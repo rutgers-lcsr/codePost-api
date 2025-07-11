@@ -1,0 +1,115 @@
+services:
+    codepost-entry:
+        image: nginx:latest
+        container_name: codepost-entry
+        volumes:
+            - ./certs:/etc/ssl/certs
+            - ./nginx.conf:/etc/nginx/nginx.conf
+        ports:
+            - "80:80"
+            - "443:443"
+        depends_on:
+            - codepost-api
+    codepost-api:
+        container_name: codepost-api
+        environment:
+            - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - PYTHON_VERSION=3.8.17
+            - API_URL=http://codepost-api:8000
+            - CLIENT_URL=http://0.0.0.0:3000
+            - MAILGUN_PASSWORD=your-mailgun-password
+            - MOOCS_API_URL=http://0.0.0.0:8000/api/moocs
+            - ON_AWS=False
+            - PRODUCTION_MODE=False
+            - SENDGRID_API_KEY=your-sendgrid-api-key
+            - STRIPE_API_KEY=your-stripe-api-key
+            - STRIPE_NOTIFICATION_WEBHOOK_SECRET=your-stripe-notification-webhook-secret
+            - STRIPE_WEBHOOK_SECRET=your-stripe-webhook-secret
+            - RDS_DB_NAME=codepost
+            - RDS_HOSTNAME=codepost-database
+            - RDS_PORT=3306
+            - RDS_USERNAME=codepost_user
+            - RDS_PASSWORD=your-database-password
+        ports:
+            - "8000:8000"
+        build:
+            context: .
+            target: api
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+        depends_on:
+            - codepost-redis
+            - codepost-database
+    codepost-worker:
+        container_name: codepost-worker
+        environment:
+            - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - PYTHON_VERSION=3.8.17
+            - API_URL=http://codepost-api:8000
+            - CLIENT_URL=http://0.0.0.0:3000
+            - MAILGUN_PASSWORD=your-mailgun-password
+            - MOOCS_API_URL=http://0.0.0.0:8000/api/moocs
+            - ON_AWS=False
+            - PRODUCTION_MODE=False
+            - SENDGRID_API_KEY=your-sendgrid-api-key
+            - STRIPE_API_KEY=your-stripe-api-key
+            - STRIPE_NOTIFICATION_WEBHOOK_SECRET=your-stripe-notification-webhook-secret
+            - STRIPE_WEBHOOK_SECRET=your-stripe-webhook-secret
+            - RDS_DB_NAME=codepost
+            - RDS_HOSTNAME=codepost-database
+            - RDS_PORT=3306
+            - RDS_USERNAME=codepost_user
+            - RDS_PASSWORD=your-database-password
+        build:
+            context: .
+            target: worker
+        depends_on:
+            - codepost-api
+    codepost-flower:
+        container_name: codepost-flower
+        build:
+            context: .
+            target: flower
+        environment:
+            - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - PYTHON_VERSION=3.8.17
+        depends_on:
+            - codepost-api
+    codepost-redis:
+        image: redis:latest
+        container_name: codepost-redis
+        ports:
+            - "6379:6379"
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+        volumes:
+            - redis-data:/data
+    codepost-database:
+        image: mariadb:latest
+        container_name: codepost-database
+        environment:
+            - MYSQL_ROOT_PASSWORD=your-root-password
+            - MYSQL_DATABASE=codepost
+            - MYSQL_USER=codepost_user
+            - MYSQL_PASSWORD=your-database-password
+        volumes:
+            - db-data:/var/lib/mysql
+
+networks:
+    default:
+        name: codepost-network
+        driver: bridge
+
+volumes:
+    redis-data:
+        name: codepost-redis-data
+        driver: local
+    db-data:
+        name: codepost-db-data
+        driver: local

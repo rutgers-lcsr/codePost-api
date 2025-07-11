@@ -1,0 +1,62 @@
+{
+  "python-2.7": {
+    "install": "pip install",
+    "base": "FROM python:2.7-slim-buster\nRUN apt-get install bash\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "python-3.7": {
+    "install": "pip install",
+    "base": "FROM python:3.7-slim-buster\nRUN apt-get install bash\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "c/c++": {
+    "install": "apk add",
+    "base": "FROM frolvlad/alpine-gxx\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "java": {
+    "install": "apk add",
+    "base": "FROM openjdk:8-jdk-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "javascript": {
+    "install": "apk add",
+    "base": "FROM node:13.8.0-alpine3.10\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+    "useradd": "RUN addgroup -S app && adduser -S -G app app"
+  },
+  "haskell": {
+    "install": "apt-get -y install",
+    "base": "FROM haskell:8\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "ocaml": {
+    "install": "apk add",
+    "base": "FROM ocaml/ocaml:latest\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get install bash\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "ruby": {
+    "install": "apk add",
+    "base": "FROM ruby:2.7-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "php": {
+    "install": "apk add",
+    "base": "FROM php:7.4-cli-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+    "useradd": "RUN addgroup -S app && adduser -S -G app app"
+  },
+  "alpine": {
+    "install": "apk add",
+    "base": "FROM alpine:3.11\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\n",
+    "useradd": "RUN addgroup -S app && adduser -S -G app app"
+  },
+  "ubuntu": {
+    "install": "apt-get -y install",
+    "base": "FROM ubuntu:18.04\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
+    "useradd": "RUN addgroup --system app && adduser --system -group app"
+  },
+  "windows": {
+    "install": "",
+    "base": "",
+    "useradd": ""
+  }
+}

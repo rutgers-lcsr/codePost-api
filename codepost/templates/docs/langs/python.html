@@ -1,0 +1,7 @@
+{% load rest_framework %}
+<pre class="highlight python hide" data-language="python"><code>{% code python %}{% if link.action == "put" or link.action == "post" or link.action == "patch" %}params = {
+{% for field in link.fields %}    "{{ field.name }}": ...{% if not loop.last %},{% endif %}
+{% endfor %}}
+r = requests.{{ link.action }}(BASE_URL+{{ link.url }}, data=params, auth=(ADMIN_EMAIL, ADMIN_PWD))
+{% else %}r = requests.{{ link.action }}(BASE_URL+{{ link.url }}, auth=(ADMIN_EMAIL, ADMIN_PWD))
+{% endif %}{% endcode %}</code></pre>

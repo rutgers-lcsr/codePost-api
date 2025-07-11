@@ -1,0 +1,15 @@
+{% autoescape off %}
+
+Hi admins,
+
+The following user is requesting to create a new account with course creation privileges:
+
+User: {{ email }}
+Organization: {{ organization }}
+
+Click here to approve: http://localhost:8000/registration/handleValidationResponse/?uid={{uid}}&token={{token}}&organization={{organization}}&activate=true
+
+Click here to deny: http://localhost:8000/registration/handleValidationResponse/?uid={{uid}}&token={{token}}&organization={{organization}}
+
+The codePost Team
+{% endautoescape %}

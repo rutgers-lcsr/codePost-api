@@ -1,0 +1,15 @@
+/venv
+/env
+__pycache__
+*.DS_Store
+*.sqlite3
+toMigrate/
+sendgrid.env
+htmlcov/
+.coverage
+
+
+.vscode/
+staticfiles/
+deploy.zip
+certs

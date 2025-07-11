@@ -1,0 +1,115 @@
+from django.contrib.auth.models import User
+from core.models import Organization
+from core.models import Course, Assignment, Submission, Section
+
+from rest_framework.response import Response
+from rest_framework import status
+
+NOT_AUTHORIZED = "You are not logged in. Please log in."
+FORBIDDEN = "You do not have permission to perform this action."
+NOT_FOUND = "The object you requested could not be found."
+NOT_ACCEPTABLE = "The request is invalid."
+
+def returnNotAuthorized():
+  return Response(NOT_AUTHORIZED, status.HTTP_401_UNAUTHORIZED)
+
+def returnForbidden():
+  return Response(FORBIDDEN, status.HTTP_403_FORBIDDEN)
+
+def returnInvalid():
+  return Response(NOT_ACCEPTABLE, status.HTTP_406_NOT_ACCEPTABLE);
+
+def returnNotFound(message=None):
+  if message is None:
+    return Response(NOT_FOUND, status.HTTP_404_NOT_FOUND)
+  else:
+    return Response(message, status.HTTP_404_NOT_FOUND)
+
+def isAuthenticated(user):
+  return user.is_authenticated
+
+def isOrganizationMember(user, organization):
+  return (user.profile.organization == organization)
+
+def isStudent(user, course):
+  return course in user.student_courses.all()
+
+def isGrader(user, course):
+  return course in user.grader_courses.all()
+
+def isSuperGrader(user, course):
+  return course in user.superGrader_courses.all()
+
+def isCourseAdmin(user, course):
+  return course in user.courseAdmin_courses.all()
+
+def isCourseStaff(user, course):
+  return isGrader(user, course) or isCourseAdmin(user, course)
+
+def isCourseMember(user, course):
+  return isStudent(user, course) or isCourseStaff(user, course)
+
+def isSectionLeader(user, section):
+  return user in section.leaders.all()
+
+def isStudentOfSub(user, submission):
+  return user in submission.students.all()
+
+def isStaffOfSub(user, submission):
+  if (user == submission.grader):
+    return True
+  elif isCourseAdmin(user, submission.assignment.course):
+    return True
+  elif isSuperGrader(user, submission.assignment.course):
+    return True
+  else:
+    # Since this check is the most computationally expensive, only do it
+    # if we need to
+    course = submission.assignment.course
+    if not isGrader(user, course):
+      return False
+
+    # This is expensive, but only performed if the user is a grader of the course
+    sections = Section.objects.filter(course=course, leaders__in=[user])
+    students = submission.students.all()
+    for section in sections:
+      for student in students:
+        if student in section.students.all():
+          return True
+  return False
+
+def isSectionLeaderOfStudent(user, course, student):
+    if not isGrader(user, course):
+      return False
+
+    # This is expensive, but only performed if the user is a grader of the course
+    sections = Section.objects.filter(course=course, leaders__in=[user])
+    for section in sections:
+      if student in section.students.all():
+        return True
+    return False
+
+def canViewUnanonymizedSubmissions(user, course):
+  if isCourseStaff(user, course):
+    if isCourseAdmin(user, course):
+      return True
+    elif isSuperGrader(user, course):
+      return True
+    else:
+      sections = course.sections.all()
+      for section in sections:
+        if isSectionLeader(user, section):
+          return True
+      return False
+  else:
+    return False
+
+def hasCourseCreationPrivilege(user):
+  return user.profile.canCreateCourses
+
+def should_use_student_captions(user, course):
+    return course.useStudentCaptions and not isCourseAdmin(user, course)
+
+def can_elevate_permissions(user):
+    code_in_place = Course.objects.get(id=925) # NOTE: unlikely to work when testing locally
+    return code_in_place in user.grader_courses.all()

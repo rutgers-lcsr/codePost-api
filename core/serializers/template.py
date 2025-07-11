@@ -1,0 +1,59 @@
+from rest_framework import serializers
+from django.db.models import ManyToManyField
+
+
+
+class ModelSerializerWithPOSTCheck(serializers.ModelSerializer):
+
+  def createForPOSTCheck(self):
+    '''
+    Use the POST_permissions_fields field to infer which fields are required for permissions
+    checking. If POST_permissions_fields not present, default to using all of the provided data.
+    '''
+    thisModel = getattr(self.Meta, 'model', None)
+    POST_permissions_fields = getattr(self.Meta, 'POST_permissions_fields', None)
+    if POST_permissions_fields is not None:
+      forConstructor = {}
+      for field_name in POST_permissions_fields:
+        forConstructor[field_name] = self.validated_data[field_name]
+      return thisModel(**forConstructor)
+
+    return thisModel(**self.validated_data)
+
+  def genProposedFields(self, data):
+    toRet = {}
+    fields = getattr(self.Meta, 'fields', None)
+    for field in fields:
+      if field in data:
+        toRet[field] = data[field]
+      elif self.instance:
+        fieldObject = getattr(self.instance, field, None)
+
+        # An example of a field defined in an object's serializer but not the object instance is a calculated field
+        # Calculated fields are by definition read_only
+
+        # Note: probably should just ignore all fields marked as read-only by default
+        # But this check will gracefully handle situations in which a calculated field is declared
+        # but left out of the read_only_fields tuple
+        if fieldObject is not None:
+          # If the object is a many to many or one to many object, use .all() so it returns an iterable
+          if fieldObject.__class__.__name__ == 'ManyRelatedManager' or fieldObject.__class__.__name__ == 'RelatedManager':
+            toRet[field] = fieldObject.all()
+          else:
+            toRet[field] = fieldObject
+      else:
+        toRet[field] = None
+
+    return toRet
+
+  def validate(self, data):
+    try:
+      course = self.instance.course
+    except:
+      course = None
+
+    if self.instance.__class__.__name__ != 'Course' and course != None and course.archived:
+      raise serializers.ValidationError("The Course is archived and cannot be edited.")
+
+    return super().validate(data)
+

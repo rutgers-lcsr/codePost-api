@@ -1,0 +1,5 @@
+{% load rest_framework %}
+<pre class="highlight curl hide" data-language="curl"><code>{% code curl %}$ curl {{ document.url|slice:"-5"|add:"api/" }}{{ link.url }} \
+    -u myusername:mypassword
+{% if link.action == "put" or link.action == "post" or link.action == "patch" %}{% for field in link.fields %}    -d {{ field.name }}= ...
+{% endfor %}{% endif %}{% endcode %}</code></pre>

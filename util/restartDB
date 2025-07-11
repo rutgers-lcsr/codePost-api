@@ -1,0 +1,6 @@
+rm db.sqlite3
+
+poetry run ./manage.py makemigrations
+poetry run ./manage.py migrate
+
+poetry run ./manage.py shell < $1

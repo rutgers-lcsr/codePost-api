@@ -1,0 +1,7 @@
+{% load rest_framework %}
+<pre class="highlight python hide" data-language="python"><code>{% code python %}import requests
+
+# Save your credentials
+ADMIN_EMAIL = 'XXX'
+ADMIN_PWD = 'XXX'
+BASE_URL = {{ document.url|slice:"-5"|add:"api/" }}{% endcode %}</code></pre>

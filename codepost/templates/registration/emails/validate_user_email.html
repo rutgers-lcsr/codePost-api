@@ -1,0 +1,13 @@
+{% autoescape off %}
+
+Hey codePost team,
+
+A new user is requesting to create an account with course creation privileges. Here is their information:
+
+email: {{email}}
+organization: {{organization}}
+
+Use this link to approve the request: http://localhost:3000/password-reset/{{uid}}/{{token}}
+Use this link to deny the request: http://localhost:3000/password-reset/{{uid}}/{{token}}
+
+{% endautoescape %}
