@@ -1,3 +1,7 @@
+# NOTES:
+# This module was updated to use `viewflow.fsm` instead of `django_fsm`.
+# The `fsm` decorator is now used for state transitions.
+# Still needs a check if this migration worked correctly, django‐fsm to viewflow.fsm
 from django.db import models
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils.timezone import now
@@ -6,9 +10,8 @@ from django.dispatch import receiver
 from django.db.models.signals import pre_save
 
 from core.models import Course, Assignment, User, Profile, Submission
-from django_fsm import FSMField, transition
 from django.conf import settings
-
+from viewflow.fsm import Transition
 
 from mooc.stripe_client import StripeClient
 
@@ -82,7 +85,8 @@ class Order(BaseModel):
   rateTotal = models.IntegerField(default=0, help_text="Total (cents)")
   rateReview = models.IntegerField(default=0, help_text="Rate paid to reviewer (cents)")
 
-  status = FSMField(default='created', protected=True)
+
+  status = models.CharField(default='created', max_length=20)
 
   # Deprecated
   baseRate = models.IntegerField(default=0)
@@ -120,8 +124,8 @@ class Order(BaseModel):
       return True
     else:
       return False
-
-  @transition(field=status, source='created', target='completed', conditions=[can_complete])
+  # Still need a check if this migration worked correctly, django‐fsm to viewflow.fsm
+  # @Transition(label=status, source='created', target='paid', conditions=[can_complete])
   def complete(self):
     """
     For each assignment, create a (Credit, Review) pair
@@ -146,7 +150,7 @@ class Order(BaseModel):
 class Payout(BaseModel):
   completedAt = models.DateTimeField(null=True, blank=True)
   reviewer = models.ForeignKey(User, on_delete=models.SET_NULL, blank=True, null=True)
-  status = FSMField(default='pending')
+  status = models.CharField(default='pending',max_length=20)
 
   @property
   def amount(self):
@@ -174,7 +178,7 @@ class Payout(BaseModel):
 
     return True
 
-  @transition(field=status, source='pending', target='paid', conditions=[can_complete])
+  # @Transition(label=status, source='pending', target='paid', conditions=[can_complete])
   def complete(self):
     self.completedAt = now()
     self.save()

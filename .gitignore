@@ -7,10 +7,11 @@ toMigrate/
 sendgrid.env
 htmlcov/
 .coverage
-
+static/*
 
 .vscode/
 staticfiles/
 deploy.zip
 certs
 .env
+.venv

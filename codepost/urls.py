@@ -17,7 +17,7 @@ from django.contrib import admin
 from django.urls import path, re_path, include
 from django.views.generic import TemplateView
 from rest_framework import routers
-from rest_framework_jwt.views import refresh_jwt_token
+from rest_framework_simplejwt.views import TokenRefreshView 
 from core.views.auth import obtain_jwt_token
 
 from core.renderers import CustomRenderer
@@ -67,10 +67,10 @@ router.register(r'fileTemplates', FileTemplateViewSet)
 router.register(r'testCases', TestCaseViewSet)
 router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'testCategories', TestCategoryViewSet)
-router.register(r'billing', BillingViewSet)
+router.register(r'billing', BillingViewSet, basename='billing')
 
 webhooks_router = routers.DefaultRouter()
-router.register(r'webhooks', WebhookViewSet)
+webhooks_router.register(r'webhooks', WebhookViewSet)
 
 #############################################
 # CoreAPI (built into Django)
@@ -93,7 +93,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     re_path('^api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('token-auth/', obtain_jwt_token),
-    path('token-refresh/', refresh_jwt_token),
+    path('token-refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     re_path('registration/', include(('core.registration_urls', 'core'), namespace='registration')),
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),

@@ -28,7 +28,6 @@ def current_user(request):
 
 
 class JWTSerializer(serializers.JSONWebTokenSerializer):
-
   def validate(self, attrs):
     validated_data = super().validate(attrs)
     update_last_login(None, validated_data['user'])
@@ -36,6 +35,7 @@ class JWTSerializer(serializers.JSONWebTokenSerializer):
 
 
 class AccountLoginAPIView(views.ObtainJSONWebToken):
+  
   serializer_class = JWTSerializer
 
 obtain_jwt_token = AccountLoginAPIView.as_view()
