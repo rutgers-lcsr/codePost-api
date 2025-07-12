@@ -291,8 +291,8 @@ REST_FRAMEWORK = {
 CORS_ORIGIN_REGEX_WHITELIST = (r"^.*$",)
 
 CSRF_TRUSTED_ORIGINS = (
-    "http://localhost:3000",
-    "http://localhost:5000",
+    "http://localhost",
+    "https://localhost",
 )
 
 JWT_AUTH = {

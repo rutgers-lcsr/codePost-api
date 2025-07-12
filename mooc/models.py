@@ -86,7 +86,7 @@ class Order(BaseModel):
   rateReview = models.IntegerField(default=0, help_text="Rate paid to reviewer (cents)")
 
 
-  status = models.CharField(default='created')
+  status = models.CharField(default='created', max_length=20)
 
   # Deprecated
   baseRate = models.IntegerField(default=0)
@@ -150,7 +150,7 @@ class Order(BaseModel):
 class Payout(BaseModel):
   completedAt = models.DateTimeField(null=True, blank=True)
   reviewer = models.ForeignKey(User, on_delete=models.SET_NULL, blank=True, null=True)
-  status = models.CharField(default='pending')
+  status = models.CharField(default='pending',max_length=20)
 
   @property
   def amount(self):
