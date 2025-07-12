@@ -293,6 +293,8 @@ CORS_ORIGIN_REGEX_WHITELIST = (r"^.*$",)
 CSRF_TRUSTED_ORIGINS = (
     "http://localhost",
     "https://localhost",
+    "http://*.cs.rutgers.edu",
+    "https://*.cs.rutgers.edu",
 )
 
 JWT_AUTH = {
