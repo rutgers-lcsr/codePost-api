@@ -27,13 +27,18 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v2
 
+            - name: Set up Certs
+              run: |
+                  HOSTNAME=$(hostname)
+                  ln -s /etc/letsencrypt/live/$HOSTNAME certs
+
             - name: Set up .env
               run: |
                   echo "API_URL=${{ vars.API_URL }}" >> .env
                   echo "CLIENT_URL=${{ vars.CLIENT_URL }}" >> .env
                   echo "MAILGUN_PASSWORD=${{ secrets.MAILGUN_PASSWORD }}" >> .env
-                  echo "ON_AWS=false" >> .env
-                  echo "PRODUCTION_MODE=false" >> .env
+                  echo "ON_AWS=${{ vars.ON_AWS }}" >> .env
+                  echo "PRODUCTION_MODE=${{ vars.PRODUCTION_MODE }}" >> .env
                   echo "SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}" >> .env
                   echo "STRIPE_API_KEY=${{ secrets.STRIPE_API_KEY }}" >> .env
                   echo "STRIPE_NOTIFICATION_WEBHOOK_SECRET=${{ secrets.STRIPE_NOTIFICATION_WEBHOOK_SECRET }}" >> .env
