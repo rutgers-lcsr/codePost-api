@@ -13,24 +13,26 @@ services:
     codepost-api:
         container_name: codepost-api
         environment:
-            - DEBUG=True
+            - DEBUG=${DEBUG}
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - PYTHON_VERSION=3.8.17
-            - API_URL=http://codepost-api:8000
-            - CLIENT_URL=$CLIENT_URL
-            - MAILGUN_PASSWORD=your-mailgun-password
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
+            - MAILGUN_PASSWORD=${MAILGUN_PASSWORD}
             - MOOCS_API_URL=http://0.0.0.0:8000/api/moocs
-            # - ON_AWS=False
-            - PRODUCTION_MODE=True
-            - SENDGRID_API_KEY=your-sendgrid-api-key
-            - STRIPE_API_KEY=your-stripe-api-key
-            - STRIPE_NOTIFICATION_WEBHOOK_SECRET=your-stripe-notification-webhook-secret
-            - STRIPE_WEBHOOK_SECRET=your-stripe-webhook-secret
+            - ON_AWS=${ON_AWS}
+            - PRODUCTION_MODE=${PRODUCTION_MODE}
+            - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+            - STRIPE_API_KEY=${STRIPE_API_KEY}
+            - STRIPE_NOTIFICATION_WEBHOOK_SECRET=${STRIPE_NOTIFICATION_WEBHOOK_SECRET}
+            - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
             - RDS_DB_NAME=codepost
             - RDS_HOSTNAME=codepost-database
             - RDS_PORT=3306
             - RDS_USERNAME=codepost_user
             - RDS_PASSWORD=${DATABASE_PASSWORD}
+            - API_USER=${API_USER}
+            - API_PASSWORD=${API_PASSWORD}
         ports:
             - "8000:8000"
         build:
@@ -42,28 +44,33 @@ services:
             timeout: 10s
             retries: 5
         depends_on:
-            - codepost-redis
-            - codepost-database
+            codepost-database:
+                condition: service_healthy
+            codepost-redis:
+                condition: service_healthy
     codepost-worker:
         container_name: codepost-worker
         environment:
+            - DEBUG=${DEBUG}
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - PYTHON_VERSION=3.8.17
-            - API_URL=http://codepost-api:8000
-            - CLIENT_URL=$CLIENT_URL
-            - MAILGUN_PASSWORD=your-mailgun-password
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
+            - MAILGUN_PASSWORD=${MAILGUN_PASSWORD}
             - MOOCS_API_URL=http://0.0.0.0:8000/api/moocs
-            - ON_AWS=False
-            - PRODUCTION_MODE=False
-            - SENDGRID_API_KEY=your-sendgrid-api-key
-            - STRIPE_API_KEY=your-stripe-api-key
-            - STRIPE_NOTIFICATION_WEBHOOK_SECRET=your-stripe-notification-webhook-secret
-            - STRIPE_WEBHOOK_SECRET=your-stripe-webhook-secret
+            - ON_AWS=${ON_AWS}
+            - PRODUCTION_MODE=${PRODUCTION_MODE}
+            - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+            - STRIPE_API_KEY=${STRIPE_API_KEY}
+            - STRIPE_NOTIFICATION_WEBHOOK_SECRET=${STRIPE_NOTIFICATION_WEBHOOK_SECRET}
+            - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
             - RDS_DB_NAME=codepost
             - RDS_HOSTNAME=codepost-database
             - RDS_PORT=3306
             - RDS_USERNAME=codepost_user
             - RDS_PASSWORD=${DATABASE_PASSWORD}
+            - API_USER=${API_USER}
+            - API_PASSWORD=${API_PASSWORD}
         build:
             context: .
             target: worker
@@ -74,6 +81,8 @@ services:
         build:
             context: .
             target: flower
+        ports:
+            - "5555:5555"
         environment:
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - PYTHON_VERSION=3.8.17
@@ -95,12 +104,17 @@ services:
         image: mariadb:latest
         container_name: codepost-database
         environment:
-            - MYSQL_ROOT_PASSWORD=your-root-password
-            - MYSQL_DATABASE=codepost
-            - MYSQL_USER=codepost_user
-            - MYSQL_PASSWORD=your-database-password
+            - MARIADB_ROOT_PASSWORD=${ROOT_DATABASE_PASSWORD}
+            - MARIADB_DATABASE=codepost
+            - MARIADB_USER=codepost_user
+            - MARIADB_PASSWORD=${DATABASE_PASSWORD}
         volumes:
             - db-data:/var/lib/mysql
+        healthcheck:
+            test: ["CMD", "mariadb-admin", "ping", "-h", "codepost-database", "--silent", "--user=root", "--password=${ROOT_DATABASE_PASSWORD}"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
 
 networks:
     default:

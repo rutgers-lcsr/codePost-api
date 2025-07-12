@@ -13,3 +13,4 @@ htmlcov/
 staticfiles/
 deploy.zip
 certs
+.env

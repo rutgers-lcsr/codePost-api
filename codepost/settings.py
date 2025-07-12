@@ -97,12 +97,17 @@ BROKER_TRANSPORT_OPTIONS = {
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("SECRET_KEY", default="your secret key")
 
-
+# Check if the application should run in debug mode
 # SECURITY WARNING: don't run with debug turned on in production!
-if "RENDER" in os.environ and "PRODUCTION_MODE" in os.environ:
+if os.environ.get("RENDER", False) and os.environ.get("PRODUCTION_MODE", False):
     DEBUG = False
 else:
     DEBUG = True
+
+# if "RENDER" in os.environ and "PRODUCTION_MODE" in os.environ:
+#     DEBUG = False
+# else:
+#     DEBUG = True
 
 # Testing flag
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"

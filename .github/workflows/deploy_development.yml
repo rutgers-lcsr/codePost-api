@@ -1,0 +1,52 @@
+name: Deploy to Development Server
+
+on:
+    push:
+        branches:
+            - render
+
+jobs:
+    deploy:
+        environment: development
+        runs-on: development-api
+        env:
+            API_URL: ${{ vars.API_URL }}
+            CLIENT_URL: ${{ vars.CLIENT_URL }}
+            MAILGUN_PASSWORD: ${{ secrets.MAILGUN_PASSWORD }}
+            ON_AWS: false
+            PRODUCTION_MODE: false
+            SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+            STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
+            STRIPE_NOTIFICATION_WEBHOOK_SECRET: ${{ secrets.STRIPE_NOTIFICATION_WEBHOOK_SECRET }}
+            STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+            DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+            ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
+            API_USER: ${{ secrets.API_USER }}
+            API_PASSWORD: ${{ secrets.API_PASSWORD }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v2
+
+            - name: Set up .env
+              run: |
+                  echo "API_URL=${{ vars.API_URL }}" >> .env
+                  echo "CLIENT_URL=${{ vars.CLIENT_URL }}" >> .env
+                  echo "MAILGUN_PASSWORD=${{ secrets.MAILGUN_PASSWORD }}" >> .env
+                  echo "ON_AWS=false" >> .env
+                  echo "PRODUCTION_MODE=false" >> .env
+                  echo "SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}" >> .env
+                  echo "STRIPE_API_KEY=${{ secrets.STRIPE_API_KEY }}" >> .env
+                  echo "STRIPE_NOTIFICATION_WEBHOOK_SECRET=${{ secrets.STRIPE_NOTIFICATION_WEBHOOK_SECRET }}" >> .env
+                  echo "STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}" >> .env
+                  echo "DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD }}" >> .env
+                  echo "ROOT_DATABASE_PASSWORD=${{ secrets.ROOT_DATABASE_PASSWORD }}" >> .env
+                  echo "API_USER=${{ secrets.API_USER }}" >> .env
+                  echo "API_PASSWORD=${{ secrets.API_PASSWORD }}" >> .env
+
+            - name: Build and deploy
+              run: |
+                  docker-compose build
+                  docker-compose up -d --remove-orphans
+
+            - name: Notify deployment success
+              run: echo "Deployment to development server successful!"
