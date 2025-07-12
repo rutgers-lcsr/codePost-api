@@ -5,14 +5,13 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes, force_text
+from django.utils.encoding import force_bytes
 
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 
 from core.models import User, Organization, Course
 from core.utils import is_course_member, email_passes_whitelist
-from core.serializers.organization import OrganizationSerializer
 from core.forms.forms import (
     EmailForm,
     EmailTokenForm,

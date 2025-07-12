@@ -11,7 +11,7 @@ from django.db import OperationalError
 
 try:
     username = "${API_USER}"
-    email = "${API_EMAIL}" + "@example.com"
+    email = "${API_USER}" + "@example.com"
     password = "${API_PASSWORD}"
 
     if not User.objects.filter(username=username).exists():

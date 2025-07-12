@@ -1,4 +1,5 @@
-from slackclient import SlackClient
+import slack
+from slack import WebClient as SlackClient
 from codepost.settings import DEBUG
 from django.conf import settings
 from log.models import Event

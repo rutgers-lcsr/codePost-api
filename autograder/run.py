@@ -616,7 +616,8 @@ def _createSubmissionTest(result, submission):
     return newTest
 
 
-testPattern = re.compile('(\d|(([^"]+?)_@_([^"]+)))')
+testPattern = re.compile(r'^\d+$|^[^"]+?_@_[^"]+$')
+
 
 
 def _processResult(result, assignment, user):

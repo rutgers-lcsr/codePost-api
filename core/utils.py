@@ -2,18 +2,9 @@ from core.serializers.user import UserSerializer
 from core.models import Assignment, RubricCategory, Environment, TestCategory
 from django.template import loader
 from django.core.mail import EmailMultiAlternatives
-
-from django.contrib.auth.tokens import default_token_generator
-from django.contrib.sites.shortcuts import get_current_site
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes, force_text
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.models import User
-from rest_framework.response import Response
-from rest_framework import status
-from django import forms
 
-from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm
 
 from mooc.models import Product
 

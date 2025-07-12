@@ -2,7 +2,7 @@ from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.serializers.course import CourseSerializer
 from core.serializers.section import SectionSerializer
-from rest_framework_jwt.settings import api_settings
+from rest_framework_simplejwt.settings import api_settings
 from core.models import User, Organization, Profile
 from rest_framework.authtoken.models import Token
 

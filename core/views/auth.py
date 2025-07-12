@@ -8,7 +8,7 @@ from core.serializers.user import UserSerializer
 from django.utils.timezone import now
 
 from django.contrib.auth.models import update_last_login
-from rest_framework_jwt import serializers, views
+from rest_framework_simplejwt import serializers, views
 
 
 @api_view(['GET'])
@@ -27,7 +27,7 @@ def current_user(request):
     return Response([])
 
 
-class JWTSerializer(serializers.JSONWebTokenSerializer):
+class JWTSerializer(serializers.TokenObtainSerializer):
 
   def validate(self, attrs):
     validated_data = super().validate(attrs)
@@ -35,7 +35,8 @@ class JWTSerializer(serializers.JSONWebTokenSerializer):
     return validated_data
 
 
-class AccountLoginAPIView(views.ObtainJSONWebToken):
+class AccountLoginAPIView(views.TokenObtainPairView):
+  
   serializer_class = JWTSerializer
 
 obtain_jwt_token = AccountLoginAPIView.as_view()

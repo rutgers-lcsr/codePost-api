@@ -16,7 +16,9 @@ import sys
 
 import urllib
 from celery.schedules import crontab
-
+import django
+from django.utils.translation import gettext
+django.utils.translation.ugettext = gettext
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,6 +27,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 ################## Autograder settings ##############################
+
+# Autograder URL
+# This is the URL where the autograder service is running.
+# Used for communication between the API and the autograder.
 
 AUTOGRADER_URL = "https://4bppxuryyz.codepost.io"
 # AUTOGRADER_URL = "https://qoe9ev62y5.codepost.io"
@@ -99,7 +105,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", default="your secret key")
 
 # Check if the application should run in debug mode
 # SECURITY WARNING: don't run with debug turned on in production!
-if os.environ.get("RENDER", False) and os.environ.get("PRODUCTION_MODE", False):
+if os.environ.get("RENDER", False)  is True and os.environ.get("PRODUCTION_MODE", False)  is True:
     DEBUG = False
 else:
     DEBUG = True
@@ -138,6 +144,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "viewflow",
     "core",
     "mooc",
     "rest_framework",
@@ -207,7 +214,7 @@ else:
     }
 
 # https://rickchristianson.wordpress.com/2013/10/31/getting-a-django-app-to-use-https-on-aws-elastic-beanstalk/
-if "ON_AWS" in os.environ:
+if os.environ.get("ON_AWS", False) is True:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_REDIRECT_EXEMPT = [r"^health-check/$"]
     SESSION_COOKIE_SECURE = True
@@ -275,7 +282,7 @@ REST_FRAMEWORK = {
     "COERCE_DECIMAL_TO_STRING": False,
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework.authentication.TokenAuthentication",
-        "rest_framework_jwt.authentication.JSONWebTokenAuthentication",
+        'rest_framework_simplejwt.authentication.JWTAuthentication', 
         "rest_framework.authentication.BasicAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
@@ -284,8 +291,8 @@ REST_FRAMEWORK = {
 CORS_ORIGIN_REGEX_WHITELIST = (r"^.*$",)
 
 CSRF_TRUSTED_ORIGINS = (
-    "localhost:3000",
-    "localhost:5000",
+    "http://localhost:3000",
+    "http://localhost:5000",
 )
 
 JWT_AUTH = {

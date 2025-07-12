@@ -29,7 +29,7 @@ class UserViewSet(SuperUserListProtectedViewSet):
 
   # Instead of id, index into /users/ detail routes with email
   lookup_field = 'email'
-  lookup_value_regex = '[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+  lookup_value_regex = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
 
   @action(detail=True, methods=['POST'])
   def email(self, request, email=None):
