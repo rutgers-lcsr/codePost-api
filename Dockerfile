@@ -18,12 +18,12 @@ RUN python manage.py migrate
 
 
 
-CMD ["gunicorn", "--workers=4", "--threads=16",  "codepost.wsgi:application"]
+CMD ["gunicorn", "--workers=4", "--threads=16",  "codepost.wsgi:application", "--bind", "0.0.0.0:8000"]
 
 FROM python:3.8 AS worker
 
 COPY --from=api /opt/app /opt/app
-WORKDIR /opt/app    
+WORKDIR /opt/app
 
 
 COPY pyproject.toml poetry.lock* /opt/app/
@@ -34,7 +34,7 @@ RUN pip install poetry
 RUN poetry config virtualenvs.create false \
  && poetry install --no-root --no-dev
 
-RUN pip install celery 
+RUN pip install celery
 
 COPY . .
 
@@ -57,7 +57,7 @@ WORKDIR /opt/app
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
  && poetry install --no-root --no-dev
-RUN pip install celery 
+RUN pip install celery
 
 COPY . .
 

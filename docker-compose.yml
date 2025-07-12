@@ -13,14 +13,15 @@ services:
     codepost-api:
         container_name: codepost-api
         environment:
+            - DEBUG=True
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - PYTHON_VERSION=3.8.17
             - API_URL=http://codepost-api:8000
-            - CLIENT_URL=http://0.0.0.0:3000
+            - CLIENT_URL=$CLIENT_URL
             - MAILGUN_PASSWORD=your-mailgun-password
             - MOOCS_API_URL=http://0.0.0.0:8000/api/moocs
-            - ON_AWS=False
-            - PRODUCTION_MODE=False
+            # - ON_AWS=False
+            - PRODUCTION_MODE=True
             - SENDGRID_API_KEY=your-sendgrid-api-key
             - STRIPE_API_KEY=your-stripe-api-key
             - STRIPE_NOTIFICATION_WEBHOOK_SECRET=your-stripe-notification-webhook-secret
@@ -29,14 +30,14 @@ services:
             - RDS_HOSTNAME=codepost-database
             - RDS_PORT=3306
             - RDS_USERNAME=codepost_user
-            - RDS_PASSWORD=your-database-password
+            - RDS_PASSWORD=${DATABASE_PASSWORD}
         ports:
             - "8000:8000"
         build:
             context: .
             target: api
         healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+            test: ["CMD", "curl", "-f", "http://codepost-api:8000/health-check"]
             interval: 30s
             timeout: 10s
             retries: 5
@@ -49,7 +50,7 @@ services:
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - PYTHON_VERSION=3.8.17
             - API_URL=http://codepost-api:8000
-            - CLIENT_URL=http://0.0.0.0:3000
+            - CLIENT_URL=$CLIENT_URL
             - MAILGUN_PASSWORD=your-mailgun-password
             - MOOCS_API_URL=http://0.0.0.0:8000/api/moocs
             - ON_AWS=False
@@ -62,7 +63,7 @@ services:
             - RDS_HOSTNAME=codepost-database
             - RDS_PORT=3306
             - RDS_USERNAME=codepost_user
-            - RDS_PASSWORD=your-database-password
+            - RDS_PASSWORD=${DATABASE_PASSWORD}
         build:
             context: .
             target: worker
