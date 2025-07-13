@@ -8,7 +8,7 @@ from core.serializers.user import UserSerializer
 from django.utils.timezone import now
 from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt import serializers, views
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshSlidingView
 
 
 @api_view(['GET'])
@@ -18,7 +18,11 @@ def current_user(request):
   Determine the current user by their token, and return their data
   """
   serializer = UserSerializer(request.user, context={'request': request})
-  return Response(serializer.data)
+
+  token = JWTSerializer.get_token(request.user)
+  data = serializer.data
+  data['token'] = str(token)
+  return Response(data)
 
 # Plan to update this to Pair with the new JWTSerializer
 class JWTSerializer(serializers.TokenObtainSlidingSerializer):
@@ -32,7 +36,9 @@ class JWTSerializer(serializers.TokenObtainSlidingSerializer):
   def validate(self, attrs):
     data = super().validate(attrs)
     
+    self.context['request'].user = self.user
     data['user'] = UserSerializer(self.user, context=self.context).data
+    data['user']['token'] = data['token']
 
     update_last_login(None, self.user)
     return data

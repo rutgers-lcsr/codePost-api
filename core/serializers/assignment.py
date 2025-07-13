@@ -89,8 +89,9 @@ class AssignmentSerializer(AssignmentSerializerBase):
 
     obj = super().create(validated_data)
 
-    sc = Slack()
-    sc.new_instance_notification(obj, user, auth_type)
+    # Slack notification
+    # sc = Slack()
+    # sc.new_instance_notification(obj, user, auth_type)
 
     return obj
 
