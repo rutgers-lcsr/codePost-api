@@ -17,7 +17,7 @@ from django.contrib import admin
 from django.urls import path, re_path, include
 from django.views.generic import TemplateView
 from rest_framework import routers
-from rest_framework_simplejwt.views import TokenRefreshView 
+from rest_framework_simplejwt.views import TokenRefreshSlidingView, TokenVerifyView
 from core.views.auth import obtain_jwt_token
 
 from core.renderers import CustomRenderer
@@ -93,7 +93,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     re_path('^api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('token-auth/', obtain_jwt_token),
-    path('token-refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('token-refresh/', TokenRefreshSlidingView.as_view(), name='token_refresh'),
+    path('token-verify/', TokenVerifyView.as_view(), name='token_verify'),
     re_path('registration/', include(('core.registration_urls', 'core'), namespace='registration')),
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),

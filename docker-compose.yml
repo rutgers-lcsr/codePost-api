@@ -95,7 +95,7 @@ services:
             - "6379:6379"
         healthcheck:
             test: ["CMD", "redis-cli", "ping"]
-            interval: 30s
+            interval: 10s
             timeout: 10s
             retries: 5
         volumes:
@@ -112,7 +112,7 @@ services:
             - db-data:/var/lib/mysql
         healthcheck:
             test: ["CMD", "mariadb-admin", "ping", "-h", "codepost-database", "--silent", "--user=root", "--password=${ROOT_DATABASE_PASSWORD}"]
-            interval: 30s
+            interval: 10s
             timeout: 10s
             retries: 5
 

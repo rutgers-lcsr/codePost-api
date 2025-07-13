@@ -5,13 +5,14 @@ from core.serializers.section import SectionSerializer
 from rest_framework_simplejwt.settings import api_settings
 from core.models import User, Organization, Profile
 from rest_framework.authtoken.models import Token
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 # Helpful source: https://medium.com/@dakota.lillie/django-react-jwt-authentication-5015ee00ef9a
 class UserSerializer(ModelSerializerWithPOSTCheck):
   organization = serializers.CharField(source="profile.organization.name", required=False, default='no organization set')
   api_token = serializers.PrimaryKeyRelatedField(source="profile.api_token", queryset=Token.objects.all())
-  token = serializers.SerializerMethodField()
+  # token = serializers.SerializerMethodField()
   password = serializers.CharField(write_only=True)
   studentCourses = serializers.SerializerMethodField()
   hasCredentials = serializers.SerializerMethodField()
@@ -28,27 +29,20 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = User
-    fields = ('id', 'token', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials')
+    fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials')
     POST_permissions_fields = ()
     extra_field_kwargs = {'url': {'lookup_field': 'email'}}
     read_only_fields = ('codePostAdmin',)
 
   # defining this as a SerializerMethodField so we can pass the request context into the CourseSerializer
   def get_studentCourses(self, obj):
-    return CourseSerializer(list(obj.student_courses.all()), many=True, context={"request": self.context['request']}).data
+    request = self.context.get('request', None)
+    return CourseSerializer(list(obj.student_courses.all()), many=True, context={"request": request}).data
 
   def get_hasCredentials(self, obj):
     if obj.password and obj.has_usable_password():
       return True
     return False
-
-  def get_token(self, obj):
-    jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
-    jwt_encode_handler = api_settings.JWT_ENCODE_HANDLER
-
-    payload = jwt_payload_handler(obj)
-    token = jwt_encode_handler(payload)
-    return token
 
   def create(self, validated_data):
     # Extract parameters that can't be used in User constructor

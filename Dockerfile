@@ -1,10 +1,8 @@
 FROM python:3.12 AS api
 
-
-
+WORKDIR /opt/app
 
 COPY pyproject.toml poetry.lock* /opt/app/
-WORKDIR /opt/app
 
 
 RUN pip install poetry

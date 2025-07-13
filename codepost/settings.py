@@ -282,8 +282,12 @@ REST_FRAMEWORK = {
     "COERCE_DECIMAL_TO_STRING": False,
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework.authentication.TokenAuthentication",
-        'rest_framework_simplejwt.authentication.JWTAuthentication',        "rest_framework.authentication.BasicAuthentication",
+        'rest_framework_simplejwt.authentication.JWTAuthentication',        
+        "rest_framework.authentication.BasicAuthentication",
         "rest_framework.authentication.SessionAuthentication",
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
     ),
 }
 
@@ -296,11 +300,12 @@ CSRF_TRUSTED_ORIGINS = (
     "https://*.cs.rutgers.edu",
 )
 
-JWT_AUTH = {
-    "JWT_RESPONSE_PAYLOAD_HANDLER": "core.utils.my_jwt_response_handler",
+SIMPLE_JWT = {
+    "TOKEN_OBTAIN_SERIALIZER": "core.views.auth.JWTSerializer",
     "JWT_ALLOW_REFRESH": True,
     "JWT_EXPIRATION_DELTA": datetime.timedelta(days=7),
     "JWT_REFRESH_EXPIRATION_DELTA": datetime.timedelta(days=7),
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.SlidingToken', 'rest_framework_simplejwt.tokens.AccessToken'),
 }
 
 
