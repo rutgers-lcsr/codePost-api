@@ -42,6 +42,18 @@ class PasswordMatchForm(forms.Form):
           except forms.ValidationError as error:
               self.add_error('password2', error)
 
+class ImpersonateForm(forms.Form):
+  username = forms.CharField(
+      label=_("Username"),
+      max_length=150,
+      strip=True,
+      help_text=_("Enter the username of the user you want to impersonate."),
+  )
+  never_expire = forms.BooleanField(
+      required=False,
+      initial=False,
+      help_text=_("Check this box if you want the token to never expire."),
+  )
 
 class SetCredentialsForm(PasswordMatchForm):
   organization = forms.CharField()
