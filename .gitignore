@@ -13,5 +13,5 @@ static/*
 staticfiles/
 deploy.zip
 certs
-.env
+.env*
 .venv

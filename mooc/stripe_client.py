@@ -1,8 +1,10 @@
 import stripe
 import os
 
+from core.logging import logEvent
 from util.slack import Slack
 from django.conf import settings
+
 
 
 class StripeClient:
@@ -14,14 +16,16 @@ class StripeClient:
       stripe.api_key = os.environ.get('STRIPE_API_KEY')
     else:
       stripe.api_key = 'sk_test_VSQyvppBKHsC8txe7mLvqDWk'
-    self.slack_client = Slack()
+    # self.slack_client = Slack()
     self.sc = stripe
 
   def get_customer_by_email(self, email):
     customers = self.sc.Customer.list(email=email)
     if len(customers) > 1:
-      self.slack_client.send_message('Stripe ERROR: Multiple Stripe Customers under same email | {}'.format(
-          user.email), channel="richard-test-2")
+      logEvent("Stripe ERROR: Multiple Stripe Customers under same email",
+               message=f"Multiple Stripe Customers found for email {email}" )
+      # self.slack_client.send_message('Stripe ERROR: Multiple Stripe Customers under same email | {}'.format(
+      #     user.email), channel="richard-test-2")
       raise ValueError("FIXME: Something went wrong; respond to client rather than fatal error")
     elif len(customers) == 1:
       return customers.data[0].id
@@ -52,8 +56,8 @@ class StripeClient:
         user.profile.save()
       else:
         if stripe_customer_id != codepost_customer_id:
-          self.slack_client.send_message('Stripe ERROR: codePost and Stripe customer records dont match | {} | stripe[{}] | codepost[{}]'.format(
-              user.email, stripe_customer_id, codepost_customer_id), channel="richard-test-2")
+          logEvent("Stripe ERROR: codePost and Stripe customer records dont match",
+                   message=f"codePost customer ID {codepost_customer_id} does not match Stripe customer ID {stripe_customer_id} for user {user.email}")
           raise ValueError("FIXME: Something went wrong; respond to client rather than fatal error")
 
         customer_id = stripe_customer_id

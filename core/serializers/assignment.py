@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Assignment
 from django.contrib.auth.models import User
@@ -89,6 +90,8 @@ class AssignmentSerializer(AssignmentSerializerBase):
 
     obj = super().create(validated_data)
 
+    logEvent("Assignment Created",
+             message=f"Assignment {obj.name} created by {user.email} with auth type {auth_type}")
     # Slack notification
     # sc = Slack()
     # sc.new_instance_notification(obj, user, auth_type)

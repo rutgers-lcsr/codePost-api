@@ -11,7 +11,9 @@ import time
 class Slack:
   api_key = 'xoxb-526958933633-591042355089-afl3CQ8XPrvgXTeVm88hho3H'
   sc = SlackClient(api_key)
-
+  def __init__(self):
+    raise NotImplementedError(
+        "This class is deprecated. We don't log to Slack anymore. Use logEvent instead.")
   # Documentation on sending beautiful slack messages
   # https://api.slack.com/docs/message-attachments
   def send_message(self, message, attachments=[], blocks=[], channel="#user_notifications", logInDebug=True, debugChannel="#richard-test-2"):

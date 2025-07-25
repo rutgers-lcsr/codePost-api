@@ -10,6 +10,7 @@ from django.utils.encoding import force_bytes
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 
+from core.logging import logEvent
 from core.models import User, Organization, Course
 from core.utils import is_course_member, email_passes_whitelist
 from core.forms.forms import (
@@ -23,7 +24,7 @@ from core.forms.forms import (
     SetCredentialsForm,
 )
 
-from core.emails import send_email_sendgrid, get_email_params, get_email_template_id
+from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, NewAdminActivationEmail, NewAdminRequestEmail, PasswordResetEmail, send_email_sendgrid, get_email_params, get_email_template_id
 
 from core.permissions.helpers import (
     returnNotAuthorized,
@@ -252,7 +253,7 @@ def graderToAdmin(request):
 
 def send_email_to_joining_user(user):
     raise NotImplementedError(
-        "This function is deprecated. Use AddedUserToOrganizationEmail instead."
+        "This function is deprecated. Use `UserSignupEmail` class instead."
     )
     """
     Send a signup email to a user who has been added to at least 1 course.
@@ -283,7 +284,7 @@ def send_email_to_joining_user(user):
 
 def send_email_to_joining_user_mooc(user):
     raise NotImplementedError(
-        "This function is deprecated. not longer using mooc"
+        "This function is deprecated. No longer using mooc Use `UserSignupEmail` class for user signups instead."
     )
 
     """
@@ -311,9 +312,7 @@ def send_email_to_joining_user_mooc(user):
 
 def sendSlackMessage(message, attachments=[]):
     raise NotImplementedError(
-        "This function is deprecated. using Logger instead."
-    )
-    
+        "This function is deprecated. Use `logEvent` instead.") 
     # sc = Slack()
     # sc.send_message(message, attachments=attachments, channel="#user_signups")
 
@@ -402,22 +401,28 @@ def validateNewAdminUser(request):
                     # Send user an email asking them to confirm they want to change their
                     # organization by emailing team@codepost.io
                     from_email = "team@codepost.io"
-                    context = {}
-                    send_email_sendgrid(
-                        from_email,
-                        user.email,
-                        get_email_params("CREATE_ORGANIZATION_CHANGE", context),
-                        get_email_template_id("CREATE_ORGANIZATION_CHANGE"),
-                    )
+                    # context = {}
 
-                    # Alert codePost team via Slack
-                    sendSlackMessage(
-                        ":warning: *{} tried to change organizations when signing up as an admin.* \nUser Org `{}` != Form Org `{}`".format(
-                            user.email,
-                            user.profile.organization.shortname,
-                            shortnameFromForm,
-                        )
+                    AdminChangeOrganizationEmail(
+                        user=user,
+                        
+                    ).send_email(organization_name=rawName)  
+
+
+                    logEvent(
+                        "admin_change_organization",
+                        level="warning",
+                        message=json.dumps(
+                            {
+                                "user": user.email,
+                                "old_organization": user.profile.organization.shortname,
+                                "new_organization": rawName,
+                                "shortname": shortnameFromForm,
+                                "email": user.email,
+                            }
+                        ),
                     )
+                 
 
                 return Response(
                     {"success": True, "action_id": ".".join(map(str, action_id))},
@@ -461,21 +466,23 @@ def validateNewAdminUser(request):
         if user.is_active and user.profile.canModifyRosters:
             action_id.append(1)
             # If user already exists and has been validated, then email them
-            # from_email = "team@codepost.io"
-            # context = {}
-            # send_email_sendgrid(
-            #     from_email,
-            #     user.email,
-            #     get_email_params("CREATE_ALREADY_ADMIN", context),
-            #     get_email_template_id("CREATE_ALREADY_ADMIN"),
-            # )
-            # sendSlackMessage(
-            #     ":warning: *{} tried to sign up as an admin, but they already are an admin.*".format(
-            #         user.email
-            #     )
-            # )
+            from_email = "team@codepost.io"
+            context = {}
+            AdminAlreadyEmail(user=user).send_email()
 
-            # Return success response, indicating that the user is already an admin
+        
+            logEvent(
+                "admin_already_is_admin",
+                level="warning",
+                message=json.dumps(
+                    {
+                        "user": user.email,
+                        "organization": org.name,
+                        "shortname": shortnameFromForm,
+                    }
+                ),
+            )
+           
 
             return Response(
                 {"success": True, "action_id": ".".join(map(str, action_id))},
@@ -489,102 +496,80 @@ def validateNewAdminUser(request):
                 user, org.name
             ).send_email()
 
-            # ## FLAG: all users are now automatically approved
-            # if not is_student_or_grader:
-            #     action_id.append(1)
-            #     # auto-approve
-            #     approve_new_admin_user(user, auto_approved=True, org_name=org.name)
+            ## FLAG: all users are now automatically approved
+            if not is_student_or_grader:
+                action_id.append(1)
+                # auto-approve
 
-            # else:
-            #     action_id.append(2)
-            #     # require codePost team approval
-              
-            #     # if is_student_or_grader:
-            #     #     # send this user through the join flow
-            #     #     sendSlackMessage(
-            #     #         "{} tried to sign up as a new admin from {}. He/she was a course member, so I sent them the join email.".format(
-            #     #             user.email, org.name
-            #     #         )
-            #     #     )
-            #     #     # change this to the right role
-            #     #     AddedUserToOrganizationEmail(
-            #     #         user, org.name, "admin"
-            #     #     ).send_email()
-            #     #     # send_email_to_joining_user(user)
+                # No auto_approval 
+                approve_new_admin_user(user, auto_approved=True, org_name=org.name)
 
-            #     # else:
-            #     #     # email codePost admins
-            #     #     user.profile.pendingValidation = True
-            #     #     user.profile.canModifyRosters = True
-            #     #     user.save()
-            #     #     from_email = "team@codepost.io"
-            #     #     to_email = "team@codepost.io"
-            #     #     context = {
-            #     #         "user": user.email,
-            #     #         "uid": urlsafe_base64_encode(force_bytes(user.pk)),
-            #     #         "token": default_token_generator.make_token(user),
-            #     #         "organization": shortnameFromForm,
-            #     #     }
+            else:
+                action_id.append(2)
+                # require codePost team approval
 
-            #     #     email_params = get_email_params("CREATE_VALIDATION", context)
-            #     #     send_email_sendgrid(
-            #     #         from_email,
-            #     #         to_email,
-            #     #         email_params,
-            #     #         get_email_template_id("CREATE_VALIDATION"),
-            #     #     )
-            #     #     attachments = [
-            #     #         {
-            #     #             "text": "What should we do?",
-            #     #             "fallback": "What should we do?",
-            #     #             "color": "#24BE85",
-            #     #             "attachment_type": "default",
-            #     #             "actions": [
-            #     #                 {
-            #     #                     "name": "approval",
-            #     #                     "text": "Approve",
-            #     #                     "type": "button",
-            #     #                     "value": "approve",
-            #     #                     "confirm": {
-            #     #                         "title": "Are you sure?",
-            #     #                         "ok_text": "Yes",
-            #     #                         "dismiss_text": "No",
-            #     #                     },
-            #     #                     "url": email_params["url"] + "&activate=true",
-            #     #                 },
-            #     #                 {
-            #     #                     "name": "approval",
-            #     #                     "text": "Deny",
-            #     #                     "type": "button",
-            #     #                     "value": "deny",
-            #     #                     "confirm": {
-            #     #                         "title": "Are you sure?",
-            #     #                         "ok_text": "Yes",
-            #     #                         "dismiss_text": "No",
-            #     #                     },
-            #     #                     "url": email_params["url"],
-            #     #                 },
-            #     #             ],
-            #     #         }
-            #     #     ]
+                if is_student_or_grader:
+                    # send this user through the join flow
+                    # sendSlackMessage(
+                    #     "{} tried to sign up as a new admin from {}. He/she was a course member, so I sent them the join email.".format(
+                    #         user.email, org.name
+                    #     )
+                    # )
 
-            #     #     sendSlackMessage(
-            #     #         ":white_check_mark: *{} just signed up as an admin from {}*".format(
-            #     #             user.email, shortnameFromForm
-            #     #         ),
-            #     #         attachments,
-            #     #     )
+                    logEvent(
+                        "admin_join_flow",
+                        level="warning",
+                        message=json.dumps(
+                            {
+                                "user": user.email,
+                                "organization": org.name,
+                                "shortname": shortnameFromForm,
+                            }
+                        ),
+                    )
+                    send_email_to_joining_user(user)
+
+                else:
+                    # email codePost admins
+                    user.profile.pendingValidation = True
+                    user.profile.canModifyRosters = True
+                    user.save()
+                   
+
+                    NewAdminRequestEmail(
+                        user=user
+                    ).send_email(organization_name=rawName)
+
+                 
+                    logEvent(
+                        "admin_new_request",
+                        level="warning",
+                        message=json.dumps(
+                            {
+                                "user": user.email,
+                                "organization": org.name,
+                                "shortname": shortnameFromForm,
+                            }
+                        ),
+                    )
+                  
 
             return Response(
                 {"success": True, "action_id": ".".join(map(str, action_id))},
                 status=status.HTTP_200_OK,
             )
     else:
-        sendSlackMessage(
-            ":warning: *A new user experienced an unknown error when signing up.* Form: {}".format(
-                form
-            )
+        logEvent(
+            "admin_new_request_error",
+            level="error",
+            message=json.dumps(
+                {
+                    "errors": form.errors,
+                    "action_id": ".".join(map(str, action_id)),
+                }
+            ),
         )
+     
         return Response(
             {
                 "success": False,
@@ -628,11 +613,18 @@ def handleValidationResponse(request):
                             user=str(user),
                             description="New admin denied",
                         )
-                        sendSlackMessage(
-                            ":warning: *A codePost team member denied new admin {}.*".format(
-                                user.email
-                            )
+
+                        logEvent(
+                            "admin_new_request_denied",
+                            level="warning",
+                            message=json.dumps(
+                                {
+                                    "user": user.email,
+                                    "organization": user.profile.organization.name,
+                                }
+                            ),
                         )
+                     
 
                         # to the privilege request. Since we are denying that request,
                         # delete them.
@@ -701,29 +693,32 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
     user.save()
 
     # send registration email
-    from_email = "team@codepost.io"
-    context = {
-        "uid": urlsafe_base64_encode(force_bytes(user.pk)),
-        "token": default_token_generator.make_token(user),
-    }
-    NewAdminEmail(user, user.profile.organization, 'admin').send_email()
 
+    NewAdminActivationEmail(
+        user=user
+    ).send_email(organization_name=org_name)
     
-    # send_email_sendgrid(
-    #     from_email,
-    #     user.email,
-    #     get_email_params("CREATE_SUCCESS", context),
-    #     get_email_template_id("CREATE_SUCCESS"),
-    # )
 
-    # notify codePost team via Slack
-    slack_message = (
-        ":white_check_mark: *A codePost team member approved new admin {} from {}.*"
+    # # notify codePost team via Slack
+    # slack_message = (
+    #     ":white_check_mark: *A codePost team member approved new admin {} from {}.*"
+    # )
+    # if auto_approved:
+    #     slack_message = (
+    #         ":white_check_mark: *codePost automatically approved new admin {} from {}.*"
+    #     )
+
+    logEvent(
+        "admin_new_request_approved",
+        level="warning",
+        message=json.dumps(
+            {
+                "user": user.email,
+                "organization": user.profile.organization.name,
+                "shortname": user.profile.organization.shortname,
+            }
+        ),
     )
-    if auto_approved:
-        slack_message = (
-            ":white_check_mark: *codePost automatically approved new admin {} from {}.*"
-        )
 
     meta = {auto_approved: auto_approved}
 
@@ -733,7 +728,7 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
         description="New admin signup",
         meta=json.dumps(meta),
     )
-    sendSlackMessage(slack_message.format(user.email, org_name))
+    # sendSlackMessage(slack_message.format(user.email, org_name))
 
 
 ##########################################################################
@@ -744,45 +739,15 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
 
 @api_view(["POST"])
 def emailPasswordReset(request):
-    is_mooc = request.data.get("is_mooc", False)
+    # is_mooc = request.data.get("is_mooc", False)
 
     form = EmailForm(request.data)
     if form.is_valid():
         try:
             user = User.objects.get(email=form.cleaned_data["email"])
-            if user.is_active:
-                # User exists
-                from_email = "team@codepost.io"
-                context = {
-                    "uid": urlsafe_base64_encode(force_bytes(user.pk)),
-                    "token": default_token_generator.make_token(user),
-                }
 
-                email_template = (
-                    "PASSWORD_RESET" if not is_mooc else "PASSWORD_RESET_MOOC"
-                )
-                send_email_sendgrid(
-                    from_email,
-                    user.email,
-                    get_email_params(email_template, context),
-                    get_email_template_id("PASSWORD_RESET"),
-                )
-            else:
-                # User exists, but has never set their password
-                from_email = "team@codepost.io"
-                context = {
-                    "uid": urlsafe_base64_encode(force_bytes(user.pk)),
-                    "token": default_token_generator.make_token(user),
-                }
-                email_template = (
-                    "JOIN_INACTIVE" if not is_mooc else "JOIN_INACTIVE_MOOC"
-                )
-                send_email_sendgrid(
-                    from_email,
-                    user.email,
-                    get_email_params(email_template, context),
-                    get_email_template_id("JOIN_INACTIVE"),
-                )
+            PasswordResetEmail(user=user).send_email()
+
         except User.DoesNotExist:
             pass
 

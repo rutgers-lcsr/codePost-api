@@ -1,0 +1,7 @@
+{% extends "emails/base_template.html" %} {% block content %}
+<h2 class="text-2xl font-semibold mb-4">Hey {{ user.username }},</h2>
+<p>A new assignment {{ assignment_name }} has been released for you! please follow the link below:</p>
+<p class="mb-4">
+    <a href="{{ client_url }}/student/{{ course_name }}/{{course_period}}" class="text-blue-500 hover:underline">View Assignments</a>
+</p>
+{% endif %} {% endblock %}

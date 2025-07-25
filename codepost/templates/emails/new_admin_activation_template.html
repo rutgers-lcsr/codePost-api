@@ -1,0 +1,14 @@
+{% extends "emails/base_template.html" %} {% block content %}
+<h2 class="text-2xl font-semibold mb-4">Welcome {{ user.username }} to Codepost!</h2>
+<p>Your admin account has been approved for the organization <strong>{{ org }}</strong>.</p>
+<p>You can now manage your organization, create assignments, and more.</p>
+<p>Please reset your password by clicking the link below:</p>
+<p class="mb-4">
+    <a
+        href="{{ client_url }}/reset-password/?uid={{uid}}&token={{token}}&organization={{organization}}&activate=true"
+        class="text-blue-500 hover:underline"
+        >Reset your password</a
+    >
+</p>
+
+{% endblock %}
