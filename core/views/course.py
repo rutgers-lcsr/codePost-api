@@ -35,7 +35,7 @@ from core.emails import send_email_sendgrid, get_email_template_id, get_email_pa
 
 # Can override get_serializer method to use different serializer for
 # different user types
-from emails import UserAddedToCourseEmail
+from core.emails import UserAddedToCourseEmail
 
 def generate_invite_code():
     import secrets
