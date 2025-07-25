@@ -426,6 +426,9 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
 ###################################### Roster Helper functions ##############################
 def send_new_user_email(user, roleType, course):
+    raise NotImplementedError(
+        "This function is deprecated. Use AddedUserToCourseEmail instead."
+    )
     # Email constants
     from_email = "team@codepost.io"
     if user.is_active:

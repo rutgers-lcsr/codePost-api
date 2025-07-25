@@ -67,6 +67,7 @@ def encoded_zip(files):
 
 
 def send_email_student_uploaded_submission(to_email, submission):
+  raise NotImplementedError("This function is deprecated, use StudentUploadReceiptEmail instead")
 
   # Only zip the most recent submission
   files = SubmissionVersionHandler(submission).current_files()
@@ -374,6 +375,8 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       subCandidate = filteredSubs[0]
 
+
+      # move to get SerializerClass back to be more readable
       # If assignment is in live feedback mode, don't check for finalized or assingment release
       if assignment.liveFeedbackMode:
         if assignment.hideGrades:

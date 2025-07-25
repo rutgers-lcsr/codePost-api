@@ -77,20 +77,22 @@ class ImpersonateView(APIView):
     except User.DoesNotExist:
       return Response({"error": "User does not exist"}, status=404)
     
-    # If the user is a superuser, allow impersonation of any user
-    if not request.user.is_superuser:
-      # Ensure the user is a course admin and that target user is a student/grader
-      sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
-      if not sharded_course.exists():
-        return Response({"error": "You do not have permission to impersonate this user."}, status=403)
+    # Ensure the user is a course admin and that target user is a student/grader
+    sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
+    if not sharded_course.exists():
+      return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
     should_expire = form.cleaned_data.get('never_expire', False)
     # Set the user in the request
     request.user = user    
+
+    
     # Generate a token for the user
-    token = JWTSerializer.get_token(user, never_expire=should_expire)
+    token = JWTSerializer.get_token(request.user, never_expire=should_expire)
     serializer = UserSerializer(request.user, context={'request': request})
 
     data = serializer.data
     data['token'] = str(token)
+
+    update_last_login(None, user)
     return Response(data)

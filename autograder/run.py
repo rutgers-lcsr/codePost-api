@@ -32,7 +32,7 @@ from log.models import Event, TrackedAutograderRun
 from core.permissions.helpers import isStaffOfSub
 from autograder.testUtils.parse import parseTests, parseSourceFile, writeCmdScript
 
-from core.emails import send_email_sendgrid, get_email_template_id, get_email_params
+from core.emails import TestCompleteEmail, send_email_sendgrid, get_email_template_id, get_email_params
 
 from rest_framework.response import Response
 

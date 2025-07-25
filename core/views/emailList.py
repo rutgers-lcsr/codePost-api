@@ -10,10 +10,10 @@ def subscribeToEmailList(request):
   if 'email' not in request.data:
     return Response({'success': False}, status=status.status.HTTP_400_BAD_REQUEST)
 
-  sc = Slack()
-  message = "{} subscribed to the product updates email list!".format(request.data['email'])
-  channel = '#email-list-subscribers'
-  debugChannel = '#richard-test-2'
-  sc.send_message(message, channel=channel, logInDebug=True, debugChannel=debugChannel)
+  # sc = Slack()
+  # message = "{} subscribed to the product updates email list!".format(request.data['email'])
+  # channel = '#email-list-subscribers'
+  # debugChannel = '#richard-test-2'
+  # sc.send_message(message, channel=channel, logInDebug=True, debugChannel=debugChannel)
 
   return Response({'success': True}, status=status.HTTP_200_OK)

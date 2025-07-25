@@ -331,12 +331,47 @@ else:
     API_URL = "http://localhost:8000"
 
 
-EMAIL_HOST = "smtp.mailgun.org"
-EMAIL_HOST_USER = "postmaster@sandbox62f8530fe8fe4f91b47ddbd740cc0e3e.mailgun.org"
-EMAIL_HOST_PASSWORD = os.environ.get("MAILGUN_PASSWORD")
+
+
+# # Email settings
+
+if DEBUG:
+    OVERRIDE_EMAIL = os.environ.get("OVERRIDE_EMAIL", None)
+else:
+    OVERRIDE_EMAIL = None
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = "farside.lcsr.rutgers.edu"
+DEFAULT_EMAIL_FROM = "codepost@cs.rutgers.edu"
 EMAIL_PORT = 587
-ADMINS = [("codePost", "richard@codepost.io")]
+ADMINS = [("codePost", "mk1800@rutgers.edu")]
 EMAIL_USE_TLS = True
 # SERVER_EMAIL = "team@coodepost.io"
-# DEFAULT_FROM_EMAIL = "codePost Team <team@codepost.io>"
-EMAIL_SUBJECT_PREFIX = "[Django] "
+EMAIL_SUBJECT_PREFIX = "[Codepost] "
+
+
+
+# Logging configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'remote_syslog': {
+            'class': 'logging.handlers.SysLogHandler',
+            'address': ('127.0.0.1', 514),
+            'socktype': socket.SOCK_DGRAM,  # or socket.SOCK_STREAM for TCP
+            'formatter': 'verbose',
+        },
+    },
+    'formatters': {
+        'verbose': {
+            'format': '%(asctime)s %(name)s: %(levelname)s %(message)s'
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['remote_syslog'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
+}

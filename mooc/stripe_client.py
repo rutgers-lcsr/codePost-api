@@ -8,6 +8,8 @@ from django.conf import settings
 class StripeClient:
 
   def __init__(self):
+    raise NotImplementedError("This class is not meant to be instantiated directly. IN process of removing it from the codebase.")
+
     if 'ON_AWS' in os.environ:
       stripe.api_key = os.environ.get('STRIPE_API_KEY')
     else:

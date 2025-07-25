@@ -1,5 +1,7 @@
 # This file is used for temporary utility endpoints
 
+import logging
+logger = logging.getLogger("django")
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes

@@ -21,6 +21,10 @@ from django.conf import settings
 
 
 def send_email_sendgrid(from_email, to_email, params, templateID, attachments=None):
+    raise NotImplementedError(
+        "This function is deprecated. Use Email Classes instead."
+    )
+
     sg = sendgrid.SendGridAPIClient(apikey=SENDGRID_API_KEY)
     if SENDGRID_OVERRIDE_EMAIL:
         to_email_to_use = SENDGRID_OVERRIDE_EMAIL
@@ -47,16 +51,19 @@ def send_email_sendgrid(from_email, to_email, params, templateID, attachments=No
 
 
 def get_email_params(identifier, context):
+    raise NotImplementedError(
+        "This function is deprecated. Use Email Classes  instead."
+    )
     if identifier == "ADD_NEW":
         return add_new_user_template(context)
     elif identifier == "ADD_EXISTING":
         return add_existing_user_template(context)
-    elif identifier == "UPGRADE_ACTIVE":
-        return upgrade_active_user_template(context)
-    elif identifier == "UPGRADE_INACTIVE":
-        return upgrade_inactive_user_template(context)
-    elif identifier == "UPGRADE_DOESNOTEXIST":
-        return upgrade_non_user(context)
+    # elif identifier == "UPGRADE_ACTIVE":
+    #     return upgrade_active_user_template(context)
+    # elif identifier == "UPGRADE_INACTIVE":
+    #     return upgrade_inactive_user_template(context)
+    # elif identifier == "UPGRADE_DOESNOTEXIST":
+    #     return upgrade_non_user(context)
     elif identifier == "JOIN_ACTIVE":
         return join_active_user_template(context)
     elif identifier == "JOIN_INACTIVE":
@@ -73,12 +80,12 @@ def get_email_params(identifier, context):
         return validation_check_to_codepost_team(context)
     elif identifier == "CREATE_SUCCESS":
         return create_admin_success(context)
-    elif identifier == "CREATE_WELCOME":
-        return create_admin_welcome(context)
+    # elif identifier == "CREATE_WELCOME":
+    #     return create_admin_welcome(context)
     elif identifier == "PASSWORD_RESET":
         return password_reset(context)
-    elif identifier == "PASSWORD_RESET_MOOC":
-        return password_reset_mooc(context)
+    # elif identifier == "PASSWORD_RESET_MOOC":
+    #     return password_reset_mooc(context)
     elif identifier == "PUBLISH_ASSIGNMENT":
         return publish_assignment(context)
     elif identifier == "GRADER_REMINDER":
@@ -128,6 +135,11 @@ SENDGRID_TEMPLATE_MAP = {
 
 
 def get_email_template_id(identifier):
+    raise NotImplementedError(
+        "This function is deprecated. Use Email Classes instead."
+    )   
+
+
     return SENDGRID_TEMPLATE_MAP.get(identifier, None)
 
 
@@ -138,6 +150,9 @@ def get_email_template_id(identifier):
 
 
 def add_existing_user_template(context):
+    raise NotImplementedError(
+        "This function is deprecated. Use Email Classes instead."
+    )
     """
     Parameters:
     type : {'student', 'grader', 'admin'}

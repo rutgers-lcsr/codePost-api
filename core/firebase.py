@@ -3,7 +3,7 @@ from django.utils.encoding import force_str
 from rest_framework import authentication
 from rest_framework import exceptions
 
-from firebase_admin import auth, initialize_app, credentials
+# from firebase_admin import auth, initialize_app, credentials
 
 from django.utils.translation import ugettext as _
 from util.slack import Slack
@@ -94,9 +94,9 @@ class BaseFirebaseAuthentication(authentication.BaseAuthentication):
             #
             # This is probably the right thing to do to accommodate new users
             # For now, let's log a Slack message
-            sc = Slack()
-            notif = "User not on roster tried to authenticate: {}".format(payload.get('email', None))
-            sc.send_message(notif, channel="#code-in-place-internal", logInDebug=False, debugChannel="richard-test")
+            # sc = Slack()
+            # notif = "User not on roster tried to authenticate: {}".format(payload.get('email', None))
+            # sc.send_message(notif, channel="#code-in-place-internal", logInDebug=False, debugChannel="richard-test")
 
         if not user.is_active:
             msg = _('User account is disabled.')
