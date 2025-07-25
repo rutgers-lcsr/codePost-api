@@ -35,7 +35,7 @@ from core.emails import send_email_sendgrid, get_email_template_id, get_email_pa
 
 # Can override get_serializer method to use different serializer for
 # different user types
-
+from emails import UserAddedToCourseEmail
 
 def generate_invite_code():
     import secrets
@@ -191,7 +191,12 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
                             for userInRoster in newList:
                                 if userInRoster not in oldList:
-                                    send_new_user_email(userInRoster, roleType, course)
+                                    UserAddedToCourseEmail(userInRoster).send_email(
+                                        course_name=course.name,
+                                        course_period=course.period,
+                                        user_type=roleType,
+                                    )
+                                    # send_new_user_email(userInRoster, roleType, course)
 
                 from webhooks.signals import hook_event
 
@@ -286,7 +291,12 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                 (newAdmins, newGraders, newStudents), ("student", "grader", "admin")
             ):
                 for newUser in userList:
-                    send_new_user_email(newUser, roleType, course)
+                    UserAddedToCourseEmail(newUser).send_email(
+                        course_name=course.name,
+                        course_period=course.period,
+                        user_type=roleType,
+                    )
+                    # send_new_user_email(newUser, roleType, course)
 
         serializer = CourseRosterSerializer(course, context={"request": request})
         return Response(serializer.data)
@@ -426,6 +436,9 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
 ###################################### Roster Helper functions ##############################
 def send_new_user_email(user, roleType, course):
+    raise NotImplementedError(
+        "send_new_user_email function is deprecated. Use UserAddedToCourseEmail instead."
+    )
     # Email constants
     from_email = "team@codepost.io"
     if user.is_active:
@@ -448,6 +461,10 @@ def send_new_user_email(user, roleType, course):
             "uid": urlsafe_base64_encode(force_bytes(user.pk)),
             "token": default_token_generator.make_token(user),
         }
+
+
+
+
         send_email_sendgrid(
             from_email,
             user.email,

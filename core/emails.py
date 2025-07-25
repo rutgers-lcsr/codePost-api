@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from email.message import EmailMessage
+from django.core.mail import EmailMessage
+from django.template.loader import render_to_string
 from codepost.settings import (
     SENDGRID_API_KEY,
     CLIENT_URL,
@@ -22,13 +23,33 @@ from core.models import Submission
 from django.conf import settings
 
 class CodepostEmail(ABC):
-    subject = None
+    subject = "CodePost Notification"
     template = "emails/base_template.html"
 
     def __init__(self, user:User):
         self.user = user
         self.from_email = settings.DEFAULT_FROM_EMAIL
 
+    def _get_base_context(self):
+        """
+        Returns the base context for the email.
+        This can be overridden by subclasses to add more context.
+        """
+        return {
+            "user": self.user,
+            "from_email": self.get_from_address(),
+            "to_email": self.get_to_address(),
+            "client_url": CLIENT_URL,
+        }
+    def get_context(self, **kwargs):
+        """
+        Returns the context for the email.
+        This method allows context to be extended by subclasses.
+        """
+        context = self._get_base_context()
+        context.update(kwargs)
+        return context
+    
     @abstractmethod
     def send_email(self):
         """
@@ -38,24 +59,239 @@ class CodepostEmail(ABC):
         """
         pass
     
-    def send(self, email:EmailMessage):
+    def get_to_address(self):
+        if self.user.email:
+            return self.user.email
+
+        if self.user.organization and self.user.organization.email:
+            return self.user.organization.email
+
+        raise ValueError("User does not have an email address set.")
+    
+    def get_from_address(self):
+        """
+        Returns the email address from which the email should be sent.
+        If SENDGRID_OVERRIDE_EMAIL is set, it returns that email address.
+        Otherwise, it returns the default from email.
+        """
+        if SENDGRID_OVERRIDE_EMAIL:
+            return SENDGRID_OVERRIDE_EMAIL
+        return self.from_email
+
+    def send(self, email:EmailMessage, type:str = "html"):
         """
         Sends the email using the Django EmailMessage class.
         """
         
         try:
+            email.content_subtype = type 
             email.send()
         except Exception as e:
             # Will log out the error in the Django logs
             return None
 
 
+class UserAddedToCourseEmail(CodepostEmail):
+    subject = "You have been added to a course on CodePost"
+    template = "emails/user_add_to_course_template.html"
+
+    def send_email(self, course_name:str, course_period:str, user_type:str):
+        """
+        Sends an email to the user notifying them that they have been added to a course.
+        """
+        if self.user.is_active:
+            context = self.get_context(
+                type=user_type,
+                course_name=course_name,
+                course_period=course_period,
+            )
+        else:
+            context = self.get_context(
+                type=user_type,
+                course_name=course_name,
+                course_period=course_period,
+                uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+                token=default_token_generator.make_token(self.user),
+            )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+class UserSignupEmail(CodepostEmail):
+    subject = "Welcome to CodePost"
+    template = "emails/user_signup_template.html"
+
+    def send_email(self):
+        """
+        Sends a welcome email to the user after they sign up.
+        """
+        if self.user.is_active:
+            context = self.get_context()
+        else:
+            context = self.get_context(
+                uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+                token=default_token_generator.make_token(self.user),
+            )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class AdminAlreadyEmail(CodepostEmail):
+    subject = "You are already an admin on CodePost"
+    template = "emails/admin_already_template.html"
+
+    def send_email(self):
+        """
+        Sends an email to the user notifying them that they are already an admin.
+        """
+        context = self.get_context()
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class AdminChangeOrganizationEmail(CodepostEmail):
+    subject = "Your organization has changed on CodePost"
+    template = "emails/admin_change_organization_template.html"
+
+    def send_email(self, organization_name:str):
+        """
+        Sends an email to the user notifying them that their organization has changed.
+        """
+        context = self.get_context(
+            uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+            token=default_token_generator.make_token(self.user),
+            organization=organization_name
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
 
 
-    
+class PasswordResetEmail(CodepostEmail):
+    subject = "Password Reset Request"
+    template = "emails/password_reset_template.html"
 
+    def send_email(self):
+        """
+        Sends a password reset email to the user.
+        """
+        context = self.get_context(
+            uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+            token=default_token_generator.make_token(self.user),
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class NewAdminRequestEmail(CodepostEmail):
+    subject = "New Admin Request on CodePost"
+    template = "emails/new_admin_request_template.html"
+
+    def send_email(self, organization_name:str):
+        """
+        Sends an email to the CodePost team notifying them of a new admin request.
+        """
+        context = self.get_context(
+            organization=organization_name,
+            uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+            token=default_token_generator.make_token(self.user),
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_from_address()],
+        )
+
+        return self.send(email)
+class NewAdminActivationEmail(CodepostEmail):
+    subject = "New Admin Activation on CodePost"
+    template = "emails/new_admin_activation_template.html"
+
+    def send_email(self, organization_name:str):
+        """
+        Sends an email to the user notifying them that they have been activated as an admin.
+        """
+        context = self.get_context(
+            organization=organization_name,
+            uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+            token=default_token_generator.make_token(self.user),
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class PublishAssignmentEmail(CodepostEmail):
+    subject = "New Assignment on CodePost"
+    template = "emails/publish_assignment_template.html"
+
+    def send_email(self, course_name:str, course_period:str, assignment_name:str):
+        """
+        Sends an email to the user notifying them that an assignment has been published.
+        """
+        context = self.get_context(
+            course_name=course_name,
+            course_period=course_period,
+            assignment_name=assignment_name,
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
 
 def send_email_sendgrid(from_email, to_email, params, templateID, attachments=None):
+    raise NotImplementedError("This function is deprecated. Use CodepostEmail subclasses instead.")
+
     sg = sendgrid.SendGridAPIClient(apikey=SENDGRID_API_KEY)
     if SENDGRID_OVERRIDE_EMAIL:
         to_email_to_use = SENDGRID_OVERRIDE_EMAIL
@@ -82,38 +318,39 @@ def send_email_sendgrid(from_email, to_email, params, templateID, attachments=No
 
 
 def get_email_params(identifier, context):
-    if identifier == "ADD_NEW":
+    raise NotImplementedError("This function is deprecated. Use CodepostEmail subclasses instead.")
+    if identifier == "ADD_NEW ✅": 
         return add_new_user_template(context)
-    elif identifier == "ADD_EXISTING":
+    elif identifier == "ADD_EXISTING ✅":
         return add_existing_user_template(context)
-    elif identifier == "UPGRADE_ACTIVE":
-        return upgrade_active_user_template(context)
-    elif identifier == "UPGRADE_INACTIVE":
-        return upgrade_inactive_user_template(context)
-    elif identifier == "UPGRADE_DOESNOTEXIST":
-        return upgrade_non_user(context)
-    elif identifier == "JOIN_ACTIVE":
+    # elif identifier == "UPGRADE_ACTIVE":
+    #     return upgrade_active_user_template(context)
+    # elif identifier == "UPGRADE_INACTIVE":
+    #     return upgrade_inactive_user_template(context)
+    # elif identifier == "UPGRADE_DOESNOTEXIST":
+        # return upgrade_non_user(context)
+    elif identifier == "JOIN_ACTIVE ✅":
         return join_active_user_template(context)
-    elif identifier == "JOIN_INACTIVE":
+    elif identifier == "JOIN_INACTIVE ✅":
         return join_inactive_user_template(context)
-    elif identifier == "JOIN_INACTIVE_MOOC":
+    elif identifier == "JOIN_INACTIVE_MOOC ✅":
         return join_inactive_user_mooc_template(context)
-    elif identifier == "JOIN_DOESNOTEXIST":
+    elif identifier == "JOIN_DOESNOTEXIST ✅":
         return join_non_user(context)
-    elif identifier == "CREATE_ALREADY_ADMIN":
+    elif identifier == "CREATE_ALREADY_ADMIN ✅":
         return create_already_admin(context)
-    elif identifier == "CREATE_ORGANIZATION_CHANGE":
+    elif identifier == "CREATE_ORGANIZATION_CHANGE ✅":
         return create_organization_change(context)
-    elif identifier == "CREATE_VALIDATION":
+    elif identifier == "CREATE_VALIDATION ✅":
         return validation_check_to_codepost_team(context)
-    elif identifier == "CREATE_SUCCESS":
+    elif identifier == "CREATE_SUCCESS  ✅":
         return create_admin_success(context)
-    elif identifier == "CREATE_WELCOME":
-        return create_admin_welcome(context)
+    # elif identifier == "CREATE_WELCOME ":
+    #     return create_admin_welcome(context)
     elif identifier == "PASSWORD_RESET":
         return password_reset(context)
-    elif identifier == "PASSWORD_RESET_MOOC":
-        return password_reset_mooc(context)
+    # elif identifier == "PASSWORD_RESET_MOOC":
+    #     return password_reset_mooc(context)
     elif identifier == "PUBLISH_ASSIGNMENT":
         return publish_assignment(context)
     elif identifier == "GRADER_REMINDER":
@@ -163,6 +400,7 @@ SENDGRID_TEMPLATE_MAP = {
 
 
 def get_email_template_id(identifier):
+    raise NotImplementedError("This function is deprecated. Use CodepostEmail subclasses instead.")
     return SENDGRID_TEMPLATE_MAP.get(identifier, None)
 
 
