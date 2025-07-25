@@ -1,0 +1,9 @@
+{% extends "emails/basic_template.html" %}
+{% block content %}
+    <div class="p-6">
+        <h1 class="text-2xl font-bold mb-4">{{ new_partner_email }} has been added to {{ assignment_name }}.</h1>
+        <p class="text-gray-700 mb-4">Partners List: {{ partners }}</p>
+        <p class="text-gray-700 mb-4">Course Name: {{ course_name }}</p>
+        <p class="text-gray-700 mb-4">Course Period: {{ course_period }}</p>
+    </div>
+{% endblock content %}

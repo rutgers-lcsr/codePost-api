@@ -27,7 +27,7 @@ from rest_framework import serializers
 
 from core.permissions.tokens import submission_token_generator
 
-from core.emails import send_email_sendgrid, get_email_template_id, get_email_params
+from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail, send_email_sendgrid, get_email_template_id, get_email_params
 
 def get_student_serializer_class(submission):
     if (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
@@ -38,13 +38,15 @@ def get_student_serializer_class(submission):
         return StudentSubmissionSerializer
 
 def send_email_updated_partners(to_email, new_partner_email, partner_emails, assignment, course):
-
+    raise NotImplementedError("This function is deprecated. Use PartnersAddedEmail instead.")
     context = {
         'assignmentName': assignment.name,
         'courseName': assignment.course.name,
         'newPartnerEmail': new_partner_email,
         'partnerEmails': partner_emails,
     }
+
+
 
     send_email_sendgrid(from_email="team@codepost.io", to_email=to_email, params=get_email_params('PARTNERS_ADDED', context), templateID=get_email_template_id('PARTNERS_ADDED'))
 
@@ -369,8 +371,12 @@ class SubmissionViewSet(ListProtectedViewSet):
     if is_valid:
         submission.students.add(user)
 
-        for student in submission.students.all():
-            send_email_updated_partners(student.email, user.email, ", ".join(list(submission.students.all().values_list('email', flat=True))), submission.assignment, course)
+        for student in submission.students.all():         
+            StudentPartnersAddedEmail(student).send_email(
+                new_partner_email=user.email,
+                submission=submission,
+            )
+            # send_email_updated_partners(student.email, user.email, ", ".join(list(submission.students.all().values_list('email', flat=True))), submission.assignment, course)
 
         return Response("ok", status.HTTP_200_OK)
     else:
@@ -437,13 +443,9 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     view_submission_url = 'https://compedu.stanford.edu/codeinplace/v1/#/submissions' if submission.assignment.course.id == 925 else 'https://codepost.io/code/{}'.format(submission.id)
 
-    context = {
-        'assignment_name': submission.assignment.name,
-        'view_submission_url': view_submission_url,
-    }
+    
 
     for student in submission.students.all():
-        to_email = student.email
-        send_email_sendgrid(from_email="team@codepost.io", to_email=to_email, params=get_email_params('STUDENT_FEEDBACK_NOTIFICATION', context), templateID=get_email_template_id('STUDENT_FEEDBACK_NOTIFICATION'))
+        StudentFeedbackNotificationEmail(student).send_email(submission)
 
     return Response('Notifications sent!', status.HTTP_200_OK)

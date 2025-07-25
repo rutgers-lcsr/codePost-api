@@ -72,35 +72,35 @@ def encoded_zip(files):
 def send_email_student_uploaded_submission(to_email, submission):
   raise NotImplementedError("This function is deprecated, use StudentUploadReceiptEmail instead")
 
-  # Only zip the most recent submission
-  files = SubmissionVersionHandler(submission).current_files()
+  # # Only zip the most recent submission
+  # files = SubmissionVersionHandler(submission).current_files()
 
-  tz = pytz.timezone(submission.assignment.course.timezone)
-  dateUploaded = submission.dateUploaded.astimezone(tz)
+  # tz = pytz.timezone(submission.assignment.course.timezone)
+  # dateUploaded = submission.dateUploaded.astimezone(tz)
 
-  dateUploadedHumanize = dateUploaded.strftime("%A, %m-%d-%Y %H:%M:%S")
-  dateUploadedTimestamp = dateUploaded.strftime("%Y%m%d_%H%M")
+  # dateUploadedHumanize = dateUploaded.strftime("%A, %m-%d-%Y %H:%M:%S")
+  # dateUploadedTimestamp = dateUploaded.strftime("%Y%m%d_%H%M")
 
-  zip_name = "{}_{}_{}.zip".format(to_email, submission.id, dateUploadedTimestamp)
+  # zip_name = "{}_{}_{}.zip".format(to_email, submission.id, dateUploadedTimestamp)
 
-  attachments = [
-      {
-          "content": encoded_zip(files),
-          "filename": zip_name,
-          "type": "application/zip"
-      }
-  ]
+  # attachments = [
+  #     {
+  #         "content": encoded_zip(files),
+  #         "filename": zip_name,
+  #         "type": "application/zip"
+  #     }
+  # ]
 
-  context = {
-      'assignmentName': submission.assignment.name,
-      'courseName': "{} | {}".format(submission.assignment.course.name, submission.assignment.course.period),
-      'students': ", ".join(list(submission.students.all().values_list('email', flat=True))),
-      'dateUploadedHumanize': dateUploadedHumanize,
-      'dateUploadedTimestamp': dateUploadedTimestamp
-  }
+  # context = {
+  #     'assignmentName': submission.assignment.name,
+  #     'courseName': "{} | {}".format(submission.assignment.course.name, submission.assignment.course.period),
+  #     'students': ", ".join(list(submission.students.all().values_list('email', flat=True))),
+  #     'dateUploadedHumanize': dateUploadedHumanize,
+  #     'dateUploadedTimestamp': dateUploadedTimestamp
+  # }
 
-  send_email_sendgrid(from_email="team@codepost.io", to_email=to_email, params=get_email_params(
-      'STUDENT_UPLOAD_RECEIPT', context), templateID=get_email_template_id('STUDENT_UPLOAD_RECEIPT'), attachments=attachments)
+  # send_email_sendgrid(from_email="team@codepost.io", to_email=to_email, params=get_email_params(
+  #     'STUDENT_UPLOAD_RECEIPT', context), templateID=get_email_template_id('STUDENT_UPLOAD_RECEIPT'), attachments=attachments)
 
 class AssignmentViewSet(ListProtectedViewSet):
   """
@@ -677,6 +677,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       if 'sendConfirmationEmail' in request.data and request.data['sendConfirmationEmail']:
         for student in submission.students.all():
           try:
+            Student
             send_email_student_uploaded_submission(student.email, submission)
           except Exception as e:
             logEvent("Error emailing student receipt",

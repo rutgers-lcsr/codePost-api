@@ -1,4 +1,7 @@
 import os
+import logging
+
+logger = logging.getLogger("django")
 
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -61,7 +64,8 @@ def fulfillment_webhook(request):
     #                                                                                               payment_intent.metadata['order'], payment_intent.metadata['assignments']), channel="richard-test-2")
 
   else:
-      slack_client.send_message('Stripe ERROR: Session completed without order metadata | session [{}]'.format(
-          session.id), channel="richard-test-2")
+      logger.error(f"Unhandled event type: {event['type']}")
+      # slack_client.send_message('Stripe ERROR: Session completed without order metadata | session [{}]'.format(
+          # session.id), channel="richard-test-2")
 
   return Response('fulfilled', status.HTTP_200_OK)

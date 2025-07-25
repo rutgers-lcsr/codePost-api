@@ -36,6 +36,16 @@ logging.getLogger().addHandler(loki_handler)
 
 logger = logging.getLogger("events")
 
+
+def log_debug(message, *args):
+    """
+    Log a debug message to Loki.
+    :param message: The message to log.
+    """
+    logger = logging.getLogger(__name__)
+    logger.debug(message, *args)
+
+
 def logEvent(event, level=logging.INFO, message=None):
     """
     Log an event to Loki.
@@ -46,7 +56,10 @@ def logEvent(event, level=logging.INFO, message=None):
 
     full_message = f"[{event}] - {message}" if message else event
 
-    logger.log(json.dumps({
+    logger.log(
+        level,
+        msg=
+        json.dumps({
         "event": event,
         "message": full_message,
         "level": level,

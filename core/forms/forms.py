@@ -4,6 +4,16 @@ from django.contrib.auth import (
     authenticate, get_user_model, password_validation,
 )
 
+class ChangePasswordForm(forms.Form):
+  uid = forms.CharField()
+  token = forms.CharField(min_length=20, strip=True)
+  password = forms.CharField(
+      label=_("New Password"),
+      strip=False,
+      widget=forms.PasswordInput,
+      help_text=password_validation.password_validators_help_text_html(),
+  )
+
 class PasswordMatchForm(forms.Form):
   error_messages = {
       'password_mismatch': _("The two password fields didn't match."),
@@ -75,7 +85,16 @@ class EmailTokenForm(EmailForm):
 class ValidateTokenForm(forms.Form):
   token = forms.CharField(min_length=20, strip=True)
   uid = forms.CharField()
-
+class ChangePasswordForm(PasswordMatchForm):
+  uid = forms.CharField()
+  token = forms.CharField(min_length=20, strip=True)
+  password = forms.CharField(
+      label=_("New Password"),
+      strip=False,
+      widget=forms.PasswordInput,
+      help_text=password_validation.password_validators_help_text_html(),
+  )
+  
 class ValidationResponseForm(forms.Form):
   token = forms.CharField(min_length=20, strip=True)
   uid = forms.CharField()

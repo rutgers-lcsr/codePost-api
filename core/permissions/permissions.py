@@ -84,8 +84,6 @@ class BillingPermissions(permissions.BasePermission):
         return True
     return False
 
-
-
 ################################################################################
 
 ############# Course Infrastructure Section ####################################

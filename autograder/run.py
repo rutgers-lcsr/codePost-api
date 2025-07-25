@@ -32,7 +32,7 @@ from log.models import Event, TrackedAutograderRun
 from core.permissions.helpers import isStaffOfSub
 from autograder.testUtils.parse import parseTests, parseSourceFile, writeCmdScript
 
-from core.emails import TestCompleteEmail, send_email_sendgrid, get_email_template_id, get_email_params
+from core.emails import TestRunAllCompleteEmail, send_email_sendgrid, get_email_template_id, get_email_params
 
 from rest_framework.response import Response
 
@@ -169,24 +169,9 @@ def RunAll(environmentID, user, sendEmail=False):
     environment.save()
 
     if sendEmail:
-        context = {
-            "assignmentName": assignment.name,
-            "courseName": assignment.course.name,
-            "coursePeriod": assignment.course.period,
-            "url": urllib.parse.quote(
-                EMAIL_BASE_URL
-                + "/admin/{}/{}/assignments/tests/{}/results".format(
-                    assignment.course.name, assignment.course.period, assignment.name
-                ),
-                safe=":/",
-            ),
-        }
-        send_email_sendgrid(
-            from_email="team@codepost.io",
-            to_email=user,
-            params=get_email_params("RUN_ALL_COMPLETE", context),
-            templateID=get_email_template_id("RUN_ALL_COMPLETE"),
-        )
+
+        TestRunAllCompleteEmail(user).send_email(assignment_name=assignment.name, course_name=assignment.course.name, course_period=assignment.course.period)
+   
 
     end_time = datetime.now()
     msg = "Run All Completed for assignment {}".format(assignment.name)

@@ -1,16 +1,14 @@
 from abc import ABC, abstractmethod
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
+import pytz
 from codepost.settings import (
-    SENDGRID_API_KEY,
     CLIENT_URL,
     MOOC_CLIENT_URL,
     API_URL,
-    SENDGRID_SANDBOX,
-    SENDGRID_OVERRIDE_EMAIL,
+    DEFAULT_EMAIL_FROM,
+    OVERRIDE_EMAIL
 )
-import sendgrid
-from sendgrid.helpers.mail import *
 
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
@@ -18,9 +16,13 @@ from django.utils.encoding import force_bytes
 from django.contrib.auth.models import User
 from django import forms
 
-from core.models import Submission
+import logging
+from core.handlers.submission_version_handler import SubmissionVersionHandler
+from core.handlers.submission_version_handler import SubmissionVersionHandler
+from core.logging import log_debug, logEvent
+from core.models import Assignment, Submission
 
-from django.conf import settings
+from core.tests.views.results import submission
 
 class CodepostEmail(ABC):
     subject = "CodePost Notification"
@@ -28,7 +30,7 @@ class CodepostEmail(ABC):
 
     def __init__(self, user:User):
         self.user = user
-        self.from_email = settings.DEFAULT_FROM_EMAIL
+        self.from_email = DEFAULT_EMAIL_FROM
 
     def _get_base_context(self):
         """
@@ -60,6 +62,9 @@ class CodepostEmail(ABC):
         pass
     
     def get_to_address(self):
+        if OVERRIDE_EMAIL:
+            return OVERRIDE_EMAIL
+
         if self.user.email:
             return self.user.email
 
@@ -74,8 +79,6 @@ class CodepostEmail(ABC):
         If SENDGRID_OVERRIDE_EMAIL is set, it returns that email address.
         Otherwise, it returns the default from email.
         """
-        if SENDGRID_OVERRIDE_EMAIL:
-            return SENDGRID_OVERRIDE_EMAIL
         return self.from_email
 
     def send(self, email:EmailMessage, type:str = "html"):
@@ -85,15 +88,22 @@ class CodepostEmail(ABC):
         
         try:
             email.content_subtype = type 
+            logEvent(event="Email sent", message="{} sent to {}".format(self.subject, self.get_to_address()))
+
+            logEvent(event="email from", message=email.from_email)
+
+            logEvent(event="email body", message=email.body)
+
             email.send()
         except Exception as e:
             # Will log out the error in the Django logs
+            logEvent(event="Email send failed", message=str(e), level=logging.ERROR)
             return None
 
 
 class UserAddedToCourseEmail(CodepostEmail):
     subject = "You have been added to a course on CodePost"
-    template = "emails/user_add_to_course_template.html"
+    template = "emails/user/add_to_course_template.html"
 
     def send_email(self, course_name:str, course_period:str, user_type:str):
         """
@@ -101,13 +111,13 @@ class UserAddedToCourseEmail(CodepostEmail):
         """
         if self.user.is_active:
             context = self.get_context(
-                type=user_type,
+                role=user_type,
                 course_name=course_name,
                 course_period=course_period,
             )
         else:
             context = self.get_context(
-                type=user_type,
+                role=user_type,
                 course_name=course_name,
                 course_period=course_period,
                 uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
@@ -125,7 +135,7 @@ class UserAddedToCourseEmail(CodepostEmail):
         return self.send(email)
 class UserSignupEmail(CodepostEmail):
     subject = "Welcome to CodePost"
-    template = "emails/user_signup_template.html"
+    template = "emails/user/signup_template.html"
 
     def send_email(self):
         """
@@ -151,7 +161,7 @@ class UserSignupEmail(CodepostEmail):
 
 class AdminAlreadyEmail(CodepostEmail):
     subject = "You are already an admin on CodePost"
-    template = "emails/admin_already_template.html"
+    template = "emails/admin/already_template.html"
 
     def send_email(self):
         """
@@ -171,7 +181,7 @@ class AdminAlreadyEmail(CodepostEmail):
 
 class AdminChangeOrganizationEmail(CodepostEmail):
     subject = "Your organization has changed on CodePost"
-    template = "emails/admin_change_organization_template.html"
+    template = "emails/admin/change_organization_template.html"
 
     def send_email(self, organization_name:str):
         """
@@ -196,7 +206,7 @@ class AdminChangeOrganizationEmail(CodepostEmail):
 
 class PasswordResetEmail(CodepostEmail):
     subject = "Password Reset Request"
-    template = "emails/password_reset_template.html"
+    template = "emails/user/password_reset_template.html"
 
     def send_email(self):
         """
@@ -219,7 +229,7 @@ class PasswordResetEmail(CodepostEmail):
 
 class NewAdminRequestEmail(CodepostEmail):
     subject = "New Admin Request on CodePost"
-    template = "emails/new_admin_request_template.html"
+    template = "emails/admin/request_template.html"
 
     def send_email(self, organization_name:str):
         """
@@ -243,7 +253,7 @@ class NewAdminRequestEmail(CodepostEmail):
         return self.send(email)
 class NewAdminActivationEmail(CodepostEmail):
     subject = "New Admin Activation on CodePost"
-    template = "emails/new_admin_activation_template.html"
+    template = "emails/admin/activation_template.html"
 
     def send_email(self, organization_name:str):
         """
@@ -265,18 +275,112 @@ class NewAdminActivationEmail(CodepostEmail):
         )
         return self.send(email)
 
-class PublishAssignmentEmail(CodepostEmail):
-    subject = "New Assignment on CodePost"
-    template = "emails/publish_assignment_template.html"
+class TestRunAllCompleteEmail(CodepostEmail):
+    subject = "Test Run All Complete on CodePost"
+    template = "emails/admin/test_complete_template.html"
 
-    def send_email(self, course_name:str, course_period:str, assignment_name:str):
+    def send_email(self, assignment_name:str, course_name:str, course_period:str):
         """
-        Sends an email to the user notifying them that an assignment has been published.
+        Sends an email to the user notifying them that the test run is complete.
         """
+
         context = self.get_context(
+            assignment_name=assignment_name,
             course_name=course_name,
             course_period=course_period,
-            assignment_name=assignment_name,
+        )
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class StudentUploadReceiptEmail(CodepostEmail):
+    subject = "Student Upload Receipt on CodePost"
+    template = "emails/student/upload_receipt_template.html"
+
+    def send_email(self, submission:Submission):
+        """
+        Sends an email to the user notifying them of a student upload receipt.
+        """
+        tz = pytz.timezone(submission.assignment.course.timezone)
+        dateUploaded = submission.dateUploaded.astimezone(tz)
+
+        dateUploadedHumanize = dateUploaded.strftime("%A, %m-%d-%Y %H:%M:%S")
+        dateUploadedTimestamp = dateUploaded.strftime("%Y%m%d_%H%M")
+        
+        files = SubmissionVersionHandler(submission).encoded_zip()
+        zip_name = "{}_{}_{}.zip".format(self.get_to_address(), submission.id, dateUploaded.strftime("%Y-%m-%d_%H-%M-%S"))
+        
+        attachments = [
+            {
+                "content": files,
+                "filename": zip_name,
+                "type": "application/zip"
+            }
+        ]
+        context = self.get_context(
+            assignment_name=submission.assignment.name,
+            course_name=submission.assignment.course.name,
+            students=", ".join(list(submission.students.all().values_list('email', flat=True))),
+            date_uploaded_humanize=dateUploadedHumanize,
+            date_uploaded_timestamp=dateUploadedTimestamp,
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+            attachments=attachments,
+        )
+        return self.send(email)
+
+class StudentPartnersAddedEmail(CodepostEmail):
+    subject = "Partners Added on CodePost"
+    template = "emails/student/partners_added_template.html"
+
+    def send_email(self,submission:Submission, new_partner_email:str):
+        """
+        Sends an email to the user notifying them that partners have been added.
+        """
+
+        partner_emails = ", ".join(list(submission.partners.all().values_list('email', flat=True)))
+
+        context = self.get_context(
+            new_partner_email=new_partner_email,
+            assignment_name=submission.assignment.name,
+            course_name=submission.assignment.course.name,
+            course_period=submission.assignment.course.period,
+            partners= partner_emails,
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class StudentFeedbackNotificationEmail(CodepostEmail):
+    subject = "Feedback Notification on CodePost"
+    template = "emails/student/feedback_notification_template.html"
+
+    def send_email(self, submission:Submission):
+        """
+        Sends an email to the user notifying them of feedback on their submission.
+        """
+        context = self.get_context(
+            submission=submission,
         )
 
         html_content = render_to_string(self.template, context)
@@ -292,29 +396,6 @@ class PublishAssignmentEmail(CodepostEmail):
 def send_email_sendgrid(from_email, to_email, params, templateID, attachments=None):
     raise NotImplementedError("This function is deprecated. Use CodepostEmail subclasses instead.")
 
-    sg = sendgrid.SendGridAPIClient(apikey=SENDGRID_API_KEY)
-    if SENDGRID_OVERRIDE_EMAIL:
-        to_email_to_use = SENDGRID_OVERRIDE_EMAIL
-    else:
-        to_email_to_use = to_email
-
-    data = {
-        "personalizations": [
-            {"to": [{"email": to_email_to_use}], "dynamic_template_data": params}
-        ],
-        "from": {"name": "codePost Team", "email": from_email},
-        "template_id": templateID,
-        "attachments": attachments,
-    }
-
-    if SENDGRID_SANDBOX:
-        data["mail_settings"] = {"sandbox_mode": {"enable": True}}
-
-    if not settings.TESTING:
-        response = sg.client.mail.send.post(request_body=data)
-        return response
-    else:
-        return None
 
 
 def get_email_params(identifier, context):
@@ -347,7 +428,7 @@ def get_email_params(identifier, context):
         return create_admin_success(context)
     # elif identifier == "CREATE_WELCOME ":
     #     return create_admin_welcome(context)
-    elif identifier == "PASSWORD_RESET":
+    elif identifier == "PASSWORD_RESET   ✅":
         return password_reset(context)
     # elif identifier == "PASSWORD_RESET_MOOC":
     #     return password_reset_mooc(context)
@@ -414,66 +495,13 @@ def add_existing_user_template(context):
     raise NotImplementedError(
         "This function is deprecated. Use Email Classes instead."
     )
-    """
-    Parameters:
-    type : {'student', 'grader', 'admin'}
-    courseName : string
-    coursePeriod : string
-    """
-    if context["type"] == "student":
-        role = "a student"
-        linkSentence = "To view your reviewed coursework, visit"
-        link = "%s/student/%s/%s/" % (
-            CLIENT_URL,
-            context["courseName"].replace(" ", "_"),
-            context["coursePeriod"].replace(" ", "_"),
-        )
-    elif context["type"] == "grader":
-        role = "a grader"
-        linkSentence = "To view your grader dashboard, visit"
-        link = "%s/grader/%s/%s/" % (
-            CLIENT_URL,
-            context["courseName"].replace(" ", "_"),
-            context["coursePeriod"].replace(" ", "_"),
-        )
-    elif context["type"] == "admin":
-        role = "an administrator"
-        linkSentence = "To view your administrator dashboard, visit"
-        link = "%s/course-admin/%s/%s/" % (
-            CLIENT_URL,
-            context["courseName"].replace(" ", "_"),
-            context["coursePeriod"].replace(" ", "_"),
-        )
-    else:
-        return None
-
-    params = {
-        "role": role,
-        "linkSentence": linkSentence,
-        "link": link.replace(" ", "_"),
-        "course": "%s | %s" % (context["courseName"], context["coursePeriod"]),
-    }
-    return params
 
 
 def add_new_user_template(context):
-    if context["type"] == "student":
-        role = "a student"
-    elif context["type"] == "grader":
-        role = "a grader"
-    elif context["type"] == "admin":
-        role = "an administrator"
-    else:
-        return None
-
-    params = {
-        "role": role,
-        "course": "%s | %s" % (context["courseName"], context["coursePeriod"]),
-        "url": CLIENT_URL,
-        "uid": context["uid"],
-        "token": context["token"],
-    }
-    return params
+    raise NotImplementedError(
+        "This function is deprecated. Use Email Classes instead."
+    )
+   
 
 
 #######################################################################################################
@@ -648,6 +676,85 @@ def mooc_follow_up(context):
 #######################################################################################################
 #######################################################################################################
 
+USER_ACCESSIBLE_TEMPLATES = [
+    "add_student",
+    "add_grader",
+    "add_admin",
+    "publish_assignment",
+    "grader_reminder",
+    "regrades_reminder",
+]
+
+class RegradesReminderEmail(CodepostEmail):
+    subject = "Regrades Reminder on CodePost"
+    template = "emails/grader/regrade_reminder_template.html"
+
+    def send_email(self, assignment:Assignment):
+        """
+        Sends an email to the user reminding them to check for regrades.
+        """
+        context = self.get_context(
+            assignment=assignment,
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class GraderReminderEmail(CodepostEmail):
+    subject = "Grader Reminder on CodePost"
+    template = "emails/grader/reminder_template.html"
+
+    def send_email(self, assignment:Assignment):
+        """
+        Sends an email to the user reminding them to grade submissions.
+        """
+        context = self.get_context(
+            assignment=assignment,
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+class PublishNewAssignmentEmail(CodepostEmail):
+    subject = "New Assignment Published"
+    template = "emails/assignments/publish_template.html"
+
+    def send_email(self, assignment:Assignment):
+        """
+        Sends an email to the user notifying them that a new assignment has been published.
+        """
+        context = self.get_context(
+            assignment=assignment,
+
+        )   
+        
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+        return self.send(email)
+
+
+
 # Tempalte schema:
 # template (required): string corresponding to Sendgrid template
 # generate_context (optional): build context variables from user (x) and course (y) and assignment (z) objects (optional)
@@ -657,72 +764,72 @@ def mooc_follow_up(context):
 # test_parameters (optional): function to be used in place of
 # generate_context when sending a test email (livemode = False)
 
-add_user_template = {
-    "template": "ADD_NEW",
-    "generate_context": lambda x, y, z: {
-        "uid": urlsafe_base64_encode(force_bytes(x.pk)),
-        "token": default_token_generator.make_token(x),
-    },
-    "test_parameters": lambda x, y, z: {
-        "uid": "xxx",
-        "token": "yyy",
-    },
-}
+# add_user_template = {
+#     "template": "ADD_NEW",
+#     "generate_context": lambda x, y, z: {
+#         "uid": urlsafe_base64_encode(force_bytes(x.pk)),
+#         "token": default_token_generator.make_token(x),
+#     },
+#     "test_parameters": lambda x, y, z: {
+#         "uid": "xxx",
+#         "token": "yyy",
+#     },
+# }
 
-USER_ACCESSIBLE_TEMPLATES = {
-    "add_student": {
-        "callbefore": lambda user, course, assn: (not user.is_active)
-        and (course in user.student_courses.all()),
-        "extra_parameters": {"type": "student"},
-        **add_user_template,
-    },
-    "add_grader": {
-        "callbefore": lambda user, course, assn: (not user.is_active)
-        and (course in user.grader_courses.all()),
-        "extra_parameters": {"type": "grader"},
-        **add_user_template,
-    },
-    "add_admin": {
-        "callbefore": lambda user, course, assn: (not user.is_active)
-        and (course in user.courseAdmin_courses.all()),
-        "extra_parameters": {"type": "admin"},
-        **add_user_template,
-    },
-    "publish_assignment": {
-        "template": "PUBLISH_ASSIGNMENT",
-        "callbefore": lambda user, course, assn: course in user.student_courses.all()
-        and assn.isReleased,
-    },
-    "grader_reminder": {
-        "template": "GRADER_REMINDER",
-        "callbefore": lambda user, course, assn: course in user.grader_courses.all()
-        and Submission.objects.filter(
-            grader=user, assignment=assn, isFinalized=False
-        ).count()
-        > 0,
-        "generate_context": lambda user, course, assn: {
-            "num": Submission.objects.filter(
-                grader=user, assignment=assn, isFinalized=False
-            ).count(),
-        },
-        "test_parameters": lambda user, course, assn: {
-            "num": 4,
-        },
-    },
-    "regrades_reminder": {
-        "template": "REGRADES_REMINDER",
-        "callbefore": lambda user, course, assn: course in user.grader_courses.all()
-        and Submission.objects.filter(
-            grader=user, assignment=assn, questionIsOpen=True
-        ).count()
-        > 0,
-        "generate_context": lambda user, course, assn: {
-            "num": Submission.objects.filter(
-                grader=user, assignment=assn, questionIsOpen=True
-            ).count(),
-        },
-        "test_parameters": lambda user, course, assn: {
-            "num": 4,
-        },
-    },
-}
+# USER_ACCESSIBLE_TEMPLATES_OLD = {
+#     "add_student": {
+#         "callbefore": lambda user, course, assn: (not user.is_active)
+#         and (course in user.student_courses.all()),
+#         "extra_parameters": {"type": "student"},
+#         **add_user_template,
+#     },
+#     "add_grader": {
+#         "callbefore": lambda user, course, assn: (not user.is_active)
+#         and (course in user.grader_courses.all()),
+#         "extra_parameters": {"type": "grader"},
+#         **add_user_template,
+#     },
+#     "add_admin": {
+#         "callbefore": lambda user, course, assn: (not user.is_active)
+#         and (course in user.courseAdmin_courses.all()),
+#         "extra_parameters": {"type": "admin"},
+#         **add_user_template,
+#     },
+#     "publish_assignment": {
+#         "template": "PUBLISH_ASSIGNMENT",
+#         "callbefore": lambda user, course, assn: course in user.student_courses.all()
+#         and assn.isReleased,
+#     },
+#     "grader_reminder": {
+#         "template": "GRADER_REMINDER",
+#         "callbefore": lambda user, course, assn: course in user.grader_courses.all()
+#         and Submission.objects.filter(
+#             grader=user, assignment=assn, isFinalized=False
+#         ).count()
+#         > 0,
+#         "generate_context": lambda user, course, assn: {
+#             "num": Submission.objects.filter(
+#                 grader=user, assignment=assn, isFinalized=False
+#             ).count(),
+#         },
+#         "test_parameters": lambda user, course, assn: {
+#             "num": 4,
+#         },
+#     },
+#     "regrades_reminder": {
+#         "template": "REGRADES_REMINDER",
+#         "callbefore": lambda user, course, assn: course in user.grader_courses.all()
+#         and Submission.objects.filter(
+#             grader=user, assignment=assn, questionIsOpen=True
+#         ).count()
+#         > 0,
+#         "generate_context": lambda user, course, assn: {
+#             "num": Submission.objects.filter(
+#                 grader=user, assignment=assn, questionIsOpen=True
+#             ).count(),
+#         },
+#         "test_parameters": lambda user, course, assn: {
+#             "num": 4,
+#         },
+#     },
+# }

@@ -1,0 +1,10 @@
+{% extends "emails/basic_template.html" %}
+{% block content %}
+    <div class="p-6">
+        <h1 class="text-2xl font-bold mb-4">
+            Your assignment {{ submission.assignment.name }} for {{ submission.assignment.course.name }} - {{ submission.assignment.course.period }} has been finalized.
+        </h1>
+        <p class="mb-4">You can view your feedback and grade on the assignment by clicking the button below.</p>
+        <a href="{{ client_url }}/code/{{ submission.id }}" class="btn">View Feedback</a>
+    </div>
+{% endblock content %}

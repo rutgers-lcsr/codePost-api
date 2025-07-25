@@ -2,11 +2,11 @@ import re
 
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
-
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 
@@ -14,6 +14,7 @@ from core.logging import logEvent
 from core.models import User, Organization, Course
 from core.utils import is_course_member, email_passes_whitelist
 from core.forms.forms import (
+    ChangePasswordForm,
     EmailForm,
     EmailTokenForm,
     ValidateTokenForm,
@@ -45,6 +46,7 @@ from util.slack import Slack
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def emailRegistration(request):
     """
     Request body includes: email.
@@ -120,6 +122,7 @@ def emailRegistration(request):
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def verifyRegistrationToken(request):
     """
     Handle valid verify email links sent after account creation.
@@ -151,6 +154,7 @@ def verifyRegistrationToken(request):
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def registerAndSetPassword(request):
     """
     Function takes a (uid, token) as authorization and, if authorization is valid, sets the associated
@@ -192,6 +196,7 @@ def registerAndSetPassword(request):
 
 ## CIP specific ##
 @api_view(["POST"])
+@permission_classes([isAuthenticated])
 def setCredentials(request):
     """
     If a user is logged in by hasn't yet set a usable password, they can use this endpoint to do so, as well
@@ -232,6 +237,7 @@ def setCredentials(request):
 
 ## CIP specific ##
 @api_view(["POST"])
+@permission_classes([isAuthenticated])
 def graderToAdmin(request):
     """
     Allows a user who is only a grader to elevate their status to level of admin within their organization.
@@ -581,6 +587,7 @@ def validateNewAdminUser(request):
 
 
 @api_view(["GET"])
+@permission_classes([AllowAny])
 def handleValidationResponse(request):
     """
     Function is used to respond to validation instructions from codePost admins (sent via URL).
@@ -647,6 +654,7 @@ def handleValidationResponse(request):
 
 
 @api_view(["GET"])
+@permission_classes([AllowAny])
 def checkStatusNewAdminUser(request):
     """
     Allows the client to check on the status of a validation request for a given user.
@@ -738,6 +746,7 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def emailPasswordReset(request):
     # is_mooc = request.data.get("is_mooc", False)
 
@@ -760,6 +769,7 @@ def emailPasswordReset(request):
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def verifyResetToken(request):
     """
     Handle valid verify email links sent after password reset requests.
@@ -782,10 +792,11 @@ def verifyResetToken(request):
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def resetPassword(request):
     # Probably should enforce some password checks here...currently, users
     # can bypass any client-side password requirements using this endpoint
-    form = ChangePasswordForm(request.POST)
+    form = ChangePasswordForm(request.data)
     if form.is_valid():
         uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
         try:

@@ -1,0 +1,14 @@
+{% extends "emails/basic_template.html" %}
+{% block content %}
+    <div class="p-6">
+        <h1 class="text-2xl font-bold mb-4">Your Submission has been uploaded to codepost!</h1>
+        <p class="text-gray-700 mb-4">
+            You have successfully uploaded your submission for assignment {{ assignment_name }} in {{ course_name }} - {{ course_period }}.
+        </p>
+        <p class="text-gray-700 mb-4">
+            Students: {{ students }}
+            <br />
+            Date Uploaded: {{ date_uploaded_humanize }} ({{ date_uploaded_timestamp }})
+        </p>
+    </div>
+{% endblock content %}

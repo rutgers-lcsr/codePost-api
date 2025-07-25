@@ -308,22 +308,23 @@ if "ON_AWS" in os.environ:
     else:
         SENDGRID_SANDBOX = False
     if "SENDGRID_OVERRIDE_EMAIL" in os.environ:
-        SENDGRID_OVERRIDE_EMAIL = os.environ.get("SENDGRID_OVERRIDE_EMAIL")
+        OVERRIDE_EMAIL = os.environ.get("SENDGRID_OVERRIDE_EMAIL")
     else:
-        SENDGRID_OVERRIDE_EMAIL = None
+        OVERRIDE_EMAIL = None
     CLIENT_URL = os.environ.get("CLIENT_URL")
     MOOC_CLIENT_URL = os.environ.get("MOOC_CLIENT_URL")
     API_URL = os.environ.get("API_URL")
 else:
     SENDGRID_API_KEY = "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"  # can make this our 'test account'
     SENDGRID_SANDBOX = True
-    SENDGRID_OVERRIDE_EMAIL = "richard+test@codepost.io"
+    OVERRIDE_EMAIL = "richard+test@codepost.io"
     CLIENT_URL = "http://localhost:3000"
     MOOC_CLIENT_URL = "http://localhost:3001"
     API_URL = "http://localhost:8000"
 
 
-
+# Model settings
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # # Email settings
 
@@ -332,16 +333,18 @@ if DEBUG:
 else:
     OVERRIDE_EMAIL = None
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = "farside.lcsr.rutgers.edu"
-DEFAULT_EMAIL_FROM = "codepost@cs.rutgers.edu"
-EMAIL_PORT = 587
-ADMINS = [("codePost", "mk1800@rutgers.edu")]
-EMAIL_USE_TLS = True
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "mx.farside.rutgers.edu")
+EMAIL_PORT = os.environ.get("EMAIL_PORT", 25)
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", False)
+DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "help@cs.rutgers.edu")
+ADMINS = [("codePost", os.environ.get("ADMIN_EMAIL", "mk1800@rutgers.edu"))]
 # SERVER_EMAIL = "team@coodepost.io"
 # DEFAULT_FROM_EMAIL = "codePost Team <team@codepost.io>"
 EMAIL_SUBJECT_PREFIX = "[Codepost] "
 
 
+# Logging settings
 
 import os
 import socket
@@ -355,7 +358,7 @@ LOGGING = {
     'formatters': {
          'json': {
             'format': (
-                '{"labels": {"app": "django", "host": "' + HOSTNAME + \
+                '{"labels": {"app": " codepost_django", "host": "' + HOSTNAME + \
                 '"}, "timestamp": "%(asctime)s", "message": "%(message)s"}'
             )
         },
@@ -365,9 +368,14 @@ LOGGING = {
             'level': 'INFO',
             'class': 'core.logging.LokiHandler', 
         },
+        "console": {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+            'formatter': 'json',
+        },
     },
     'root': {
-        'handlers': ['loki'],
+        'handlers': ['loki', 'console'],
         'level': 'INFO',
     },
 }

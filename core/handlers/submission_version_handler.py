@@ -1,9 +1,11 @@
-from core.models import Course, Assignment, Submission, Comment, CommentTag
-
+import base64
+import io
+import zipfile
+from core.models import  Submission
 
 class SubmissionVersionHandler:
 
-    def __init__(self, submission):
+    def __init__(self, submission: Submission):
         self.submission = submission
         self.assignment = submission.assignment
         self.course = submission.assignment.course
@@ -24,3 +26,17 @@ class SubmissionVersionHandler:
                     current_files[unique_path] = file
 
         return current_files.values()
+    def encoded_zip(self):
+        """
+        Create zip from files in memory
+        """
+
+        files = self.current_files()
+
+        zip_buffer = io.BytesIO()
+
+        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            for file in files:
+                zip_file.writestr(file.name, file.code)
+
+        return base64.b64encode(zip_buffer.getvalue()).decode()
