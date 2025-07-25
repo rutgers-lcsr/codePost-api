@@ -1,3 +1,5 @@
+from abc import ABC, abstractmethod
+from email.message import EmailMessage
 from codepost.settings import (
     SENDGRID_API_KEY,
     CLIENT_URL,
@@ -12,12 +14,45 @@ from sendgrid.helpers.mail import *
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
-
+from django.contrib.auth.models import User
 from django import forms
 
 from core.models import Submission
 
 from django.conf import settings
+
+class CodepostEmail(ABC):
+    subject = None
+    template = "emails/base_template.html"
+
+    def __init__(self, user:User):
+        self.user = user
+        self.from_email = settings.DEFAULT_FROM_EMAIL
+
+    @abstractmethod
+    def send_email(self):
+        """
+        This method should be implemented by subclasses to send the email.
+        It should return the response from the email service or None if in testing mode.
+        Should call send() to send the email.
+        """
+        pass
+    
+    def send(self, email:EmailMessage):
+        """
+        Sends the email using the Django EmailMessage class.
+        """
+        
+        try:
+            email.send()
+        except Exception as e:
+            # Will log out the error in the Django logs
+            return None
+
+
+
+
+    
 
 
 def send_email_sendgrid(from_email, to_email, params, templateID, attachments=None):

@@ -105,15 +105,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", default="your secret key")
 
 # Check if the application should run in debug mode
 # SECURITY WARNING: don't run with debug turned on in production!
-if os.environ.get("RENDER", False)  is True and os.environ.get("PRODUCTION_MODE", False)  is True:
-    DEBUG = False
-else:
-    DEBUG = True
+DEBUG = os.environ.get("DEBUG", "FALSE").upper() == "TRUE"
 
-# if "RENDER" in os.environ and "PRODUCTION_MODE" in os.environ:
-#     DEBUG = False
-# else:
-#     DEBUG = True
 
 # Testing flag
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
@@ -127,9 +120,6 @@ ALLOWED_HOSTS = [
     "*",
 ]
 
-RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
-if RENDER_EXTERNAL_HOSTNAME:
-    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 # Application definition
 from webhooks.codepost_hooks import codepost_hooks
@@ -206,6 +196,8 @@ if "RDS_HOSTNAME" in os.environ:
         }
     }
 else:
+    # Use SQLite for development and testing
+    # This is not recommended for production use, but is fine for local development.
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -339,4 +331,35 @@ ADMINS = [("codePost", "richard@codepost.io")]
 EMAIL_USE_TLS = True
 # SERVER_EMAIL = "team@coodepost.io"
 # DEFAULT_FROM_EMAIL = "codePost Team <team@codepost.io>"
-EMAIL_SUBJECT_PREFIX = "[Django] "
+EMAIL_SUBJECT_PREFIX = "[Codepost] "
+
+
+
+import os
+import socket
+
+HOSTNAME = socket.gethostname()
+LOKI_URL = os.environ.get("LOKI_URL", "http://localhost:3100/loki/api/v1/push")
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+         'json': {
+            'format': (
+                '{"labels": {"app": "django", "host": "' + HOSTNAME + \
+                '"}, "timestamp": "%(asctime)s", "message": "%(message)s"}'
+            )
+        },
+    },
+    'handlers': {
+        'loki': {
+            'level': 'INFO',
+            'class': 'core.logging.LokiHandler', 
+        },
+    },
+    'root': {
+        'handlers': ['loki'],
+        'level': 'INFO',
+    },
+}

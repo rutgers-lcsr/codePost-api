@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from core.logging import log_user_event
 from core.models import Course
 from core.serializers.user import UserSerializer
 from django.utils.timezone import now
@@ -63,7 +64,7 @@ class ImpersonateView(APIView):
   """
   permission_classes = [IsAuthenticated]
   
-
+  @log_user_event("Become Attempt")
   def post(self, request, *args, **kwargs):
 
     form = ImpersonateForm(request.data)

@@ -303,8 +303,10 @@ def send_email_to_joining_user_mooc(user):
 
 
 def sendSlackMessage(message, attachments=[]):
-    sc = Slack()
-    sc.send_message(message, attachments=attachments, channel="#user_signups")
+    raise NotImplementedError(
+        "This function is deprecated. Use `logEvent` instead.") 
+    # sc = Slack()
+    # sc.send_message(message, attachments=attachments, channel="#user_signups")
 
 
 @api_view(["POST"])

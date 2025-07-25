@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from core.auth import Authentications, type_of_auth
+from core.logging import logEvent
 from log.models import Event
 
 from util.slack import Slack
@@ -49,9 +50,10 @@ def logError(request):
     Event.objects.create(category="error", user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
   except:
     pass
-
-  sc = Slack()
-  sc.send_message(message, attachments=[], channel="#user_errors")
+  logEvent("User Error",
+           message=f"User Error: {error} by user {user.email} at {url}")
+  # sc = Slack()
+  # sc.send_message(message, attachments=[], channel="#user_errors")
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
@@ -73,9 +75,10 @@ def logHappiness(request):
           "footer": str(user),
       }
   ]
-
-  sc = Slack()
-  sc.send_message('', attachments=attachments)
+  logEvent("User Happiness",
+           message=f"User Happiness: {message} by user {user.email} at {url}")
+  # sc = Slack()
+  # sc.send_message('', attachments=attachments)
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
@@ -88,8 +91,8 @@ def logDump(request):
   if request.user.email in ignored_users:
     return Response({'success': True}, status=status.HTTP_200_OK)
 
-  sc = Slack()
-  channel = request.data['channel'] if request.data['channel'] else "#user_notifications_everything"
+  # sc = Slack()
+  # channel = request.data['channel'] if request.data['channel'] else "#user_notifications_everything"
 
   attachments = []
   heading = str(request.user)
@@ -103,5 +106,8 @@ def logDump(request):
 
   Event.objects.create(category="log", user=request.user.email, description=description, courseID=courseID, meta=json.dumps(attachments))
 
-  sc.send_message(heading, attachments=attachments, channel=channel, logInDebug=True)
+  logEvent("User Dump",
+           message=f"User Dump by user {request.user.email} with data: {request.data}")
   return Response({'success': True}, status=status.HTTP_200_OK)
+
+

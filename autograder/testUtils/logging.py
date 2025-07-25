@@ -1,29 +1,24 @@
 from util.slack import Slack
+from celery.utils.log import get_task_logger
+
+logger = get_task_logger(__name__)
 
 
-def standardLog(user, title, text, channel):
-    sc = Slack()
-    attachments = [{"title": title, "text": text}]
-    sc.send_message(
-        user,
-        attachments=attachments,
-        channel=channel,
-        logInDebug=False,
-        debugChannel=channel,
-    )
+def standardLog(user, title, text, event):
+    logger.info(f"Event: {title} - {text} for user {user.email} in channel {event}")
+    return    
 
 
 def AutograderError(user, title, text):
-    standardLog(user, title, text, "#autograder_bugs")
+    standardLog(user, title, text, "autograder_bugs")
 
 
 def AutograderTestError(user, title, text):
-    standardLog(user, title, text, "#autograder_test_errors")
+    standardLog(user, title, text, "autograder_test_errors")
 
 
 def AutograderBuild(user, title, text):
-    return
-    standardLog(user, title, text, "#autograder_build_usage")
+    standardLog(user, title, text, "autograder_build_usage")
 
 
 def AutograderUsage(user, title, text):
@@ -51,5 +46,4 @@ def AutograderUsage(user, title, text):
 
 
 def AutograderRunAllUsage(user, title, text):
-    return
-    standardLog(user, title, text, "#autograder_runall_usage")
+    standardLog(user, title, text, "autograder_runall_usage")

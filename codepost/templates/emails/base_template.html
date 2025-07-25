@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+        <title>Email Template</title>
+    </head>
+    <body>
+        <div class="w-full max-w-2xl mx-auto bg-white shadow-lg rounded-lg overflow-hidden">
+            <header class="bg-green-500 text-white p-4">
+                <h1 class="text-xl font-bold">Codepost</h1>
+            </header>
+            <main class="p-4 justify-center flex flex-col items-center">{% block content %} {% endblock %}</main>
+            <footer class="bg-gray-200 text-gray-600 p-4 text-center">
+                <p>If you have any questions, feel free to contact us at help@cs.rutgers.edu</p>
+            </footer>
+        </div>
+    </body>
+</html>

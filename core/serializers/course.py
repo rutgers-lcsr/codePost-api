@@ -1,6 +1,7 @@
 import pytz
 
 from rest_framework import serializers
+from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Course, Organization, User
 from core.serializers.assignment import AssignmentSerializer
@@ -12,6 +13,9 @@ from core.auth import Authentications, type_of_auth
 from core.serializers.assignment import MoocAssignmentSerializer
 
 from core.permissions.helpers import isCourseStaff
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CourseSerializer(ModelSerializerWithPOSTCheck):
   assignments = serializers.SerializerMethodField()
@@ -62,15 +66,17 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
   def create(self, validated_data):
     from core.views.course import generate_invite_code
 
-    courseAdmin = self.context['request'].user
-    obj = super().create(validated_data)
+    courseAdmin: User = self.context['request'].user
+    obj: Course = super().create(validated_data)
 
     # Slack
     token = str(self.context['request'].auth)
     auth_type = type_of_auth(token)
-
-    sc = Slack()
-    sc.new_instance_notification(obj, courseAdmin, auth_type)
+  
+    logEvent("Course Created",
+             message=f"Course {obj.name} created by {courseAdmin.email} with auth type {auth_type}")
+    # sc = Slack()
+    # sc.new_instance_notification(obj, courseAdmin, auth_type)
     # /Slack
 
     # Make requesting user a courseAdmin of the course

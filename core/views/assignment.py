@@ -1,3 +1,4 @@
+from core.logging import logEvent
 from core.models import Course, Assignment, RubricCategory, RubricComment, Submission, File, TestCase, TestCategory
 from rest_framework import serializers
 from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary
@@ -52,6 +53,8 @@ import zipfile
 import base64
 from core.emails import send_email_sendgrid, get_email_template_id, get_email_params
 
+import logging
+logger = logging.getLogger(__name__)
 
 def encoded_zip(files):
   """
@@ -657,9 +660,11 @@ class AssignmentViewSet(ListProtectedViewSet):
       try:
         handler.handle()
       except Exception as e:
-        sc = Slack()
-        sc.send_message("Error handling late submission: {}".format(
-            e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")
+        logEvent("Error handling late submission",
+                 message=f"Error handling late submission: {e} for submission by user {user.email}")
+        # sc = Slack()
+        # sc.send_message("Error handling late submission: {}".format(
+        #     e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")
 
       ###############################################################
       # [End] Late Logic
@@ -671,9 +676,11 @@ class AssignmentViewSet(ListProtectedViewSet):
           try:
             send_email_student_uploaded_submission(student.email, submission)
           except Exception as e:
-            sc = Slack()
-            sc.send_message("Error emailing student receipt: {}".format(
-                e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")
+            logEvent("Error emailing student receipt",
+                     message=f"Error emailing student receipt: {e} for submission by user {user.email}")
+            # sc = Slack()
+            # sc.send_message("Error emailing student receipt: {}".format(
+            #     e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")
 
       serializer = SubmissionStatusSerializer(submission, many=False, context={"request": request})
       return Response(serializer.data)

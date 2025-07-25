@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 
+from core.logging import logEvent
 from core.permissions.helpers import isSuperGrader, returnNotAuthorized, returnForbidden
 from core.auth import Authentications, type_of_auth
 from core.models import Course
@@ -37,8 +38,6 @@ def activate_cip(request):
         if not student.is_active:
             student.is_active = True
             student.save()
-
-    sc = Slack()
-    sc.send_message('Done with tmp script', attachments=[])
-
+    logEvent("CIP Activation",
+             message=f"CIP activated by {user.email} for course {course.name}")
     return Response({'success': True}, status=status.HTTP_200_OK)
