@@ -1,7 +1,7 @@
 {% extends "emails/base_template.html" %}
 {% block content %}
     <h2 class="text-2xl font-semibold mb-4">
-        Welcome {{ user.username }}, You have been added to {{ course_name }} - {{ course_period }} as
+        Welcome {{ user.username }}, You have been added to <strong>{{ course_name }}</strong> - <strong>{{ course_period }}</strong> as
         {% if role == 'student' %}
             a student!
         {% elif role == 'grader' %}
@@ -11,13 +11,13 @@
         {% endif %}
     </h2>
     {% if user.is_active %}
-        <p class="mb-4">You can now access your course below</p>
+        <p class="mb-4">You can now access the course below</p>
         <p class="mb-4">
             <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_name }}"
                class="btn">View Course</a>
         </p>
     {% else %}
-        <p class="mb-4">You can now access your course below</p>
+        <p class="mb-4">You can now access the course below</p>
         <p class="mb-4">
             <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_name }}"
                class="btn">View Course</a>

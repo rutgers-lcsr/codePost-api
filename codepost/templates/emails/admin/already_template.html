@@ -2,7 +2,7 @@
 {% block content %}
     <h2 class="text-2xl font-semibold mb-4">Hey {{ user.username }},</h2>
     <p>
-        It seems like you are already an admin for {{ org }}. You can access your admin dashboard by clicking the button below:
+        It seems like you are already an admin for <strong>{{ org }}</strong>. You can access your admin dashboard by clicking the button below:
     </p>
     <p>
         <a href="{{ client_url }}/admin/" class="btn">{{ client_url }}/admin</a>
