@@ -3,14 +3,16 @@
 {% block content %}
     <h2 class="text-2xl font-semibold mb-4">Welcome {{ user.username }}, thank you for signing up for CodePost!</h2>
     {% if user.is_active %}
+        <p class="mb-4">Log in to your account below:</p>
         <p class="mb-4">
-            You can now access your account at <a href="{{ client_url }}/login" class="btn">Login</a>.
+            <a href="{{ client_url }}/login" class="btn">Login</a>
         </p>
     {% else %}
+        <p class="mb-4">Login in to your account below:</p>
         <p class="mb-4">
-            You can now access your account at <a href="{{ client_url }}/login" class="btn">Login</a>. However, you
-            need to activate your account first.
+            <a href="{{ client_url }}/login" class="btn">Login</a>
         </p>
+        <p class="mb-4">However, your account is not yet activated.</p>
         <p class="mb-4">Please click the link below to activate your account:</p>
         <p class="mb-4">
             <a href="{{ client_url }}/activate/{{ uid }}/{{ token }}" class="btn">Activate your account</a>

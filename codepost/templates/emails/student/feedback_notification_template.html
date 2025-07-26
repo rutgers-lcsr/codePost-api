@@ -5,6 +5,8 @@
             Your assignment {{ submission.assignment.name }} for {{ submission.assignment.course.name }} - {{ submission.assignment.course.period }} has been finalized.
         </h1>
         <p class="mb-4">You can view your feedback and grade on the assignment by clicking the button below.</p>
-        <a href="{{ client_url }}/code/{{ submission.id }}" class="btn">View Feedback</a>
+        <p class="mb-4">
+            <a href="{{ client_url }}/code/{{ submission.id }}" class="btn">View Feedback</a>
+        </p>
     </div>
 {% endblock content %}

@@ -567,6 +567,7 @@ class SubmissionHistory(BaseModel):
 
   class Meta:
     unique_together = ('submission', 'student')
+    ordering = ['-created']
 
 ##################################### Autograder Models ##########################################
 
