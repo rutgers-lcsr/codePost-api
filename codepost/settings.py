@@ -36,7 +36,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # DB_NAME: The name of the database used by the codepost API.
 # DB_HOSTNAME: The hostname of the database used by the codepost API.
 # DB_PORT: The port of the database used by the codepost API.
-# DB_USER: The username used to connect to the database.
+# DB_USERNAME: The username used to connect to the database.
 # DB_PASSWORD: The password used to connect to the database.
 # LOKI_URL: The URL of the Loki logging service.
 # EMAIL_HOST: The hostname of the email service.
@@ -264,7 +264,7 @@ elif "DB_HOSTNAME" in os.environ:
         "default": {
             "ENGINE": "django.db.backends.mysql",
             "NAME": os.environ["DB_NAME"],
-            "USER": os.environ["DB_USER"],
+            "USER": os.environ["DB_USERNAME"] if "DB_USERNAME" in os.environ else "root",
             "PASSWORD": os.environ["DB_PASSWORD"],
             "HOST": os.environ["DB_HOSTNAME"],
             "PORT": os.environ["DB_PORT"],

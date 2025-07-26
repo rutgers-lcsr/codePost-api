@@ -27,8 +27,10 @@ services:
             - EMAIL_PORT=${EMAIL_PORT}
             - EMAIL_USE_TLS=${EMAIL_USE_TLS}
             - EMAIL_USE_SSL=${EMAIL_USE_SSL}
+            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
+            - LOKI_URL=http://loki:3100/loki/api/v1/push
         ports:
             - "8000:8000"
         build:
@@ -61,8 +63,10 @@ services:
             - EMAIL_PORT=${EMAIL_PORT}
             - EMAIL_USE_TLS=${EMAIL_USE_TLS}
             - EMAIL_USE_SSL=${EMAIL_USE_SSL}
+            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
+            - LOKI_URL=http://loki:3100/loki/api/v1/push
         build:
             context: .
             target: worker
@@ -107,6 +111,23 @@ services:
             interval: 10s
             timeout: 10s
             retries: 5
+    loki:
+        image: grafana/loki:latest
+        container_name: loki
+        ports:
+            - "3100:3100"
+        volumes:
+            - ./loki-config.yaml:/etc/loki/local-config.yaml
+        command: -config.file=/etc/loki/local-config.yaml
+    promtail:
+        image: grafana/promtail:latest
+        container_name: promtail
+        volumes:
+            - /var/log:/var/log
+            - ./promtail-config.yaml:/etc/promtail/config.yaml
+        command: -config.file=/etc/promtail/config.yaml
+        depends_on:
+            - loki
 
 networks:
     default:
