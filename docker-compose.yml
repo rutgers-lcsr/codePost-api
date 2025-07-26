@@ -13,7 +13,7 @@ services:
     codepost-api:
         container_name: codepost-api
         environment:
-            - DEBUG=True
+            - DEBUG=TRUE
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - PYTHON_VERSION=3.8.17
             - API_URL=${API_URL}
@@ -28,6 +28,7 @@ services:
             - EMAIL_USE_TLS=${EMAIL_USE_TLS}
             - EMAIL_USE_SSL=${EMAIL_USE_SSL}
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
+            - SECRET_KEY=${SECRET_KEY}
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
             - LOKI_URL=http://loki:3100/loki/api/v1/push
@@ -49,7 +50,7 @@ services:
     codepost-worker:
         container_name: codepost-worker
         environment:
-            - DEBUG=True
+            - DEBUG=TRUE
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - PYTHON_VERSION=3.8.17
             - API_URL=${API_URL}
@@ -64,6 +65,7 @@ services:
             - EMAIL_USE_TLS=${EMAIL_USE_TLS}
             - EMAIL_USE_SSL=${EMAIL_USE_SSL}
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
+            - SECRET_KEY=${SECRET_KEY}
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
             - LOKI_URL=http://loki:3100/loki/api/v1/push
