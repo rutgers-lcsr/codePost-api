@@ -25,7 +25,7 @@ from core.forms.forms import (
     SetCredentialsForm,
 )
 
-from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, NewAdminActivationEmail, NewAdminRequestEmail, PasswordResetEmail, send_email_sendgrid, get_email_params, get_email_template_id
+from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, NewAdminActivationEmail, NewAdminRequestEmail, PasswordResetEmail, UserSignupEmail, send_email_sendgrid, get_email_params, get_email_template_id
 
 from core.permissions.helpers import (
     returnNotAuthorized,
@@ -499,8 +499,8 @@ def validateNewAdminUser(request):
             # Figure out if we can automatically approve this user
             # email_ends_with_edu = user.email[-4:] == ".edu"
             NewAdminRequestEmail(
-                user, org.name
-            ).send_email()
+                user=user
+            ).send_email(organization_name=org.name)
 
             ## FLAG: all users are now automatically approved
             if not is_student_or_grader:
@@ -533,7 +533,10 @@ def validateNewAdminUser(request):
                             }
                         ),
                     )
-                    send_email_to_joining_user(user)
+                    UserSignupEmail(
+                        user=user
+                    ).send_email(organization_name=org.name)
+                    # send_email_to_joining_user(user)
 
                 else:
                     # email codePost admins
