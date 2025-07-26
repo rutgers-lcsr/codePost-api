@@ -507,7 +507,9 @@ def validateNewAdminUser(request):
                 # auto-approve
 
                 # No auto_approval 
-                approve_new_admin_user(user, auto_approved=True, org_name=org.name)
+                NewAdminRequestEmail(
+                    user=user
+                ).send_email(organization_name=rawName)
 
             else:
                 action_id.append(2)

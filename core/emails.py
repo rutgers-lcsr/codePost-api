@@ -7,7 +7,8 @@ from codepost.settings import (
     MOOC_CLIENT_URL,
     API_URL,
     DEFAULT_EMAIL_FROM,
-    OVERRIDE_EMAIL
+    OVERRIDE_EMAIL,
+    ADMINS
 )
 
 from django.contrib.auth.tokens import default_token_generator
@@ -80,6 +81,13 @@ class CodepostEmail(ABC):
         Otherwise, it returns the default from email.
         """
         return self.from_email
+
+    def get_admin_emails(self):
+        """
+        Returns a list of admin emails for the organization.
+        If the user is not part of an organization, it returns an empty list.
+        """
+        return ADMINS
 
     def send(self, email:EmailMessage, type:str = "html"):
         """
@@ -244,7 +252,7 @@ class NewAdminRequestEmail(CodepostEmail):
             subject=self.subject,
             body=html_content,
             from_email=self.get_from_address(),
-            to=[self.get_from_address()],
+            to=[self.get_admin_emails()],
         )
 
         return self.send(email)
