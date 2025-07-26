@@ -34,6 +34,7 @@ from core.permissions.helpers import (
 )
 from core.permissions.helpers import isAuthenticated, can_elevate_permissions
 
+from core.views import user
 from log.models import Event
 import json
 
@@ -496,6 +497,10 @@ def validateNewAdminUser(request):
             action_id.append(2)
             # Figure out if we can automatically approve this user
             # email_ends_with_edu = user.email[-4:] == ".edu"
+            user.profile.pendingValidation = True
+            user.profile.canModifyRosters = True
+            user.save()
+
             NewAdminRequestEmail(
                 user=user
             ).send_email(organization_name=org.name)

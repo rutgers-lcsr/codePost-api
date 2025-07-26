@@ -2,7 +2,7 @@
 {% block content %}
     <h2 class="text-2xl font-semibold mb-4">Welcome {{ user.username }} to Codepost!</h2>
     <p>
-        Your admin account has been approved for the organization <strong>{{ org }}</strong>.
+        Your admin account has been approved for the organization <strong>{{ user.profile.organization.name }}</strong>.
     </p>
     <p>You can now manage your organization, create assignments, and more.</p>
     <p>Please set your password by clicking the link below:</p>

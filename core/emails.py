@@ -21,7 +21,7 @@ import logging
 from core.handlers.submission_version_handler import SubmissionVersionHandler
 from core.handlers.submission_version_handler import SubmissionVersionHandler
 from core.logging import log_debug, logEvent
-from core.models import Assignment, Submission
+from core.models import Assignment, Organization, Submission
 
 from core.tests.views.results import submission
 
@@ -88,8 +88,20 @@ class CodepostEmail(ABC):
         Returns a list of admin emails for the organization.
         If the user is not part of an organization, it returns an empty list.
         """
-        return ADMINS
+        CODEPOST_ADMINS = ADMINS
 
+        requested_org:Organization = self.user.profile.organization.name
+
+
+        org_admins = User.objects.filter(
+            profile__organization__name=requested_org,
+            profile__canCreateCourses=True
+        ).values_list('email', flat=True)
+        
+        return list(org_admins) + CODEPOST_ADMINS
+
+    def get_codepost_admins(self):
+        return ADMINS
     def send(self, email:EmailMessage, type:str = "html"):
         """
         Sends the email using the Django EmailMessage class.
