@@ -6,12 +6,12 @@
     </p>
     <p class="mb-4">Please confirm the change by clicking the link below:</p>
     <p class="mb-4">
-        <a href="{{ client_url }}/registration/handleValidationResponse/?uid={{ uid }}&token={{ token }}&organization={{ organization }}&activate=true"
-           class="btn">Confirm Organization Change</a>
+        <a href="{{ api_url }}/registration/handleValidationResponse/?uid={{ uid }}&token={{ token }}&organization={{ organization }}&activate=true"
+           class="btn">Confirm</a>
     </p>
     <p class="mt-4">You can also deny the change by clicking the link below:</p>
     <p class="mb-4">
-        <a href="{{ client_url }}/registration/handleValidationResponse/?uid={{ uid }}&token={{ token }}&organization={{ organization }}"
-           class="btn-red">Deny Organization Change</a>
+        <a href="{{ api_url }}/registration/handleValidationResponse/?uid={{ uid }}&token={{ token }}&organization={{ organization }}"
+           class="btn-red">Deny</a>
     </p>
 {% endblock content %}

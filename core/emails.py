@@ -43,6 +43,7 @@ class CodepostEmail(ABC):
             "from_email": self.get_from_address(),
             "to_email": self.get_to_address(),
             "client_url": CLIENT_URL,
+            "api_url": API_URL,
         }
     def get_context(self, **kwargs):
         """
