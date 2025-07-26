@@ -15,7 +15,6 @@ services:
         environment:
             - DEBUG=TRUE
             - CELERY_BROKER_URL=redis://codepost-redis:6379
-            - PYTHON_VERSION=3.8.17
             - API_URL=${API_URL}
             - CLIENT_URL=${CLIENT_URL}
             - DB_NAME=codepost
@@ -23,7 +22,7 @@ services:
             - DB_PORT=3306
             - DB_USERNAME=codepost_user
             - DB_PASSWORD=${DB_PASSWORD}
-            - EMAIL_HOST=mx.farside.lcsr.rutgers.edu
+            - EMAIL_HOST=mx.farside.rutgers.edu
             - EMAIL_PORT=25
             - EMAIL_USE_TLS=true
             - EMAIL_USE_SSL=false
@@ -52,7 +51,6 @@ services:
         environment:
             - DEBUG=TRUE
             - CELERY_BROKER_URL=redis://codepost-redis:6379
-            - PYTHON_VERSION=3.8.17
             - API_URL=${API_URL}
             - CLIENT_URL=${CLIENT_URL}
             - DB_NAME=codepost
@@ -60,7 +58,7 @@ services:
             - DB_PORT=3306
             - DB_USERNAME=codepost_user
             - DB_PASSWORD=${DB_PASSWORD}
-            - EMAIL_HOST=mx.farside.lcsr.rutgers.edu
+            - EMAIL_HOST=mx.farside.rutgers.edu
             - EMAIL_PORT=25
             - EMAIL_USE_TLS=true
             - EMAIL_USE_SSL=false

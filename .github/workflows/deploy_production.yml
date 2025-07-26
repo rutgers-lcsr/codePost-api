@@ -55,5 +55,9 @@ jobs:
                   docker compose build
                   docker compose up -d --remove-orphans
 
+            - name: Remove docker artifacts
+              run: |
+                  docker system prune -f
+
             - name: Notify deployment success
               run: echo "Deployment to development server successful!"
