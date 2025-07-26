@@ -22,7 +22,7 @@ services:
             - DB_HOSTNAME=codepost-database
             - DB_PORT=3306
             - DB_USERNAME=codepost_user
-            - DB_PASSWORD=${DATABASE_PASSWORD}
+            - DB_PASSWORD=${DB_PASSWORD}
             - EMAIL_HOST=${EMAIL_HOST}
             - EMAIL_PORT=${EMAIL_PORT}
             - EMAIL_USE_TLS=${EMAIL_USE_TLS}
@@ -58,7 +58,7 @@ services:
             - DB_HOSTNAME=codepost-database
             - DB_PORT=3306
             - DB_USERNAME=codepost_user
-            - DB_PASSWORD=${DATABASE_PASSWORD}
+            - DB_PASSWORD=${DB_PASSWORD}
             - EMAIL_HOST=${EMAIL_HOST}
             - EMAIL_PORT=${EMAIL_PORT}
             - EMAIL_USE_TLS=${EMAIL_USE_TLS}
@@ -103,7 +103,7 @@ services:
             - MARIADB_ROOT_PASSWORD=${ROOT_DATABASE_PASSWORD}
             - MARIADB_DATABASE=codepost
             - MARIADB_USER=codepost_user
-            - MARIADB_PASSWORD=${DATABASE_PASSWORD}
+            - MARIADB_PASSWORD=${DB_PASSWORD}
         volumes:
             - db-data:/var/lib/mysql
         healthcheck:

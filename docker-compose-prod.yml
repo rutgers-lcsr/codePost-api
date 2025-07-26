@@ -21,7 +21,7 @@ services:
             - DB_HOSTNAME=${DB_HOSTNAME}
             - DB_PORT=${DB_PORT}
             - DB_USERNAME=${DB_USERNAME}
-            - DB_PASSWORD=${DATABASE_PASSWORD}
+            - DB_PASSWORD=${DB_PASSWORD}
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
             - EMAIL_HOST=${EMAIL_HOST}
@@ -40,8 +40,6 @@ services:
             timeout: 10s
             retries: 5
         depends_on:
-            codepost-database:
-                condition: service_healthy
             codepost-redis:
                 condition: service_healthy
     codepost-worker:
@@ -55,7 +53,7 @@ services:
             - DB_HOSTNAME=${DB_HOSTNAME}
             - DB_PORT=${DB_PORT}
             - DB_USERNAME=${DB_USERNAME}
-            - DB_PASSWORD=${DATABASE_PASSWORD}
+            - DB_PASSWORD=${DB_PASSWORD}
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
             - EMAIL_HOST=${EMAIL_HOST}
