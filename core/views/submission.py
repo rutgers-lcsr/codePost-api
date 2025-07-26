@@ -27,7 +27,7 @@ from rest_framework import serializers
 
 from core.permissions.tokens import submission_token_generator
 
-from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail, send_email_sendgrid, get_email_template_id, get_email_params
+from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail
 
 def get_student_serializer_class(submission):
     if (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
@@ -37,18 +37,6 @@ def get_student_serializer_class(submission):
     else:
         return StudentSubmissionSerializer
 
-def send_email_updated_partners(to_email, new_partner_email, partner_emails, assignment, course):
-    raise NotImplementedError("This function is deprecated. Use PartnersAddedEmail instead.")
-    context = {
-        'assignmentName': assignment.name,
-        'courseName': assignment.course.name,
-        'newPartnerEmail': new_partner_email,
-        'partnerEmails': partner_emails,
-    }
-
-
-
-    send_email_sendgrid(from_email="team@codepost.io", to_email=to_email, params=get_email_params('PARTNERS_ADDED', context), templateID=get_email_template_id('PARTNERS_ADDED'))
 
 
 class SubmissionViewSet(ListProtectedViewSet):

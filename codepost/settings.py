@@ -13,12 +13,10 @@ https://docs.djangoproject.com/en/2.1/ref/settings/
 import os
 import datetime
 import sys
-
+import socket
 import urllib
 from celery.schedules import crontab
-import django
-from django.utils.translation import gettext
-django.utils.translation.ugettext = gettext
+
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -26,102 +24,139 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # See https://docs.djangoproject.com/en/2.1/howto/deployment/checklist/
 
 
-################## Autograder settings ##############################
+######################### settings ##############################
 
-# Autograder URL
-# This is the URL where the autograder service is running.
-# Used for communication between the API and the autograder.
+# HOSTNAME (optional): The hostname of the machine running the codepost API.
+# API_URL: The URL of the codepost API.
+# CLIENT_URL: The URL of the codepost client.
+# DEBUG (optional): Whether the codepost API is running in debug mode.
+# TESTING (optional): Whether the codepost API is running in testing mode.
+# SECRET_KEY: The secret key used for cryptographic signing.
+# ON_AWS (optional): Whether the codepost API is running on AWS.
+# DB_NAME: The name of the database used by the codepost API.
+# DB_HOSTNAME: The hostname of the database used by the codepost API.
+# DB_PORT: The port of the database used by the codepost API.
+# DB_USER: The username used to connect to the database.
+# DB_PASSWORD: The password used to connect to the database.
+# LOKI_URL: The URL of the Loki logging service.
+# EMAIL_HOST: The hostname of the email service.
+# EMAIL_PORT: The port of the email service.
+# EMAIL_USE_TLS: Whether to use TLS for the email service.
+# EMAIL_USE_SSL: Whether to use SSL for the email service.
+# DEFAULT_EMAIL_FROM: The default email address used for sending emails.
+# OVERRIDE_EMAIL (optional): If set, all emails will be sent to this address instead of the original recipient.
+# CELERY_BROKER_URL: The URL of the Celery broker.
 
-AUTOGRADER_URL = "https://4bppxuryyz.codepost.io"
-# AUTOGRADER_URL = "https://qoe9ev62y5.codepost.io"
-# AUTOGRADER_URL = "http://127.0.0.1:8002"
-# AUTOGRADER_URL = "https://autograder-cyl1.onrender.com"
+###################### Environment settings ##############################
 
-################## Celery settings ##############################
-# Adding celery. To set up locally do the following commands:
-#
-# > pip install -r requirements.txt
-# > PYCURL_SSL_LIBRARY=openssl LDFLAGS="-L/usr/local/opt/openssl/lib" CPPFLAGS="-I/usr/local/opt/openssl/include" pip install --no-cache-dir pycurl
-#
-# The reason for the PYCURL command is that MacOSX uses a different ssl backend than our linux server.
-#
-# To run the worker locally, run the following in a second terminal:
-# > celery worker -A autograder --loglevel=info -Q dev-api-celery,dev-api-celery-long-tasks
-
-# if "SQS_ACCESS" in os.environ:
-#     CELERY_DEFAULT_QUEUE = "prod-celery"
-#     CELERY_ROUTES = {
-#         "autograder.tasks.RunAll": {"queue": "prod-celery-long-tasks"},
-#         "autograder.tasks.daily_assignment_check": {"queue": "prod-celery-crontasks"},
-#         "webhooks.tasks.DeliverHook": {"queue": "prod-celery-webhooks"},
-#     }
-#     SQS_ACCESS = os.environ["SQS_ACCESS"]
-#     SQS_SECRET = os.environ["SQS_SECRET"]
+DOCKER = os.path.exists('/.dockerenv')
 
 
-# else:
-#     # This Access Credentials is for a user that only has access to the dev queues specified
-#     SQS_ACCESS = "AKIAV22BSJSCUAENRZH6"
-#     SQS_SECRET = "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"
-#     CELERY_DEFAULT_QUEUE = "dev-api-celery"
-#     CELERY_ROUTES = {
-#         "autograder.tasks.RunAll": {"queue": "dev-api-celery-long-tasks"},
-#     }
+#################### CodePost settings ##############################
+# These settings are used to configure the CodePost application.
 
-CELERY_DEFAULT_QUEUE = "prod-celery"
-# CELERY_ROUTES = {
-#     "autograder.tasks.RunAll": {"queue": "prod-celery"},
-#     # "autograder.tasks.daily_assignment_check": {"queue": "prod-celery-crontasks"},
-#     # "webhooks.tasks.DeliverHook": {"queue": "prod-celery-webhooks"},
-# }
-
-# BROKER_URL = os.getenv("CELERY_BROKER_URL")
-# BROKER_URL = "sqs://{aws_access_key}:{aws_secret_key}@".format(
-#     aws_access_key=urllib.parse.quote(SQS_ACCESS, safe=''), aws_secret_key=urllib.parse.quote(SQS_SECRET, safe=''),
-# )
-
-DJANGO_CELERY_RESULTS_TASK_ID_MAX_LENGTH = 191
-CELERY_ACCEPT_CONTENT = ["application/json"]
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_BACKEND = "django-db"
-CELERY_CACHE_BACKEND = "django-cache"
-CELERY_IGNORE_RESULT = False
-CELERY_TRACK_STARTED = True
-CELERY_RESULT_EXTENDED = True
-# CELERYBEAT_SCHEDULE = {
-#     "daily-assignment-check": {
-#         "task": "autograder.run.daily_assignment_check",
-#         "schedule": crontab(day_of_week="*", hour="14", minute="1"),
-#     }
-# }
-BROKER_TRANSPORT_OPTIONS = {
-    # "region": "us-east-2",
-    "polling_interval": 20,
-}
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("SECRET_KEY", default="your secret key")
-
-# Check if the application should run in debug mode
-# SECURITY WARNING: don't run with debug turned on in production!
+HOSTNAME = os.environ.get("HOSTNAME", socket.gethostname())
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
+CLIENT_URL = os.environ.get("CLIENT_URL", "http://localhost:3000")
 DEBUG = os.environ.get("DEBUG", "FALSE").upper() == "TRUE"
-
-
-# Testing flag
 TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
+ADMINS = [
+    ("LCSR Codepost Team", "mk1800@rutgers.edu"),
+]
+
+#################### Authentication And Host settings ##############################
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "your secret key")
+if SECRET_KEY == "your secret key":
+    # Secret key is used for cryptographic signing and should be kept secret in production.
+    print("WARNING: You are using the default secret key. This is insecure and should not be used in production.")
+    print("Please set the SECRET_KEY environment variable to a secure value.")
 
 ALLOWED_HOSTS = [
     "codepost-api-dev.pexarpdmjm.us-east-2.elasticbeanstalk.com",
     "codepost-api-production.pexarpdmjm.us-east-2.elasticbeanstalk.com",
     "api.codepost-labs.io",
-    "localhost",
-    "127.0.0.1",
-    "*",
+    "api.codepost.cs.rutgers.edu",
+    socket.gethostname(),
+]
+
+if DEBUG: 
+    ALLOWED_HOSTS.append("localhost")
+    ALLOWED_HOSTS.append("127.0.0.1")
+    ALLOWED_HOSTS.append("*")
+    print("WARNING: You are using a wildcard ALLOWED_HOSTS. This is insecure and should not be used in production.")
+
+# https://rickchristianson.wordpress.com/2013/10/31/getting-a-django-app-to-use-https-on-aws-elastic-beanstalk/
+if os.environ.get("ON_AWS", False) is True:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_REDIRECT_EXEMPT = [r"^health-check/$"]
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+else:
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+
+if DOCKER:
+    SECURE_REDIRECT_EXEMPT = [r"^health-check/$"]
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+
+REST_FRAMEWORK = {
+    "COERCE_DECIMAL_TO_STRING": False,
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework.authentication.TokenAuthentication",
+        'rest_framework_simplejwt.authentication.JWTAuthentication',        
+        "rest_framework.authentication.BasicAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+}
+
+CORS_ORIGIN_REGEX_WHITELIST = (r"^.*$",)
+
+CSRF_TRUSTED_ORIGINS = (
+    "http://localhost",
+    "https://localhost",
+    "http://*.cs.rutgers.edu",
+    "https://*.cs.rutgers.edu",
+)
+
+
+# Password validation
+# https://docs.djangoproject.com/en/2.1/ref/settings/#auth-password-validators
+
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
 ]
 
 
-# Application definition
+SIMPLE_JWT = {
+    "TOKEN_OBTAIN_SERIALIZER": "core.views.auth.JWTSerializer",
+    "JWT_ALLOW_REFRESH": True,
+    "JWT_EXPIRATION_DELTA": datetime.timedelta(days=7),
+    "JWT_REFRESH_EXPIRATION_DELTA": datetime.timedelta(days=7),
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.SlidingToken', 'rest_framework_simplejwt.tokens.AccessToken'),
+}
+
+################# End Authentication settings ##############################
+
+################## Django settings ##############################
+
 from webhooks.codepost_hooks import codepost_hooks
 
 HOOK_EVENTS = codepost_hooks
@@ -136,7 +171,6 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "viewflow",
     "core",
-    "mooc",
     "rest_framework",
     "corsheaders",
     "rest_framework.authtoken",
@@ -179,8 +213,38 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "codepost.wsgi.application"
 
+# https://docs.djangoproject.com/en/2.1/topics/i18n/
 
-# Database
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "UTC"
+USE_I18N = True
+USE_L10N = True
+USE_TZ = True
+
+
+# Static files (CSS, JavaScript, Images)
+# https://docs.djangoproject.com/en/2.1/howto/static-files/
+
+STATIC_URL = "/static/"
+STATIC_ROOT = "static"
+
+if not DEBUG:
+    # Tell Django to copy statics to the `staticfiles` directory
+    # in your application directory on Render.
+    STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+
+    # Turn on WhiteNoise storage backend that takes care of compressing static files
+    # and creating unique names for each version so they can safely be cached forever.
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+STATICFILES_DIRS = []
+
+
+################# Database and Model settings ##############################
+
+# Model settings
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
 # https://docs.djangoproject.com/en/2.1/ref/settings/#databases
 if "RDS_HOSTNAME" in os.environ:
     DATABASES = {
@@ -195,6 +259,19 @@ if "RDS_HOSTNAME" in os.environ:
             "CONN_MAX_AGE": 60,
         }
     }
+elif "DB_HOSTNAME" in os.environ:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.environ["DB_NAME"],
+            "USER": os.environ["DB_USER"],
+            "PASSWORD": os.environ["DB_PASSWORD"],
+            "HOST": os.environ["DB_HOSTNAME"],
+            "PORT": os.environ["DB_PORT"],
+            "OPTIONS": {"charset": "utf8mb4"},
+            "CONN_MAX_AGE": 60,
+        }
+    }
 else:
     # Use SQLite for development and testing
     # This is not recommended for production use, but is fine for local development.
@@ -205,126 +282,11 @@ else:
         }
     }
 
-# https://rickchristianson.wordpress.com/2013/10/31/getting-a-django-app-to-use-https-on-aws-elastic-beanstalk/
-if os.environ.get("ON_AWS", False) is True:
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_REDIRECT_EXEMPT = [r"^health-check/$"]
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_SSL_REDIRECT = True
-else:
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
 
+################# End Database settings ##############################
 
-# Password validation
-# https://docs.djangoproject.com/en/2.1/ref/settings/#auth-password-validators
+################## Email settings ##############################
 
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
-]
-
-
-# Internationalization
-# https://docs.djangoproject.com/en/2.1/topics/i18n/
-
-LANGUAGE_CODE = "en-us"
-
-TIME_ZONE = "UTC"
-
-USE_I18N = True
-
-USE_L10N = True
-
-USE_TZ = True
-
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/2.1/howto/static-files/
-
-STATIC_URL = "/static/"
-STATIC_ROOT = "static"
-
-
-if not DEBUG:
-    # Tell Django to copy statics to the `staticfiles` directory
-    # in your application directory on Render.
-    STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-
-    # Turn on WhiteNoise storage backend that takes care of compressing static files
-    # and creating unique names for each version so they can safely be cached forever.
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
-
-# os.path.join(BASE_DIR, 'build/static'),
-
-STATICFILES_DIRS = []
-
-REST_FRAMEWORK = {
-    "COERCE_DECIMAL_TO_STRING": False,
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework.authentication.TokenAuthentication",
-        'rest_framework_simplejwt.authentication.JWTAuthentication',        
-        "rest_framework.authentication.BasicAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
-    ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
-    ),
-}
-
-CORS_ORIGIN_REGEX_WHITELIST = (r"^.*$",)
-
-CSRF_TRUSTED_ORIGINS = (
-    "http://localhost",
-    "https://localhost",
-    "http://*.cs.rutgers.edu",
-    "https://*.cs.rutgers.edu",
-)
-
-SIMPLE_JWT = {
-    "TOKEN_OBTAIN_SERIALIZER": "core.views.auth.JWTSerializer",
-    "JWT_ALLOW_REFRESH": True,
-    "JWT_EXPIRATION_DELTA": datetime.timedelta(days=7),
-    "JWT_REFRESH_EXPIRATION_DELTA": datetime.timedelta(days=7),
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.SlidingToken', 'rest_framework_simplejwt.tokens.AccessToken'),
-}
-
-
-if "ON_AWS" in os.environ:
-    SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
-    if "SENDGRID_SANDBOX" in os.environ:
-        SENDGRID_SANDBOX = True
-    else:
-        SENDGRID_SANDBOX = False
-    if "SENDGRID_OVERRIDE_EMAIL" in os.environ:
-        OVERRIDE_EMAIL = os.environ.get("SENDGRID_OVERRIDE_EMAIL")
-    else:
-        OVERRIDE_EMAIL = None
-    CLIENT_URL = os.environ.get("CLIENT_URL")
-    MOOC_CLIENT_URL = os.environ.get("MOOC_CLIENT_URL")
-    API_URL = os.environ.get("API_URL")
-else:
-    SENDGRID_API_KEY = "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"  # can make this our 'test account'
-    SENDGRID_SANDBOX = True
-    OVERRIDE_EMAIL = "richard+test@codepost.io"
-    CLIENT_URL = "http://localhost:3000"
-    MOOC_CLIENT_URL = "http://localhost:3001"
-    API_URL = "http://localhost:8000"
-
-
-# Model settings
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # # Email settings
 
@@ -332,24 +294,21 @@ if DEBUG:
     OVERRIDE_EMAIL = os.environ.get("OVERRIDE_EMAIL", None)
 else:
     OVERRIDE_EMAIL = None
+
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "mx.farside.rutgers.edu")
 EMAIL_PORT = os.environ.get("EMAIL_PORT", 25)
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", True)
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", False)
 DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "help@cs.rutgers.edu")
-ADMINS = ["mk1800@rutgers.edu"]
-# SERVER_EMAIL = "team@coodepost.io"
-# DEFAULT_FROM_EMAIL = "codePost Team <team@codepost.io>"
 EMAIL_SUBJECT_PREFIX = "[Codepost] "
 
 
-# Logging settings
+###################### End Email settings ##############################
 
-import os
-import socket
+################## Logging settings ##############################
 
-HOSTNAME = socket.gethostname()
+
 LOKI_URL = os.environ.get("LOKI_URL", "http://localhost:3100/loki/api/v1/push")
 
 LOGGING = {
@@ -362,6 +321,10 @@ LOGGING = {
                 '"}, "timestamp": "%(asctime)s", "message": "%(message)s"}'
             )
         },
+        'console': {
+            'format': '%(levelname)s %(asctime)s %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
     },
     'handlers': {
         'loki': {
@@ -371,7 +334,7 @@ LOGGING = {
         "console": {
             'level': 'DEBUG',
             'class': 'logging.StreamHandler',
-            'formatter': 'json',
+            "formatter":'console',
         },
     },
     'root': {
@@ -379,3 +342,62 @@ LOGGING = {
         'level': 'INFO',
     },
 }
+
+################## End Logging settings ##############################
+
+################## End Codepost settings ##############################
+
+################## Autograder settings ##############################
+
+# Autograder URL
+# This is the URL where the autograder service is running.
+# Used for communication between the API and the autograder.
+
+AUTOGRADER_URL = "https://4bppxuryyz.codepost.io"
+# AUTOGRADER_URL = "https://qoe9ev62y5.codepost.io"
+# AUTOGRADER_URL = "http://127.0.0.1:8002"
+# AUTOGRADER_URL = "https://autograder-cyl1.onrender.com"
+
+################# Autograder settings end ##############################
+
+
+################## Celery settings ##############################
+# Adding celery. To set up locally do the following commands:
+#
+# > pip install -r requirements.txt
+# > PYCURL_SSL_LIBRARY=openssl LDFLAGS="-L/usr/local/opt/openssl/lib" CPPFLAGS="-I/usr/local/opt/openssl/include" pip install --no-cache-dir pycurl
+#
+# The reason for the PYCURL command is that MacOSX uses a different ssl backend than our linux server.
+#
+# To run the worker locally, run the following in a second terminal:
+# > celery worker -A autograder --loglevel=info -Q dev-api-celery,dev-api-celery-long-tasks
+
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://codepost-redis:6379")
+CELERY_DEFAULT_QUEUE = "prod-celery"
+# CELERY_ROUTES = {
+#     "autograder.tasks.RunAll": {"queue": "prod-celery"},
+#     # "autograder.tasks.daily_assignment_check": {"queue": "prod-celery-crontasks"},
+#     # "webhooks.tasks.DeliverHook": {"queue": "prod-celery-webhooks"},
+# }
+
+DJANGO_CELERY_RESULTS_TASK_ID_MAX_LENGTH = 191
+CELERY_ACCEPT_CONTENT = ["application/json"]
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_BACKEND = "django-db"
+CELERY_CACHE_BACKEND = "django-cache"
+CELERY_IGNORE_RESULT = False
+CELERY_TRACK_STARTED = True
+CELERY_RESULT_EXTENDED = True
+# CELERYBEAT_SCHEDULE = {
+#     "daily-assignment-check": {
+#         "task": "autograder.run.daily_assignment_check",
+#         "schedule": crontab(day_of_week="*", hour="14", minute="1"),
+#     }
+# }
+BROKER_TRANSPORT_OPTIONS = {
+    # "region": "us-east-2",
+    "polling_interval": 20,
+}
+
+#################### End Celery settings ##############################

@@ -10,19 +10,17 @@ jobs:
         environment: development
         runs-on: development-api
         env:
+            DEBUG: true
             API_URL: ${{ vars.API_URL }}
             CLIENT_URL: ${{ vars.CLIENT_URL }}
             MAILGUN_PASSWORD: ${{ secrets.MAILGUN_PASSWORD }}
             ON_AWS: false
             PRODUCTION_MODE: false
-            SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-            STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
-            STRIPE_NOTIFICATION_WEBHOOK_SECRET: ${{ secrets.STRIPE_NOTIFICATION_WEBHOOK_SECRET }}
-            STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
             DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
             ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
             API_USER: ${{ secrets.API_USER }}
             API_PASSWORD: ${{ secrets.API_PASSWORD }}
+            SECRET_KEY: ${{ secrets.SECRET_KEY }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v2
@@ -36,9 +34,6 @@ jobs:
               run: |
                   echo "API_URL=${{ vars.API_URL }}" >> .env
                   echo "CLIENT_URL=${{ vars.CLIENT_URL }}" >> .env
-                  echo "MAILGUN_PASSWORD=${{ secrets.MAILGUN_PASSWORD }}" >> .env
-                  echo "ON_AWS=${{ vars.ON_AWS }}" >> .env
-                  echo "PRODUCTION_MODE=${{ vars.PRODUCTION_MODE }}" >> .env
                   echo "SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}" >> .env
                   echo "STRIPE_API_KEY=${{ secrets.STRIPE_API_KEY }}" >> .env
                   echo "STRIPE_NOTIFICATION_WEBHOOK_SECRET=${{ secrets.STRIPE_NOTIFICATION_WEBHOOK_SECRET }}" >> .env

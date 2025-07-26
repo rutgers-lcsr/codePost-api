@@ -3,7 +3,6 @@ from django.utils.encoding import force_str
 from rest_framework import authentication
 from rest_framework import exceptions
 from django.utils.translation import ugettext as _
-from util.slack import Slack
 
 #################################################################################
 # Adapted with immense grattitude from:
@@ -90,7 +89,6 @@ class BaseFirebaseAuthentication(authentication.BaseAuthentication):
             # We could choose to create this user and add them to the Code in Place course
             #
             # This is probably the right thing to do to accommodate new users
-            # For now, let's log a Slack message
     
         if not user.is_active:
             msg = _('User account is disabled.')

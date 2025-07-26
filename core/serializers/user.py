@@ -33,6 +33,7 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
     POST_permissions_fields = ()
     extra_field_kwargs = {'url': {'lookup_field': 'email'}}
     read_only_fields = ('codePostAdmin',)
+    ordering = ('email',)
 
   # defining this as a SerializerMethodField so we can pass the request context into the CourseSerializer
   def get_studentCourses(self, obj):

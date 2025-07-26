@@ -1,5 +1,7 @@
 import requests
 import json
+import logging
+from core.logging import logEvent
 
 """
 FIXME
@@ -13,32 +15,6 @@ from django.core.serializers.json import DjangoJSONEncoder
 
 from webhooks.utils import get_hook_model
 
-
-def slack_webhook_error(topic, target, hook_id, payload):
-    from util.slack import Slack
-
-    slack_client = Slack()
-
-    blocks = [
-        {"type": "section", "text": {"type": "mrkdwn", "text": "*{}*".format(topic)}},
-        {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": "*Target:*\n{}".format(str(target))},
-                {"type": "mrkdwn", "text": "*Hook ID:*\n{}".format(str(hook_id))},
-                {
-                    "type": "mrkdwn",
-                    "text": "*Data:*\n{}".format(
-                        json.dumps(payload, cls=DjangoJSONEncoder)
-                    ),
-                },
-            ],
-        },
-    ]
-
-    slack_client.send_message(
-        topic, blocks=blocks, channel="user_notifications_webhooks"
-    )
 
 
 # class DeliverHook(Task):
@@ -80,17 +56,28 @@ class DeliverHook:
                 hook.last_triggered_status = "Could not connect"
                 hook.save()
                 # We could optionally just deactivate hooks if they fail
-                slack_webhook_error(
-                    "Webhook Failed to Connect", target, hook_id, payload
+               
+                logEvent(
+                    "Webhook Connection Error",
+                    message=f"Failed to connect to {target} with hook ID {hook_id}",
+                    level=logging.ERROR,
                 )
         except:
             hook.last_triggered_status = "Unknown error"
             hook.save()
-            slack_webhook_error("Unknown Webhook Error", target, hook_id, payload)
+            logEvent(
+                "Webhook Error",
+                message=f"Unknown error delivering webhook to {target} with hook ID {hook_id}",
+                level=logging.ERROR,
+            )
 
 
 def deliver_hook_wrapper(target, payload, instance=None, hook=None, **kwargs):
     if hook:
         kwargs["hook_id"] = hook.id
-    return None
+
+
+    print(f"Delivering hook to {target} with payload: {payload}")
     return DeliverHook.delay(target, payload, **kwargs)
+
+

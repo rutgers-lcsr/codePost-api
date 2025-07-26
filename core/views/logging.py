@@ -7,7 +7,6 @@ from core.auth import Authentications, type_of_auth
 from core.logging import logEvent
 from log.models import Event
 
-from util.slack import Slack
 
 import json
 
@@ -23,7 +22,7 @@ def logError(request):
   """
   Request body includes: error, errorInfo.
 
-  Notifies codePost Slack of any uncaught UI errors. Initiated via globally-scoped
+  Notifies codePost of any uncaught UI errors. Initiated via globally-scoped
   ErrorBoundary on the frontend. https://reactjs.org/docs/error-boundaries.html
 
   """
@@ -51,10 +50,9 @@ def logError(request):
     Event.objects.create(category="error", user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
   except:
     pass
-  logEvent("User Error",
+  logEvent("User Error UI",
            message=f"User Error: {error} by user {user.email} at {url}", level=logging.ERROR)
-  # sc = Slack()
-  # sc.send_message(message, attachments=[], channel="#user_errors")
+  
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
@@ -62,7 +60,7 @@ def logError(request):
 @permission_classes((IsAuthenticated,))
 def logHappiness(request):
   """
-  Notifies codePost Slack of any happiness occurring on the frontend (by authenticated users).
+  Notifies codePost of any happiness occurring on the frontend (by authenticated users).
 
   """
   user = request.user
@@ -78,8 +76,6 @@ def logHappiness(request):
   ]
   logEvent("User Happiness",
            message=f"User Happiness: {message} by user {user.email} at {url}")
-  # sc = Slack()
-  # sc.send_message('', attachments=attachments)
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
@@ -91,9 +87,6 @@ def logDump(request):
 
   if request.user.email in ignored_users:
     return Response({'success': True}, status=status.HTTP_200_OK)
-
-  # sc = Slack()
-  # channel = request.data['channel'] if request.data['channel'] else "#user_notifications_everything"
 
   attachments = []
   heading = str(request.user)

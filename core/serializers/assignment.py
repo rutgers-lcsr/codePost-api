@@ -4,7 +4,6 @@ from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Assignment
 from django.contrib.auth.models import User
 
-from util.slack import Slack
 from core.auth import Authentications, type_of_auth
 
 from core.serializers.submission import SubmissionSerializer
@@ -92,9 +91,6 @@ class AssignmentSerializer(AssignmentSerializerBase):
 
     logEvent("Assignment Created",
              message=f"Assignment {obj.name} created by {user.email} with auth type {auth_type}")
-    # Slack notification
-    # sc = Slack()
-    # sc.new_instance_notification(obj, user, auth_type)
 
     return obj
 
@@ -164,9 +160,3 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
     else:
       return 0
 
-
-class MoocAssignmentSerializer(ModelSerializerWithPOSTCheck):
-
-  class Meta:
-    model = Assignment
-    fields = ('id', 'name', 'course', 'sortKey')

@@ -163,6 +163,7 @@ class Course(BaseModel):
 
   class Meta:
     unique_together = ('name', 'period', 'organization')
+    ordering = ('name', 'period')
 
   def __str__(self):
     return str(self.name) + " | " + self.period
@@ -185,6 +186,7 @@ class Section(BaseModel):
 
   class Meta:
     unique_together = ('name', 'course')
+    ordering = ('name',)
 
   def __str__(self):
     return self.name + " | " + str(self.course)
@@ -267,13 +269,19 @@ class Assignment(BaseModel):
 
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''
-    if self.isReleased:
-      self.mean, self.median = self.calculate_average_and_median()
-
+    is_new = self.pk is None
     super(Assignment, self).save(*args, **kwargs)
+    
+    if is_new:
+        # Now self.pk is available
+        self.mean, self.median = self.calculate_average_and_median()
+        super().save(update_fields=["mean", "median"])
+
 
   class Meta:
     unique_together = ('name', 'course')
+    ordering = ('sortKey', 'name')
+    
 
 
 class RubricCategory(BaseModel):
@@ -365,24 +373,10 @@ class Submission(BaseModel):
       self.grade = calculate_grade(self)
     self.dateEdited = now()
 
-    ###############################################################
-    # [Begin] MOOC Handling
-    ###############################################################
-    from core.utils import get_mooc_courses
-    if self.assignment.course.id in get_mooc_courses():
-      try:
-        credit = self.credit
-        credit.review.reviewer = self.grader
-        credit.review.save()
-      except:
-        # should never get here
-        pass
-    ###############################################################
-    # [End] MOOC Handling
-    ###############################################################
 
     super(Submission, self).save(*args, **kwargs)
-
+  class Meta:
+    ordering = ('queueOrderKey', 'dateUploaded')
 
 class FileTemplate(BaseModel):
   name = models.CharField(max_length=150, help_text=("The name of the template file."))
@@ -542,6 +536,9 @@ class SubmissionTest(BaseModel):
       "A boolean field. 'True' if the test resulted in an error. False otherwise."))
 
   course = property(lambda self: self.submission.course)
+
+  class Meta:
+    ordering = ('created', )
 
 ################################################################################################
 ##################################### Internal Models ##########################################

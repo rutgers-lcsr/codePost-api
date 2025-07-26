@@ -15,13 +15,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, re_path, include
-from django.views.generic import TemplateView
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshSlidingView, TokenVerifyView
 from core.views.auth import obtain_jwt_token, ImpersonateView
 
-from core.renderers import CustomRenderer
-from rest_framework.renderers import CoreJSONRenderer, JSONOpenAPIRenderer
+from rest_framework.renderers import JSONOpenAPIRenderer
 
 from core.views.user import UserViewSet
 from core.views.course import CourseViewSet
@@ -38,7 +36,6 @@ from core.views.comment import CommentViewSet
 from core.views.submissionTest import SubmissionTestViewSet
 from core.views.testCase import TestCaseViewSet
 from core.views.testCategory import TestCategoryViewSet
-from core.views.stripe import BillingViewSet
 
 from webhooks.view import WebhookViewSet
 
@@ -67,7 +64,7 @@ router.register(r'fileTemplates', FileTemplateViewSet)
 router.register(r'testCases', TestCaseViewSet)
 router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'testCategories', TestCategoryViewSet)
-router.register(r'billing', BillingViewSet, basename='billing')
+# router.register(r'billing', BillingViewSet, basename='billing')
 
 webhooks_router = routers.DefaultRouter()
 webhooks_router.register(r'webhooks', WebhookViewSet)
@@ -99,7 +96,6 @@ urlpatterns = [
     re_path('registration/', include(('core.registration_urls', 'core'), namespace='registration')),
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),
-    path('mooc/', include('mooc.urls')),
     re_path('health-check/', health_check),
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),

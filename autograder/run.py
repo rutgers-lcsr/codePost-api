@@ -32,22 +32,13 @@ from log.models import Event, TrackedAutograderRun
 from core.permissions.helpers import isStaffOfSub
 from autograder.testUtils.parse import parseTests, parseSourceFile, writeCmdScript
 
-from core.emails import TestRunAllCompleteEmail, send_email_sendgrid, get_email_template_id, get_email_params
+from core.emails import TestRunAllCompleteEmail
 
-from rest_framework.response import Response
-
-from datetime import datetime, timedelta
-from django.utils import timezone
-import pytz
-import urllib
+from datetime import datetime
 
 import re
 import traceback
 
-
-import copy
-
-from util.slack import Slack
 
 ######################################### CELERY TASKS ###########################################################
 # NOTE: task arguments can't be objects, only numbers or strings. Celery can't handle object serialization
@@ -763,6 +754,3 @@ def _runAndDump(environment, submission, logs):
 #             "footer": assignment.uploadDueDate.astimezone(eastern).strftime('%a, %d %b %Y %H:%M:%S %z (%Z)')
 #         })
 
-#     sc = Slack()
-#     sc.send_message("Upcoming Due Dates (24hrs)", attachments=attachments,
-#                     channel="#user_notifications", logInDebug=True, debugChannel="richard-test")

@@ -17,7 +17,6 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
 
 from core.models import Section, SubmissionHistory, Comment
-from mooc.models import Credit
 
 from core.views.template import ListProtectedViewSet
 
@@ -39,19 +38,12 @@ from django.utils.timezone import now
 
 from django.db.models import Q
 
-from core.utils import get_mooc_courses, copy_assignment
+from core.utils import copy_assignment
 from core.handlers.late_submission_handler import LateSubmissionHandler
-from core.handlers.submission_version_handler import SubmissionVersionHandler
-
-from util.slack import Slack
-from autograder.testUtils.logging import standardLog
-import datetime
-import pytz
-
 import io
 import zipfile
 import base64
-from core.emails import send_email_sendgrid, get_email_template_id, get_email_params
+from core.emails import StudentUploadReceiptEmail
 
 import logging
 logger = logging.getLogger(__name__)
@@ -68,39 +60,6 @@ def encoded_zip(files):
 
   return base64.b64encode(zip_buffer.getvalue()).decode()
 
-
-def send_email_student_uploaded_submission(to_email, submission):
-  raise NotImplementedError("This function is deprecated, use StudentUploadReceiptEmail instead")
-
-  # # Only zip the most recent submission
-  # files = SubmissionVersionHandler(submission).current_files()
-
-  # tz = pytz.timezone(submission.assignment.course.timezone)
-  # dateUploaded = submission.dateUploaded.astimezone(tz)
-
-  # dateUploadedHumanize = dateUploaded.strftime("%A, %m-%d-%Y %H:%M:%S")
-  # dateUploadedTimestamp = dateUploaded.strftime("%Y%m%d_%H%M")
-
-  # zip_name = "{}_{}_{}.zip".format(to_email, submission.id, dateUploadedTimestamp)
-
-  # attachments = [
-  #     {
-  #         "content": encoded_zip(files),
-  #         "filename": zip_name,
-  #         "type": "application/zip"
-  #     }
-  # ]
-
-  # context = {
-  #     'assignmentName': submission.assignment.name,
-  #     'courseName': "{} | {}".format(submission.assignment.course.name, submission.assignment.course.period),
-  #     'students': ", ".join(list(submission.students.all().values_list('email', flat=True))),
-  #     'dateUploadedHumanize': dateUploadedHumanize,
-  #     'dateUploadedTimestamp': dateUploadedTimestamp
-  # }
-
-  # send_email_sendgrid(from_email="team@codepost.io", to_email=to_email, params=get_email_params(
-  #     'STUDENT_UPLOAD_RECEIPT', context), templateID=get_email_template_id('STUDENT_UPLOAD_RECEIPT'), attachments=attachments)
 
 class AssignmentViewSet(ListProtectedViewSet):
   """
@@ -559,20 +518,6 @@ class AssignmentViewSet(ListProtectedViewSet):
       if len(otherSubs) > 1:
         raise serializers.ValidationError("This student has multiple submissions for this assignment")
 
-      ###############################################################
-      # [Begin] MOOC Handling
-      ###############################################################
-      if course.id in get_mooc_courses():
-
-        credit = Credit.objects.filter(user=user, assignment=assignment)
-        if not credit:
-          raise serializers.ValidationError("Missing valid Credit for submission")
-        else:
-          credit = credit.first()
-      ###############################################################
-      # [End] MOOC Handling
-      ###############################################################
-
       if len(otherSubs) == 1:
         submission = otherSubs[0]
 
@@ -597,60 +542,6 @@ class AssignmentViewSet(ListProtectedViewSet):
         submission.students.add(user)
         submission.save()
 
-      ###############################################################
-      # [Begin] MOOC Handling
-      ###############################################################
-      if course.id in get_mooc_courses() and credit:
-        credit.submission = submission
-        credit.save()
-
-        try:
-          blocks = [
-              {
-                  "type": "section",
-                  "text": {
-                      "type": "mrkdwn",
-                      "text": "*Assignment Submitted*\n:👉 [dashboard](https://dasbhoard.codepost.io)"
-                  }
-              },
-              {
-                  "type": "section",
-                  "fields": [
-                      {
-                          "type": "mrkdwn",
-                          "text": "*Course:*\n{}".format(str(course))
-                      },
-                      {
-                          "type": "mrkdwn",
-                          "text": "*Assignment:*\n{}".format(str(assignment))
-                      },
-                      {
-                          "type": "mrkdwn",
-                          "text": "*User:*\n{}".format(user.id)
-                      },
-                      {
-                          "type": "mrkdwn",
-                          "text": "*When:*\n{}".format(datetime.datetime.now(pytz.timezone('US/Eastern')).strftime("%Y-%m-%d %H:%M:%S"))
-                      },
-                      {
-                          "type": "mrkdwn",
-                          "text": "*Submission:*\n[{}](https://codepost.io/code/{})".format(submission.id, submission.id)
-                      },
-                      {
-                          "type": "mrkdwn",
-                          "text": "*Approve:*\n[{}](https://api.codepost.io/admin/mooc/review/{})".format(credit.id, credit.id)
-                      }
-                  ]
-              }]
-          slack_client = Slack()
-          slack_client.send_message('[FaaS] New Submission', blocks=blocks, channel="coursera_algorithms-1")
-        except:
-          slack_client = Slack()
-          slack_client.send_message('Something went wrong sending FaaS notification', channel="coursera_algorithms-1")
-      ###############################################################
-      # [End] MOOC Handling
-      ###############################################################
-
       for f in request.data['files']:
         file = File.objects.create(name=f['name'], code=f['code'], submission=submission, extension=f[
                                    'extension'], path=f['path'] if f['path'] else None)
@@ -665,9 +556,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       except Exception as e:
         logEvent("Error handling late submission",
                  message=f"Error handling late submission: {e} for submission by user {user.email}", level=logging.ERROR)
-        # sc = Slack()
-        # sc.send_message("Error handling late submission: {}".format(
-        #     e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")
+
 
       ###############################################################
       # [End] Late Logic
@@ -677,14 +566,12 @@ class AssignmentViewSet(ListProtectedViewSet):
       if 'sendConfirmationEmail' in request.data and request.data['sendConfirmationEmail']:
         for student in submission.students.all():
           try:
-            Student
-            send_email_student_uploaded_submission(student.email, submission)
+            StudentUploadReceiptEmail(student).send_email(submission)
+            # send_email_student_uploaded_submission(student.email, submission)
           except Exception as e:
             logEvent("Error emailing student receipt",
                      message=f"Error emailing student receipt: {e} for submission by user {user.email}", level=logging.ERROR)
-            # sc = Slack()
-            # sc.send_message("Error emailing student receipt: {}".format(
-            #     e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")
+      
 
       serializer = SubmissionStatusSerializer(submission, many=False, context={"request": request})
       return Response(serializer.data)

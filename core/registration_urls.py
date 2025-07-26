@@ -14,7 +14,6 @@ urlpatterns = [
 
     # Create Flow
     path('validateNewAdminUser/', registration.validateNewAdminUser),
-    path('validateMoocSignup/', registration.validateMoocSignup),
     path('handleValidationResponse/', registration.handleValidationResponse),
     path('checkStatusNewAdminUser/', registration.checkStatusNewAdminUser),
 

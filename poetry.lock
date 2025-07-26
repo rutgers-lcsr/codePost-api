@@ -2045,24 +2045,6 @@ files = [
 ]
 
 [[package]]
-name = "slackclient"
-version = "2.9.3"
-description = "Slack API clients for Web API and RTM API"
-optional = false
-python-versions = ">=3.6.0"
-groups = ["main"]
-files = [
-    {file = "slackclient-2.9.3-py2.py3-none-any.whl", hash = "sha256:2d68d668c02f4038299897e5c4723ab85dd40a3548354924b24f333a435856f8"},
-    {file = "slackclient-2.9.3.tar.gz", hash = "sha256:07ec8fa76f6aa64852210ae235ff9e637ba78124e06c0b07a7eeea4abb955965"},
-]
-
-[package.dependencies]
-aiohttp = ">3.5.2,<4.0.0"
-
-[package.extras]
-optional = ["aiodns (>1.0)"]
-
-[[package]]
 name = "sqlparse"
 version = "0.5.3"
 description = "A non-validating SQL parser."
@@ -2365,4 +2347,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "290ec6eaadea88cd28ed33a2a83104be6215e9ea30ecf25fde4e244dae54fe7a"
+content-hash = "59a85d236e43fabda5668c1886be189c284488faf510e9511d4dc5a99d541890"

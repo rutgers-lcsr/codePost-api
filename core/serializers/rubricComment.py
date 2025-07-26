@@ -33,7 +33,7 @@ class RubricCommentSerializer(ModelSerializerWithPOSTCheck):
     proposedFields = self.genProposedFields(newData)
 
     # rubric comment needs a name
-    if proposedFields['name'] is None:
+    if proposedFields.get('name', None) is None:
       newData['name'] = generate_random_name()
 
     # client is trying to set a new name

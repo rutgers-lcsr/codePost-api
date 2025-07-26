@@ -5,9 +5,6 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.models import User
 
-
-from mooc.models import Product
-
 import re
 
 def my_jwt_response_handler(token, user=None, request=None):
@@ -99,11 +96,6 @@ def send_mail(subject_template_name, email_template_name,
 
 def domain_from_email(email):
   return '@' + email.split('@')[1]
-
-
-def get_mooc_courses():
-  courses = list(Product.objects.values_list('course', flat=True))
-  return courses
 
 def copy_assignment(assignment, destination_course):
   new_assignment = assignment

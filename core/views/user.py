@@ -15,8 +15,7 @@ from core.permissions.helpers import returnNotAuthorized, returnForbidden
 
 from rest_framework.authtoken.models import Token
 
-from core.emails import USER_ACCESSIBLE_TEMPLATES, GraderReminderEmail, NewAdminActivationEmail, PublishNewAssignmentEmail, RegradesReminderEmail, UserAddedToCourseEmail
-from core.emails import send_email_sendgrid, get_email_params, get_email_template_id
+from core.emails import USER_ACCESSIBLE_TEMPLATES, GraderReminderEmail, PublishNewAssignmentEmail, RegradesReminderEmail, UserAddedToCourseEmail
 from core.permissions.helpers import isCourseMember, isCourseAdmin
 
 from rest_framework import status
@@ -82,6 +81,11 @@ class UserViewSet(SuperUserListProtectedViewSet):
     # Are we running a test? If so, we'll send a dummy version of the email to the requestor
     testMode = not request.data.get('livemode', False)
 
+    if testMode:
+        # In test mode, we send the email to the requestor instead of the user
+        user_to_email = requestor
+
+
     match template:
       # The add use case seems to be handled by the addToRoster endpoint.
       case 'add_student':
@@ -102,42 +106,6 @@ class UserViewSet(SuperUserListProtectedViewSet):
         if not course in user_to_email.grader_courses.all():
           return returnForbidden()
         RegradesReminderEmail(user_to_email).send_email(assignment=assignment)
-
-
-
-    # Template specifies a function (callbefore) to run prior to sending an email.
-    # If function returns True => send email
-    # Else, don't
-    # template_obj = USER_ACCESSIBLE_TEMPLATES[template]
-    # if testMode or template_obj.get('callbefore', lambda x, y, z: False)(user_to_email, course, assignment):
-    #     from_email = "team@codepost.io"
-    #     to_email = requestor.email if testMode else user_to_email.email
-
-    #     # if we're sending an email, we need to inject the right context variables.
-    #     # some of these, we need from the user. these are passed in the request body.
-    #     # some of these, we need to generate server-side. to generate these, we run
-    #     # the generate_context function defined by the email template
-    #     context = {
-    #         'courseName': course.name,
-    #         'coursePeriod': course.period,
-    #         'assignmentName': assignment.name if assignment is not None else '',
-    #         **template_obj.get('extra_parameters', {}),
-    #     }
-
-    #     if testMode:
-    #         context = {
-    #             **context,
-    #             **template_obj.get('test_parameters', lambda x, y, z: {})(user_to_email, course, assignment),
-    #         }
-    #     else:
-    #         context = {
-    #             **context,
-    #             **template_obj.get('generate_context', lambda x, y, z: {})(user_to_email, course, assignment),
-    #         }
-
-    #     sendgrid_template = template_obj.get('template')
-    #     send_email_sendgrid(from_email, to_email, get_email_params(sendgrid_template, context),
-    #                                               get_email_template_id(sendgrid_template))
 
     # wait (to avoid sending too many emails too quickly)
     time.sleep(0.300)

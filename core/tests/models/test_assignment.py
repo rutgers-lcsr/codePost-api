@@ -18,7 +18,6 @@ class TestModel_Assignment(APITestCase):
 
     def test_create_assignment_with_negative_points(self):
         user = Persona.ADMIN_OF_COURSE(self)
-
         self.assertEqual(user.courseAdmin_courses.first(), self.course)
 
         payload = {

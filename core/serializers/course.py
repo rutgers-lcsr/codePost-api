@@ -7,10 +7,7 @@ from core.models import Course, Organization, User
 from core.serializers.assignment import AssignmentSerializer
 from rest_framework.validators import UniqueTogetherValidator
 
-from util.slack import Slack
 from core.auth import Authentications, type_of_auth
-
-from core.serializers.assignment import MoocAssignmentSerializer
 
 from core.permissions.helpers import isCourseStaff
 import logging
@@ -36,7 +33,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     return timezone
 
   def get_assignments(self, obj):
-    user = self.context['request'].user
+    user = self.context.get('request').user
     if (user.is_active):
         if (isCourseStaff(user, obj)):
             return list(map(lambda x: x.id, obj.assignments.all()))
@@ -69,15 +66,12 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     courseAdmin: User = self.context['request'].user
     obj: Course = super().create(validated_data)
 
-    # Slack
     token = str(self.context['request'].auth)
     auth_type = type_of_auth(token)
   
     logEvent("Course Created",
              message=f"Course {obj.name} created by {courseAdmin.email} with auth type {auth_type}")
-    # sc = Slack()
-    # sc.new_instance_notification(obj, courseAdmin, auth_type)
-    # /Slack
+
 
     # Make requesting user a courseAdmin of the course
     obj.courseAdmins.add(courseAdmin)
@@ -211,10 +205,3 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
 
     return newData
 
-
-class MoocCourseSerializer(ModelSerializerWithPOSTCheck):
-  assignments = MoocAssignmentSerializer(many=True)
-
-  class Meta:
-    model = Course
-    fields = ('id', 'name', 'period', 'assignments', )

@@ -1,4 +1,4 @@
-from core.models import Course
+from core.models import Course, RubricCategory
 from django.contrib.auth.models import User
 from core.serializers.course import (
     CourseSerializer,
@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import serializers
+from rest_framework import status
 
 from core.permissions.permissions import CoursePermissions
 from core.permissions.helpers import (
@@ -27,11 +28,8 @@ from core.permissions.helpers import isStudentOfSub, isStaffOfSub, isSuperGrader
 from core.pagination import LargeObjectsPagination
 
 from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode
-from django.utils.encoding import force_bytes
 
-from core.utils import get_or_create_user, send_mail
-from core.emails import send_email_sendgrid, get_email_template_id, get_email_params
+from core.utils import get_or_create_user
 
 # Can override get_serializer method to use different serializer for
 # different user types
@@ -288,7 +286,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if course.emailNewUsers:
             # Email new students
             for userList, roleType in zip(
-                (newAdmins, newGraders, newStudents), ("student", "grader", "admin")
+                (newAdmins, newGraders, newStudents), ("admin", "grader", "student")
             ):
                 for newUser in userList:
                     UserAddedToCourseEmail(newUser).send_email(
@@ -433,44 +431,6 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         serializer = SectionSerializer(sections, many=True)
         return Response(serializer.data)
 
-
-###################################### Roster Helper functions ##############################
-def send_new_user_email(user, roleType, course):
-    raise NotImplementedError(
-        "send_new_user_email function is deprecated. Use UserAddedToCourseEmail instead."
-    )
-    # Email constants
-    from_email = "team@codepost.io"
-    if user.is_active:
-        context = {
-            "type": roleType,
-            "courseName": course.name,
-            "coursePeriod": course.period,
-        }
-        send_email_sendgrid(
-            from_email,
-            user.email,
-            get_email_params("ADD_EXISTING", context),
-            get_email_template_id("ADD_EXISTING"),
-        )
-    else:
-        context = {
-            "type": roleType,
-            "courseName": course.name,
-            "coursePeriod": course.period,
-            "uid": urlsafe_base64_encode(force_bytes(user.pk)),
-            "token": default_token_generator.make_token(user),
-        }
-
-
-
-
-        send_email_sendgrid(
-            from_email,
-            user.email,
-            get_email_params("ADD_NEW", context),
-            get_email_template_id("ADD_NEW"),
-        )
 
 
 def add_admin_privileges(user):

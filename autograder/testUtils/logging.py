@@ -1,4 +1,3 @@
-from util.slack import Slack
 from celery.utils.log import get_task_logger
 
 logger = get_task_logger(__name__)
@@ -23,26 +22,6 @@ def AutograderBuild(user, title, text):
 
 def AutograderUsage(user, title, text):
     return
-    sc = Slack()
-    ignored_users = [
-        "vinay@codepost.io",
-        "james@codepost.io",
-        "richard@codepost.io",
-        "superadmin@codepost.io",
-    ]
-
-    if user in ignored_users:
-        channel = "#autograder_team_usage"
-    else:
-        channel = "#autograder_usage"
-    attachments = [{"title": title, "text": text}]
-    sc.send_message(
-        user,
-        attachments=attachments,
-        channel=channel,
-        logInDebug=True,
-        debugChannel=channel,
-    )
 
 
 def AutograderRunAllUsage(user, title, text):
