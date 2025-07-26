@@ -90,9 +90,6 @@ class CodepostEmail(ABC):
             email.content_subtype = type 
             logEvent(event="Email sent", message="{} sent to {}".format(self.subject, self.get_to_address()))
 
-            logEvent(event="email from", message=email.from_email)
-
-            logEvent(event="email body", message=email.body)
 
             email.send()
         except Exception as e:

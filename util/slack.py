@@ -13,7 +13,7 @@ class Slack:
   sc = SlackClient(api_key)
   def __init__(self):
     raise NotImplementedError(
-        "This class is deprecated. We don't log to Slack anymore. Use logEvent instead.")
+        "This class is deprecated. We don't log to Slack anymore.")
   # Documentation on sending beautiful slack messages
   # https://api.slack.com/docs/message-attachments
   def send_message(self, message, attachments=[], blocks=[], channel="#user_notifications", logInDebug=True, debugChannel="#richard-test-2"):

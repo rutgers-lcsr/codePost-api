@@ -37,8 +37,7 @@ from core.permissions.helpers import isAuthenticated, can_elevate_permissions
 from log.models import Event
 import json
 
-from util.slack import Slack
-
+import logging
 ##########################################################################
 #####################################     JOIN FLOW     ##################
 #####################################                   ##################
@@ -417,7 +416,7 @@ def validateNewAdminUser(request):
 
                     logEvent(
                         "admin_change_organization",
-                        level="warning",
+                        level= logging.WARNING,
                         message=json.dumps(
                             {
                                 "user": user.email,
@@ -479,7 +478,7 @@ def validateNewAdminUser(request):
         
             logEvent(
                 "admin_already_is_admin",
-                level="warning",
+                level=logging.WARNING,
                 message=json.dumps(
                     {
                         "user": user.email,
@@ -524,7 +523,7 @@ def validateNewAdminUser(request):
 
                     logEvent(
                         "admin_join_flow",
-                        level="warning",
+                        level=logging.WARNING,
                         message=json.dumps(
                             {
                                 "user": user.email,
@@ -552,7 +551,7 @@ def validateNewAdminUser(request):
                  
                     logEvent(
                         "admin_new_request",
-                        level="warning",
+                        level=logging.WARNING,
                         message=json.dumps(
                             {
                                 "user": user.email,
@@ -570,7 +569,7 @@ def validateNewAdminUser(request):
     else:
         logEvent(
             "admin_new_request_error",
-            level="error",
+            level=logging.ERROR,
             message=json.dumps(
                 {
                     "errors": form.errors,
@@ -626,7 +625,7 @@ def handleValidationResponse(request):
 
                         logEvent(
                             "admin_new_request_denied",
-                            level="warning",
+                            level=logging.WARNING,
                             message=json.dumps(
                                 {
                                     "user": user.email,
@@ -721,7 +720,7 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
 
     logEvent(
         "admin_new_request_approved",
-        level="warning",
+        level=logging.WARNING,
         message=json.dumps(
             {
                 "user": user.email,

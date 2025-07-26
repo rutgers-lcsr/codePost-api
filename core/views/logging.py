@@ -1,3 +1,4 @@
+import logging
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
@@ -51,7 +52,7 @@ def logError(request):
   except:
     pass
   logEvent("User Error",
-           message=f"User Error: {error} by user {user.email} at {url}")
+           message=f"User Error: {error} by user {user.email} at {url}", level=logging.ERROR)
   # sc = Slack()
   # sc.send_message(message, attachments=[], channel="#user_errors")
   return Response({'success': True}, status=status.HTTP_200_OK)

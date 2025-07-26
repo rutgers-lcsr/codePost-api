@@ -664,7 +664,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         handler.handle()
       except Exception as e:
         logEvent("Error handling late submission",
-                 message=f"Error handling late submission: {e} for submission by user {user.email}")
+                 message=f"Error handling late submission: {e} for submission by user {user.email}", level=logging.ERROR)
         # sc = Slack()
         # sc.send_message("Error handling late submission: {}".format(
         #     e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")
@@ -681,7 +681,7 @@ class AssignmentViewSet(ListProtectedViewSet):
             send_email_student_uploaded_submission(student.email, submission)
           except Exception as e:
             logEvent("Error emailing student receipt",
-                     message=f"Error emailing student receipt: {e} for submission by user {user.email}")
+                     message=f"Error emailing student receipt: {e} for submission by user {user.email}", level=logging.ERROR)
             # sc = Slack()
             # sc.send_message("Error emailing student receipt: {}".format(
             #     e), channel="#user_notifications", logInDebug=True, debugChannel="richard-test")

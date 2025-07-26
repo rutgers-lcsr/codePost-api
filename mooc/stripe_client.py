@@ -4,7 +4,7 @@ import os
 from core.logging import logEvent
 from util.slack import Slack
 from django.conf import settings
-
+import logging
 
 
 class StripeClient:
@@ -23,7 +23,7 @@ class StripeClient:
     customers = self.sc.Customer.list(email=email)
     if len(customers) > 1:
       logEvent("Stripe ERROR: Multiple Stripe Customers under same email",
-               message=f"Multiple Stripe Customers found for email {email}" )
+               message=f"Multiple Stripe Customers found for email {email}", level=logging.ERROR)
       # self.slack_client.send_message('Stripe ERROR: Multiple Stripe Customers under same email | {}'.format(
       #     user.email), channel="richard-test-2")
       raise ValueError("FIXME: Something went wrong; respond to client rather than fatal error")
@@ -57,7 +57,7 @@ class StripeClient:
       else:
         if stripe_customer_id != codepost_customer_id:
           logEvent("Stripe ERROR: codePost and Stripe customer records dont match",
-                   message=f"codePost customer ID {codepost_customer_id} does not match Stripe customer ID {stripe_customer_id} for user {user.email}")
+                   message=f"codePost customer ID {codepost_customer_id} does not match Stripe customer ID {stripe_customer_id} for user {user.email}", level=logging.ERROR)
           raise ValueError("FIXME: Something went wrong; respond to client rather than fatal error")
 
         customer_id = stripe_customer_id
