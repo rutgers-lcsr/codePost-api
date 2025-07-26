@@ -471,8 +471,7 @@ def validateNewAdminUser(request):
         if user.is_active and user.profile.canModifyRosters:
             action_id.append(1)
             # If user already exists and has been validated, then email them
-            from_email = "team@codepost.io"
-            context = {}
+         
             AdminAlreadyEmail(user=user).send_email()
 
         
@@ -501,67 +500,67 @@ def validateNewAdminUser(request):
                 user=user
             ).send_email(organization_name=org.name)
 
-            ## FLAG: all users are now automatically approved
-            if not is_student_or_grader:
-                action_id.append(1)
-                # auto-approve
+            # ## FLAG: all users are now automatically approved
+            # if not is_student_or_grader:
+            #     action_id.append(1)
+            #     # auto-approve
 
-                # No auto_approval 
-                NewAdminRequestEmail(
-                    user=user
-                ).send_email(organization_name=rawName)
+            #     # No auto_approval 
+            #     NewAdminRequestEmail(
+            #         user=user
+            #     ).send_email(organization_name=rawName)
 
-            else:
-                action_id.append(2)
-                # require codePost team approval
+            # else:
+            #     action_id.append(2)
+            #     # require codePost team approval
 
-                if is_student_or_grader:
-                    # send this user through the join flow
-                    # sendSlackMessage(
-                    #     "{} tried to sign up as a new admin from {}. He/she was a course member, so I sent them the join email.".format(
-                    #         user.email, org.name
-                    #     )
-                    # )
+            #     if is_student_or_grader:
+            #         # send this user through the join flow
+            #         # sendSlackMessage(
+            #         #     "{} tried to sign up as a new admin from {}. He/she was a course member, so I sent them the join email.".format(
+            #         #         user.email, org.name
+            #         #     )
+            #         # )
 
-                    logEvent(
-                        "admin_join_flow",
-                        level=logging.WARNING,
-                        message=json.dumps(
-                            {
-                                "user": user.email,
-                                "organization": org.name,
-                                "shortname": shortnameFromForm,
-                            }
-                        ),
-                    )
-                    UserSignupEmail(
-                        user=user
-                    ).send_email(organization_name=org.name)
-                    # send_email_to_joining_user(user)
+            #         logEvent(
+            #             "admin_join_flow",
+            #             level=logging.WARNING,
+            #             message=json.dumps(
+            #                 {
+            #                     "user": user.email,
+            #                     "organization": org.name,
+            #                     "shortname": shortnameFromForm,
+            #                 }
+            #             ),
+            #         )
+            #         UserSignupEmail(
+            #             user=user
+            #         ).send_email(organization_name=org.name)
+            #         # send_email_to_joining_user(user)
 
-                else:
-                    # email codePost admins
-                    user.profile.pendingValidation = True
-                    user.profile.canModifyRosters = True
-                    user.save()
+            #     else:
+            #         # email codePost admins
+            #         user.profile.pendingValidation = True
+            #         user.profile.canModifyRosters = True
+            #         user.save()
                    
 
-                    NewAdminRequestEmail(
-                        user=user
-                    ).send_email(organization_name=rawName)
+            #         NewAdminRequestEmail(
+            #             user=user
+            #         ).send_email(organization_name=rawName)
 
                  
-                    logEvent(
-                        "admin_new_request",
-                        level=logging.WARNING,
-                        message=json.dumps(
-                            {
-                                "user": user.email,
-                                "organization": org.name,
-                                "shortname": shortnameFromForm,
-                            }
-                        ),
-                    )
+            #         logEvent(
+            #             "admin_new_request",
+            #             level=logging.WARNING,
+            #             message=json.dumps(
+            #                 {
+            #                     "user": user.email,
+            #                     "organization": org.name,
+            #                     "shortname": shortnameFromForm,
+            #                 }
+            #             ),
+            #         )
                   
 
             return Response(

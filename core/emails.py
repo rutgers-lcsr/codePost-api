@@ -252,7 +252,7 @@ class NewAdminRequestEmail(CodepostEmail):
             subject=self.subject,
             body=html_content,
             from_email=self.get_from_address(),
-            to=[self.get_admin_emails()],
+            to=self.get_admin_emails(),
         )
 
         return self.send(email)
