@@ -5,9 +5,8 @@
         Your admin account has been approved for the organization <strong>{{ org }}</strong>.
     </p>
     <p>You can now manage your organization, create assignments, and more.</p>
-    <p>Please reset your password by clicking the link below:</p>
+    <p>Please set your password by clicking the link below:</p>
     <p class="mb-4">
-        <a href="{{ client_url }}/reset-password/?uid={{ uid }}&token={{ token }}&organization={{ organization }}&activate=true"
-           class="btn">Reset your password</a>
+        <a href="{{ client_url }}/activate/{{ uid }}/{{ token }}/" class="btn">Set your password</a>
     </p>
 {% endblock content %}
