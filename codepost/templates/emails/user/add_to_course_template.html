@@ -3,23 +3,23 @@
     <h2 class="text-2xl font-semibold mb-4">
         Welcome {{ user.username }}, You have been added to <strong>{{ course_name }}</strong> - <strong>{{ course_period }}</strong> as
         {% if role == 'student' %}
-            a student!
+            a <strong>student</strong>!
         {% elif role == 'grader' %}
-            a grader!
+            a <strong>grader</strong>!
         {% else %}
-            an admin!
+            an <strong>admin</strong>!
         {% endif %}
     </h2>
     {% if user.is_active %}
         <p class="mb-4">You can now access the course below</p>
         <p class="mb-4">
-            <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_name }}/"
+            <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_period }}/"
                class="btn">View Course</a>
         </p>
     {% else %}
         <p class="mb-4">You can now access the course below</p>
         <p class="mb-4">
-            <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_name }}/"
+            <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_period }}/"
                class="btn">View Course</a>
         </p>
         <p class="mb-4">However, your account is not yet activated.</p>
@@ -28,4 +28,7 @@
             <a href="{{ client_url }}/activate/{{ uid }}/{{ token }}/" class="btn">Activate your account</a>
         </p>
     {% endif %}
+    <p class="mt-4">If you have any questions, please contact your course instructor.</p>
+    <p class="mt-4">Happy coding!</p>
+    <p class="mt-4">- The Codepost Team</p>
 {% endblock content %}

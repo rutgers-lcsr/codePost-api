@@ -2,10 +2,14 @@
 {% block content %}
     <h2 class="text-2xl font-semibold mb-4">Hey {{ user.username }},</h2>
     <p>
-        A new assignment <strong>{{ assignment.name }}</strong> has been released! please follow the link below:
+        A new assignment <strong>{{ assignment.name }}</strong> has been released to CodePost!
     </p>
     <p class="mb-4">
         <a href="{{ client_url }}/student/{{ assignment.course.name }}/{{ assignment.course.period }}/"
            class="btn">View Assignments</a>
     </p>
+    <p>Please note that your assignment might be done on other platforms, such as Canvas, or Jupyter.</p>
+    <p class="mb-4">If you have any questions, please contact your course instructor.</p>
+    <p class="mt-4">Happy coding!</p>
+    <p class="mt-4">- The Codepost Team</p>
 {% endblock content %}

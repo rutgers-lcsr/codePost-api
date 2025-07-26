@@ -2,20 +2,18 @@
 {% comment %} FIX THIS TEMPLATE FOR LINKS  {% endcomment %}
 {% block content %}
     <h2 class="text-2xl font-semibold mb-4">Welcome {{ user.username }}, thank you for signing up for CodePost!</h2>
-    {% if user.is_active %}
-        <p class="mb-4">Log in to your account below:</p>
-        <p class="mb-4">
-            <a href="{{ client_url }}/login" class="btn">Login</a>
-        </p>
-    {% else %}
-        <p class="mb-4">Login in to your account below:</p>
-        <p class="mb-4">
-            <a href="{{ client_url }}/login" class="btn">Login</a>
-        </p>
+    <p class="mb-4">Log in to your account below:</p>
+    <p class="mb-4">
+        <a href="{{ client_url }}/login" class="btn">Login</a>
+    </p>
+    {% if not user.is_active %}
         <p class="mb-4">However, your account is not yet activated.</p>
         <p class="mb-4">Please click the link below to activate your account:</p>
         <p class="mb-4">
             <a href="{{ client_url }}/activate/{{ uid }}/{{ token }}/" class="btn">Activate your account</a>
         </p>
     {% endif %}
+    <p class="mt-4">If you have any questions, please contact your course instructor.</p>
+    <p class="mt-4">Happy coding!</p>
+    <p class="mt-4">- The Codepost Team</p>
 {% endblock content %}
