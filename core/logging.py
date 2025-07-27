@@ -71,14 +71,16 @@ def log_user_event(event_name):
         @functools.wraps(func)
         def wrapper(request, *args, **kwargs):
             user: User = getattr(request, "user", None)
+
+            
+
             logger.info(json.dumps({
                 "event": event_name or func.__name__,
-                "user": user.username if user and user.is_authenticated else "anonymous",
-                "path": request.path,
-                "method": request.method,
-                "args": args,
-                "kwargs": kwargs,
+                "user": user.username if user and user.username else "anonymous",
+                "path": request.path if hasattr(request, 'path') else None,
+                "method": request.method if hasattr(request, 'method') else None,
             }))
+
             return func(request, *args, **kwargs)
         return wrapper
     return decorator

@@ -18,15 +18,15 @@ cgi - was removed, quick fix: install legacy-cgi in python >3.12
 
 # SECRET_KEY=your_secret_key
 
-# RDS_HOST=your_rds_host
+# DB_HOST=your_DB_host
 
-# RDS_PORT=your_rds_port
+# DB_PORT=your_DB_port
 
-# RDS_DB_NAME=your_rds_db_name
+# DB_DB_NAME=your_DB_db_name
 
-# RDS_USER=your_rds_user
+# DB_USER=your_DB_user
 
-# RDS_PASSWORD=your_rds_password
+# DB_PASSWORD=your_DB_password
 
 # LOKI_URL=http://localhost:3100
 

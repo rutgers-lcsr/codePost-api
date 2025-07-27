@@ -23,6 +23,7 @@ jobs:
             EMAIL_USE_TLS: ${{ vars.EMAIL_USE_TLS }}
             EMAIL_USE_SSL: ${{ vars.EMAIL_USE_SSL }}
             DEFAULT_EMAIL_FROM: ${{ vars.DEFAULT_EMAIL_FROM }}
+            LOKI_URL: ${{ vars.LOKI_URL }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v2
@@ -52,8 +53,8 @@ jobs:
 
             - name: Build and deploy
               run: |
-                  docker compose build
-                  docker compose up -d --remove-orphans
+                  docker compose build -f docker-compose-prod.yml
+                  docker compose -f docker-compose-prod.yml up -d --remove-orphans
 
             - name: Remove docker artifacts
               run: |

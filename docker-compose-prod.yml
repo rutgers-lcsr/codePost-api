@@ -96,23 +96,6 @@ services:
             retries: 5
         volumes:
             - redis-data:/data
-    loki:
-        image: grafana/loki:latest
-        container_name: loki
-        ports:
-            - "3100:3100"
-        volumes:
-            - ./loki-config.yaml:/etc/loki/local-config.yaml
-        command: -config.file=/etc/loki/local-config.yaml
-    promtail:
-        image: grafana/promtail:latest
-        container_name: promtail
-        volumes:
-            - /var/log:/var/log
-            - ./promtail-config.yaml:/etc/promtail/config.yaml
-        command: -config.file=/etc/promtail/config.yaml
-        depends_on:
-            - loki
 networks:
     default:
         name: codepost-network

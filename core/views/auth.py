@@ -83,7 +83,7 @@ class ImpersonateView(APIView):
     if not sharded_course.exists():
       return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
-    should_expire = form.cleaned_data.get('never_expire', False)
+    should_expire = form.cleaned_data.get('never_expire', False) == True
     # Set the user in the request
     request.user = user    
 
