@@ -16,6 +16,21 @@ import sys
 import socket
 import urllib
 from celery.schedules import crontab
+from urllib.parse import urlparse
+import regex
+
+
+
+def checkCSRFTrustedOrigins(CLIENT_URL, CSRF_TRUSTED_ORIGINS):
+    """
+    Check if the CSRF_TRUSTED_ORIGINS setting is set correctly.
+    If not, print a warning message.
+    """
+    for origin in CSRF_TRUSTED_ORIGINS:
+        if regex.match(origin, CLIENT_URL):
+            return True
+    print(f"WARNING: {CLIENT_URL} is not in CSRF_TRUSTED_ORIGINS. This may cause issues with CSRF protection.")
+    return False
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,27 +79,44 @@ ADMINS = [
     ("LCSR Codepost Team", "mk1800@rutgers.edu"),
 ]
 
+API_HOST = urlparse(API_URL).netloc.split(':')[0]
+
+print(f"CodePost API running on {API_URL}")
+print(f"CodePost Client running on {CLIENT_URL}")
+print(f"CodePost API running in {'debug' if DEBUG else 'production'} mode")
+print(f"CodePost API Admins are {', '.join([f'{name} <{email}>' for name, email in ADMINS])}")
+
+
+
 #################### Authentication And Host settings ##############################
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "your secret key")
 if SECRET_KEY == "your secret key":
     # Secret key is used for cryptographic signing and should be kept secret in production.
     print("WARNING: You are using the default secret key. This is insecure and should not be used in production.")
-    print("Please set the SECRET_KEY environment variable to a secure value.")
 
+
+# Allowed host settings
 ALLOWED_HOSTS = [
     "codepost-api-dev.pexarpdmjm.us-east-2.elasticbeanstalk.com",
     "codepost-api-production.pexarpdmjm.us-east-2.elasticbeanstalk.com",
     "api.codepost-labs.io",
     "api.codepost.cs.rutgers.edu",
-    socket.gethostname(),
 ]
+if DOCKER:
+    ALLOWED_HOSTS.append(socket.gethostname())
 
 if DEBUG: 
     ALLOWED_HOSTS.append("localhost")
     ALLOWED_HOSTS.append("127.0.0.1")
     ALLOWED_HOSTS.append("*")
     print("WARNING: You are using a wildcard ALLOWED_HOSTS. This is insecure and should not be used in production.")
+
+if not API_HOST in ALLOWED_HOSTS:
+    print(f"WARNING: {API_HOST} is not in ALLOWED_HOSTS. This may cause issues with CORS and CSRF protection.") 
+
+
+
 
 # https://rickchristianson.wordpress.com/2013/10/31/getting-a-django-app-to-use-https-on-aws-elastic-beanstalk/
 if os.environ.get("ON_AWS", False) is True:
@@ -98,6 +130,8 @@ else:
     CSRF_COOKIE_SECURE = False
 
 if DOCKER:
+    # If running in Docker, we assume that the API is behind a reverse proxy
+    # that handles SSL termination and forwards the request to the API.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_REDIRECT_EXEMPT = [r"^health-check/$"]
     SESSION_COOKIE_SECURE = True
@@ -117,6 +151,9 @@ REST_FRAMEWORK = {
     ),
 }
 
+# CORS settings
+# https://pypi.org/project/django-cors-headers/
+
 CORS_ORIGIN_REGEX_WHITELIST = (r"^.*$",)
 
 CSRF_TRUSTED_ORIGINS = (
@@ -126,6 +163,7 @@ CSRF_TRUSTED_ORIGINS = (
     "https://*.cs.rutgers.edu",
 )
 
+checkCSRFTrustedOrigins(CLIENT_URL, CSRF_TRUSTED_ORIGINS)
 
 # Password validation
 # https://docs.djangoproject.com/en/2.1/ref/settings/#auth-password-validators
@@ -155,6 +193,72 @@ SIMPLE_JWT = {
 }
 
 ################# End Authentication settings ##############################
+
+################# Database and Model settings ##############################
+
+# Model settings
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# https://docs.djangoproject.com/en/2.1/ref/settings/#databases
+if "RDS_HOSTNAME" in os.environ:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.environ["RDS_DB_NAME"],
+            "USER": os.environ["RDS_USERNAME"],
+            "PASSWORD": os.environ["RDS_PASSWORD"],
+            "HOST": os.environ["RDS_HOSTNAME"],
+            "PORT": os.environ["RDS_PORT"],
+            "OPTIONS": {"charset": "utf8mb4"},
+            "CONN_MAX_AGE": 60,
+        }
+    }
+elif "DB_HOSTNAME" in os.environ:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.environ["DB_NAME"],
+            "USER": os.environ["DB_USERNAME"] if "DB_USERNAME" in os.environ else "root",
+            "PASSWORD": os.environ["DB_PASSWORD"],
+            "HOST": os.environ["DB_HOSTNAME"],
+            "PORT": os.environ["DB_PORT"],
+            "OPTIONS": {"charset": "utf8mb4"},
+            "CONN_MAX_AGE": 60,
+        }
+    }
+else:
+    # Use SQLite for development and testing
+    # This is not recommended for production use, but is fine for local development.
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
+        }
+    }
+
+
+################# End Database settings ##############################
+
+################## Email settings ##############################
+
+
+# # Email settings
+
+if DEBUG:
+    OVERRIDE_EMAIL = os.environ.get("OVERRIDE_EMAIL", None)
+else:
+    OVERRIDE_EMAIL = None
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "mx.farside.rutgers.edu")
+EMAIL_PORT = os.environ.get("EMAIL_PORT", 25)
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "TRUE").upper() == "TRUE"
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "FALSE").upper() == "TRUE"
+DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "help@cs.rutgers.edu")
+EMAIL_SUBJECT_PREFIX = "[Codepost] "
+
+
+###################### End Email settings ##############################
 
 ################## Django settings ##############################
 
@@ -241,71 +345,7 @@ if not DEBUG:
 STATICFILES_DIRS = []
 
 
-################# Database and Model settings ##############################
 
-# Model settings
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-# https://docs.djangoproject.com/en/2.1/ref/settings/#databases
-if "RDS_HOSTNAME" in os.environ:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.mysql",
-            "NAME": os.environ["RDS_DB_NAME"],
-            "USER": os.environ["RDS_USERNAME"],
-            "PASSWORD": os.environ["RDS_PASSWORD"],
-            "HOST": os.environ["RDS_HOSTNAME"],
-            "PORT": os.environ["RDS_PORT"],
-            "OPTIONS": {"charset": "utf8mb4"},
-            "CONN_MAX_AGE": 60,
-        }
-    }
-elif "DB_HOSTNAME" in os.environ:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.mysql",
-            "NAME": os.environ["DB_NAME"],
-            "USER": os.environ["DB_USERNAME"] if "DB_USERNAME" in os.environ else "root",
-            "PASSWORD": os.environ["DB_PASSWORD"],
-            "HOST": os.environ["DB_HOSTNAME"],
-            "PORT": os.environ["DB_PORT"],
-            "OPTIONS": {"charset": "utf8mb4"},
-            "CONN_MAX_AGE": 60,
-        }
-    }
-else:
-    # Use SQLite for development and testing
-    # This is not recommended for production use, but is fine for local development.
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
-        }
-    }
-
-
-################# End Database settings ##############################
-
-################## Email settings ##############################
-
-
-# # Email settings
-
-if DEBUG:
-    OVERRIDE_EMAIL = os.environ.get("OVERRIDE_EMAIL", None)
-else:
-    OVERRIDE_EMAIL = None
-
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "mx.farside.rutgers.edu")
-EMAIL_PORT = os.environ.get("EMAIL_PORT", 25)
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "TRUE").upper() == "TRUE"
-EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "FALSE").upper() == "TRUE"
-DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "help@cs.rutgers.edu")
-EMAIL_SUBJECT_PREFIX = "[Codepost] "
-
-
-###################### End Email settings ##############################
 
 ################## Logging settings ##############################
 
