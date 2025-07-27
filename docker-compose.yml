@@ -12,7 +12,7 @@ services:
             - codepost-api
     codepost-api:
         container_name: codepost-api
-        env_files:
+        env_file:
             - .env
         environment:
             - DEBUG=TRUE
@@ -39,7 +39,7 @@ services:
                 condition: service_healthy
     codepost-worker:
         container_name: codepost-worker
-        env_files:
+        env_file:
             - .env
         environment:
             - DEBUG=TRUE
@@ -81,7 +81,7 @@ services:
     codepost-database:
         image: mariadb:latest
         container_name: codepost-database
-        env_files:
+        env_file:
             - .env
         environment:
             - MARIADB_ROOT_PASSWORD=${ROOT_DATABASE_PASSWORD}

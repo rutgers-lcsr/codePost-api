@@ -12,7 +12,7 @@ services:
             - codepost-api
     codepost-api:
         container_name: codepost-api
-        env_files:
+        env_file:
             - .env
         environment:
             - DEBUG=False
@@ -48,7 +48,7 @@ services:
                 condition: service_healthy
     codepost-worker:
         container_name: codepost-worker
-        env_files:
+        env_file:
             - .env
         environment:
             - DEBUG=False
