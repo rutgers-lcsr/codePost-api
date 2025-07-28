@@ -153,7 +153,7 @@ volumes:
             device: ":${NFS_SHARE_PATH}/mariadb"
     loki-data:
         name: codepost-loki-data
-        driver: nfs
+        driver: local
         driver_opts:
             type: nfs
             o: addr=${NFS_SERVER_IP},rw
