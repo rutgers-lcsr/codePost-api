@@ -261,7 +261,10 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return error
 
         # Pre-filter fields for any users who do not exist yet
-        newStudents, newGraders, newAdmins, newSuperGraders = [], [], [], []
+        newStudents: list[User] = []
+        newGraders: list[User] = []
+        newAdmins: list[User] = []
+        newSuperGraders: list[User] = []
         for keyEl, userList in zip(
             ("students", "graders", "courseAdmins", "superGraders"),
             (newStudents, newGraders, newAdmins, newSuperGraders),
@@ -282,11 +285,20 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             # and modify rosters.
             add_admin_privileges(admin)
 
+            if not admin.is_active or course.emailNewUsers: 
+                # Email the admin that they have been added to the course, so they can activate their account, bypasses email new users setting for course
+                UserAddedToCourseEmail(admin).send_email(
+                    course_name=course.name,
+                    course_period=course.period,
+                    user_type="admin",
+                )
+
         # If course setting is set, email newly created users
         if course.emailNewUsers:
             # Email new students
+
             for userList, roleType in zip(
-                (newAdmins, newGraders, newStudents), ("admin", "grader", "student")
+                (newGraders, newStudents), ("grader", "student")
             ):
                 for newUser in userList:
                     UserAddedToCourseEmail(newUser).send_email(
@@ -294,7 +306,6 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                         course_period=course.period,
                         user_type=roleType,
                     )
-                    # send_new_user_email(newUser, roleType, course)
 
         serializer = CourseRosterSerializer(course, context={"request": request})
         return Response(serializer.data)
