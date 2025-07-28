@@ -15,7 +15,7 @@ jobs:
             CLIENT_URL: ${{ vars.CLIENT_URL }}
             DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
             ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
-            API_USER: ${{ secrets.API_USER }}
+            API_USER: ${{ vars.API_USER }}
             API_PASSWORD: ${{ secrets.API_PASSWORD }}
             SECRET_KEY: ${{ secrets.SECRET_KEY }}
             EMAIL_HOST: ${{ vars.EMAIL_HOST }}
@@ -23,6 +23,8 @@ jobs:
             EMAIL_USE_TLS: ${{ vars.EMAIL_USE_TLS }}
             EMAIL_USE_SSL: ${{ vars.EMAIL_USE_SSL }}
             DEFAULT_EMAIL_FROM: ${{ vars.DEFAULT_EMAIL_FROM }}
+            NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
+            NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v2
@@ -41,13 +43,15 @@ jobs:
                   SECRET_KEY=${{ secrets.SECRET_KEY }}
                   DB_PASSWORD=${{ secrets.DB_PASSWORD }}
                   ROOT_DATABASE_PASSWORD=${{ secrets.ROOT_DATABASE_PASSWORD }}
-                  API_USER=${{ secrets.API_USER }}
+                  API_USER=${{ vars.API_USER }}
                   API_PASSWORD=${{ secrets.API_PASSWORD }}
                   EMAIL_HOST=${{ vars.EMAIL_HOST }}
                   EMAIL_PORT=${{ vars.EMAIL_PORT }}
                   EMAIL_USE_TLS=${{ vars.EMAIL_USE_TLS }}
                   EMAIL_USE_SSL=${{ vars.EMAIL_USE_SSL }}
                   DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
+                  NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
+                  NFS_SHARE_PATH=${{ vars.NFS_SHARE_PATH }}
                   EOF
 
             - name: Build and deploy

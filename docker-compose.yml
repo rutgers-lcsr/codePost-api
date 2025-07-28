@@ -17,10 +17,21 @@ services:
         environment:
             - DEBUG=TRUE
             - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
             - DB_NAME=codepost
             - DB_HOSTNAME=codepost-database
             - DB_PORT=3306
             - DB_USERNAME=codepost_user
+            - DB_PASSWORD=${DB_PASSWORD}
+            - SECRET_KEY=${SECRET_KEY}
+            - API_USER=${API_USER}
+            - API_PASSWORD=${API_PASSWORD}
+            - EMAIL_HOST=${EMAIL_HOST}
+            - EMAIL_PORT=${EMAIL_PORT}
+            - EMAIL_USE_TLS=${EMAIL_USE_TLS}
+            - EMAIL_USE_SSL=${EMAIL_USE_SSL}
+            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
             - LOKI_URL=http://loki:3100/loki/api/v1/push
         ports:
             - "8000:8000"
@@ -44,10 +55,21 @@ services:
         environment:
             - DEBUG=TRUE
             - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
             - DB_NAME=codepost
             - DB_HOSTNAME=codepost-database
             - DB_PORT=3306
             - DB_USERNAME=codepost_user
+            - DB_PASSWORD=${DB_PASSWORD}
+            - SECRET_KEY=${SECRET_KEY}
+            - API_USER=${API_USER}
+            - API_PASSWORD=${API_PASSWORD}
+            - EMAIL_HOST=${EMAIL_HOST}
+            - EMAIL_PORT=${EMAIL_PORT}
+            - EMAIL_USE_TLS=${EMAIL_USE_TLS}
+            - EMAIL_USE_SSL=${EMAIL_USE_SSL}
+            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
             - LOKI_URL=http://loki:3100/loki/api/v1/push
         build:
             context: .
@@ -102,6 +124,7 @@ services:
             - "3100:3100"
         volumes:
             - ./loki-config.yaml:/etc/loki/local-config.yaml
+            - loki-data:/loki
         command: -config.file=/etc/loki/local-config.yaml
     promtail:
         image: grafana/promtail:latest
@@ -109,6 +132,7 @@ services:
         volumes:
             - /var/log:/var/log
             - ./promtail-config.yaml:/etc/promtail/config.yaml
+            - loki-data:/loki
         command: -config.file=/etc/promtail/config.yaml
         depends_on:
             - loki
@@ -125,3 +149,14 @@ volumes:
     db-data:
         name: codepost-db-data
         driver: local
+        driver_opts:
+            type: nfs
+            o: addr=${NFS_SERVER_IP},rw
+            device: ":${NFS_SHARE_PATH}/mariadb"
+    loki-data:
+        name: codepost-loki-data
+        driver: nfs
+        driver_opts:
+            type: nfs
+            o: addr=${NFS_SERVER_IP},rw
+            device: ":${NFS_SHARE_PATH}/loki"
