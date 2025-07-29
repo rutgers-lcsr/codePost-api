@@ -5,7 +5,6 @@ import json
 import time
 import socket
 from codepost.settings import DEBUG, LOKI_URL
-from core.emails import CodepostAPIErrorEmail
 class LokiHandler(logging.Handler):
     def emit(self, record):
         log_entry = self.format(record)
@@ -68,7 +67,8 @@ def logEvent(event, level=logging.INFO, message=None):
     except Exception as e:
         if not DEBUG:
             print(f"Failed to log event {event}: {e}")
-
+            # Send an email notification if logging fails
+            from core.emails import CodepostAPIErrorEmail
             CodepostAPIErrorEmail().send_email(
                 error_message=f"Failed to log event {event}",
                 error_details=f"An error occurred while logging event {event}: {str(e)}"
