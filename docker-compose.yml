@@ -48,8 +48,6 @@ services:
                 condition: service_healthy
             codepost-redis:
                 condition: service_healthy
-            loki:
-                condition: service_healthy
     codepost-worker:
         container_name: codepost-worker
         env_file:
@@ -128,11 +126,6 @@ services:
             - ./loki-config.yaml:/etc/loki/local-config.yaml
             - loki-data:/loki
         command: -config.file=/etc/loki/local-config.yaml
-        healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:3100/ready"]
-            interval: 30s
-            timeout: 10s
-            retries: 10
     promtail:
         image: grafana/promtail:latest
         container_name: promtail
@@ -158,12 +151,12 @@ volumes:
         driver: local
         driver_opts:
             type: nfs
-            o: addr=${NFS_SERVER_IP},rw,noatime,nfsvers=4,tcp,rsize=1048576,wsize=1048576
+            o: addr=${NFS_SERVER_IP},rw
             device: ":${NFS_SHARE_PATH}/mariadb"
     loki-data:
         name: codepost-loki-data
         driver: local
         driver_opts:
             type: nfs
-            o: addr=${NFS_SERVER_IP},rw,noatime,nfsvers=4,tcp,rsize=1048576,wsize=1048576
+            o: addr=${NFS_SERVER_IP},rw
             device: ":${NFS_SHARE_PATH}/loki"
