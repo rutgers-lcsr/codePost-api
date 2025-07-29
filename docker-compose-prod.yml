@@ -44,8 +44,11 @@ services:
             timeout: 10s
             retries: 5
         depends_on:
+            codepost-database:
+                condition: service_healthy
             codepost-redis:
                 condition: service_healthy
+            loki:
     codepost-worker:
         container_name: codepost-worker
         env_file:
