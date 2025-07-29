@@ -158,12 +158,12 @@ volumes:
         driver: local
         driver_opts:
             type: nfs
-            o: addr=${NFS_SERVER_IP},rw
+            o: addr=${NFS_SERVER_IP},rw,noatime,nfsvers=4,tcp,rsize=1048576,wsize=1048576
             device: ":${NFS_SHARE_PATH}/mariadb"
     loki-data:
         name: codepost-loki-data
         driver: local
         driver_opts:
             type: nfs
-            o: addr=${NFS_SERVER_IP},rw
+            o: addr=${NFS_SERVER_IP},rw,noatime,nfsvers=4,tcp,rsize=1048576,wsize=1048576
             device: ":${NFS_SHARE_PATH}/loki"
