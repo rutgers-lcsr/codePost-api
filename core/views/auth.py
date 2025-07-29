@@ -5,7 +5,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from core.logging import log_user_event
+import logging
+from core.logging import logEvent
 from core.models import Course
 from core.serializers.user import UserSerializer
 from django.utils.timezone import now
@@ -64,7 +65,6 @@ class ImpersonateView(APIView):
   """
   permission_classes = [IsAuthenticated]
   
-  @log_user_event("Become Attempt")
   def post(self, request, *args, **kwargs):
 
     form = ImpersonateForm(request.data)
@@ -84,10 +84,18 @@ class ImpersonateView(APIView):
       return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
     should_expire = form.cleaned_data.get('never_expire', False) == True
+    
+    # Log the impersonation event
+    logEvent(
+        event="Become User",
+        message=f"User {request.user.username} is becoming {user.username}",
+        level=logging.INFO
+    )
+    
     # Set the user in the request
     request.user = user    
 
-    
+
     # Generate a token for the user
     token = JWTSerializer.get_token(request.user, never_expire=should_expire)
     serializer = UserSerializer(request.user, context={'request': request})

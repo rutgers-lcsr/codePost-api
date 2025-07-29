@@ -4,6 +4,16 @@ from django.contrib.auth import (
     authenticate, get_user_model, password_validation,
 )
 
+class IDForm(forms.Form):
+    """
+    Form to handle ID input for course operations.
+    """
+    id = forms.CharField(
+        label=_("ID"),
+        max_length=64,
+        strip=True,
+        help_text=_("Enter ID to proceed."),
+    )
 class ChangePasswordForm(forms.Form):
   uid = forms.CharField()
   token = forms.CharField(min_length=20, strip=True)

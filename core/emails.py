@@ -29,7 +29,7 @@ class CodepostEmail(ABC):
     subject = "CodePost Notification"
     template = "emails/base_template.html"
 
-    def __init__(self, user:User):
+    def __init__(self, user:User = None):
         self.user = user
         self.from_email = DEFAULT_EMAIL_FROM
 
@@ -71,6 +71,10 @@ class CodepostEmail(ABC):
         if OVERRIDE_EMAIL:
             return OVERRIDE_EMAIL
 
+        if not self.user:
+            logEvent(event="Email send failed", message="No user provided for email", level=logging.ERROR)
+            raise ValueError("No user provided for email")
+
         if self.user.email:
             return self.user.email
 
@@ -104,6 +108,7 @@ class CodepostEmail(ABC):
 
     def get_codepost_admins(self):
         return list(map(lambda x: x[1], ADMINS))
+
     def send(self, email:EmailMessage, type:str = "html"):
         """
         Sends the email using the Django EmailMessage class.
@@ -120,7 +125,28 @@ class CodepostEmail(ABC):
             # Will log out the error in the Django logs
             logEvent(event="Email send failed", message=str(e), level=logging.ERROR)
             return None
+class CodepostAPIErrorEmail(CodepostEmail):
+    subject = "CodePost API Error Notification"
+    template = "emails/api_error_template.html"
 
+    def send_email(self, error_message:str, error_details:str):
+        """
+        Sends an email to the CodePost admins notifying them of an API error.
+        """
+        context = self.get_context(
+            error_message=error_message,
+            error_details=error_details,
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.error_message,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=self.get_codepost_admins(),
+        )
+        return self.send(email)
 
 class UserAddedToCourseEmail(CodepostEmail):
     subject = "You have been added to a course on CodePost"

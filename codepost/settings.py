@@ -81,13 +81,6 @@ ADMINS = [
 
 API_HOST = urlparse(API_URL).netloc.split(':')[0]
 
-print(f"CodePost API running on {API_URL}")
-print(f"CodePost Client running on {CLIENT_URL}")
-print(f"CodePost API running in {'debug' if DEBUG else 'production'} mode")
-print(f"CodePost API Admins are {', '.join([f'{name} <{email}>' for name, email in ADMINS])}")
-
-
-
 #################### Authentication And Host settings ##############################
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "your secret key")
@@ -442,3 +435,12 @@ BROKER_TRANSPORT_OPTIONS = {
 }
 
 #################### End Celery settings ##############################
+
+
+#################### Log info to console for debugging ##############################
+
+print(f"CodePost API running on {API_URL}")
+print(f"CodePost Client running on {CLIENT_URL}")
+print(f"CodePost API running in {'debug' if DEBUG else 'production'} mode")
+print(f"CodePost API Admins are {', '.join([f'{name} <{email}>' for name, email in ADMINS])}")
+

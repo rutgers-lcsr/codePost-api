@@ -1,3 +1,4 @@
+from core.forms.forms import IDForm
 from core.models import Course, RubricCategory
 from django.contrib.auth.models import User
 from core.serializers.course import (
@@ -365,7 +366,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not isAuthenticated(user):
             return returnNotAuthorized()
 
-        form = IDForm(request.POST)
+        form = IDForm(request.data)
         if form.is_valid():
             course = Course.objects.get(id=pk)
 

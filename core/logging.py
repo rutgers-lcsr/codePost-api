@@ -4,8 +4,8 @@ import requests
 import json
 import time
 import socket
-from codepost.settings import LOKI_URL
-
+from codepost.settings import DEBUG, LOKI_URL
+from core.emails import CodepostAPIErrorEmail
 class LokiHandler(logging.Handler):
     def emit(self, record):
         log_entry = self.format(record)
@@ -52,18 +52,27 @@ def logEvent(event, level=logging.INFO, message=None):
     :param event: The event to log.
     :param level: The logging level (default is INFO).
     """
-    logger = logging.getLogger(__name__)
+    try:
+        logger = logging.getLogger(__name__)
 
-    full_message = f"[{event}] - {message}" if message else event
+        full_message = f"[{event}] - {message}" if message else event
 
-    logger.log(
-        level,
-        msg=
-        json.dumps({
-        "event": event,
-        "message": full_message,
-        "level": level,
-    }))
+        logger.log(
+            level,
+            msg=
+            json.dumps({
+            "event": event,
+            "message": full_message,
+            "level": level,
+        }))
+    except Exception as e:
+        if not DEBUG:
+            print(f"Failed to log event {event}: {e}")
+
+            CodepostAPIErrorEmail().send_email(
+                error_message=f"Failed to log event {event}",
+                error_details=f"An error occurred while logging event {event}: {str(e)}"
+            )
 
 def log_user_event(event_name):
     def decorator(func):
@@ -76,6 +85,7 @@ def log_user_event(event_name):
 
             logger.info(json.dumps({
                 "event": event_name or func.__name__,
+                "function": func.__name__,
                 "user": user.username if user and user.username else "anonymous",
                 "path": request.path if hasattr(request, 'path') else None,
                 "method": request.method if hasattr(request, 'method') else None,
