@@ -49,6 +49,7 @@ services:
             codepost-redis:
                 condition: service_healthy
             loki:
+                condition: service_healthy
     codepost-worker:
         container_name: codepost-worker
         env_file:
