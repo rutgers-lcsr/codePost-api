@@ -33,6 +33,7 @@ services:
             - EMAIL_USE_SSL=${EMAIL_USE_SSL}
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
             - LOKI_URL=http://loki:3100/loki/api/v1/push
+            - API_HOSTNAME=codepost-api
         ports:
             - "8000:8000"
         build:

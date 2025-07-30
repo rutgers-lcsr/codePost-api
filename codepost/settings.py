@@ -91,13 +91,11 @@ if SECRET_KEY == "your secret key":
 
 # Allowed host settings
 ALLOWED_HOSTS = [
-    "codepost-api-dev.pexarpdmjm.us-east-2.elasticbeanstalk.com",
-    "codepost-api-production.pexarpdmjm.us-east-2.elasticbeanstalk.com",
-    "api.codepost-labs.io",
-    "api.codepost.cs.rutgers.edu",
+    "codepost-api.cs.rutgers.edu",
 ]
+
 if DOCKER:
-    ALLOWED_HOSTS.append(socket.gethostname())
+    ALLOWED_HOSTS.append(os.environ.get("API_HOSTNAME", "localhost"))
 
 if DEBUG: 
     ALLOWED_HOSTS.append("localhost")
