@@ -32,7 +32,7 @@ jobs:
             - name: Set up Certs
               run: |
                   HOSTNAME=$(hostname)
-                  ln -s /etc/letsencrypt/live/$HOSTNAME certs
+                  cp -rflT /etc/letsencrypt/live/$HOSTNAME/ certs/
 
             - name: Set up .env
               run: |
