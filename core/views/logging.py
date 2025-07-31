@@ -50,7 +50,7 @@ def logError(request):
     Event.objects.create(category="error", user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
   except:
     pass
-  logEvent("User Error UI",
+  logEvent("UI Error",
            message=f"User Error: {error} by user {user.email} at {url}", level=logging.ERROR)
   
   return Response({'success': True}, status=status.HTTP_200_OK)

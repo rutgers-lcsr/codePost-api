@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 @api_view(['POST'])
 def subscribeToEmailList(request):
   if 'email' not in request.data:
-    return Response({'success': False}, status=status.status.HTTP_400_BAD_REQUEST)
+    return Response({'success': False}, status=status.HTTP_400_BAD_REQUEST)
 
-  logEvent("Email subscription", message=f"Email subscription: {request.data['email']}")
+  logEvent("Email Subscription", message=f"Email subscription: {request.data['email']}")
 
   return Response({'success': True}, status=status.HTTP_200_OK)

@@ -554,7 +554,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       try:
         handler.handle()
       except Exception as e:
-        logEvent("Error handling late submission",
+        logEvent("Late Submission Error",
                  message=f"Error handling late submission: {e} for submission by user {user.email}", level=logging.ERROR)
 
 
@@ -569,7 +569,7 @@ class AssignmentViewSet(ListProtectedViewSet):
             StudentUploadReceiptEmail(student).send_email(submission)
             # send_email_student_uploaded_submission(student.email, submission)
           except Exception as e:
-            logEvent("Error emailing student receipt",
+            logEvent("API Error",
                      message=f"Error emailing student receipt: {e} for submission by user {user.email}", level=logging.ERROR)
       
 
