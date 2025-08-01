@@ -7,36 +7,21 @@ import socket
 from codepost.settings import DEBUG, LOKI_URL, HOSTNAME
 class LokiHandler(logging.Handler):
     def emit(self, record):
-        
-        log_entry = self.format(record)
+        print("LokiHandler emit called")
         ts_ns = int(time.time() * 1e9)
-
         # Prepare the payload for Loki
-
-        if isinstance(log_entry, dict):
-            log_entry.update({
-                "timestamp": ts_ns,
-                "app": "codepost_django",
-                "host": HOSTNAME,
-            })
-        else:
-            log_entry = {
-                "event": log_entry,
-                "timestamp": ts_ns,
-                "app": "codepost_django",
-                "host": HOSTNAME,
-            }
 
         payload = {
             "streams": [
                 {
-                    "stream": log_entry,
+                    "stream": record.msg,
                     "values": [
                         [str(ts_ns)]
                     ],
                 }
             ]
         }
+        print("LokiHandler payload:", json.dumps(payload, indent=2))
         try:
             requests.post(LOKI_URL, json=payload)
         except Exception as e:

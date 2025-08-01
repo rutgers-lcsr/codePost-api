@@ -358,14 +358,6 @@ LOGGING = {
          'json': {
             '()': structlog.stdlib.ProcessorFormatter,
             'processor': structlog.processors.JSONRenderer(),
-            'format': {
-                'timestamp': '%Y-%m-%dT%H:%M:%S.%fZ',
-                'level': '%(levelname)s',
-                'message': '%(message)s',
-                'event': '%(event)s',
-                'app': 'codepost_django',
-                'host': HOSTNAME,
-            }
         },
         'console': {
             'format': '%(levelname)s %(asctime)s %(message)s',
