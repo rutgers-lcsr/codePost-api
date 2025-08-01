@@ -22,6 +22,7 @@ class LokiHandler(logging.Handler):
             "timestamp": time.time(),
             "level": record.levelname,
             "host": HOSTNAME,
+            "app": "codepost_django",
         })
         payload = {
             "streams": [
