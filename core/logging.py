@@ -93,9 +93,9 @@ def logEvent(event: str, level=logging.INFO, message: any=None):
 
         logger.log(
             level,
+            msg=message,
             extra={
                 "event": event,
-                "message": message,
                 "level": level,
             }
         )
@@ -121,13 +121,11 @@ def log_user_event(event_name):
 
             logger = logging.getLogger(__name__)
 
-            logger.info(msg={
-                "event": event_name or func.__name__,
+            logger.info(msg= event_name, extra={ "event": event_name or func.__name__,
                 "function": func.__name__,
                 "user": user.username if user and user.username else "anonymous",
                 "path": request.path if hasattr(request, 'path') else None,
-                "method": request.method if hasattr(request, 'method') else None,
-            })
+                "method": request.method if hasattr(request, 'method') else None,})
 
             return func(request, *args, **kwargs)
         return wrapper
