@@ -6,4 +6,4 @@ class CoreConfig(AppConfig):
     name = 'core'
     
     def ready(self):
-        logEvent("Core App Ready", message="Core app has been initialized and logging handler added.")
+        logEvent("Core App Ready", message="Core app is ready and logging to Loki.")
