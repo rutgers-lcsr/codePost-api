@@ -4,21 +4,35 @@ import requests
 import json
 import time
 import socket
-from codepost.settings import DEBUG, LOKI_URL
+from codepost.settings import DEBUG, LOKI_URL, HOSTNAME
 class LokiHandler(logging.Handler):
     def emit(self, record):
+        
         log_entry = self.format(record)
         ts_ns = int(time.time() * 1e9)
+
+        # Prepare the payload for Loki
+
+        if isinstance(log_entry, dict):
+            log_entry.update({
+                "timestamp": ts_ns,
+                "app": "codepost_django",
+                "host": HOSTNAME,
+            })
+        else:
+            log_entry = {
+                "message": log_entry,
+                "timestamp": ts_ns,
+                "app": "codepost_django",
+                "host": HOSTNAME,
+            }
+
         payload = {
             "streams": [
                 {
-                    "stream": {
-                        "app": "django",
-                        "level": record.levelname,
-                        "host": socket.gethostname(),
-                    },
+                    "stream": log_entry,
                     "values": [
-                        [str(ts_ns), log_entry]
+                        [str(ts_ns)]
                     ],
                 }
             ]
