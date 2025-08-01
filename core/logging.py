@@ -13,18 +13,20 @@ class LokiHandler(logging.Handler):
         entries = {}
         if isinstance(record.msg, dict):
             entries = record.msg
+            
         else:
             entries = {
                 "message": record.getMessage(),
-                "level": record.levelname,
-                "timestamp": ts_ns,
-                "host": HOSTNAME,
             }
+        entries.update({
+            "timestamp": time.time(),
+            "level": record.levelname,
+            "host": HOSTNAME,
+        })
         payload = {
             "streams": [
                 {
                     "labels": {
-                        "app": "codepost",
                         "level": record.levelname,
                         "host": HOSTNAME,
                     },
