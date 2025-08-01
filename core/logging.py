@@ -29,8 +29,15 @@ class LokiHandler(logging.Handler):
         payload = {
             "streams": [
                 {
-                    "labels": labels,
-                    "entries": [entry],
+                    "stream": {
+                        "level": record.levelname,
+                        "host": HOSTNAME,
+                        "app": "codepost_django",
+                        "event": record.msg.get("event", "unknown_event") if isinstance(record.msg, dict) else None,
+                    },
+                    "values": [
+                        [str(int(time.time() * 1000000000)), json.dumps(entry)]
+                    ],
                 }
             ]
         }
