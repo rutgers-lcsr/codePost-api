@@ -1,9 +1,11 @@
 from django.apps import AppConfig
 
-from .logging import loki_handler, logEvent
+# from .logging import loki_handler
 
 class CoreConfig(AppConfig):
     name = 'core'
     
     def ready(self):
-        logEvent("Core App Ready", message="Core app is ready and logging to Loki.")
+        pass
+
+        # logEvent("Core App Ready", message="Core app has been initialized and logging handler added.")

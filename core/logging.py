@@ -10,14 +10,25 @@ class LokiHandler(logging.Handler):
         print("LokiHandler emit called")
         ts_ns = int(time.time() * 1e9)
         # Prepare the payload for Loki
-
+        entries = {}
+        if isinstance(record.msg, dict):
+            entries = record.msg
+        else:
+            entries = {
+                "message": record.getMessage(),
+                "level": record.levelname,
+                "timestamp": ts_ns,
+                "host": HOSTNAME,
+            }
         payload = {
             "streams": [
                 {
-                    "stream": record.msg,
-                    "values": [
-                        [str(ts_ns)]
-                    ],
+                    "labels": {
+                        "app": "codepost",
+                        "level": record.levelname,
+                        "host": HOSTNAME,
+                    },
+                    "entries": entries,
                 }
             ]
         }
