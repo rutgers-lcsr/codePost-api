@@ -343,6 +343,7 @@ STATICFILES_DIRS = []
 
 LOKI_URL = os.environ.get("LOKI_URL", "http://localhost:3100/loki/api/v1/push")
 
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -362,6 +363,7 @@ LOGGING = {
         'loki': {
             'level': 'INFO',
             'class': 'core.logging.LokiHandler', 
+            'formatter': 'json',
         },
         "console": {
             'level': 'DEBUG',

@@ -308,9 +308,6 @@ def validateNewAdminUser(request):
                 action_id.append(1)
 
                 # Send user an email asking them to confirm they want to change their
-                # organization by emailing team@codepost.io
-                from_email = "team@codepost.io"
-                # context = {}
 
                 AdminChangeOrganizationEmail(
                     user=user,
