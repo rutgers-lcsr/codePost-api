@@ -93,11 +93,12 @@ def logEvent(event: str, level=logging.INFO, message: any=None):
 
         logger.log(
             level,
-            msg={
-            "event": event,
-            "message": message,
-            "level": level,
-        })
+            extra={
+                "event": event,
+                "message": message,
+                "level": level,
+            }
+        )
     except Exception as e:
 
         # If logging to loki fails, that means something is wrong with the Loki server or network.
