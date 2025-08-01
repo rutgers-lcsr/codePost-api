@@ -350,8 +350,8 @@ LOGGING = {
     'formatters': {
          'json': {
             'format': (
-                '{"labels": {"app": "codepost_django", "host": "' + HOSTNAME + \
-                '"}, "timestamp": "%(asctime)s" }'
+                '{"labels": {"app": " codepost_django", "host": "' + HOSTNAME + \
+                '"}, "timestamp": "%(asctime)s", "message": "%(message)s"}'
             )
         },
         'console': {
