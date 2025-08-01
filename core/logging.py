@@ -28,7 +28,7 @@ class LokiHandler(logging.Handler):
                         "level": record.levelname,
                         "host": HOSTNAME,
                     },
-                    "entries": entries,
+                    "entries": [entries],
                 }
             ]
         }
