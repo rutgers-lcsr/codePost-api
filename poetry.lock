@@ -2077,6 +2077,18 @@ requests = {version = ">=2.20", markers = "python_version >= \"3.0\""}
 typing_extensions = {version = ">=4.5.0", markers = "python_version >= \"3.7\""}
 
 [[package]]
+name = "structlog"
+version = "25.4.0"
+description = "Structured Logging for Python"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "structlog-25.4.0-py3-none-any.whl", hash = "sha256:fe809ff5c27e557d14e613f45ca441aabda051d119ee5a0102aaba6ce40eed2c"},
+    {file = "structlog-25.4.0.tar.gz", hash = "sha256:186cd1b0a8ae762e29417095664adf1d6a31702160a46dacb7796ea82f7409e4"},
+]
+
+[[package]]
 name = "text-unidecode"
 version = "1.3"
 description = "The most basic Text::Unidecode port"
@@ -2347,4 +2359,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "59a85d236e43fabda5668c1886be189c284488faf510e9511d4dc5a99d541890"
+content-hash = "c25a4f662cf6caa274b37002c444b67887b73623cbf6d72ceb57090c7b27e9ef"
