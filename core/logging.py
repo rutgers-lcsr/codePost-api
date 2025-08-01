@@ -21,7 +21,7 @@ class LokiHandler(logging.Handler):
             })
         else:
             log_entry = {
-                "message": log_entry,
+                "event": log_entry,
                 "timestamp": ts_ns,
                 "app": "codepost_django",
                 "host": HOSTNAME,
@@ -85,7 +85,7 @@ events = [
 ]
 
 
-def logEvent(event: str, level=logging.INFO, message: any=None):
+def logEvent(event: str, level=logging.INFO, message: str=None):
     """
     Log an event to Loki.
     :param event: The event to log.
