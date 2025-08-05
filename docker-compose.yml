@@ -10,6 +10,7 @@ services:
             - "443:443"
         depends_on:
             - codepost-api
+        restart: unless-stopped
     codepost-api:
         container_name: codepost-api
         env_file:
@@ -48,6 +49,8 @@ services:
                 condition: service_healthy
             codepost-redis:
                 condition: service_healthy
+        restart: unless-stopped
+
     codepost-worker:
         container_name: codepost-worker
         env_file:
@@ -77,6 +80,8 @@ services:
             target: worker
         depends_on:
             - codepost-api
+        restart: unless-stopped
+
     codepost-flower:
         container_name: codepost-flower
         build:
@@ -89,6 +94,7 @@ services:
             - PYTHON_VERSION=3.8.17
         depends_on:
             - codepost-api
+        restart: unless-stopped
     codepost-redis:
         image: redis:latest
         container_name: codepost-redis
@@ -101,6 +107,7 @@ services:
             retries: 5
         volumes:
             - redis-data:/data
+        restart: unless-stopped
     codepost-database:
         image: mariadb:latest
         container_name: codepost-database
@@ -118,6 +125,8 @@ services:
             interval: 10s
             timeout: 10s
             retries: 5
+        restart: unless-stopped
+
     loki:
         image: grafana/loki:latest
         container_name: loki
@@ -127,6 +136,8 @@ services:
             - ./loki-config.yaml:/etc/loki/local-config.yaml
             - loki-data:/loki
         command: -config.file=/etc/loki/local-config.yaml
+
+        restart: unless-stopped
     promtail:
         image: grafana/promtail:latest
         container_name: promtail
@@ -137,6 +148,7 @@ services:
         command: -config.file=/etc/promtail/config.yaml
         depends_on:
             - loki
+        restart: unless-stopped
 
 networks:
     default:
