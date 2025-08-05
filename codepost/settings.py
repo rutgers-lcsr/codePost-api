@@ -92,6 +92,8 @@ if SECRET_KEY == "your secret key":
 # Allowed host settings
 ALLOWED_HOSTS = [
     "codepost-api.cs.rutgers.edu",
+    "128.6.13.52",  
+    "172.16.71.211",
 ]
 
 if DOCKER:
