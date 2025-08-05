@@ -73,16 +73,18 @@ class ImpersonateView(APIView):
 
     username = form.cleaned_data.get('username')
 
+    # Check if the becomee user exists
     try:
       user = User.objects.get(username=username)
     except User.DoesNotExist:
       return Response({"error": "User does not exist"}, status=404)
     
-    # Ensure the user is a course admin and that target user is a student/grader
+    # Ensure the requestee user is a course admin and that target user is a student/grader
     sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
     if not sharded_course.exists():
       return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
+    # if never_expire is set, we will set the token to expire in 1 year
     should_expire = form.cleaned_data.get('never_expire', False) == True
     
     # Log the impersonation event

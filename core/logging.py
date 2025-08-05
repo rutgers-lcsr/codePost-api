@@ -4,25 +4,37 @@ import requests
 import json
 import time
 import socket
-from codepost.settings import DEBUG, LOKI_URL
+from codepost.settings import DEBUG, LOKI_URL, HOSTNAME
 class LokiHandler(logging.Handler):
     def emit(self, record):
-        log_entry = self.format(record)
-        ts_ns = int(time.time() * 1e9)
+        # Prepare the payload for Loki
+        labels = {
+            "level": record.levelname,
+            "host": HOSTNAME,
+            "app": "codepost_django",
+        }
+
+        # If the message is a dict, use its keys as columns (labels)
+        if isinstance(record.msg, dict):
+            labels.update({k: str(v) for k, v in record.msg.items() if isinstance(v, (str, int, float))})
+            message = record.msg.get("message", "")
+        else:
+            message = record.getMessage()
+
+       
+
         payload = {
             "streams": [
                 {
-                    "stream": {
-                        "app": "django",
-                        "level": record.levelname,
-                        "host": socket.gethostname(),
-                    },
+                    "stream": labels,
                     "values": [
-                        [str(ts_ns), log_entry]
+                        [str(int(time.time() * 1000000000)), message]
                     ],
                 }
             ]
         }
+        print("Sending log to Loki:", json.dumps(payload, indent=2))
+
         try:
             requests.post(LOKI_URL, json=payload)
         except Exception as e:
@@ -33,7 +45,6 @@ loki_handler = LokiHandler()
 loki_handler.setLevel(logging.INFO)
 logging.getLogger().addHandler(loki_handler)
 
-logger = logging.getLogger("events")
 
 
 def log_debug(message, *args):
@@ -45,7 +56,34 @@ def log_debug(message, *args):
     logger.debug(message, *args)
 
 
-def logEvent(event, level=logging.INFO, message=None):
+
+events = [
+    "Core App Ready",
+    "Course Created",
+    "Organization Created",
+    "Assignment Created",
+    "Email Subscription",
+    "Email Sent",
+    "Email Failed",
+    "Late Submission Error",
+    "Become User",
+    "UI Error",
+    "User Happiness",
+    "User Dump",
+    "Admin Change Organization Request",
+    "Codepost Registration Error",
+    "Admin Already Exists",
+    "Admin New Request Error",
+    "Admin New Request Denied",
+    "Admin New Request Approved",
+    "CIP Activation",
+    "Webhook Error",
+    "Webhook Connection Error",
+    "API Error",
+]
+
+
+def logEvent(event: str, level=logging.INFO, message: str=None):
     """
     Log an event to Loki.
     :param event: The event to log.
@@ -54,17 +92,30 @@ def logEvent(event, level=logging.INFO, message=None):
     try:
         logger = logging.getLogger(__name__)
 
-        full_message = f"[{event}] - {message}" if message else event
+        
+        if event not in events:
+            from core.emails import CodepostAPIErrorEmail
+
+            CodepostAPIErrorEmail().send_email(
+                error_message=f"Unknown event logged: {event}",
+                error_details=f"An unknown event was logged: {event}"
+            )
+
+        message = message or f"Event {event} logged."
 
         logger.log(
             level,
-            msg=
-            json.dumps({
-            "event": event,
-            "message": full_message,
-            "level": level,
-        }))
+            msg={
+                "event": event,
+                "message": message,
+                "timestamp": time.time(),
+            },
+            
+        )
     except Exception as e:
+
+        # If logging to loki fails, that means something is wrong with the Loki server or network.
+        # We should log this error to the console and send an email notification to the admin.
         if not DEBUG:
             print(f"Failed to log event {event}: {e}")
             # Send an email notification if logging fails
@@ -81,15 +132,16 @@ def log_user_event(event_name):
         def wrapper(request, *args, **kwargs):
             user: User = getattr(request, "user", None)
 
-            
+            logger = logging.getLogger(__name__)
 
-            logger.info(json.dumps({
+            logger.info(msg= {
+                "message": f"User event: {event_name}",
                 "event": event_name or func.__name__,
                 "function": func.__name__,
                 "user": user.username if user and user.username else "anonymous",
                 "path": request.path if hasattr(request, 'path') else None,
                 "method": request.method if hasattr(request, 'method') else None,
-            }))
+            })
 
             return func(request, *args, **kwargs)
         return wrapper

@@ -24,7 +24,7 @@ from core.forms.forms import (
     SetCredentialsForm,
 )
 
-from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, NewAdminActivationEmail, NewAdminRequestEmail, PasswordResetEmail
+from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, NewAdminActivationEmail, NewAdminRequestEmail, PasswordResetEmail, UserAddedToCourseEmail
 
 from core.permissions.helpers import (
     returnNotAuthorized,
@@ -91,7 +91,12 @@ def emailRegistration(request):
                     ].profile.organization
                     newUser.save()
                     course.students.add(newUser)
-                    send_email_to_joining_user(newUser)
+                    # Send activation email to new user
+                    UserAddedToCourseEmail(newUser).send_email(
+                        course_name=course.name,
+                        course_period=course.period,
+                        role="student",
+                    )
                     return Response(
                         {"success": True, "code_valid": True, "email_valid": True},
                         status=status.HTTP_200_OK,
@@ -105,7 +110,7 @@ def emailRegistration(request):
         except Course.DoesNotExist:
             # Used to email the user, but now we just log the event
             logEvent(
-                "registration_join_does_not_exist",
+                "Codepost Registration Error",
                 level=logging.WARNING,
                 message=json.dumps(
                     {
@@ -302,34 +307,28 @@ def validateNewAdminUser(request):
             ):
                 action_id.append(1)
 
-                if is_student_or_grader and (not user.profile.canModifyRosters):
-                    send_email_to_joining_user(user)
-                else:
-                    # Send user an email asking them to confirm they want to change their
-                    # organization by emailing team@codepost.io
-                    from_email = "team@codepost.io"
-                    # context = {}
+                # Send user an email asking them to confirm they want to change their
 
-                    AdminChangeOrganizationEmail(
-                        user=user,
-                        
-                    ).send_email(organization_name=rawName)  
+                AdminChangeOrganizationEmail(
+                    user=user,
+                    
+                ).send_email(organization_name=rawName)  
 
 
-                    logEvent(
-                        "admin_change_organization",
-                        level= logging.WARNING,
-                        message=json.dumps(
-                            {
-                                "user": user.email,
-                                "old_organization": user.profile.organization.shortname,
-                                "new_organization": rawName,
-                                "shortname": shortnameFromForm,
-                                "email": user.email,
-                            }
-                        ),
-                    )
-                 
+                logEvent(
+                    "Admin Change Organization Request",
+                    level= logging.WARNING,
+                    message=json.dumps(
+                        {
+                            "user": user.email,
+                            "old_organization": user.profile.organization.shortname,
+                            "new_organization": rawName,
+                            "shortname": shortnameFromForm,
+                            "email": user.email,
+                        }
+                    ),
+                )
+                
 
                 return Response(
                     {"success": True, "action_id": ".".join(map(str, action_id))},
@@ -378,7 +377,7 @@ def validateNewAdminUser(request):
 
         
             logEvent(
-                "admin_already_is_admin",
+                "Admin Already Exists",
                 level=logging.WARNING,
                 message=json.dumps(
                     {
@@ -412,7 +411,7 @@ def validateNewAdminUser(request):
             )
     else:
         logEvent(
-            "admin_new_request_error",
+            "Admin New Request Error",
             level=logging.ERROR,
             message=json.dumps(
                 {
@@ -468,7 +467,7 @@ def handleValidationResponse(request):
                         )
 
                         logEvent(
-                            "admin_new_request_denied",
+                            "Admin New Request Denied",
                             level=logging.WARNING,
                             message=json.dumps(
                                 {
@@ -553,7 +552,7 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
     ).send_email(organization_name=org_name)
 
     logEvent(
-        "admin_new_request_approved",
+        "Admin New Request Approved",
         level=logging.WARNING,
         message=json.dumps(
             {

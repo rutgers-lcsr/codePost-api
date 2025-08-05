@@ -68,6 +68,7 @@ class ImpersonateForm(forms.Form):
       max_length=150,
       strip=True,
       help_text=_("Enter the username of the user you want to impersonate."),
+      required=True,
   )
   never_expire = forms.BooleanField(
       required=False,

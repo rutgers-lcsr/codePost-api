@@ -6,7 +6,6 @@ services:
             - ./certs:/etc/ssl/certs
             - ./nginx.conf:/etc/nginx/nginx.conf
         ports:
-            - "80:80"
             - "443:443"
         depends_on:
             - codepost-api
@@ -34,8 +33,6 @@ services:
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
             - LOKI_URL=http://loki:3100/loki/api/v1/push
             - API_HOSTNAME=codepost-api
-        ports:
-            - "8000:8000"
         build:
             context: .
             target: api
@@ -92,8 +89,6 @@ services:
     codepost-redis:
         image: redis:latest
         container_name: codepost-redis
-        ports:
-            - "6379:6379"
         healthcheck:
             test: ["CMD", "redis-cli", "ping"]
             interval: 10s

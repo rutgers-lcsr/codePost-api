@@ -7,6 +7,8 @@ import copy
 import json
 import collections
 
+import settings
+
 class CustomRenderer(DocumentationRenderer):
   media_type = 'text/html'
   format = 'html'

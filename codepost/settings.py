@@ -18,7 +18,7 @@ import urllib
 from celery.schedules import crontab
 from urllib.parse import urlparse
 import regex
-
+import structlog
 
 
 def checkCSRFTrustedOrigins(CLIENT_URL, CSRF_TRUSTED_ORIGINS):
@@ -343,15 +343,21 @@ STATICFILES_DIRS = []
 
 LOKI_URL = os.environ.get("LOKI_URL", "http://localhost:3100/loki/api/v1/push")
 
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ]
+)
+
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
          'json': {
-            'format': (
-                '{"labels": {"app": " codepost_django", "host": "' + HOSTNAME + \
-                '"}, "timestamp": "%(asctime)s", "message": "%(message)s"}'
-            )
+            '()': structlog.stdlib.ProcessorFormatter,
+            'processor': structlog.processors.JSONRenderer(),
         },
         'console': {
             'format': '%(levelname)s %(asctime)s %(message)s',
@@ -362,6 +368,7 @@ LOGGING = {
         'loki': {
             'level': 'INFO',
             'class': 'core.logging.LokiHandler', 
+            'formatter': 'json',
         },
         "console": {
             'level': 'DEBUG',

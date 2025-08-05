@@ -104,12 +104,29 @@ class Course(BaseModel):
 
   students = models.ManyToManyField(User, related_name="student_courses", help_text=(
       "A list of usernames of students enrolled in the course."))
-  inactive_students = models.ManyToManyField(User, related_name="student_inactive_courses", help_text=(
-      "A list of usernames of students unenrolled in the course."))
-  inactive_graders = models.ManyToManyField(User, related_name="grader_inactive_courses", help_text=(
-      "A list of usernames of graders inactive in the course."))
-  inactive_courseAdmins = models.ManyToManyField(User, related_name="courseAdmin_inactive_courses", help_text=(
-      "A list of usernames of admins inactive in the course."))
+  inactive_students = models.ManyToManyField(
+      User,
+      related_name="student_inactive_courses",
+      help_text=("A list of usernames of students unenrolled in the course."),
+      blank=True,
+      default=list
+  )
+  inactive_graders = models.ManyToManyField(
+    User, 
+    related_name="grader_inactive_courses", 
+    help_text=(
+      "A list of usernames of graders inactive in the course."),
+    blank=True,
+    default=list
+    )
+  inactive_courseAdmins = models.ManyToManyField(
+    User, 
+    related_name="courseAdmin_inactive_courses", 
+    help_text=(
+      "A list of usernames of admins inactive in the course."),
+    blank=True,
+    default=list
+  )
   graders = models.ManyToManyField(User, related_name="grader_courses", help_text=(
       "A list of usernames of graders for the course."))
   superGraders = models.ManyToManyField(User, related_name="superGrader_courses", help_text=(

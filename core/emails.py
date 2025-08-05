@@ -117,13 +117,13 @@ class CodepostEmail(ABC):
             return None
         try:
             email.content_subtype = type 
-            logEvent(event="Email sent", message="{} sent to {}".format(self.subject, self.get_to_address(),))
+            logEvent(event="Email Sent", message="{} sent to {}".format(self.subject, self.get_to_address(),))
 
 
             email.send()
         except Exception as e:
             # Will log out the error in the Django logs
-            logEvent(event="Email send failed", message=str(e), level=logging.ERROR)
+            logEvent(event="Email Failed", message=str(e), level=logging.ERROR)
             return None
 class CodepostAPIErrorEmail(CodepostEmail):
     subject = "CodePost API Error Notification"
