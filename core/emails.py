@@ -156,7 +156,7 @@ class UserAddedToCourseEmail(CodepostEmail):
         """
         Sends an email to the user notifying them that they have been added to a course.
         """
-        if self.user.is_active:
+        if self.user.is_active and self.user.profile.isPasswordSet:
             context = self.get_context(
                 role=user_type,
                 course_name=course_name,
