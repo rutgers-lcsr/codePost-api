@@ -75,7 +75,7 @@ class ImpersonateView(APIView):
 
     # Check if the becomee user exists
     try:
-      user = User.objects.get(username=username)
+      user = User.objects.get(username=username, is_active=True)
     except User.DoesNotExist:
       return Response({"error": "User does not exist"}, status=404)
     
@@ -95,7 +95,7 @@ class ImpersonateView(APIView):
     )
     
     # Set the user in the request
-    request.user = user    
+    request.user = user
 
 
     # Generate a token for the user

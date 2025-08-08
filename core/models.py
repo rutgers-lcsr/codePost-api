@@ -85,6 +85,8 @@ class Profile(BaseModel):
   canModifyRosters = models.BooleanField(default=False)
   pendingValidation = models.BooleanField(default=False)
   showProductTips = models.BooleanField(default=True)
+  isPasswordSet = models.BooleanField(default=False, help_text=(
+      "A boolean field. If True, the user has set a password for their account. If False, the user has not set a password and should be prompted to do so."))
 
   stripeCustomerId = models.CharField(max_length=96, unique=True, null=True, blank=True, help_text=(
       "The customer_id from the Stripe customer object."))

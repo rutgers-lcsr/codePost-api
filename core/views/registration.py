@@ -89,6 +89,7 @@ def emailRegistration(request):
                     newUser.profile.organization = course.courseAdmins.all()[
                         0
                     ].profile.organization
+                    newUser.profile.isPasswordSet = False
                     newUser.save()
                     course.students.add(newUser)
                     # Send activation email to new user
@@ -185,6 +186,7 @@ def registerAndSetPassword(request):
             if isValid:
                 user.is_active = True
                 user.set_password(form.cleaned_data["password1"])
+                user.profile.isPasswordSet = True
                 user.save()
                 return Response({"isValid": True}, status=status.HTTP_200_OK)
             else:
@@ -235,6 +237,7 @@ def setCredentials(request):
         user.is_active = True
         user.set_password(form.cleaned_data["password1"])
         user.profile.organization = org
+        user.profile.isPasswordSet = True
         user.save()
 
         return Response({"isValid": True}, status=status.HTTP_200_OK)
@@ -640,6 +643,7 @@ def resetPassword(request):
             if isValid:
                 # Update password
                 user.set_password(form.cleaned_data["password"])
+                user.profile.isPasswordSet = True
                 user.save()
             return Response(
                 {"isValid": isValid, "success": True}, status=status.HTTP_200_OK

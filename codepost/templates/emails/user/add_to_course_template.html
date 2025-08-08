@@ -10,11 +10,22 @@
             an <strong>admin</strong>!
         {% endif %}
     </h2>
-    {% if user.is_active %}
+    {% if user.is_active and user.profile.isPasswordSet %}
         <p class="mb-4">You can now access the course below</p>
         <p class="mb-4">
             <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_period }}/"
                class="btn">View Course</a>
+        </p>
+    {% elif not user.profile.isPasswordSet %}
+        <p class="mb-4">You can now access the course below</p>
+        <p class="mb-4">
+            <a href="{{ client_url }}/{{ role }}/{{ course_name }}/{{ course_period }}/"
+               class="btn">View Course</a>
+        </p>
+        <p class="mb-4">However, your account has been activated but you need to set your password.</p>
+        <p class="mb-4">Please click the link below to set your password:</p>
+        <p class="mb-4">
+            <a href="{{ client_url }}/activate/{{ uid }}/{{ token }}/" class="btn">Set your password</a>
         </p>
     {% else %}
         <p class="mb-4">You can now access the course below</p>

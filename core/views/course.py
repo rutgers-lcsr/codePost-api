@@ -147,9 +147,10 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             # Pre-filter fields for any users who do not exist yet
             # Create these users so serializer doesn't raise a DoesNotExist
             # error for any of them
-            tempCreated = []
+            tempCreated: list[User] = []
             for keyEl in ["students", "graders", "courseAdmins"]:
-                parse_new_users(keyEl, request, tempCreated)
+                # Since these users are being created via the SDK, assume they should be active
+                parse_new_users(keyEl, request, tempCreated, auto_activate=True)
 
             # Log for emailing new students
             oldStudents = list(course.students.all())
@@ -467,7 +468,7 @@ def get_roster_permission_errors(user, request, course):
     return False
 
 
-def parse_new_users(keyEl, request, userList):
+def parse_new_users(keyEl, request, userList, auto_activate=False):
     if keyEl in request.data:
         # There are two ways to specify a list of values in a request
         # Type 1: request['graders'] = firstEmail, request['graders'] = secondEmail
@@ -484,5 +485,5 @@ def parse_new_users(keyEl, request, userList):
         for email in thisData:
             # Add any newly created users to the creator's
             # organization
-            newUser = get_or_create_user(email, request.user.profile.organization)
+            newUser = get_or_create_user(email, request.user.profile.organization, auto_activate=auto_activate)
             userList.append(newUser)

@@ -59,7 +59,7 @@ def email_passes_whitelist(email, whitelist):
 
   return False
 
-def get_or_create_user(email, organization):
+def get_or_create_user(email, organization, auto_activate=False):
   """ If a user corresponds to <email>, return that user. Else,
   create a user with <email> and set their organization to <organization> """
 
@@ -68,8 +68,9 @@ def get_or_create_user(email, organization):
       thisUser = User.objects.get(email=email)
       return thisUser
     except:
-      newUser = User.objects.create(username=email, email=email, is_active=False)
+      newUser = User.objects.create(username=email, email=email, is_active=auto_activate)
       newUser.profile.organization = organization
+      newUser.profile.isPasswordSet = False
       newUser.save()
       return newUser
   else:
