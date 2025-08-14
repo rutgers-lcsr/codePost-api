@@ -11,6 +11,11 @@ services:
         depends_on:
             - codepost-api
         restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
     codepost-api:
         container_name: codepost-api
         env_file:
@@ -50,7 +55,11 @@ services:
             codepost-redis:
                 condition: service_healthy
         restart: unless-stopped
-
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
     codepost-worker:
         container_name: codepost-worker
         env_file:
@@ -81,6 +90,11 @@ services:
         depends_on:
             - codepost-api
         restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     codepost-flower:
         container_name: codepost-flower
@@ -95,6 +109,11 @@ services:
         depends_on:
             - codepost-api
         restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
     codepost-redis:
         image: redis:latest
         container_name: codepost-redis
@@ -108,6 +127,11 @@ services:
         volumes:
             - redis-data:/data
         restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
     codepost-database:
         image: mariadb:latest
         container_name: codepost-database
@@ -126,7 +150,11 @@ services:
             timeout: 10s
             retries: 5
         restart: unless-stopped
-
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
     loki:
         image: grafana/loki:latest
         container_name: loki
@@ -138,6 +166,11 @@ services:
         command: -config.file=/etc/loki/local-config.yaml
 
         restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
     promtail:
         image: grafana/promtail:latest
         container_name: promtail
@@ -149,7 +182,11 @@ services:
         depends_on:
             - loki
         restart: unless-stopped
-
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 networks:
     default:
         name: codepost-network
