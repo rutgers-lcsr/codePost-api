@@ -144,12 +144,10 @@ services:
             - MARIADB_PASSWORD=${DB_PASSWORD}
         volumes:
             - db-data:/var/lib/mysql
-            - db-data-tx-log:/var/log/mysql
         command:
             - --innodb_page_size=64k
             - --innodb_buffer_pool_size=1G
             - --innodb_log_file_size=256M
-            - --innodb_log_group_home_dir=/var/log/mysql
         healthcheck:
             test: ["CMD", "mariadb-admin", "ping", "-h", "codepost-database", "--silent", "--user=root", "--password=${ROOT_DATABASE_PASSWORD}"]
             interval: 10s
@@ -209,9 +207,6 @@ volumes:
             type: nfs
             o: addr=${NFS_SERVER_IP},rw
             device: ":${NFS_SHARE_PATH}/mariadb"
-    db-data-tx-log:
-        driver: local
-        name: codepost-db-data-tx-log
     loki-data:
         name: codepost-loki-data
         driver: local
