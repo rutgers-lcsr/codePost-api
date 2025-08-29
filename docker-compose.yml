@@ -144,11 +144,15 @@ services:
             - MARIADB_PASSWORD=${DB_PASSWORD}
         volumes:
             - db-data:/var/lib/mysql
+        command:
+            - --innodb_page_size=16k
+            - --innodb_buffer_pool_size=1G
+            - --innodb_log_file_size=256M
         healthcheck:
             test: ["CMD", "mariadb-admin", "ping", "-h", "codepost-database", "--silent", "--user=root", "--password=${ROOT_DATABASE_PASSWORD}"]
             interval: 10s
             timeout: 10s
-            retries: 5
+            retries: 10
         restart: unless-stopped
         logging:
             driver: json-file
