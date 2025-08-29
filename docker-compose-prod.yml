@@ -139,7 +139,7 @@ services:
         volumes:
             - db-data:/var/lib/mysql
         command:
-            - --innodb_page_size=64k
+            - --innodb_page_size=16k
             - --innodb_buffer_pool_size=10G
             - --innodb_log_file_size=256M
         healthcheck:
