@@ -1,6 +1,7 @@
 import time
 
 from core.tests.views.results import course
+from core.views.auth import JWTSerializer
 from core.views.template import SuperUserListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -30,6 +31,32 @@ class UserViewSet(SuperUserListProtectedViewSet):
   # Instead of id, index into /users/ detail routes with email
   lookup_field = 'email'
   lookup_value_regex = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+
+
+  @action(detail=False, methods=['POST'])
+  def user(self, request):
+    """
+    Given an email address as a query parameter, return the user object
+    for that email address. This is a non-standard use of a GET request,
+    but it is convenient for the client to be able to look up users by
+    email address.
+    """
+    email = request.query_params.get('email', None)
+    if email is None:
+      return Response({'error': 'email query parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+      user = User.objects.get(email=email)
+    except User.DoesNotExist:
+      return Response({'error': 'user not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = UserSerializer(user, context={'request': request})
+    request.user = user  # hack to get JWTSerializer to work
+    data = serializer.data 
+    token = JWTSerializer.get_token(request.user)
+    
+    data['token'] = str(token)
+    return Response(data)
 
   @action(detail=True, methods=['POST'])
   def email(self, request, email=None):
