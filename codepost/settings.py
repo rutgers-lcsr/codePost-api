@@ -384,6 +384,12 @@ LOGGING = {
     },
 }
 
+
+if DEBUG:
+    # Remove loki handler in debug mode
+    LOGGING['root']['handlers'].remove('loki')
+    LOGGING['root']['level'] = 'DEBUG'  # Set root logger level to DEBUG in debug mode
+
 ################## End Logging settings ##############################
 
 ################## End Codepost settings ##############################

@@ -28,6 +28,7 @@ from rest_framework import serializers
 from core.permissions.tokens import submission_token_generator
 
 from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail
+from django.db.models import Q
 
 def get_student_serializer_class(submission):
     if (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
@@ -138,8 +139,11 @@ class SubmissionViewSet(ListProtectedViewSet):
     else:
     # Retrieve student
       try:
-        studentParam = User.objects.get(username=student)
+        studentParam = User.objects.filter(Q(username=student) | Q(email=student)).first()
+        if studentParam is None:
+          raise User.DoesNotExist
       except User.DoesNotExist:
+        
         if isCourseAdmin(user, course):
           return returnNotFound(message="The user does not exist")
         else:

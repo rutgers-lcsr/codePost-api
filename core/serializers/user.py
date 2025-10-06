@@ -26,10 +26,11 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
   canCreateCourses = serializers.BooleanField(source="profile.canCreateCourses")
   canModifyRosters = serializers.BooleanField(source="profile.canModifyRosters")
   showProductTips = serializers.BooleanField(source="profile.showProductTips")
+  token = serializers.SerializerMethodField()
 
   class Meta:
     model = User
-    fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials')
+    fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials', 'token')
     POST_permissions_fields = ()
     extra_field_kwargs = {'url': {'lookup_field': 'email'}}
     read_only_fields = ('codePostAdmin',)
@@ -45,6 +46,25 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
       return True
     return False
 
+  def get_token(self, obj):
+    from core.views.auth import JWTSerializer
+ 
+    # check if user is authenticated or admin
+    request = self.context.get('request', None)
+    if not request or not request.user.is_authenticated:
+      return None
+
+    # do not return token if the requestor is not the user themselves or a superuser
+    user = self.context.get('request').user
+    if not user.is_authenticated:
+      return None
+    if not (user.is_superuser or user.id == obj.id):
+      return None
+    token = JWTSerializer.get_token(obj)
+    
+  
+    return str(token)
+  
   def create(self, validated_data):
     # Extract parameters that can't be used in User constructor
     profile = validated_data.pop('profile')

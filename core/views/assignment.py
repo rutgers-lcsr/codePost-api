@@ -300,7 +300,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     studentParam = None
     if student is not None:
       try:
-        studentParam = User.objects.get(username=student)
+        studentParam = User.objects.filter(Q(username=student) | Q(email=student)).first()
+        if studentParam is None:
+            raise User.DoesNotExist()
       except User.DoesNotExist:
         if isCourseAdmin(user, course):
           return returnNotFound(message="The user does not exist")
@@ -311,7 +313,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     graderParam = None
     if grader is not None:
       try:
-        graderParam = User.objects.get(username=grader)
+        graderParam = User.objects.filter(Q(username=grader) | Q(email=grader)).first()
+        if graderParam is None:
+            raise User.DoesNotExist()
       except User.DoesNotExist:
         if isCourseAdmin(user, course):
           return returnNotFound(message="The user does not exist")

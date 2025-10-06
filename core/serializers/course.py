@@ -33,7 +33,12 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     return timezone
 
   def get_assignments(self, obj):
+    
+    if not self.context.get('request'):
+      return []
+    
     user = self.context.get('request').user
+
     if (user.is_active):
         if (isCourseStaff(user, obj)):
             return list(map(lambda x: x.id, obj.assignments.all()))

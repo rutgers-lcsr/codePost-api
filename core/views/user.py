@@ -153,7 +153,8 @@ class UserViewSet(SuperUserListProtectedViewSet):
         raise serializers.ValidationError(
             "The only editable field is 'showProductTips'.")
 
-    serializer = UserSerializer(user)
+    serializer = UserSerializer(user, context={"request": request})
+
     return Response(serializer.data)
 
   @action(detail=False, methods=['POST'])
