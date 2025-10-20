@@ -45,3 +45,6 @@ cgi - was removed, quick fix: install legacy-cgi in python >3.12
 # ```
 
 # 6. Run the server: `./init.sh python manage.py runserver`
+
+
+Update readme to cause a commit to happen
