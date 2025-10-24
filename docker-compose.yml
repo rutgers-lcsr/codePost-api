@@ -50,7 +50,7 @@ services:
             timeout: 10s
             retries: 5
         volumes:
-            - codepost-datasets:/assignment_datasets
+            - datasets:/assignment_datasets
             - /var/run/docker.sock:/var/run/docker.sock
         restart: unless-stopped
         logging:
