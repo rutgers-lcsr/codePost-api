@@ -1,5 +1,7 @@
+from typing import TYPE_CHECKING
 from rest_framework import viewsets
 from rest_framework.response import Response
+from rest_framework.request import Request
 
 from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound
 from core.permissions.helpers import isAuthenticated
@@ -15,6 +17,8 @@ class ListPagination(PageNumberPagination):
 
 
 class ListProtectedViewSet(viewsets.ModelViewSet):
+  if TYPE_CHECKING:
+    request: Request
 
   def list(self, request):
     user = request.user

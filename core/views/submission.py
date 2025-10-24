@@ -148,6 +148,7 @@ class SubmissionViewSet(ListProtectedViewSet):
           return returnNotFound(message="The user does not exist")
         else:
           return returnForbidden()
+        
 
     # If you want to filter by the student, and want to post/patch/delete, you need to be the student
     # If you want to filter by the student, and get, then you need to be an admin, supergrader, or sectioNleader of student
@@ -159,12 +160,14 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     histories = submissionHistories.filter(student=studentParam) if studentParam is not None else submissionHistories
     if (request.method == "PATCH") and 'hasViewed' in request.data:
-        newFields = {"student": studentParam, "hasViewed": request.data['hasViewed']}
+        newFields = {"student": studentParam.email, "hasViewed": request.data['hasViewed']}
+
         serializer = SubmissionHistorySerializer(histories[0], newFields, many=False, context={"request": request})
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
     else:
         serializer = SubmissionHistorySerializer(histories, many=True, context={"request": request})
+        
     return Response(serializer.data)
 
 
@@ -277,7 +280,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     def retrieve_log_code(submission):
         try:
             logFile = File.objects.get(submission=submission, name="_tests.txt")
-            return logFile.code
+            return logFile.data
         except:
             return ''
 

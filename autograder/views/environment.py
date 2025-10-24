@@ -259,7 +259,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
 
         files = []
         for f in environment.solutionFiles.all():
-            files.append({"name": f.name, "code": f.code})
+            files.append({"name": f.name, "code": f.data})
 
         # Get all non external and file-defined test cases
         testCase_types_to_exclude = ["file", "external"]

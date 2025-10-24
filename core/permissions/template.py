@@ -1,4 +1,8 @@
+from abc import abstractmethod
 from rest_framework import permissions
+from rest_framework.request import Request
+from rest_framework.views import View
+from typing import Any
 
 
 class TemplatePermission(permissions.BasePermission):
@@ -11,6 +15,10 @@ class TemplatePermission(permissions.BasePermission):
         return self.has_object_permission(request, view, obj)
 
     return True
+
+  @abstractmethod
+  def has_object_permission(self, request: Request, view: View, obj: Any):
+    pass
 
 
 class SuperuserPermission(permissions.BasePermission):

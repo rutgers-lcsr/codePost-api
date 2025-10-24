@@ -3,6 +3,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+from django.conf import settings
 from core.auth import Authentications, type_of_auth
 from core.logging import logEvent
 from log.models import Event
@@ -35,24 +36,22 @@ def logError(request):
   fullstory = "https://app.fullstory.com/ui/MFFNS/segments/everyone/people:search:((NOW%2FDAY-29DAY:NOW%2FDAY%2B1DAY):((UserEmail:==:%22{}%22)):():():():)/0".format(
       user)
 
-  loginas = "https://codepost.io/loginas/{}".format(user)
+  loginas = "{}/loginAs?email={}".format(settings.CLIENT_URL, user)
 
-  message = ":warning: User error ({user} | {url} | <{fullstory}|Find on Fullstory> | <{loginas}|Login>)\n>>>*{error}*\n{errorDetail}".format(
+  message = ":warning: User error ({user} | {url} | <{loginas}|Login>)\n>>>*{error}*\n{errorDetail}".format(
       user=user, url=url, fullstory=fullstory, error=error, errorDetail=errorDetail, loginas=loginas)
 
 
   try:
     meta = {
-      url: url,
-      error: error,
-      errorDetail: errorDetail
+      "url": url,
+      "error": error,
+      "errorDetail": errorDetail,
+      "message": message,
     }
-    Event.objects.create(category="error", user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
+    Event.objects.create(category="UI Error", user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
   except:
     pass
-  logEvent("UI Error",
-           message=f"User Error: {error} by user {user.email} at {url}", level=logging.ERROR)
-  
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
@@ -74,8 +73,7 @@ def logHappiness(request):
           "footer": str(user),
       }
   ]
-  logEvent("User Happiness",
-           message=f"User Happiness: {message} by user {user.email} at {url}")
+  Event.objects.create(category="User Happiness", user=user.email, description=message, meta=json.dumps(attachments))
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
@@ -98,10 +96,8 @@ def logDump(request):
   description = heading.split('|')[0].strip()
   courseID = request.data.get('courseID', 0)
 
-  Event.objects.create(category="log", user=request.user.email, description=description, courseID=courseID, meta=json.dumps(attachments))
+  Event.objects.create(category="User Dump", user=request.user.email, description=description, courseID=courseID, meta=json.dumps(attachments))
 
-  logEvent("User Dump",
-           message=f"User Dump by user {request.user.email} with data: {request.data}")
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 

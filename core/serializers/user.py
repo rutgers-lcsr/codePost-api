@@ -12,7 +12,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 class UserSerializer(ModelSerializerWithPOSTCheck):
   organization = serializers.CharField(source="profile.organization.name", required=False, default='no organization set')
   api_token = serializers.PrimaryKeyRelatedField(source="profile.api_token", queryset=Token.objects.all())
-  # token = serializers.SerializerMethodField()
   password = serializers.CharField(write_only=True)
   studentCourses = serializers.SerializerMethodField()
   hasCredentials = serializers.SerializerMethodField()
@@ -27,7 +26,7 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
   canModifyRosters = serializers.BooleanField(source="profile.canModifyRosters")
   showProductTips = serializers.BooleanField(source="profile.showProductTips")
   token = serializers.SerializerMethodField()
-
+  
   class Meta:
     model = User
     fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials', 'token')
@@ -86,3 +85,11 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
 
   def get_codePostAdmin(self, obj):
     return obj.is_superuser
+  
+  def get_profile(self, obj):
+    try:
+      return obj.profile
+    except (AttributeError, Profile.DoesNotExist):
+      # Create profile if it doesn't exist
+      profile, created = Profile.objects.get_or_create(user=obj)
+      return profile

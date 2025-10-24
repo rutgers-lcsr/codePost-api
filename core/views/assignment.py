@@ -1,6 +1,8 @@
+from typing import TYPE_CHECKING
 from core.logging import logEvent
-from core.models import Course, Assignment, RubricCategory, RubricComment, Submission, File, TestCase, TestCategory
+from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
+from rest_framework.request import Request
 from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionStatusSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
@@ -10,7 +12,7 @@ from core.serializers.comment import CommentSerializer
 
 from core.serializers.testCase import TestCaseStudentSerializer
 from core.serializers.testCategory import TestCategorySerializer
-from core.serializers.file import FileValidationSerializerWithoutSubmission, FileStudentUploadSerializer
+from core.serializers.file import FileValidationSerializerWithoutSubmission, SubmissionFileStudentUploadSerializer
 
 
 from django.contrib.auth.models import User
@@ -48,7 +50,7 @@ from core.emails import StudentUploadReceiptEmail
 import logging
 logger = logging.getLogger(__name__)
 
-def encoded_zip(files):
+def encoded_zip(files: list[AssignmentFile]) -> str:
   """
   Create zip from files in memory
   """
@@ -56,7 +58,7 @@ def encoded_zip(files):
 
   with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
     for file in files:
-      zip_file.writestr(file.name, file.code)
+      zip_file.writestr(file.name, file.data)
 
   return base64.b64encode(zip_buffer.getvalue()).decode()
 
@@ -81,9 +83,15 @@ class AssignmentViewSet(ListProtectedViewSet):
   delete:
   Delete an assignment
   """
+  if TYPE_CHECKING:
+    request: Request
+  
   queryset = Assignment.objects.all()
   permission_classes = (IsAuthenticated, AssignmentPermissions)
   serializer_class = AssignmentSerializer
+
+  def get_object(self) -> Assignment:
+    return super().get_object()
 
   # return an assignment serializer with statistics if the user is allowed to see them
   def get_serializer_class(self):
@@ -199,6 +207,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     user = request.user
     assignment = self.get_object()
     course = assignment.course
+    amount = self.request.query_params.get('amount', 1)
 
     if not isGrader(user, course):
       return returnForbidden()
@@ -227,22 +236,34 @@ class AssignmentViewSet(ListProtectedViewSet):
         return returnNotFound(message="No such section")
 
     submission = None
-    if len(submissions) > 0:
-      submission = submissions[0]
+
+    if len(submissions) <= 0:
+      return Response(status=status.HTTP_204_NO_CONTENT)
+     
+    claimed_submissions = submissions[:int(amount)]
+    
+    for s in claimed_submissions:
       # Assign submission to grader
       # Doing this in this call is important, since it prevents two users from drawing the
       # save unassigned submission and subsequently trying to claim it
-      submission.grader = user
-      submission.save()
+      s.grader = user
+      s.save()
+    
 
-      serializerClass = SubmissionSerializer
-      if assignment.anonymousGrading and not canViewUnanonymizedSubmissions(user, course):
-        serializerClass = AnonymousSubmissionSerializer
 
-      serializer = serializerClass(submission, context={'request': request})
-      return Response(serializer.data)
-    else:
-      return Response(status=status.HTTP_204_NO_CONTENT)
+    serializerClass = SubmissionSerializer
+    if assignment.anonymousGrading and not canViewUnanonymizedSubmissions(user, course):
+      serializerClass = AnonymousSubmissionSerializer
+
+    
+    data = []
+    # serializer = serializerClass(claimed_submissions, context={'request': request})
+    
+    for s in claimed_submissions:
+      serializer = serializerClass(s, context={'request': request})
+      data.append(serializer.data)
+
+    return Response(data)
 
 # Optional arguments: username, grader
 # If neither specified, returns full list of submissions for this assignment
@@ -376,7 +397,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     return Response(serializer.data)
 
   @action(detail=True, methods=['GET'], pagination_class=DefaultPagination)
-  def submissionHistories(self, request, pk=None):
+  def submissionHistories(self, request: Request, pk=None):
     user = request.user
     assignment = self.get_object()  # => this endpoint has permissions at least as strict
     course = assignment.course
@@ -435,7 +456,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     })
 
   @action(detail=True, methods=["GET"])
-  def beforeStudentUpload(self, request, pk=None):
+  def beforeStudentUpload(self, request: Request, pk=None):
     """
     Get submission upload information
 
@@ -484,6 +505,37 @@ class AssignmentViewSet(ListProtectedViewSet):
           "adjustedDaysLate": handler.calculated_days_late()
       }, status=status.HTTP_200_OK)
 
+  @action(detail=True, methods=["GET"])
+  def download(self, request: Request, pk=None):
+    """
+    download all files for an assignment files as a zip
+    """
+    user = request.user
+    assignment = self.get_object()
+    course = assignment.course
+
+    if assignment.isVisible:
+      if not isCourseMember(user, course):
+        return returnForbidden()
+    else:
+      if not isCourseStaff(user, course):
+        return returnForbidden()
+
+
+    files = assignment.files.all()
+    if len(files) == 0:
+      return Response("No files to download", status=status.HTTP_204_NO_CONTENT)
+    
+    files_to_zip = []
+    for f in files:
+      files_to_zip.append(f)
+
+    encoded = encoded_zip(files_to_zip)
+    return Response({
+        "zip": encoded,
+        "filename": f"assignment{assignment.id}_files.zip"
+    })
+  
   # Upload assignment
   @action(detail=True, methods=["POST", "PATCH", "GET"])
   def studentUpload(self, request, pk=None):
@@ -513,42 +565,49 @@ class AssignmentViewSet(ListProtectedViewSet):
 
         try:
           serializer.is_valid(raise_exception=True)
-        except Exception as e:
-          e.detail['file'] = f['name']
-          raise ValidationError(e)
+        except ValidationError as e:
+          e.detail['file'] = f['name']  # type: ignore
+          raise
 
 
       otherSubs = Submission.objects.filter(assignment=pk, students__in=[user])
       if len(otherSubs) > 1:
         raise serializers.ValidationError("This student has multiple submissions for this assignment")
 
-      if len(otherSubs) == 1:
-        submission = otherSubs[0]
-
-        # Don't allow submission if the submission is finalized, unless we are in LiveFeedbackMode
-        if submission.isFinalized and not assignment.liveFeedbackMode:
-          raise serializers.ValidationError("Cannot edit this submission, grading has started.")
-
-        oldFiles = submission.files.all()
-        if (request.method == "POST"):
-          # Only if the request is a post do we replace all the submissions
-          for f in oldFiles:
-            f.delete()
-        submission.dateUploaded = now()
-
-        if assignment.liveFeedbackMode:
-          submission.isFinalized = False
-
-        submission.save()
-
-      else:
+      submission = otherSubs[0]
+      if not submission:
         submission = Submission.objects.create(assignment=assignment)
         submission.students.add(user)
         submission.save()
+      # Don't allow submission if the submission is finalized, unless we are in LiveFeedbackMode
+      if submission.isFinalized and not assignment.liveFeedbackMode:
+        raise serializers.ValidationError("Cannot edit this submission, grading has started.")
 
+      oldFiles = submission.files.all()
+      print(oldFiles)
+      if (request.method == "POST"):
+        # Only if the request is a post do we replace all the submissions
+        for f in oldFiles:
+          print(f)
+          f.delete()
+          
+          
       for f in request.data['files']:
-        file = File.objects.create(name=f['name'], code=f['code'], submission=submission, extension=f[
+        # Create new submission file
+        SubmissionFile.objects.create(name=f['name'], data=f['data'], submission=submission, extension=f[
                                    'extension'], path=f['path'] if f['path'] else None)
+
+      # Update submission date once files have been uploaded, triggers auto-execution celery task
+      submission.dateUploaded = now()
+
+      if assignment.liveFeedbackMode:
+        submission.isFinalized = False
+
+      submission.save()
+
+      
+
+      
 
       ###############################################################
       # [Begin] Late Logic
@@ -591,7 +650,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         # Remove any autogenerated test files from being exposed
         filesToReturn = submission.files.filter(hiddenBeforePublish=False)
         toRet = {
-            'id': submission.id, 'files': FileStudentUploadSerializer(filesToReturn, many=True).data
+            'id': submission.id, 'files': SubmissionFileStudentUploadSerializer(filesToReturn, many=True).data
         }
         return Response(toRet)
 
@@ -621,6 +680,21 @@ class AssignmentViewSet(ListProtectedViewSet):
     serializer = SubmissionWithTestsSerializer(submissions, many=True)
     return Response(serializer.data)
 
+
+  @action(detail=True, methods=["GET"])
+  def datasets(self, request, pk=None):
+    """
+    Return all datasets for this assignment
+    
+    GET /api/assignments/{id}/datasets/
+    """
+    from core.models import AssignmentDataSet
+    from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
+    
+    assignment = self.get_object()
+    datasets = AssignmentDataSet.objects.filter(assignment=assignment).order_by('name')
+    serializer = AssignmentDataSetSerializer(datasets, many=True, context={'request': request})
+    return Response(serializer.data)
 
   @action(detail=True, methods=["POST"])
   def clone(self, request, pk=None):

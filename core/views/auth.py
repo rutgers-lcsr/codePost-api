@@ -45,6 +45,7 @@ class JWTSerializer(serializers.TokenObtainSlidingSerializer):
     data = super().validate(attrs)
     
     self.context['request'].user = self.user
+    # raise Exception(f"{self.user} {self.user.profile}")
     data['user'] = UserSerializer(self.user, context=self.context).data
     data['user']['token'] = data['token']
 

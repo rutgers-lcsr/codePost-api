@@ -6,6 +6,7 @@ class CoreConfig(AppConfig):
     name = 'core'
     
     def ready(self):
-        pass
-
+        # Import signals to connect them
+        import core.signals  # noqa: F401
+        
         # logEvent("Core App Ready", message="Core app has been initialized and logging handler added.")

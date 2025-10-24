@@ -3,7 +3,7 @@ import pytz
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Submission, User
-from core.serializers.file import FileSerializer
+from core.serializers.file import FileSerializer, SubmissionFileSerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 from core.permissions.helpers import isStudent, isGrader, should_use_student_captions
 from datetime import timezone
@@ -49,6 +49,8 @@ class SubmissionSerializerWithoutFiles(ModelSerializerWithPOSTCheck):
     return ret
 
 class SubmissionSerializer(SubmissionSerializerWithoutFiles):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
 
   class Meta(SubmissionSerializerWithoutFiles.Meta):
     fields = SubmissionSerializerWithoutFiles.Meta.fields + ('files',)
@@ -139,6 +141,8 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
 
 
 class AnonymousSubmissionSerializer(serializers.ModelSerializer):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
   grader = serializers.SlugRelatedField(many=False, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
@@ -169,6 +173,8 @@ class SubmissionStatusSerializer(serializers.ModelSerializer):
                         'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'testRunsCompleted', 'lateDayCreditsUsed')
 
 class StudentSubmissionSerializer(serializers.ModelSerializer):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
@@ -181,6 +187,8 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
                         'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
 
 class StudentSubmissionWithoutGradeSerializer(serializers.ModelSerializer):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)

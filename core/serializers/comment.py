@@ -52,7 +52,7 @@ class CommentSerializer(ModelSerializerWithPOSTCheck):
       data['startChar'] = data.get('startChar', 0)
 
       try:
-        fallback = len(data['file'].code.split('\n')[data['endLine']])
+        fallback = len(data['file'].data.split('\n')[data['endLine']])
       except:
         fallback = 0
 
@@ -82,15 +82,15 @@ class CommentSerializer(ModelSerializerWithPOSTCheck):
 
       if proposedFields['file'].extension in ['ipynb', '.ipynb']:
         # FIXME: To dynamically calculate the number of cells in a Jupyter Notebook, we need to do two things:
-        # 1) len(json.loads(proposedFields['file'].code['cells']))
+        # 1) len(json.loads(proposedFields['file'].data['cells']))
         # 2) Calc array length of all cell types (e.g. Markdown, Output, Code)
         #
         # Hardcoding the number of cells makes the API vulnerable to saving invalid comments (beyond the length scope of the file)
         numMatches = 20000
       else:
-        numMatches = len(re.findall("\n", proposedFields['file'].code)) + 1
+        numMatches = len(re.findall("\n", proposedFields['file'].data)) + 1
       if proposedFields['endLine'] > numMatches:
-        raise serializers.ValidationError("endLine exceeds the lines in the specified file's code")
+        raise serializers.ValidationError("endLine exceeds the lines in the specified file's data")
 
     if 'color' in proposedFields and proposedFields['color'] is not None:
       if proposedFields['color'] != '':

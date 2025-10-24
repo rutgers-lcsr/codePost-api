@@ -41,7 +41,7 @@ def parseTests(testCases, language):
 
 
 def parseSourceFile(sourceFile, includeName=False):
-    template_string = sourceFile.code
+    template_string = sourceFile.data
     return {
         "id": sourceFile.id,
         "name": sourceFile.name,

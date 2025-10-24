@@ -20,7 +20,7 @@ from rest_framework_simplejwt.views import TokenRefreshSlidingView, TokenVerifyV
 from core.views.auth import obtain_jwt_token, ImpersonateView
 
 from rest_framework.renderers import JSONOpenAPIRenderer
-
+from rest_framework.viewsets import ViewSet
 from core.views.user import UserViewSet
 from core.views.course import CourseViewSet
 from core.views.submission import SubmissionViewSet
@@ -31,11 +31,14 @@ from core.views.comment import CommentViewSet
 from core.views.rubricCategory import RubricCategoryViewSet
 from core.views.rubricComment import RubricCommentViewSet
 from core.views.file import FileViewSet
-from core.views.fileTemplate import FileTemplateViewSet
+from core.views.submissionFile import SubmissionFileViewSet
+from core.views.assignmentFile import AssignmentFileViewSet
+from core.views.courseFile import CourseFileViewSet
 from core.views.comment import CommentViewSet
 from core.views.submissionTest import SubmissionTestViewSet
 from core.views.testCase import TestCaseViewSet
 from core.views.testCategory import TestCategoryViewSet
+from core.views.assignmentDataSet import AssignmentDataSetViewSet
 
 from webhooks.view import WebhookViewSet
 
@@ -49,7 +52,16 @@ from django.http import HttpResponse
 def health_check(request):
     return HttpResponse(status=200)
 
+class RedirectToAdminViewSet(ViewSet):
+    """
+    A simple ViewSet that redirects to the admin interface.
+    """
+    def list(self, request):
+        from django.shortcuts import redirect
+        return redirect('/admin/')
+
 router = routers.DefaultRouter()
+router.register(r'admin', RedirectToAdminViewSet, basename='admin-redirect')
 router.register(r'users', UserViewSet)
 router.register(r'courses', CourseViewSet)
 router.register(r'submissions', SubmissionViewSet)
@@ -60,14 +72,16 @@ router.register(r'comments', CommentViewSet)
 router.register(r'rubricCategories', RubricCategoryViewSet)
 router.register(r'rubricComments', RubricCommentViewSet)
 router.register(r'files', FileViewSet)
-router.register(r'fileTemplates', FileTemplateViewSet)
+router.register(r'submissionFiles', SubmissionFileViewSet)
+router.register(r'assignmentFiles', AssignmentFileViewSet)
+router.register(r'courseFiles', CourseFileViewSet)
+# router.register(r'fileTemplates', AssignmentFileViewSet)  # Deprecated - redirects to AssignmentFileViewSet
 router.register(r'testCases', TestCaseViewSet)
 router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'testCategories', TestCategoryViewSet)
+router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
 # router.register(r'billing', BillingViewSet, basename='billing')
-
-webhooks_router = routers.DefaultRouter()
-webhooks_router.register(r'webhooks', WebhookViewSet)
+router.register(r'webhooks', WebhookViewSet)
 
 #############################################
 # CoreAPI (built into Django)
@@ -100,5 +114,4 @@ urlpatterns = [
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     re_path('', include(router.urls)),
-    re_path('', include(webhooks_router.urls)),
 ]

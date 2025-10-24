@@ -1,4 +1,11 @@
 # External libraries
+from ast import Sub
+from calendar import c
+from operator import is_
+import os
+from socket import timeout
+import threading
+from celery import shared_task
 import requests
 from enum import Enum
 import json
@@ -6,6 +13,7 @@ from django.contrib.auth.models import User
 
 # Internal imports
 from autograder.celery import app, logger
+from autograder.services.executor import ExecutionResult, Executor
 from codepost.settings import AUTOGRADER_URL
 from autograder.testUtils.logging import (
     AutograderError,
@@ -16,6 +24,7 @@ from autograder.testUtils.logging import (
 )
 
 from core.models import (
+    SubmissionFile,
     TestCase,
     SubmissionTest,
     Submission,
@@ -27,6 +36,7 @@ from core.models import (
     Assignment,
 )
 from core.serializers.submissionTest import SubmissionTestSerializer
+from core.tests.views.results import assignment
 from log.models import Event, TrackedAutograderRun
 
 from core.permissions.helpers import isStaffOfSub
@@ -58,6 +68,7 @@ def add(x, y):
 @app.task
 def RunAll(environmentID, user, sendEmail=False):
     """
+    Deprecated Autograder Run All Task
     This celery task takes an environment and runs all test on all submissions.
     It updates the progress of the task after each submission run.
     """
@@ -97,7 +108,7 @@ def RunAll(environmentID, user, sendEmail=False):
         try:
             fileObjs = s.files.all()
             files = [
-                {"name": f.name, "code": f.code, "path": f.path if f.path else ""}
+                {"name": f.name, "code": f.data, "path": f.path if f.path else ""}
                 for f in fileObjs
             ]
             (response, logs) = _runTests(
@@ -192,6 +203,130 @@ class RunType(str, Enum):
     SourceFile = "SOURCEFILE"
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def RunSubmission(self, submissionID: int):
+    """
+    This celery task runs all executable files in a submission to cache execution results.
+    This prevents repeated execution of student code when viewing test results or re-running tests.
+    
+    The task will automatically retry up to 3 times if it fails, with a 60-second delay between retries.
+    
+    Args:
+        submissionID (int): The ID of the submission to run.
+        
+    Returns:
+        dict: Summary of execution results
+        
+    Raises:
+        Submission.DoesNotExist: If submission ID is invalid
+        Exception: If execution fails after all retries
+    """
+    try:
+        submission = Submission.objects.get(id=submissionID)
+    except Submission.DoesNotExist:
+        logger.error(f"Submission {submissionID} not found")
+        return {"success": False, "error": "Submission not found"}
+
+    file_objs = submission.files.all()
+    
+    if not file_objs or len(file_objs) == 0:
+        logger.info(f"No files found for submission {submissionID}")
+        return {"success": True, "message": "No files to execute", "files_processed": 0}
+    
+    # Look for file with excutionable extension
+    files: list[SubmissionFile] = []
+
+
+    for f in file_objs:
+        if Executor.is_executable_file(file=f.name):
+            files.append(f)
+    
+    
+    # If no executable file found, return
+    if not files or len(files) == 0:
+        logger.info(f"No executable file found for submission {submissionID}")
+        return {"success": True, "message": "No executable files found", "files_processed": 0}
+
+    logger.info(f"Running submission {submissionID} with {len(files)} executable files out of {len(file_objs)} total files")
+
+    results = []
+    successful = 0
+    failed = 0
+    
+    try:
+        for f in files:
+            result = None  # type: ignore[ExecutionResult]
+            execution_error = None
+            execution_complete = threading.Event()
+            executor = Executor.factory(f)
+            
+            if not executor:
+                logger.info(f"File {f.id} has no executor, skipping.")
+                failed += 1
+                results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": "No executor available"})
+                continue
+            
+            def execute_thread():
+                """Execute in background thread"""
+                nonlocal executor, result, execution_error
+                try:
+                    if not executor:
+                        raise ValueError("No executor found for file.")
+                    result = executor.execute()
+                except Exception as e:
+                    logger.error(f"[RunSubmission] Execution failed: {e}", exc_info=True)
+                    execution_error = e
+                finally:
+                    execution_complete.set()
+            
+            # Start execution in background thread
+            exec_thread = threading.Thread(target=execute_thread, daemon=True)
+            exec_thread.start()
+            
+            # Wait for thread to complete (with reasonable timeout)
+            exec_thread.join(timeout=300)  # 5 minutes max per file
+
+            if execution_error:
+                logger.error(f"[RunSubmission] Execution error for file {f.id}: {execution_error}", exc_info=True)
+                failed += 1
+                results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": str(execution_error)})
+                continue
+
+            if result is None:
+                logger.warning(f"[RunSubmission] Execution did not complete for file {f.id}")
+                failed += 1
+                results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": "Execution timeout or incomplete"})
+                continue
+            
+            # Save the cached result
+            try:
+                result.save_cache(f)
+                successful += 1
+                results.append({"file_id": f.id, "file_name": f.name, "success": True, "execution_time": result.execution_time})
+                logger.info(f"[RunSubmission] Successfully cached execution for file {f.id}")
+            except Exception as e:
+                logger.error(f"[RunSubmission] Failed to save cache for file {f.id}: {e}")
+                failed += 1
+                results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": f"Cache save failed: {str(e)}"})
+    
+    except Exception as e:
+        logger.error(f"[RunSubmission] Unexpected error processing submission {submissionID}: {e}", exc_info=True)
+        # Retry the task if we hit an unexpected error
+        raise self.retry(exc=e)
+    
+    summary = {
+        "success": True,
+        "submission_id": submissionID,
+        "files_processed": len(files),
+        "successful": successful,
+        "failed": failed,
+        "results": results
+    }
+    
+    logger.info(f"[RunSubmission] Completed submission {submissionID}: {successful} successful, {failed} failed")
+    return summary
+
+
 @app.task
 def Run(
     user,
@@ -205,6 +340,8 @@ def Run(
     run_by_role="unknown",
 ):
     """
+    Removing Autograder Run Task
+    
     This celery task does a single run of tests on an object of type Submission, TestCase, or SourceFile
     For type TestCase or SourceFile, an optional submissionID can be passed in to be run on. If not, solution files will be used.
     For type Submission, all tests are run.
@@ -212,6 +349,9 @@ def Run(
     Files: Submission(pk).files if type Submission else Submission(subID) if subID else SolutionFiles
     Tests: TestCase(pk) if type TestCase else SourceFile(pk) if type SourceFile else All Tests
     """
+
+    return False
+
     environment = Environment.objects.get(id=environmentID)
     assignment = environment.assignment
     type = RunType(json.loads(type))
@@ -235,7 +375,7 @@ def Run(
             submission.files.all() if submission else environment.solutionFiles.all()
         )
         files = [
-            {"name": f.name, "code": f.code, "path": f.path if f.path else ""}
+            {"name": f.name, "code": f.data, "path": f.path if f.path else ""}
             for f in fileObjs
         ]
 
@@ -451,7 +591,7 @@ def _runTests(
     tracked_autograder_run.save()
     ########################### 1. Process files ###########################################
     helpers = [
-        {"name": f.name, "code": f.code, "path": _parseFilePath(f.path)}
+        {"name": f.name, "code": f.data, "path": _parseFilePath(f.path)}
         for f in environment.helperFiles.all()
     ]
 
@@ -717,7 +857,7 @@ def _runAndDump(environment, submission, logs):
     if environment.dumpMode and submission:
         try:
             testFile = File.objects.get(submission=submission, name="_tests.txt")
-            testFile.code = logs
+            testFile.data = logs
             testFile.save()
         except:
             testFile = File.objects.create(

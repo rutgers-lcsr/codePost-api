@@ -19,6 +19,8 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   maxStudentTestRuns = serializers.SerializerMethodField('get_max_test_runs')
   exposeDumpLogs = serializers.SerializerMethodField('get_expose_dump_logs')
   nudgeMode = serializers.SerializerMethodField('get_nudge_mode')
+  files = serializers.SerializerMethodField('get_files')
+  fileTemplates = serializers.SerializerMethodField('get_file_templates')
 
   lateDeductions = serializers.JSONField(default=[])
 
@@ -40,6 +42,14 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
     else:
       return None
 
+  def get_files(self, obj):
+    # Return IDs of AssignmentFile objects
+    return list(obj.files.values_list('id', flat=True))
+
+  def get_file_templates(self, obj):
+    # FileTemplate is deprecated - return empty array for backwards compatibility
+    return []
+
   def validate(self, data):
 
     newData = super().validate(data)
@@ -56,9 +66,9 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   class Meta:
     model = Assignment
     fields = ('id', 'name', 'isReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
-              'uploadDueDate', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'exposeDumpLogs', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions')
+              'uploadDueDate', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'exposeDumpLogs', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions')
     POST_permissions_fields = ('course',)
-    read_only_fields = ('rubricCategories', 'fileTemplates', 'environment', 'maxStudentTestRuns', 'exposeDumpLogs', 'nudgeMode')
+    read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'exposeDumpLogs', 'nudgeMode')
 
 
 class AssignmentStudentSerializer(AssignmentSerializerBase):
