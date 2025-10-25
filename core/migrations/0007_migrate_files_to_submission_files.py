@@ -138,19 +138,6 @@ def copy_submission_data_from_file(apps, schema_editor):
     This runs after the columns are added to SubmissionFile but before File columns are removed.
     """
     with schema_editor.connection.cursor() as cursor:
-        # Check if submission_id still exists in File
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'submission_id'
-        """)
-        
-        if cursor.fetchone()[0] == 0:
-            print("✓ submission_id already removed from File, skipping data copy")
-            return
-        
         # Copy data from File to SubmissionFile
         cursor.execute("""
             UPDATE core_submissionfile sf
