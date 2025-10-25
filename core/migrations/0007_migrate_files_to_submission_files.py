@@ -296,17 +296,7 @@ class Migration(migrations.Migration):
             migrations.RunPython.noop,
         ),
         
-        # Step 6: Remove old fields from File model
-        migrations.RemoveField(
-            model_name="file",
-            name="submission",
-        ),
-        migrations.RemoveField(
-            model_name="file",
-            name="hiddenBeforePublish",
-        ),
-        
-        # Step 6b: Now add submission and hiddenBeforePublish to SubmissionFile
+        # Step 6a: Add submission and hiddenBeforePublish to SubmissionFile BEFORE removing from File
         # Add as nullable first, then populate, then make NOT NULL
         migrations.AddField(
             model_name="submissionfile",
@@ -328,13 +318,13 @@ class Migration(migrations.Migration):
             ),
         ),
         
-        # Step 6c: Populate submission_id and hiddenBeforePublish from parent File table
+        # Step 6b: Populate submission_id and hiddenBeforePublish from parent File table
         migrations.RunPython(
             copy_submission_data_from_file,
             migrations.RunPython.noop,
         ),
         
-        # Step 6d: Make submission NOT NULL now that data is populated
+        # Step 6c: Make submission NOT NULL now that data is populated
         migrations.AlterField(
             model_name="submissionfile",
             name="submission",
@@ -344,6 +334,16 @@ class Migration(migrations.Migration):
                 related_name="files",
                 to="core.submission",
             ),
+        ),
+        
+        # Step 6d: NOW remove old fields from File model (after copying to SubmissionFile)
+        migrations.RemoveField(
+            model_name="file",
+            name="submission",
+        ),
+        migrations.RemoveField(
+            model_name="file",
+            name="hiddenBeforePublish",
         ),
         
         # Step 7: Update other model fields (from original migration)
