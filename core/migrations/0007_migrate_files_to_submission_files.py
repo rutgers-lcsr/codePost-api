@@ -27,6 +27,7 @@ def rename_fields_in_file(apps, schema_editor):
     """
     Rename submission and hiddenBeforePublish to temporary names.
     This allows us to add them to SubmissionFile without conflicts.
+    Also drops the foreign key constraint on submission_id.
     """
     with schema_editor.connection.cursor() as cursor:
         # Check if submission_id exists (not already renamed)
@@ -39,6 +40,21 @@ def rename_fields_in_file(apps, schema_editor):
         """)
         
         if cursor.fetchone()[0] > 0:
+            # First, drop the foreign key constraint
+            cursor.execute("""
+                SELECT CONSTRAINT_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'core_file'
+                AND COLUMN_NAME = 'submission_id'
+                AND REFERENCED_TABLE_NAME IS NOT NULL
+            """)
+            fk_result = cursor.fetchone()
+            if fk_result:
+                fk_name = fk_result[0]
+                print(f"→ Dropping foreign key constraint {fk_name}")
+                cursor.execute(f"ALTER TABLE core_file DROP FOREIGN KEY {fk_name}")
+            
             print("→ Renaming submission_id to temp_submission_id in File")
             cursor.execute("ALTER TABLE core_file CHANGE COLUMN submission_id temp_submission_id bigint")
         else:
@@ -186,6 +202,58 @@ def copy_submission_data_from_file(apps, schema_editor):
         
         rows_updated = cursor.rowcount
         print(f"✓ Copied submission data for {rows_updated} SubmissionFile records")
+
+
+def cleanup_temp_columns(apps, schema_editor):
+    """
+    Drop temporary columns from File table.
+    Drops any remaining indexes first to avoid constraint errors.
+    """
+    with schema_editor.connection.cursor() as cursor:
+        # Check if temp_submission_id exists
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'temp_submission_id'
+        """)
+        
+        if cursor.fetchone()[0] > 0:
+            # Drop any indexes on temp_submission_id
+            cursor.execute("""
+                SELECT DISTINCT INDEX_NAME
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'core_file'
+                AND COLUMN_NAME = 'temp_submission_id'
+                AND INDEX_NAME != 'PRIMARY'
+            """)
+            
+            for (index_name,) in cursor.fetchall():
+                try:
+                    print(f"→ Dropping index {index_name} on temp_submission_id")
+                    cursor.execute(f"ALTER TABLE core_file DROP INDEX {index_name}")
+                except Exception as e:
+                    print(f"  Note: Could not drop index {index_name}: {e}")
+            
+            print("→ Dropping temp_submission_id column")
+            cursor.execute("ALTER TABLE core_file DROP COLUMN temp_submission_id")
+        
+        # Check if temp_hiddenBeforePublish exists
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'temp_hiddenBeforePublish'
+        """)
+        
+        if cursor.fetchone()[0] > 0:
+            print("→ Dropping temp_hiddenBeforePublish column")
+            cursor.execute("ALTER TABLE core_file DROP COLUMN temp_hiddenBeforePublish")
+        
+        print("✓ Cleaned up temporary columns")
 
 
 class Migration(migrations.Migration):
@@ -396,14 +464,10 @@ class Migration(migrations.Migration):
         ),
         
         # Step 6d: NOW remove temp fields from File model (after copying to SubmissionFile)
-        # Use RunSQL since these are temporary columns we created, not Django fields
-        migrations.RunSQL(
-            sql="""
-                ALTER TABLE core_file 
-                DROP COLUMN IF EXISTS temp_submission_id,
-                DROP COLUMN IF EXISTS temp_hiddenBeforePublish
-            """,
-            reverse_sql=migrations.RunSQL.noop,
+        # Use custom function to safely drop columns and their indexes
+        migrations.RunPython(
+            cleanup_temp_columns,
+            migrations.RunPython.noop,
         ),
         
         # Step 7: Update other model fields (from original migration)
