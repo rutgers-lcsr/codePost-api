@@ -202,11 +202,21 @@ class Migration(migrations.Migration):
             migrations.RunPython.noop,
         ),
         
-        # Step 1b: Rename submission and hiddenBeforePublish to temporary names
+        # Step 1b: Rename submission and hiddenBeforePublish to temporary names in database
         # This allows us to add them to SubmissionFile without field name conflicts
         migrations.RunPython(
             rename_fields_in_file,
             migrations.RunPython.noop,
+        ),
+        
+        # Step 1c: Remove from Django's state so we can add to SubmissionFile
+        migrations.RemoveField(
+            model_name="file",
+            name="submission",
+        ),
+        migrations.RemoveField(
+            model_name="file",
+            name="hiddenBeforePublish",
         ),
         
         # Step 2: Alter File model fields
