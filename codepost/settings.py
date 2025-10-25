@@ -101,6 +101,7 @@ if SECRET_KEY == "your secret key":
 # Allowed host settings
 ALLOWED_HOSTS = [
     "codepost-api.cs.rutgers.edu",
+    "dev-codepost-2.cs.rutgers.edu",
     "128.6.13.52",  
     "172.16.71.211",
 ]
@@ -163,7 +164,10 @@ REST_FRAMEWORK = {
 # CORS settings
 # https://pypi.org/project/django-cors-headers/
 
-CORS_ORIGIN_REGEX_WHITELIST = (r"^.*$",)
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = ["*"]
+CORS_ALLOW_METHODS = ["*"]
 
 CSRF_TRUSTED_ORIGINS = (
     "http://localhost",
