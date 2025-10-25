@@ -166,7 +166,24 @@ REST_FRAMEWORK = {
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_HEADERS = ["*"]
+CORS_ALLOW_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+    "User-Agent",
+    "Referer",
+    "Accept-Encoding",
+    "Accept-Language",
+    "DNT",
+    "Connection",
+    "Cookie",
+    "If-Modified-Since",
+    "Cache-Control",
+    "Pragma",
+    "X-CSRFToken",
+]
 CORS_ALLOW_METHODS = ["*"]
 
 CSRF_TRUSTED_ORIGINS = (
