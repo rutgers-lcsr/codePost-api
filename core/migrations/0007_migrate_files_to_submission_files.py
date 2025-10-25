@@ -23,6 +23,43 @@ def safe_rename_code_to_data(apps, schema_editor):
             print("✓ Column 'code' already renamed to 'data', skipping")
 
 
+def rename_fields_in_file(apps, schema_editor):
+    """
+    Rename submission and hiddenBeforePublish to temporary names.
+    This allows us to add them to SubmissionFile without conflicts.
+    """
+    with schema_editor.connection.cursor() as cursor:
+        # Check if submission_id exists (not already renamed)
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'submission_id'
+        """)
+        
+        if cursor.fetchone()[0] > 0:
+            print("→ Renaming submission_id to temp_submission_id in File")
+            cursor.execute("ALTER TABLE core_file CHANGE COLUMN submission_id temp_submission_id bigint")
+        else:
+            print("✓ submission_id already renamed or removed")
+        
+        # Check if hiddenBeforePublish exists (not already renamed)
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'hiddenBeforePublish'
+        """)
+        
+        if cursor.fetchone()[0] > 0:
+            print("→ Renaming hiddenBeforePublish to temp_hiddenBeforePublish in File")
+            cursor.execute("ALTER TABLE core_file CHANGE COLUMN hiddenBeforePublish temp_hiddenBeforePublish tinyint(1) NOT NULL DEFAULT 0")
+        else:
+            print("✓ hiddenBeforePublish already renamed or removed")
+
+
 def check_hidden_in_file(apps, schema_editor):
     """Check if hiddenBeforePublish exists in File table"""
     with schema_editor.connection.cursor() as cursor:
@@ -42,17 +79,17 @@ def migrate_existing_files_to_submissionfiles(apps, schema_editor):
     This happens AFTER SubmissionFile table is created but BEFORE fields are removed from File.
     """
     with schema_editor.connection.cursor() as cursor:
-        # Check if submission_id still exists in File
+        # Check if temp_submission_id exists in File (after rename)
         cursor.execute("""
             SELECT COUNT(*)
             FROM information_schema.COLUMNS
             WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'submission_id'
+            AND COLUMN_NAME = 'temp_submission_id'
         """)
         
         if cursor.fetchone()[0] == 0:
-            print("✓ submission_id already removed from File, skipping data migration")
+            print("✓ temp_submission_id doesn't exist, skipping data migration")
             return
         
         # Check if SubmissionFile records already exist
@@ -67,7 +104,7 @@ def migrate_existing_files_to_submissionfiles(apps, schema_editor):
         # This creates the child table entry pointing to the existing File parent record
         cursor.execute("""
             INSERT INTO core_submissionfile (file_ptr_id)
-            SELECT id FROM core_file WHERE submission_id IS NOT NULL
+            SELECT id FROM core_file WHERE temp_submission_id IS NOT NULL
         """)
         
         rows_migrated = cursor.rowcount
@@ -134,17 +171,17 @@ def migrate_filetemplates_to_assignmentfiles(apps, schema_editor):
 
 def copy_submission_data_from_file(apps, schema_editor):
     """
-    Copy submission_id and hiddenBeforePublish from File table to SubmissionFile table.
-    This runs after the columns are added to SubmissionFile but before File columns are removed.
+    Copy temp_submission_id and temp_hiddenBeforePublish from File table to SubmissionFile table.
+    This runs after the columns are added to SubmissionFile.
     """
     with schema_editor.connection.cursor() as cursor:
-        # Copy data from File to SubmissionFile
+        # Copy data from File temp columns to SubmissionFile
         cursor.execute("""
             UPDATE core_submissionfile sf
             INNER JOIN core_file f ON sf.file_ptr_id = f.id
             SET 
-                sf.submission_id = f.submission_id,
-                sf.hiddenBeforePublish = COALESCE(f.hiddenBeforePublish, 0)
+                sf.submission_id = f.temp_submission_id,
+                sf.hiddenBeforePublish = COALESCE(f.temp_hiddenBeforePublish, 0)
         """)
         
         rows_updated = cursor.rowcount
@@ -162,6 +199,13 @@ class Migration(migrations.Migration):
         # Step 1: Safely rename 'code' to 'data' (handles partial state)
         migrations.RunPython(
             safe_rename_code_to_data,
+            migrations.RunPython.noop,
+        ),
+        
+        # Step 1b: Rename submission and hiddenBeforePublish to temporary names
+        # This allows us to add them to SubmissionFile without field name conflicts
+        migrations.RunPython(
+            rename_fields_in_file,
             migrations.RunPython.noop,
         ),
         
@@ -336,14 +380,15 @@ class Migration(migrations.Migration):
             ),
         ),
         
-        # Step 6d: NOW remove old fields from File model (after copying to SubmissionFile)
-        migrations.RemoveField(
-            model_name="file",
-            name="submission",
-        ),
-        migrations.RemoveField(
-            model_name="file",
-            name="hiddenBeforePublish",
+        # Step 6d: NOW remove temp fields from File model (after copying to SubmissionFile)
+        # Use RunSQL since these are temporary columns we created, not Django fields
+        migrations.RunSQL(
+            sql="""
+                ALTER TABLE core_file 
+                DROP COLUMN IF EXISTS temp_submission_id,
+                DROP COLUMN IF EXISTS temp_hiddenBeforePublish
+            """,
+            reverse_sql=migrations.RunSQL.noop,
         ),
         
         # Step 7: Update other model fields (from original migration)
