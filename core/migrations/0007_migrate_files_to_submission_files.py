@@ -5,6 +5,39 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def safe_rename_code_to_data(apps, schema_editor):
+    """
+    Safely rename 'code' to 'data' if the 'code' column exists.
+    This handles partial migration runs where the rename may have already occurred.
+    """
+    db_alias = schema_editor.connection.alias
+    with schema_editor.connection.cursor() as cursor:
+        # Check if 'code' column exists
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'code'
+        """)
+        code_exists = cursor.fetchone()[0] > 0
+        
+        if code_exists:
+            print("ℹ Renaming 'code' column to 'data' in core_file table")
+            cursor.execute("ALTER TABLE core_file CHANGE COLUMN code data LONGTEXT NOT NULL")
+        else:
+            print("ℹ Column 'code' already renamed to 'data' (or never existed), skipping rename")
+
+
+def reverse_rename_data_to_code(apps, schema_editor):
+    """
+    Reverse the rename operation
+    """
+    db_alias = schema_editor.connection.alias
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("ALTER TABLE core_file CHANGE COLUMN data code LONGTEXT NOT NULL")
+
+
 def migrate_files_to_submission_files(apps, schema_editor):
     """
     Migrate existing File records with submissions to SubmissionFile records.
@@ -129,11 +162,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Step 1: Rename 'code' field to 'data' on File model
-        migrations.RenameField(
-            model_name="file",
-            old_name="code",
-            new_name="data",
+        # Step 1: Safely rename 'code' field to 'data' on File model (handles partial migrations)
+        migrations.RunPython(
+            safe_rename_code_to_data,
+            reverse_rename_data_to_code,
         ),
         
         # Step 2: Alter other fields on File model
