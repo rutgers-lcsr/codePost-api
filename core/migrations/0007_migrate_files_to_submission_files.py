@@ -126,6 +126,109 @@ def migrate_filetemplates_to_assignment_files(apps, schema_editor):
     print(f"✓ Migrated {len(assignment_files_to_create)} FileTemplate records to AssignmentFile")
 
 
+def safe_create_submissionfile_table(apps, schema_editor):
+    """
+    Safely create SubmissionFile table if it doesn't exist.
+    Handles partial migration runs.
+    """
+    db_alias = schema_editor.connection.alias
+    
+    with schema_editor.connection.cursor() as cursor:
+        # Check if table exists
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_submissionfile'
+        """)
+        table_exists = cursor.fetchone()[0] > 0
+        
+        if table_exists:
+            print("ℹ Table 'core_submissionfile' already exists, skipping creation")
+            return
+        
+        # Create the table manually
+        print("ℹ Creating table 'core_submissionfile'")
+        cursor.execute("""
+            CREATE TABLE `core_submissionfile` (
+                `file_ptr_id` bigint NOT NULL PRIMARY KEY,
+                CONSTRAINT `core_submissionfile_file_ptr_id_fk` 
+                    FOREIGN KEY (`file_ptr_id`) 
+                    REFERENCES `core_file` (`id`)
+            )
+        """)
+
+
+def safe_create_assignmentfile_table(apps, schema_editor):
+    """
+    Safely create AssignmentFile table if it doesn't exist.
+    """
+    db_alias = schema_editor.connection.alias
+    
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_assignmentfile'
+        """)
+        table_exists = cursor.fetchone()[0] > 0
+        
+        if table_exists:
+            print("ℹ Table 'core_assignmentfile' already exists, skipping creation")
+            return
+        
+        print("ℹ Creating table 'core_assignmentfile'")
+        cursor.execute("""
+            CREATE TABLE `core_assignmentfile` (
+                `file_ptr_id` bigint NOT NULL PRIMARY KEY,
+                `assignment_id` bigint NOT NULL,
+                `required` tinyint(1) NOT NULL DEFAULT 0,
+                `description` longtext NOT NULL,
+                CONSTRAINT `core_assignmentfile_file_ptr_id_fk` 
+                    FOREIGN KEY (`file_ptr_id`) 
+                    REFERENCES `core_file` (`id`),
+                CONSTRAINT `core_assignmentfile_assignment_id_fk`
+                    FOREIGN KEY (`assignment_id`)
+                    REFERENCES `core_assignment` (`id`)
+            )
+        """)
+
+
+def safe_create_coursefile_table(apps, schema_editor):
+    """
+    Safely create CourseFile table if it doesn't exist.
+    """
+    db_alias = schema_editor.connection.alias
+    
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_coursefile'
+        """)
+        table_exists = cursor.fetchone()[0] > 0
+        
+        if table_exists:
+            print("ℹ Table 'core_coursefile' already exists, skipping creation")
+            return
+        
+        print("ℹ Creating table 'core_coursefile'")
+        cursor.execute("""
+            CREATE TABLE `core_coursefile` (
+                `file_ptr_id` bigint NOT NULL PRIMARY KEY,
+                `course_id` bigint NOT NULL,
+                CONSTRAINT `core_coursefile_file_ptr_id_fk` 
+                    FOREIGN KEY (`file_ptr_id`) 
+                    REFERENCES `core_file` (`id`),
+                CONSTRAINT `core_coursefile_course_id_fk`
+                    FOREIGN KEY (`course_id`)
+                    REFERENCES `core_course` (`id`)
+            )
+        """)
+
+
 def copy_submission_data_to_child_table(apps, schema_editor):
     """
     Copy submission_id and hiddenBeforePublish data from core_file table 
@@ -137,6 +240,33 @@ def copy_submission_data_to_child_table(apps, schema_editor):
     db_alias = schema_editor.connection.alias
     
     with schema_editor.connection.cursor() as cursor:
+        # Check if the columns exist in both tables
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_submissionfile'
+            AND COLUMN_NAME = 'submission_id'
+        """)
+        child_has_column = cursor.fetchone()[0] > 0
+        
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'submission_id'
+        """)
+        parent_has_column = cursor.fetchone()[0] > 0
+        
+        if not child_has_column:
+            print("ℹ Skipping data copy - submission_id not yet in core_submissionfile")
+            return
+        
+        if not parent_has_column:
+            print("ℹ Skipping data copy - submission_id already removed from core_file")
+            return
+        
         # Copy data from parent table columns to child table columns
         cursor.execute("""
             UPDATE core_submissionfile sf
@@ -212,83 +342,134 @@ class Migration(migrations.Migration):
         # Step 3: Create new child models (BEFORE removing fields from File)
         # Note: submission and hiddenBeforePublish are NOT defined here because they still exist in File parent class
         # They will be removed from File in Step 5, then added specifically to SubmissionFile in Step 5b/5c
-        migrations.CreateModel(
-            name="SubmissionFile",
-            fields=[
-                (
-                    "file_ptr",
-                    models.OneToOneField(
-                        auto_created=True,
-                        on_delete=django.db.models.deletion.CASCADE,
-                        parent_link=True,
-                        primary_key=True,
-                        serialize=False,
-                        to="core.file",
-                    ),
+        # Use SeparateDatabaseAndState to handle idempotent table creation
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.CreateModel(
+                    name="SubmissionFile",
+                    fields=[
+                        (
+                            "file_ptr",
+                            models.OneToOneField(
+                                auto_created=True,
+                                on_delete=django.db.models.deletion.CASCADE,
+                                parent_link=True,
+                                primary_key=True,
+                                serialize=False,
+                                to="core.file",
+                            ),
+                        ),
+                    ],
+                    options={
+                        "abstract": False,
+                    },
+                    bases=("core.file",),
                 ),
             ],
-            options={
-                "abstract": False,
-            },
-            bases=("core.file",),
+            database_operations=[
+                migrations.RunPython(
+                    safe_create_submissionfile_table,
+                    migrations.RunPython.noop,
+                ),
+            ],
         ),
-        migrations.CreateModel(
-            name="AssignmentFile",
-            fields=[
-                (
-                    "file_ptr",
-                    models.OneToOneField(
-                        auto_created=True,
-                        on_delete=django.db.models.deletion.CASCADE,
-                        parent_link=True,
-                        primary_key=True,
-                        serialize=False,
-                        to="core.file",
-                    ),
-                ),
-                (
-                    "assignment",
-                    models.ForeignKey(
-                        help_text="The related assignment_id.",
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="files",
-                        to="core.assignment",
-                    ),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.CreateModel(
+                    name="AssignmentFile",
+                    fields=[
+                        (
+                            "file_ptr",
+                            models.OneToOneField(
+                                auto_created=True,
+                                on_delete=django.db.models.deletion.CASCADE,
+                                parent_link=True,
+                                primary_key=True,
+                                serialize=False,
+                                to="core.file",
+                            ),
+                        ),
+                        (
+                            "assignment",
+                            models.ForeignKey(
+                                help_text="The related assignment_id.",
+                                on_delete=django.db.models.deletion.CASCADE,
+                                related_name="files",
+                                to="core.assignment",
+                            ),
+                        ),
+                        (
+                            "required",
+                            models.BooleanField(
+                                default=False,
+                                help_text="Whether this file is required for submission.",
+                            ),
+                        ),
+                        (
+                            "description",
+                            models.TextField(
+                                default="",
+                                help_text="Description of the file template.",
+                            ),
+                        ),
+                    ],
+                    options={
+                        "abstract": False,
+                    },
+                    bases=("core.file",),
                 ),
             ],
-            options={
-                "abstract": False,
-            },
-            bases=("core.file",),
+            database_operations=[
+                migrations.RunPython(
+                    safe_create_assignmentfile_table,
+                    migrations.RunPython.noop,
+                ),
+            ],
         ),
-        migrations.CreateModel(
-            name="CourseFile",
-            fields=[
-                (
-                    "file_ptr",
-                    models.OneToOneField(
-                        auto_created=True,
-                        on_delete=django.db.models.deletion.CASCADE,
-                        parent_link=True,
-                        primary_key=True,
-                        serialize=False,
-                        to="core.file",
-                    ),
-                ),
-                (
-                    "course",
-                    models.ForeignKey(
-                        help_text="The related course_id.",
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="files",
-                        to="core.course",
-                    ),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.CreateModel(
+                    name="CourseFile",
+                    fields=[
+                        (
+                            "file_ptr",
+                            models.OneToOneField(
+                                auto_created=True,
+                                on_delete=django.db.models.deletion.CASCADE,
+                                parent_link=True,
+                                primary_key=True,
+                                serialize=False,
+                                to="core.file",
+                            ),
+                        ),
+                        (
+                            "course",
+                            models.ForeignKey(
+                                help_text="The related course_id.",
+                                on_delete=django.db.models.deletion.CASCADE,
+                                related_name="files",
+                                to="core.course",
+                            ),
+                        ),
+                    ],
+                    options={
+                        "abstract": False,
+                    },
+                    bases=("core.file",),
                 ),
             ],
-            options={
-                "abstract": False,
-            },
-            bases=("core.file",),
+            database_operations=[
+                migrations.RunPython(
+                    safe_create_coursefile_table,
+                    migrations.RunPython.noop,
+                ),
+            ],
+            database_operations=[
+                migrations.RunPython(
+                    safe_create_coursefile_table,
+                    migrations.RunPython.noop,
+                ),
+            ],
         ),
         
         # Step 4a: CRITICAL - Migrate existing File→SubmissionFile data BEFORE removing fields
