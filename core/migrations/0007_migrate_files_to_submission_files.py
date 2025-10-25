@@ -209,14 +209,19 @@ class Migration(migrations.Migration):
             migrations.RunPython.noop,
         ),
         
-        # Step 1c: Remove from Django's state so we can add to SubmissionFile
-        migrations.RemoveField(
-            model_name="file",
-            name="submission",
-        ),
-        migrations.RemoveField(
-            model_name="file",
-            name="hiddenBeforePublish",
+        # Step 1c: Remove from Django's state ONLY (database columns already renamed above)
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(
+                    model_name="file",
+                    name="submission",
+                ),
+                migrations.RemoveField(
+                    model_name="file",
+                    name="hiddenBeforePublish",
+                ),
+            ],
+            database_operations=[],  # No database changes - already renamed in Step 1b
         ),
         
         # Step 2: Alter File model fields
