@@ -173,7 +173,9 @@ CSRF_TRUSTED_ORIGINS = (
     "http://localhost",
     "https://localhost",
     "http://*.cs.rutgers.edu",
-    "https://*.cs.rutgers.edu",
+    "https://dev-codepost-1.cs.rutgers.edu",
+    "https://codepost.cs.rutgers.edu",
+    
 )
 
 checkCSRFTrustedOrigins(CLIENT_URL, CSRF_TRUSTED_ORIGINS)
