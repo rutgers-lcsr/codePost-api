@@ -17,7 +17,6 @@ import warnings
 warnings.filterwarnings('ignore', message='pkg_resources is deprecated', category=UserWarning)
 
 import abc
-import subprocess
 import tempfile
 import json
 import os
@@ -26,7 +25,6 @@ import logging
 import tarfile
 import ast
 import re
-import base64
 import time
 from typing import Dict, List, Literal, Optional, Tuple, Any, TypedDict
 from pathlib import Path
@@ -35,10 +33,8 @@ from docker import DockerClient
 import nbformat
 from datetime import datetime
 
-from numpy import add
-from regex import P
 
-from core.models import Assignment, File, Submission, User
+from core.models import  File, User
 
 try:
     import docker
