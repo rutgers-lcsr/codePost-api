@@ -117,7 +117,7 @@ def RunAll(environmentID, user, sendEmail=False):
                 environment,
                 files,
                 user,
-                s.id,
+                str(s.id),
                 assignment=assignment,
                 submission=s,
                 test_case_set="all",
@@ -187,7 +187,7 @@ def RunAll(environmentID, user, sendEmail=False):
             category="autograder",
             user=str(user),
             description="Autograder run all completed",
-            courseID=assignment.course_id,
+            courseID=assignment.course.id,
             meta=json.dumps(meta),
         )
     except:
