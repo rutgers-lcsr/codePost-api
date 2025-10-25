@@ -34,6 +34,7 @@ jobs:
                   EOF
             - name: Deploy docker containers for database, redis, adminer, and flower
               run: |
+                  docker compose -f docker-compose-data.yml build
                   docker compose -f docker-compose-data.yml up -d --remove-orphans
             - name: Remove docker artifacts
               run: |
