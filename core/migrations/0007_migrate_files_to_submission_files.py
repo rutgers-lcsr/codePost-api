@@ -264,20 +264,32 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Step 1: Safely rename 'code' to 'data' (handles partial state)
+        # Step 1a: Rename 'code' to 'data' in database (idempotent)
         migrations.RunPython(
             safe_rename_code_to_data,
             migrations.RunPython.noop,
         ),
         
-        # Step 1b: Rename submission and hiddenBeforePublish to temporary names in database
+        # Step 1b: Update Django's state to reflect the rename (state only, database already done)
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RenameField(
+                    model_name="file",
+                    old_name="code",
+                    new_name="data",
+                ),
+            ],
+            database_operations=[],  # Database rename already done in Step 1a
+        ),
+        
+        # Step 1c: Rename submission and hiddenBeforePublish to temporary names in database
         # This allows us to add them to SubmissionFile without field name conflicts
         migrations.RunPython(
             rename_fields_in_file,
             migrations.RunPython.noop,
         ),
         
-        # Step 1c: Remove from Django's state ONLY (database columns already renamed above)
+        # Step 1d: Remove from Django's state ONLY (database columns already renamed above)
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.RemoveField(
@@ -289,7 +301,7 @@ class Migration(migrations.Migration):
                     name="hiddenBeforePublish",
                 ),
             ],
-            database_operations=[],  # No database changes - already renamed in Step 1b
+            database_operations=[],  # No database changes - already renamed in Step 1c
         ),
         
         # Step 2: Alter File model fields
