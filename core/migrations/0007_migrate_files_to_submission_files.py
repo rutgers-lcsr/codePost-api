@@ -45,14 +45,22 @@ def migrate_files_to_submission_files(apps, schema_editor):
     """
     db_alias = schema_editor.connection.alias
     
-    # Check if SubmissionFile records already exist (migration already ran)
     with schema_editor.connection.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM core_submissionfile")
-        existing_count = cursor.fetchone()[0]
-        
-        if existing_count > 0:
-            print(f"ℹ SubmissionFile records already exist ({existing_count} records), skipping migration")
-            return
+        # Check if SubmissionFile table is actually usable
+        try:
+            cursor.execute("SELECT COUNT(*) FROM core_submissionfile")
+            existing_count = cursor.fetchone()[0]
+            
+            if existing_count > 0:
+                print(f"ℹ SubmissionFile records already exist ({existing_count} records), skipping migration")
+                return
+        except Exception as e:
+            if "doesn't exist" in str(e) or "1932" in str(e):
+                print(f"ℹ Warning: core_submissionfile table not accessible: {e}")
+                print("ℹ Skipping SubmissionFile data migration - table will be created first")
+                return
+            else:
+                raise
         
         # Check if submission_id column exists in core_file (not yet removed)
         cursor.execute("""
@@ -90,13 +98,21 @@ def migrate_filetemplates_to_assignment_files(apps, schema_editor):
     db_alias = schema_editor.connection.alias
     
     with schema_editor.connection.cursor() as cursor:
-        # Check if AssignmentFile records already exist
-        cursor.execute("SELECT COUNT(*) FROM core_assignmentfile")
-        existing_count = cursor.fetchone()[0]
-        
-        if existing_count > 0:
-            print(f"ℹ AssignmentFile records already exist ({existing_count} records), skipping migration")
-            return
+        # Check if AssignmentFile table is actually usable
+        try:
+            cursor.execute("SELECT COUNT(*) FROM core_assignmentfile")
+            existing_count = cursor.fetchone()[0]
+            
+            if existing_count > 0:
+                print(f"ℹ AssignmentFile records already exist ({existing_count} records), skipping migration")
+                return
+        except Exception as e:
+            if "doesn't exist" in str(e) or "1932" in str(e):
+                print(f"ℹ Warning: core_assignmentfile table not accessible: {e}")
+                print("ℹ Skipping AssignmentFile data migration - table will be created first")
+                return
+            else:
+                raise
         
         # Check if FileTemplate table exists
         cursor.execute("""
@@ -152,25 +168,29 @@ def migrate_filetemplates_to_assignment_files(apps, schema_editor):
 def safe_create_submissionfile_table(apps, schema_editor):
     """
     Safely create SubmissionFile table if it doesn't exist.
-    Handles partial migration runs.
+    Handles partial migration runs and corrupted table states.
     """
     db_alias = schema_editor.connection.alias
     
     with schema_editor.connection.cursor() as cursor:
-        # Check if table exists
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_submissionfile'
-        """)
-        table_exists = cursor.fetchone()[0] > 0
-        
-        if table_exists:
-            print("ℹ Table 'core_submissionfile' already exists, skipping creation")
+        # Try to check if table is actually usable (not just in information_schema)
+        try:
+            cursor.execute("SELECT 1 FROM core_submissionfile LIMIT 0")
+            print("ℹ Table 'core_submissionfile' already exists and is usable, skipping creation")
             return
+        except Exception as e:
+            # Table doesn't exist or is corrupted, try to drop and recreate
+            if "doesn't exist" in str(e) or "1932" in str(e):
+                print(f"ℹ Table 'core_submissionfile' is corrupted or doesn't exist: {e}")
+                try:
+                    cursor.execute("DROP TABLE IF EXISTS core_submissionfile")
+                    print("ℹ Dropped corrupted table 'core_submissionfile'")
+                except:
+                    pass
+            else:
+                raise
         
-        # Create the table manually
+        # Create the table
         print("ℹ Creating table 'core_submissionfile'")
         cursor.execute("""
             CREATE TABLE `core_submissionfile` (
@@ -185,21 +205,25 @@ def safe_create_submissionfile_table(apps, schema_editor):
 def safe_create_assignmentfile_table(apps, schema_editor):
     """
     Safely create AssignmentFile table if it doesn't exist.
+    Handles partial migration runs and corrupted table states.
     """
     db_alias = schema_editor.connection.alias
     
     with schema_editor.connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_assignmentfile'
-        """)
-        table_exists = cursor.fetchone()[0] > 0
-        
-        if table_exists:
-            print("ℹ Table 'core_assignmentfile' already exists, skipping creation")
+        try:
+            cursor.execute("SELECT 1 FROM core_assignmentfile LIMIT 0")
+            print("ℹ Table 'core_assignmentfile' already exists and is usable, skipping creation")
             return
+        except Exception as e:
+            if "doesn't exist" in str(e) or "1932" in str(e):
+                print(f"ℹ Table 'core_assignmentfile' is corrupted or doesn't exist: {e}")
+                try:
+                    cursor.execute("DROP TABLE IF EXISTS core_assignmentfile")
+                    print("ℹ Dropped corrupted table 'core_assignmentfile'")
+                except:
+                    pass
+            else:
+                raise
         
         print("ℹ Creating table 'core_assignmentfile'")
         cursor.execute("""
@@ -221,21 +245,25 @@ def safe_create_assignmentfile_table(apps, schema_editor):
 def safe_create_coursefile_table(apps, schema_editor):
     """
     Safely create CourseFile table if it doesn't exist.
+    Handles partial migration runs and corrupted table states.
     """
     db_alias = schema_editor.connection.alias
     
     with schema_editor.connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_coursefile'
-        """)
-        table_exists = cursor.fetchone()[0] > 0
-        
-        if table_exists:
-            print("ℹ Table 'core_coursefile' already exists, skipping creation")
+        try:
+            cursor.execute("SELECT 1 FROM core_coursefile LIMIT 0")
+            print("ℹ Table 'core_coursefile' already exists and is usable, skipping creation")
             return
+        except Exception as e:
+            if "doesn't exist" in str(e) or "1932" in str(e):
+                print(f"ℹ Table 'core_coursefile' is corrupted or doesn't exist: {e}")
+                try:
+                    cursor.execute("DROP TABLE IF EXISTS core_coursefile")
+                    print("ℹ Dropped corrupted table 'core_coursefile'")
+                except:
+                    pass
+            else:
+                raise
         
         print("ℹ Creating table 'core_coursefile'")
         cursor.execute("""
