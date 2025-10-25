@@ -11,45 +11,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="code",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="description",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="extension",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="name",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="path",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="required",
-        ),
-        migrations.AddField(
-            model_name="assignmentfile",
-            name="description",
-            field=models.TextField(
-                blank=True, help_text="Optional description shown to students."
-            ),
-        ),
-        migrations.AddField(
-            model_name="assignmentfile",
-            name="required",
-            field=models.BooleanField(
-                default=False,
-                help_text="If student upload is enabled, a file with this name and extension will be required.",
-            ),
-        ),
+        # Note: FileTemplate field removals and AssignmentFile field additions
+        # This migration only updates the Comment.file foreign key
         migrations.AlterField(
             model_name="comment",
             name="file",
