@@ -43,30 +43,43 @@ def migrate_files_to_submission_files(apps, schema_editor):
     Migrate existing File records with submissions to SubmissionFile records.
     This preserves the File IDs so that Comment and other foreign key references remain valid.
     """
-    File = apps.get_model("core", "File")
-    SubmissionFile = apps.get_model("core", "SubmissionFile")
-    
     db_alias = schema_editor.connection.alias
     
-    # Get all File records that have submissions (must do this BEFORE removing the field)
-    files_with_submissions = File.objects.using(db_alias).filter(submission__isnull=False)
-    
-    submission_files_to_create = []
-    for file_obj in files_with_submissions:
-        # Create SubmissionFile using the SAME ID as the original File
-        # This preserves foreign key relationships (like Comment.file_id)
-        submission_file = SubmissionFile(
-            file_ptr_id=file_obj.id,
-            submission_id=file_obj.submission_id,
-            hiddenBeforePublish=getattr(file_obj, 'hiddenBeforePublish', False),
-        )
-        submission_files_to_create.append(submission_file)
-    
-    if submission_files_to_create:
-        SubmissionFile.objects.using(db_alias).bulk_create(submission_files_to_create)
-        print(f"✓ Migrated {len(submission_files_to_create)} File records to SubmissionFile")
-    else:
-        print("ℹ No File records with submissions to migrate")
+    # Check if SubmissionFile records already exist (migration already ran)
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) FROM core_submissionfile")
+        existing_count = cursor.fetchone()[0]
+        
+        if existing_count > 0:
+            print(f"ℹ SubmissionFile records already exist ({existing_count} records), skipping migration")
+            return
+        
+        # Check if submission_id column exists in core_file (not yet removed)
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'submission_id'
+        """)
+        submission_in_file = cursor.fetchone()[0] > 0
+        
+        if not submission_in_file:
+            print("ℹ submission_id already removed from File, skipping SubmissionFile migration")
+            return
+        
+        # Migrate File records with submissions to SubmissionFile
+        # Use raw SQL to avoid ORM state issues
+        cursor.execute("""
+            INSERT INTO core_submissionfile (file_ptr_id)
+            SELECT id FROM core_file WHERE submission_id IS NOT NULL
+        """)
+        
+        rows_created = cursor.rowcount
+        if rows_created > 0:
+            print(f"✓ Migrated {rows_created} File records to SubmissionFile")
+        else:
+            print("ℹ No File records with submissions to migrate")
 
 
 def migrate_filetemplates_to_assignment_files(apps, schema_editor):
@@ -74,56 +87,66 @@ def migrate_filetemplates_to_assignment_files(apps, schema_editor):
     Migrate existing FileTemplate records to AssignmentFile records.
     This creates new File base records and then AssignmentFile child records.
     """
-    FileTemplate = apps.get_model("core", "FileTemplate")
-    File = apps.get_model("core", "File")
-    AssignmentFile = apps.get_model("core", "AssignmentFile")
-    
     db_alias = schema_editor.connection.alias
     
-    # Get all FileTemplate records
-    file_templates = FileTemplate.objects.using(db_alias).all()
-    
-    if not file_templates.exists():
-        print("ℹ No FileTemplate records to migrate")
-        return
-    
-    files_to_create = []
-    assignment_files_to_create = []
-    
-    for template in file_templates:
-        # First create the File base record
-        file_obj = File(
-            name=template.name,
-            data=getattr(template, 'code', ''),  # Rename code → data
-            extension=template.extension,
-            path=template.path,
-            created=template.created,
-            modified=template.modified,
-        )
-        files_to_create.append(file_obj)
-    
-    # Bulk create File records
-    created_files = File.objects.using(db_alias).bulk_create(files_to_create)
-    print(f"✓ Created {len(created_files)} File base records from FileTemplate")
-    
-    # Now create AssignmentFile child records for each File
-    # We need to get the IDs that were just created
-    file_templates = list(FileTemplate.objects.using(db_alias).all())
-    created_files_list = list(File.objects.using(db_alias).order_by('-id')[:len(file_templates)])
-    created_files_list.reverse()  # Match the order
-    
-    for i, template in enumerate(file_templates):
-        file_id = created_files_list[i].id
-        assignment_file = AssignmentFile(
-            file_ptr_id=file_id,
-            assignment_id=template.assignment_id,
-            required=template.required,
-            description=getattr(template, 'description', ''),
-        )
-        assignment_files_to_create.append(assignment_file)
-    
-    AssignmentFile.objects.using(db_alias).bulk_create(assignment_files_to_create)
-    print(f"✓ Migrated {len(assignment_files_to_create)} FileTemplate records to AssignmentFile")
+    with schema_editor.connection.cursor() as cursor:
+        # Check if AssignmentFile records already exist
+        cursor.execute("SELECT COUNT(*) FROM core_assignmentfile")
+        existing_count = cursor.fetchone()[0]
+        
+        if existing_count > 0:
+            print(f"ℹ AssignmentFile records already exist ({existing_count} records), skipping migration")
+            return
+        
+        # Check if FileTemplate table exists
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_filetemplate'
+        """)
+        template_exists = cursor.fetchone()[0] > 0
+        
+        if not template_exists:
+            print("ℹ FileTemplate table doesn't exist, skipping AssignmentFile migration")
+            return
+        
+        # Count FileTemplate records
+        cursor.execute("SELECT COUNT(*) FROM core_filetemplate")
+        template_count = cursor.fetchone()[0]
+        
+        if template_count == 0:
+            print("ℹ No FileTemplate records to migrate")
+            return
+        
+        # Get FileTemplate records and create File + AssignmentFile records
+        # Use raw SQL to avoid ORM state issues with code/data field
+        cursor.execute("""
+            SELECT id, name, code, extension, path, assignment_id, required, description, created, modified
+            FROM core_filetemplate
+        """)
+        
+        templates = cursor.fetchall()
+        files_created = 0
+        
+        for template_id, name, code, extension, path, assignment_id, required, description, created, modified in templates:
+            # Create File base record
+            cursor.execute("""
+                INSERT INTO core_file (name, data, extension, path, created, modified)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, [name, code or '', extension, path, created, modified])
+            
+            file_id = cursor.lastrowid
+            
+            # Create AssignmentFile child record
+            cursor.execute("""
+                INSERT INTO core_assignmentfile (file_ptr_id, assignment_id, required, description)
+                VALUES (%s, %s, %s, %s)
+            """, [file_id, assignment_id, required, description or ''])
+            
+            files_created += 1
+        
+        print(f"✓ Migrated {files_created} FileTemplate records to AssignmentFile")
 
 
 def safe_create_submissionfile_table(apps, schema_editor):
