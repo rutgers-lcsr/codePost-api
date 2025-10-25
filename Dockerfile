@@ -53,5 +53,4 @@ RUN pip install celery
 
 COPY . .
 
-# CHANGE THIS FOR DEPLOYMENT
-CMD ["celery", "--app", "autograder", "flower", "--basic-auth=$API_USER:$API_PASSWORD"]
+CMD ["celery", "--app", "autograder", "flower"]

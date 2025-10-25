@@ -10,8 +10,7 @@ services:
             - "5555:5555"
         environment:
             - CELERY_BROKER_URL=redis://codepost-redis:6379
-            - API_USER=${API_USER}
-            - API_PASSWORD=${API_PASSWORD}
+            - FLOWER_BASIC_AUTH=${API_USER}:${API_PASSWORD}
         depends_on:
             - codepost-redis
         restart: always
