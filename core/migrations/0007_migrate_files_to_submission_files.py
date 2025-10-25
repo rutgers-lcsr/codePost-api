@@ -36,6 +36,102 @@ def check_hidden_in_file(apps, schema_editor):
         return cursor.fetchone()[0] > 0
 
 
+def migrate_existing_files_to_submissionfiles(apps, schema_editor):
+    """
+    Migrate existing File records (that have submission_id) to SubmissionFile records.
+    This happens AFTER SubmissionFile table is created but BEFORE fields are removed from File.
+    """
+    with schema_editor.connection.cursor() as cursor:
+        # Check if submission_id still exists in File
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_file'
+            AND COLUMN_NAME = 'submission_id'
+        """)
+        
+        if cursor.fetchone()[0] == 0:
+            print("✓ submission_id already removed from File, skipping data migration")
+            return
+        
+        # Check if SubmissionFile records already exist
+        cursor.execute("SELECT COUNT(*) FROM core_submissionfile")
+        existing_count = cursor.fetchone()[0]
+        
+        if existing_count > 0:
+            print(f"✓ SubmissionFile records already exist ({existing_count}), skipping data migration")
+            return
+        
+        # Migrate: Create SubmissionFile record for each File that has a submission
+        # This creates the child table entry pointing to the existing File parent record
+        cursor.execute("""
+            INSERT INTO core_submissionfile (file_ptr_id)
+            SELECT id FROM core_file WHERE submission_id IS NOT NULL
+        """)
+        
+        rows_migrated = cursor.rowcount
+        print(f"✓ Migrated {rows_migrated} File records to SubmissionFile")
+
+
+def migrate_filetemplates_to_assignmentfiles(apps, schema_editor):
+    """
+    Migrate FileTemplate records to AssignmentFile records.
+    Creates new File records and corresponding AssignmentFile child records.
+    """
+    with schema_editor.connection.cursor() as cursor:
+        # Check if FileTemplate table exists
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'core_filetemplate'
+        """)
+        
+        if cursor.fetchone()[0] == 0:
+            print("✓ FileTemplate table doesn't exist, skipping AssignmentFile migration")
+            return
+        
+        # Check if AssignmentFile records already exist
+        cursor.execute("SELECT COUNT(*) FROM core_assignmentfile")
+        existing_count = cursor.fetchone()[0]
+        
+        if existing_count > 0:
+            print(f"✓ AssignmentFile records already exist ({existing_count}), skipping migration")
+            return
+        
+        # Get FileTemplate records
+        cursor.execute("""
+            SELECT id, name, code, extension, path, assignment_id, required, description, created, modified
+            FROM core_filetemplate
+        """)
+        
+        templates = cursor.fetchall()
+        if not templates:
+            print("✓ No FileTemplate records to migrate")
+            return
+        
+        files_created = 0
+        for template_id, name, code, extension, path, assignment_id, required, description, created, modified in templates:
+            # Create File base record
+            cursor.execute("""
+                INSERT INTO core_file (name, data, extension, path, created, modified)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, [name, code or '', extension, path, created, modified])
+            
+            file_id = cursor.lastrowid
+            
+            # Create AssignmentFile child record
+            cursor.execute("""
+                INSERT INTO core_assignmentfile (file_ptr_id, assignment_id, required, description)
+                VALUES (%s, %s, %s, %s)
+            """, [file_id, assignment_id, required or False, description or ''])
+            
+            files_created += 1
+        
+        print(f"✓ Migrated {files_created} FileTemplate records to AssignmentFile")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -166,6 +262,19 @@ class Migration(migrations.Migration):
                 "abstract": False,
             },
             bases=("core.file",),
+        ),
+        
+        # Step 5b: Migrate existing File data to SubmissionFile
+        # This happens AFTER creating the child tables but BEFORE removing fields from File
+        migrations.RunPython(
+            migrate_existing_files_to_submissionfiles,
+            migrations.RunPython.noop,
+        ),
+        
+        # Step 5c: Migrate FileTemplate data to AssignmentFile
+        migrations.RunPython(
+            migrate_filetemplates_to_assignmentfiles,
+            migrations.RunPython.noop,
         ),
         
         # Step 6: Remove old fields from File model
