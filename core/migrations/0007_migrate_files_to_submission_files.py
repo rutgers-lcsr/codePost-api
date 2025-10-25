@@ -464,12 +464,6 @@ class Migration(migrations.Migration):
                     migrations.RunPython.noop,
                 ),
             ],
-            database_operations=[
-                migrations.RunPython(
-                    safe_create_coursefile_table,
-                    migrations.RunPython.noop,
-                ),
-            ],
         ),
         
         # Step 4a: CRITICAL - Migrate existing File→SubmissionFile data BEFORE removing fields
