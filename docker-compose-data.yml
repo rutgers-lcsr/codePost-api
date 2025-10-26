@@ -15,7 +15,11 @@ services:
             - codepost-redis
         restart: unless-stopped
         healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:5555/"]
+            test:
+                [
+                    "CMD-SHELL",
+                    'curl -f -u "$$FLOWER_BASIC_AUTH" http://localhost:5555/ || exit 1',
+                ]
             interval: 30s
             timeout: 10s
             retries: 3
