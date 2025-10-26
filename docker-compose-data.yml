@@ -13,7 +13,12 @@ services:
             - FLOWER_BASIC_AUTH=${API_USER}:${API_PASSWORD}
         depends_on:
             - codepost-redis
-        restart: always
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:5555/"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
         logging:
             driver: json-file
             options:
@@ -31,7 +36,8 @@ services:
             retries: 5
         volumes:
             - redis-data:/data
-        restart: always
+        restart: unless-stopped
+
         logging:
             driver: json-file
             options:
@@ -84,6 +90,11 @@ services:
         depends_on:
             - codepost-database
         restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
         logging:
             driver: json-file
             options:

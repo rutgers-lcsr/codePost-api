@@ -927,10 +927,13 @@ class SourceFileAdmin(admin.ModelAdmin):
         return qs.select_related("environment", "environment__assignment")
 
 
-# Register remaining models with default admin
-
-# Deprecated model to base model, used to be submission files, but now used as a base class for other file types
-admin.site.register(File)
+# Register File model with search_fields for autocomplete
+@admin.register(File)
+class FileAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "extension",)
+    search_fields = ("name", "extension")
+    list_filter = ("extension",)
+    readonly_fields = ("created", "modified")
 
 
 # Deprecated model, but keep in admin for data access
