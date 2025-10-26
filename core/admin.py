@@ -9,6 +9,7 @@ from core.models import (
     Assignment,
     AssignmentFile,
     AssignmentDataSet,
+    CachedExecutionResult,
     Comment,
     CommentTag,
     Course,
@@ -652,6 +653,57 @@ class AssignmentFileAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         return qs.select_related("assignment")
 
+@admin.register(CachedExecutionResult)
+class CachedExecutionResultAdmin(admin.ModelAdmin):
+    list_display = ("id", "file_name", "executed_by_email", "executed_at", "execution_time", "file_type", "created")
+    search_fields = ("file__name", "executed_by__email", "file_content_hash")
+    list_filter = ("executed_at", "created")
+    readonly_fields = ("file", "executed_by", "executed_at", "file_content_hash", 
+                        "execution_time_seconds", "created", "modified")
+    autocomplete_fields = ["file", "executed_by"]
+    
+    fieldsets = (
+        ("File Information", {
+            "fields": ("file", "file_content_hash")
+        }),
+        ("Execution Details", {
+            "fields": ("executed_by", "executed_at", "execution_time_seconds")
+        }),
+        ("Output Data", {
+            "fields": ("output_data",),
+            "classes": ("collapse",)
+        }),
+        ("Timestamps", {
+            "fields": ("created", "modified"),
+            "classes": ("collapse",)
+        }),
+    )
+    
+    def file_name(self, obj: CachedExecutionResult) -> str:
+        return obj.file.name if obj.file else "-"
+    file_name.short_description = "File Name"
+    file_name.admin_order_field = "file__name"
+    
+    def executed_by_email(self, obj: CachedExecutionResult) -> str:
+        return obj.executed_by.email if obj.executed_by else "-"
+    executed_by_email.short_description = "Executed By"
+    executed_by_email.admin_order_field = "executed_by__email"
+    
+    def execution_time(self, obj: CachedExecutionResult) -> str:
+        if obj.execution_time_seconds is not None:
+            return f"{obj.execution_time_seconds:.2f}s"
+        return "-"
+    execution_time.short_description = "Execution Time"
+    execution_time.admin_order_field = "execution_time_seconds"
+    
+    def file_type(self, obj: CachedExecutionResult) -> str:
+        return obj.file.__class__.__name__ if obj.file else "-"
+    file_type.short_description = "File Type"
+    
+    def get_queryset(self, request: Any) -> Any:
+        qs = super().get_queryset(request)
+        return qs.select_related("file", "executed_by")
+    
 @admin.register(AssignmentDataSet)
 class AssignmentDataSetAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "assignment", "created")
