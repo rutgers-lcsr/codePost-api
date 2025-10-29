@@ -76,6 +76,7 @@ class ImpersonateForm(forms.Form):
       help_text=_("Check this box if you want the token to never expire."),
   )
 
+  
 class SetCredentialsForm(PasswordMatchForm):
   organization = forms.CharField()
 

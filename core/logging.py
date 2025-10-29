@@ -42,6 +42,7 @@ events = [
     "Webhook Error",
     "Webhook Connection Error",
     "API Error",
+    "One-Time Token Generated"
 ]
 
 

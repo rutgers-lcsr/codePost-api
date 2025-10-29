@@ -89,6 +89,8 @@ services:
     adminer:
         image: adminer:latest
         container_name: codepost-adminer
+        environment:
+            - ADMINER_DEFAULT_DB=codepost
         ports:
             - "8080:8080"
         depends_on:

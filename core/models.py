@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from ast import For
 from asyncio.log import logger
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import re
+import uuid
 
 from django.contrib.auth.models import User  # type: ignore[assignment]
 from django.core.exceptions import ValidationError
@@ -19,11 +20,16 @@ from jsonfield import JSONField
 from regex import F
 from rest_framework.authtoken.models import Token
 from zmq import has
+from django.utils import timezone
 
 from core.validators import validate_hex_color
 from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
 
 from django.db import models
+
+def get_default_token_expiry():
+  """Returns datetime 5 minutes from now for OneTimeToken expiration."""
+  return timezone.now() + timedelta(minutes=5)
 
 if TYPE_CHECKING:
     from django.db.models import Manager as RelatedManager
@@ -141,6 +147,26 @@ class Profile(BaseModel):
   def __str__(self):
     return self.user.email
 
+class OneTimeToken(BaseModel):
+  if TYPE_CHECKING:
+    id: int
+    user: models.ForeignKey[User, User]
+
+  user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="one_time_tokens", help_text=(
+      "The username of the related user."))
+  token = models.CharField(max_length=255, unique=True, help_text=(
+      "The one-time token string."), default=uuid.uuid4)
+  expires_at = models.DateTimeField(default=get_default_token_expiry)
+
+  used = models.BooleanField(default=False, help_text=("Whether the token has been used."))
+
+  def is_valid(self):
+    return not self.used and timezone.now() < self.expires_at
+
+  
+
+  def __str__(self):
+    return f"OneTimeToken for {self.user.email} expiring at {self.expires_at}"
 
 class Course(BaseModel):
   if TYPE_CHECKING:

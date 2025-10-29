@@ -7,14 +7,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 import logging
 from core.logging import logEvent
-from core.models import Course
+from core.models import Course, OneTimeToken
 from core.serializers.user import UserSerializer
 from django.utils.timezone import now
 from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt import serializers, views
 from rest_framework_simplejwt.views import TokenRefreshSlidingView
 from core.forms.forms import ImpersonateForm
-
+from codepost.settings import DEBUG
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def current_user(request):
@@ -30,6 +30,16 @@ def current_user(request):
 
 # Plan to update this to Pair with the new JWTSerializer
 class JWTSerializer(serializers.TokenObtainSlidingSerializer):
+  
+  @classmethod
+  def one_time_token(cls, user):
+      token = super().get_token(user)
+      token.set_exp(lifetime=timedelta(minutes=5))
+      token['user_id'] = user.id
+      token['email'] = user.email
+      token['username'] = user.username
+      return token
+  
   @classmethod
   def get_token(cls, user, never_expire=False):
      
@@ -108,3 +118,97 @@ class ImpersonateView(APIView):
 
     update_last_login(None, user)
     return Response(data)
+
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def generate_one_time_token(request):
+  """
+  Generate a one-time token for the authenticated course instructor. 
+  
+  Used to create one time tokens for jupyter servers.
+  """
+  params = request.query_params
+  # Invalidate previous tokens
+  username = params.get('username', None)
+  if not username:
+    return Response({"error": "username query parameter is required"}, status=400)
+  
+  
+  # Check if the becomee user exists
+  try:
+    user = User.objects.get(username=username, is_active=True)
+  except User.DoesNotExist:
+    return Response({"error": "User does not exist"}, status=404)
+  
+  # Ensure the requestee user is a course admin and that target user is a student/grader
+  sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
+  if not sharded_course.exists() and not request.user.username == username:
+    return Response({"error": "You do not have permission to impersonate this user."}, status=403)
+
+  
+  # Log the impersonation event
+  logEvent(
+      event="Generate One-Time Token",
+      message=f"User {request.user.username} is generating a one-time token for {user.username}",
+      level=logging.INFO
+  )
+  
+  token = OneTimeToken.objects.create(user=user)
+  return Response({
+    "token": str(token.token),
+    "expires_at": token.expires_at.isoformat()
+  })
+  
+  
+@api_view(['GET'])
+def validate_one_time_token(request):
+  """
+  Validate a one-time token and return the associated user data. 
+  
+  Used for long lived Jupyter server sessions. Should stay in memory. 
+  """
+  params = request.query_params
+  token_str = params.get('token', None)
+  if not token_str:
+    return Response({"error": "token query parameter is required"}, status=400)
+  
+  try:
+    token_obj = OneTimeToken.objects.get(token=token_str)
+  except OneTimeToken.DoesNotExist:
+    return Response({"error": "Invalid token"}, status=404)
+  
+  if not token_obj.is_valid():
+    return Response({"error": "Token has expired or already used"}, status=400)
+  
+  # Mark the token as used
+  if not DEBUG:
+    # allow re-use in debug mode
+    token_obj.used = True
+    token_obj.save()
+  
+  user = token_obj.user
+  serializer = UserSerializer(user, context={'request': request})
+
+  jwt_token = JWTSerializer.get_token(user, never_expire=True)
+
+  data = serializer.data
+  data['token'] = str(jwt_token)
+  
+  update_last_login(None, user)
+  
+  return Response(data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_jwt_ott(request):
+  """
+  Generate a JWT short-lived 5 min token for the authenticated user.
+  Used to exchange a one-time token for imbedding in an iframe or other uses.
+  """
+  token = JWTSerializer.one_time_token(request.user)
+  return Response({
+    "token": str(token),
+    "expires_at": token['exp']
+  })

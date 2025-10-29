@@ -18,6 +18,7 @@ from core.models import (
     File,
     FileTemplate,
     HelperFile,
+    OneTimeToken,
     Organization,
     Profile,
     RubricCategory,
@@ -125,6 +126,80 @@ class ProfileAdmin(admin.ModelAdmin):
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
         return qs.select_related("user", "organization")
+
+
+@admin.register(OneTimeToken)
+class OneTimeTokenAdmin(admin.ModelAdmin):
+    list_display = ("token_preview", "user_email", "is_valid_status", "used", "expires_at", "created")
+    search_fields = ("user__email", "user__username", "token")
+    list_filter = ("used", "created", "expires_at")
+    readonly_fields = ("token", "user", "expires_at", "created", "modified", "copy_token_button")
+    autocomplete_fields = ["user"]
+    
+    fieldsets = (
+        ("Token Information", {
+            "fields": ("user", "token", "copy_token_button")
+        }),
+        ("Status", {
+            "fields": ("used", "expires_at")
+        }),
+        ("Timestamps", {
+            "fields": ("created", "modified"),
+            "classes": ("collapse",)
+        }),
+    )
+    
+    actions = ["generate_new_tokens"]
+    
+    def token_preview(self, obj: OneTimeToken) -> str:
+        """Display first and last 8 characters of token"""
+        token_str = str(obj.token)
+        if len(token_str) > 20:
+            return f"{token_str[:8]}...{token_str[-8:]}"
+        return token_str
+    token_preview.short_description = "Token"
+    
+    def user_email(self, obj: OneTimeToken) -> str:
+        """Display user email"""
+        return obj.user.email
+    user_email.short_description = "User"
+    user_email.admin_order_field = "user__email"
+    
+    def is_valid_status(self, obj: OneTimeToken) -> bool:
+        """Check if token is still valid"""
+        return obj.is_valid()
+    is_valid_status.short_description = "Valid"
+    is_valid_status.boolean = True
+    
+    def copy_token_button(self, obj: OneTimeToken) -> str:
+        """Display a copyable token field"""
+        if obj.token:
+            return format_html(
+                '<div style="font-family: monospace; background: #f5f5f5; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">'
+                '<div style="margin-bottom: 5px;"><strong>Token:</strong></div>'
+                '<input type="text" value="{}" readonly style="width: 100%; padding: 5px; font-family: monospace;" '
+                'onclick="this.select(); document.execCommand(\'copy\'); alert(\'Token copied to clipboard!\');" />'
+                '<div style="margin-top: 5px; font-size: 11px; color: #666;">Click to select and copy</div>'
+                '</div>',
+                obj.token
+            )
+        return "-"
+    copy_token_button.short_description = "Copy Token"
+    
+    def generate_new_tokens(self, request: Any, queryset: Any) -> None:
+        """Generate new tokens for selected users (creates new OneTimeToken entries)"""
+        from core.models import OneTimeToken
+        count = 0
+        for token_obj in queryset:
+            # Create a new token for the same user
+            OneTimeToken.objects.create(user=token_obj.user)
+            count += 1
+        self.message_user(request, f"{count} new token(s) generated.")
+    generate_new_tokens.short_description = "Generate new tokens for selected users"
+    
+    def get_queryset(self, request: Any) -> Any:
+        qs = super().get_queryset(request)
+        return qs.select_related("user")
 
 
 @admin.register(Course)
@@ -934,6 +1009,9 @@ class FileAdmin(admin.ModelAdmin):
     search_fields = ("name", "extension")
     list_filter = ("extension",)
     readonly_fields = ("created", "modified")
+
+
+
 
 
 # Deprecated model, but keep in admin for data access

@@ -17,7 +17,7 @@ from django.contrib import admin
 from django.urls import path, re_path, include
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshSlidingView, TokenVerifyView
-from core.views.auth import obtain_jwt_token, ImpersonateView
+from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token
 
 from rest_framework.renderers import JSONOpenAPIRenderer
 from rest_framework.viewsets import ViewSet
@@ -106,7 +106,9 @@ urlpatterns = [
     path('token-auth/', obtain_jwt_token),
     path('token-refresh/', TokenRefreshSlidingView.as_view(), name='token_refresh'),
     path('token-verify/', TokenVerifyView.as_view(), name='token_verify'),
-    path('become/', ImpersonateView.as_view(), name='impersonate'),
+    path('ott/generate/', generate_one_time_token, name='generate_one_time_token'),
+    path('ott/validate/', validate_one_time_token, name='validate_one_time_token'),
+    path('ott/', get_jwt_ott, name='get_jwt_ott'),
     re_path('registration/', include(('core.registration_urls', 'core'), namespace='registration')),
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),
