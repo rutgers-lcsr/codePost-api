@@ -574,11 +574,14 @@ class AssignmentViewSet(ListProtectedViewSet):
       if len(otherSubs) > 1:
         raise serializers.ValidationError("This student has multiple submissions for this assignment")
 
-      submission = otherSubs[0]
-      if not submission:
+      
+      if len(otherSubs) == 1:
+        submission = otherSubs[0]
+      else:
         submission = Submission.objects.create(assignment=assignment)
         submission.students.add(user)
         submission.save()
+        
       # Don't allow submission if the submission is finalized, unless we are in LiveFeedbackMode
       if submission.isFinalized and not assignment.liveFeedbackMode:
         raise serializers.ValidationError("Cannot edit this submission, grading has started.")
