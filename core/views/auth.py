@@ -189,6 +189,7 @@ def validate_one_time_token(request):
     token_obj.save()
   
   user = token_obj.user
+  request.user = user
   serializer = UserSerializer(user, context={'request': request})
 
   jwt_token = JWTSerializer.get_token(user, never_expire=True)
