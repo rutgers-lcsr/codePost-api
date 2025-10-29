@@ -128,16 +128,9 @@ if not API_HOST in ALLOWED_HOSTS:
 
 
 
-# https://rickchristianson.wordpress.com/2013/10/31/getting-a-django-app-to-use-https-on-aws-elastic-beanstalk/
-if os.environ.get("ON_AWS", False) is True:
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_REDIRECT_EXEMPT = [r"^health-check/$"]
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_SSL_REDIRECT = True
-else:
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
+
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
 
 if DOCKER:
     # If running in Docker, we assume that the API is behind a reverse proxy
@@ -191,6 +184,7 @@ CSRF_TRUSTED_ORIGINS = (
     "https://localhost",
     "http://*.cs.rutgers.edu",
     "https://dev-codepost-1.cs.rutgers.edu",
+    "https://dev-codepost-2.cs.rutgers.edu",
     "https://codepost.cs.rutgers.edu",
     
 )
@@ -311,6 +305,7 @@ MIDDLEWARE = [
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
