@@ -24,11 +24,14 @@ from django.utils import timezone
 
 from core.validators import validate_hex_color
 from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
-
+from codepost.settings import DEBUG
 from django.db import models
 
 def get_default_token_expiry():
   """Returns datetime 5 minutes from now for OneTimeToken expiration."""
+  if DEBUG:
+    return timezone.now() + timedelta(days=1)
+
   return timezone.now() + timedelta(minutes=5)
 
 if TYPE_CHECKING:
