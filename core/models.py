@@ -479,7 +479,7 @@ class Submission(BaseModel):
   gradeFrozen = models.BooleanField(default=False, help_text=(
       "A boolean field. If 'True', the submissions grade will not be re-calculated based on the current comments applied to it. Warning: this can cause grade to become out of sync with the submission's comments."))
   dateUploaded = models.DateTimeField(
-      default=None, help_text=("The date this submission was created. None if just created, and files haven't been uploaded yet. Used for Celery tasks."))
+      default=None, help_text=("The date this submission was created. None if just created, and files haven't been uploaded yet. Used for Celery tasks."), null=True)
 
   lateDayCreditsUsed = models.IntegerField(default=0, help_text=(
       "The number of Late Day Credits used by the Submission."))
