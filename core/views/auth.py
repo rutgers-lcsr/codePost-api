@@ -163,6 +163,7 @@ def generate_one_time_token(request):
   
   
 @api_view(['GET'])
+@permission_classes([])
 def validate_one_time_token(request):
   """
   Validate a one-time token and return the associated user data. 
