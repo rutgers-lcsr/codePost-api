@@ -234,7 +234,7 @@ class CourseAdmin(admin.ModelAdmin):
                     "admin_count", "assignment_count", "is_archived", "created")
     search_fields = ("name", "period", "organization__name")
     list_filter = ("archived", "organization", "created", "modified")
-    readonly_fields = ("created", "modified")
+    readonly_fields = ("id", "created", "modified")
     autocomplete_fields = ["organization"]
     filter_horizontal = ("students", "graders", "courseAdmins", "superGraders",
                         "inactive_students", "inactive_graders", "inactive_courseAdmins")
@@ -276,10 +276,7 @@ class CourseAdmin(admin.ModelAdmin):
     )
     
     actions = ["archive_courses", "unarchive_courses"]
-
-    def id(self, obj: Course) -> int:
-        return obj.id
-    id.short_description = "Course ID"
+    
     def student_count(self, obj: Course) -> int:
         return obj.students.count()
     student_count.short_description = "Students"
