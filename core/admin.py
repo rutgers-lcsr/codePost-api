@@ -244,8 +244,14 @@ class CourseAdmin(admin.ModelAdmin):
             "fields": ("name", "period", "organization", "archived")
         }),
         ("Settings", {
-            "fields": ("sortKey", "emailNewSubmissions", "sendReleasedEmailsAutomatically", 
-                      "roster", "whitelist", "allowLateSubmissions", "lateSubmissionMode")
+            "fields": ("timezone", "sendReleasedSubmissionsToBack", "showStudentsStatistics",
+                      "emailNewUsers", "anonymousGradingDefault", "allowGradersToEditRubric",
+                      "minComments", "noUnfinalize", "activateQueue")
+        }),
+        ("Student Management", {
+            "fields": ("rosterMap", "emailWhitelist", "lateDayCreditsAllowable", 
+                      "studentCaptions", "useStudentCaptions", "inviteCode", "inviteCodeEnabled"),
+            "classes": ("collapse",)
         }),
         ("Active Members", {
             "fields": ("students", "graders", "courseAdmins", "superGraders"),
@@ -255,8 +261,12 @@ class CourseAdmin(admin.ModelAdmin):
             "fields": ("inactive_students", "inactive_graders", "inactive_courseAdmins"),
             "classes": ("collapse",)
         }),
-        ("Statistics Display", {
-            "fields": ("showStudentsStatistics",),
+        ("Notifications", {
+            "fields": ("enableStudentFeedbackNotifications",),
+            "classes": ("collapse",)
+        }),
+        ("Payments & Waivers", {
+            "fields": ("manual_payments", "waiver_requested"),
             "classes": ("collapse",)
         }),
         ("Timestamps", {
@@ -586,8 +596,8 @@ class RubricCategoryAdmin(admin.ModelAdmin):
         }),
     )
     
-    def point_limit(self, obj: RubricCategory) -> Optional[int]:
-        return obj.pointLimit if obj.pointLimit is not None else "-"
+    def point_limit(self, obj: RubricCategory) -> str:
+        return str(obj.pointLimit) if obj.pointLimit is not None else "-"
     point_limit.short_description = "Point Limit"
     point_limit.admin_order_field = "pointLimit"
     
