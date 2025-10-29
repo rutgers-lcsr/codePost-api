@@ -8,6 +8,45 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def safe_remove_filetemplate_fields(apps, schema_editor):
+    """
+    Safely remove fields from filetemplate table if they exist.
+    This handles cases where the table structure may have already been modified.
+    """
+    db_alias = schema_editor.connection.alias
+    with schema_editor.connection.cursor() as cursor:
+        # Check if the table exists
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.tables 
+            WHERE table_schema = DATABASE() 
+            AND table_name = 'core_filetemplate'
+        """)
+        table_exists = cursor.fetchone()[0] > 0
+        
+        if not table_exists:
+            return  # Table doesn't exist, nothing to do
+        
+        # List of columns to remove
+        columns_to_remove = ['assignment_id', 'code', 'description', 'extension', 'name', 'path', 'required']
+        
+        for column in columns_to_remove:
+            # Check if column exists
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM information_schema.columns 
+                WHERE table_schema = DATABASE()
+                AND table_name = 'core_filetemplate'
+                AND column_name = %s
+            """, [column])
+            
+            column_exists = cursor.fetchone()[0] > 0
+            
+            if column_exists:
+                # Remove the column
+                cursor.execute(f"ALTER TABLE core_filetemplate DROP COLUMN {column}")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -16,33 +55,40 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="assignment",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="code",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="description",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="extension",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="name",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="path",
-        ),
-        migrations.RemoveField(
-            model_name="filetemplate",
-            name="required",
+        migrations.RunPython(safe_remove_filetemplate_fields, reverse_code=migrations.RunPython.noop),
+        # Update Django's migration state to reflect the removed fields
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.RemoveField(
+                    model_name="filetemplate",
+                    name="assignment",
+                ),
+                migrations.RemoveField(
+                    model_name="filetemplate",
+                    name="code",
+                ),
+                migrations.RemoveField(
+                    model_name="filetemplate",
+                    name="description",
+                ),
+                migrations.RemoveField(
+                    model_name="filetemplate",
+                    name="extension",
+                ),
+                migrations.RemoveField(
+                    model_name="filetemplate",
+                    name="name",
+                ),
+                migrations.RemoveField(
+                    model_name="filetemplate",
+                    name="path",
+                ),
+                migrations.RemoveField(
+                    model_name="filetemplate",
+                    name="required",
+                ),
+            ],
         ),
         migrations.AlterField(
             model_name="assignmentfile",
