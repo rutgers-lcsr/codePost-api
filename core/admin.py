@@ -188,13 +188,9 @@ class OneTimeTokenAdmin(admin.ModelAdmin):
     
     def generate_new_tokens(self, request: Any, queryset: Any) -> None:
         """Generate new tokens for selected users (creates new OneTimeToken entries)"""
-        from core.models import OneTimeToken
-        count = 0
-        for token_obj in queryset:
-            # Create a new token for the same user
-            OneTimeToken.objects.create(user=token_obj.user)
-            count += 1
-        self.message_user(request, f"{count} new token(s) generated.")
+        # Create a new token for the same user
+        OneTimeToken.objects.create(user=request.user)
+        self.message_user(request, f"{queryset.count()} new token(s) generated.")
     generate_new_tokens.short_description = "Generate new tokens for selected users"
     
     def get_queryset(self, request: Any) -> Any:
