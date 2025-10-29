@@ -241,7 +241,7 @@ class CourseAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ("Basic Information", {
-            "fields": ("name", "period", "organization", "archived")
+            "fields": ("id", "name", "period", "organization", "archived")
         }),
         ("Settings", {
             "fields": ("timezone", "sendReleasedSubmissionsToBack", "showStudentsStatistics",
