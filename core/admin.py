@@ -1,8 +1,10 @@
 from django.contrib import admin
 from django.db.models import Count, Q
 from django.utils.html import format_html
-from django.urls import reverse
+from django.urls import reverse, path
 from django.utils.safestring import mark_safe
+from django.http import HttpResponseRedirect
+from django.shortcuts import redirect
 from typing import Any, Optional
 
 from core.models import (
@@ -134,7 +136,6 @@ class OneTimeTokenAdmin(admin.ModelAdmin):
     search_fields = ("user__email", "user__username", "token")
     list_filter = ("used", "created", "expires_at")
     readonly_fields = ("token", "user", "expires_at", "created", "modified", "copy_token_button")
-    autocomplete_fields = ["user"]
     
     fieldsets = (
         ("Token Information", {
@@ -150,6 +151,35 @@ class OneTimeTokenAdmin(admin.ModelAdmin):
     )
     
     actions = ["generate_new_tokens"]
+    
+    def has_add_permission(self, request: Any) -> bool:
+        """Disable add form - tokens should be generated via the action"""
+        return False
+    
+    def changelist_view(self, request: Any, extra_context: Any = None) -> Any:
+        """Add custom button to changelist"""
+        extra_context = extra_context or {}
+        extra_context['generate_token_url'] = reverse('admin:generate_token')
+        return super().changelist_view(request, extra_context)
+    
+    def get_urls(self):
+        """Add custom URL for generating token"""
+        urls = super().get_urls()
+        custom_urls = [
+            path('generate-token/', self.admin_site.admin_view(self.generate_token_view), name='generate_token'),
+        ]
+        return custom_urls + urls
+    
+    def generate_token_view(self, request: Any) -> HttpResponseRedirect:
+        """View to generate a new token for the current user"""
+        from django.contrib import messages
+        
+        token = OneTimeToken.objects.create(user=request.user)
+        messages.success(request, format_html(
+            'New token generated: <strong style="font-family: monospace; background: #f0f0f0; padding: 2px 6px;">{}</strong>',
+            token.token
+        ))
+        return redirect('admin:core_onetimetoken_changelist')
     
     def token_preview(self, obj: OneTimeToken) -> str:
         """Display first and last 8 characters of token"""
