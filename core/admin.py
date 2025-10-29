@@ -276,7 +276,10 @@ class CourseAdmin(admin.ModelAdmin):
     )
     
     actions = ["archive_courses", "unarchive_courses"]
-    
+
+    def id(self, obj: Course) -> int:
+        return obj.id
+    id.short_description = "Course ID"
     def student_count(self, obj: Course) -> int:
         return obj.students.count()
     student_count.short_description = "Students"
@@ -420,6 +423,7 @@ class SectionAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
     )
+    
     
     def leader_count(self, obj: Section) -> int:
         return obj.leaders.count()
