@@ -556,15 +556,19 @@ class File(BaseModel):
     assignment = None
     course = None
     
-    if hasattr(self, 'submissionfile'):
-      submission = self.submissionfile.submission  # type: ignore[attr-defined]
-      assignment = submission.assignment
-      course = assignment.course
-    elif hasattr(self, 'assignmentfile'):
-      assignment = self.assignmentfile.assignment  # type: ignore[attr-defined]
-      course = assignment.course
-    elif hasattr(self, 'coursefile'):
-      course = self.coursefile.course  # type: ignore[attr-defined]
+    try:
+      if hasattr(self, 'submissionfile'):
+        submission = self.submissionfile.submission  # type: ignore[attr-defined]
+        assignment = submission.assignment
+        course = assignment.course
+      elif hasattr(self, 'assignmentfile'):
+        assignment = self.assignmentfile.assignment  # type: ignore[attr-defined]
+        course = assignment.course
+      elif hasattr(self, 'coursefile'):
+        course = self.coursefile.course  # type: ignore[attr-defined]
+    except (AttributeError, ObjectDoesNotExist):
+      # Related objects may have been deleted during cascade deletion
+      pass
 
     return submission, assignment, course
 
@@ -576,15 +580,19 @@ class File(BaseModel):
     submission = None
     assignment = None
     course = None
-    if hasattr(file, 'submissionfile'):
-      submission = file.submissionfile.submission # type: ignore[attr-defined]
-      assignment = submission.assignment
-      course = assignment.course
-    elif hasattr(file, 'assignmentfile'):
-      assignment = file.assignmentfile.assignment  # type: ignore[attr-defined]
-      course = assignment.course
-    elif hasattr(file, 'coursefile'):
-      course = file.coursefile.course  # type: ignore[attr-defined]
+    try:
+      if hasattr(file, 'submissionfile'):
+        submission = file.submissionfile.submission # type: ignore[attr-defined]
+        assignment = submission.assignment
+        course = assignment.course
+      elif hasattr(file, 'assignmentfile'):
+        assignment = file.assignmentfile.assignment  # type: ignore[attr-defined]
+        course = assignment.course
+      elif hasattr(file, 'coursefile'):
+        course = file.coursefile.course  # type: ignore[attr-defined]
+    except (AttributeError, ObjectDoesNotExist):
+      # Related objects may have been deleted during cascade deletion
+      pass
 
     return file, submission, assignment, course
   

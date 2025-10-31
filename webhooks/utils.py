@@ -100,6 +100,10 @@ def find_and_fire_hook(event_name, instance, user_override=None, payload_overrid
     except AttributeError:
         raise Exception('{} has no related `course` property.'.format(repr(instance)))
 
+    # If the course is None (e.g., during cascade deletion), skip webhook delivery
+    if related_course is None:
+        return
+
     filters['course'] = related_course.id
 
     HookModel = get_hook_model()
