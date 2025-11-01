@@ -25,7 +25,7 @@ def returnNotFound(message=None):
   else:
     return Response(message, status.HTTP_404_NOT_FOUND)
 
-def isAuthenticated(user):
+def isAuthenticated(user) -> bool:
   return user.is_authenticated
 
 def isOrganizationMember(user, organization):

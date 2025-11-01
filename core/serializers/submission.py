@@ -3,7 +3,7 @@ import pytz
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Submission, User
-from core.serializers.file import FileSerializer, SubmissionFileSerializer
+from core.serializers.file import FileSerializer, SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 from core.permissions.helpers import isStudent, isGrader, should_use_student_captions
 from datetime import timezone
@@ -199,6 +199,19 @@ class StudentSubmissionWithoutGradeSerializer(serializers.ModelSerializer):
               'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
     read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'questionIsOpen', 'questionIsRegrade',
                         'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+
+class StudentSubmissionFilesOnlySerializer(serializers.ModelSerializer):
+  """
+  Serializer for student submissions with files only (no comments, no grade, no tests).
+  Used when students can view their files but not feedback.
+  """
+  files = SubmissionFileWithoutCommentsSerializer(many=True, read_only=True)
+  students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
+
+  class Meta:
+    model = Submission
+    fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'dateUploaded')
+    read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'dateUploaded')
 
 # This is a light-weight serializer to return submission tests
 class SubmissionWithTestsSerializer(serializers.ModelSerializer):

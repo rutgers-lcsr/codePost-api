@@ -42,6 +42,26 @@ class SubmissionFileSerializer(ModelSerializerWithPOSTCheck):
         }
 
 
+class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
+    """
+    Serializer for SubmissionFile objects without comments field.
+    Used for files-only view where students can see files but not comments.
+    """
+    # Support both 'data' (new) and 'code' (legacy) field names
+    code = serializers.CharField(source='data', trim_whitespace=False, required=False, allow_blank=True)
+
+    class Meta:
+        model = SubmissionFile
+        fields = ('name', 'data', 'code', 'extension', 'submission', 'id', 'path', 
+                  'hiddenBeforePublish', 'created', 'modified')
+        read_only_fields = ('created', 'modified')
+        POST_permissions_fields = ('submission',)
+        extra_kwargs = {
+            "data": {"trim_whitespace": False},
+            "code": {"trim_whitespace": False}
+        }
+
+
 class SubmissionFileStudentUploadSerializer(ModelSerializerWithPOSTCheck):
     """
     Simplified serializer for students uploading submission files.

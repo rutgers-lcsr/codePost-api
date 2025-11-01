@@ -142,8 +142,18 @@ def generate_one_time_token(request):
   except User.DoesNotExist:
     return Response({"error": "User does not exist"}, status=404)
   
-  # Ensure the requestee user is a course admin and that target user is a student/grader
-  sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
+  # Ensure the requestee user is a course admin and that target user is a student/grader/instructor
+  from django.db.models import Q
+
+  sharded_course = Course.objects.filter(
+      Q(courseAdmins=request.user) &
+      (
+          Q(students=user) |
+          Q(graders=user) |
+          Q(courseAdmins=user)
+      )
+  )
+
   if not sharded_course.exists() and not request.user.username == username:
     return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
