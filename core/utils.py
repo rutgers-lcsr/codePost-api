@@ -136,6 +136,19 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   new_assignment.course_id = destination_course.id  # type: ignore[attr-defined]
   new_assignment.save()
 
+  # copy assignment files (template files)
+  from core.models import AssignmentFile
+  for assignmentFile in original_assignment.files.all():
+      # Create new file with same data
+      AssignmentFile.objects.create(
+          assignment=new_assignment,
+          name=assignmentFile.name,
+          data=assignmentFile.data,
+          extension=assignmentFile.extension,
+          path=assignmentFile.path,
+          required=assignmentFile.required,
+          description=assignmentFile.description
+      )
 
   # copy rubric
   for rubricCategory in original_assignment.rubricCategories.all():

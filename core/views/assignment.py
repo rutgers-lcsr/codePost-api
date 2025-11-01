@@ -722,4 +722,6 @@ class AssignmentViewSet(ListProtectedViewSet):
     if copied_assignment is None:
       return returnInvalid()
 
-    return Response("Success!")
+    # Return the newly created assignment data so frontend can navigate to it
+    serializer = AssignmentSerializer(copied_assignment, context={'request': request})
+    return Response(serializer.data)
