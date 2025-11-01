@@ -138,6 +138,11 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   new_assignment.pk = None
   new_assignment.name = new_name
   new_assignment.course_id = destination_course.id  # type: ignore[attr-defined]
+  
+  # Reset student-facing settings for safety when cloning to a new course
+  new_assignment.isReleased = False
+  new_assignment.isVisible = False
+  
   new_assignment.save()
 
   # copy assignment files (template files)
