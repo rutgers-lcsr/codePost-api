@@ -118,16 +118,20 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   original_assignment = Assignment.objects.get(id=assignment.id)
 
   course_assignments = Assignment.objects.filter(course=destination_course.id).values_list('name', flat=True)
-  count = 1
-  new_name = f"{new_assignment.name} (copy {count})"
+  
+  # Only add "(copy N)" suffix if there's a name collision in the destination course
+  new_name = new_assignment.name
+  if new_name in course_assignments:
+    count = 1
+    new_name = f"{new_assignment.name} (copy {count})"
+    
+    # Prevent copying the same assignment into the same course more than 10 times
+    while new_name in course_assignments and count < 10:
+        count += 1
+        new_name = f"{new_assignment.name} (copy {count})"
 
-  # Prevent copying the same assignment into the same course more than 10 times
-  while new_name in course_assignments and count < 10:
-      count += 1
-      new_name = f"{new_assignment.name} (copy {count})"
-
-  if count == 10:
-      return None
+    if count == 10:
+        return None
 
   # copy assignment
   new_assignment.id = None  # type: ignore[assignment]

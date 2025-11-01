@@ -13,7 +13,7 @@ class CourseFileViewSet(ListProtectedViewSet):
     (e.g., syllabi, course resources, etc.).
     
     list:
-    Return a list of all course files.
+    Return a list of all course files for a given course (requires ?course=<id> parameter).
 
     create:
     Create a new course file.
@@ -33,3 +33,37 @@ class CourseFileViewSet(ListProtectedViewSet):
     queryset = CourseFile.objects.all()
     serializer_class = CourseFileSerializer
     permission_classes = (IsAuthenticated, FilePermissions)
+    
+    def list(self, request):
+        """
+        List course files. Requires ?course=<id> query parameter.
+        Returns files for courses where the user is a member.
+        """
+        from core.permissions.helpers import isAuthenticated, isCourseMember
+        from core.views.template import returnNotAuthorized, returnForbidden
+        from core.models import Course
+        from rest_framework.response import Response
+        
+        user = request.user
+        
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+        
+        # Get course ID from query parameters
+        course_id = request.query_params.get('course')
+        if not course_id:
+            return returnForbidden()
+        
+        try:
+            course = Course.objects.get(id=int(course_id))
+        except (Course.DoesNotExist, ValueError):
+            return returnForbidden()
+        
+        # Check if user is a member of the course
+        if not (user.is_superuser or isCourseMember(user, course)):
+            return returnForbidden()
+        
+        # Filter course files by course
+        queryset = self.queryset.filter(course=course)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
