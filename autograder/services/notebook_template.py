@@ -15,6 +15,7 @@ os.environ['PIP_ROOT_USER_ACTION'] = 'ignore'
 os.environ['PIP_CACHE_DIR'] = '/root/.cache/pip'
 os.environ['MPLBACKEND'] = 'Agg'  # For matplotlib headless
 
+MAX_CELLS = 500  # Maximum number of cells allowed to prevent abuse
 
 def template_log(message: str, level:str) -> None:
     with open('/template_log.txt', 'a') as f:
@@ -171,133 +172,160 @@ results = []
 # Shared namespace for all cells (like Jupyter)
 namespace = {'__name__': '__main__', '__builtins__': __builtins__}
 
-# Execute each code cell
-for cell_idx, cell in enumerate(cells):
-    if cell['type'] == 'markdown':
-        results.append({
+
+if len(cells) > MAX_CELLS:
+    template_log(f"Number of cells ({len(cells)}) exceeds maximum allowed ({MAX_CELLS})", "ERROR")
+    results.append({
+        'type': 'markdown',
+        'source': f"**Error:** Number of cells ({len(cells)}) exceeds maximum allowed ({MAX_CELLS}). Execution aborted. Please reduces the number of cells and try again. Or contact support."
+    })
+else:
+    # Execute each code cell
+    for cell_idx, cell in enumerate(cells):
+        if cell['type'] == 'markdown':
+            results.append({
             'type': 'markdown',
             'source': cell['source']
         })
-    elif cell['type'] == 'code':
-        cell_source = cell['source']
-        
-        # Capture stdout and stderr
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-        
-        outputs = []
-        success = True
-        error_msg = None
-        
-        try:
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                # Parse and execute with last-expression handling
-                try:
-                    parsed = ast.parse(cell_source, mode='exec')
-                    
-                    # Check if last statement is an expression
-                    if parsed.body and isinstance(parsed.body[-1], ast.Expr):
-                        # Execute all-but-last
-                        setup_stmts = parsed.body[:-1]
-                        last_expr = parsed.body[-1].value
+        elif cell['type'] == 'code':
+            cell_source = cell['source']
+            
+            # Capture stdout and stderr
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            
+            outputs = []
+            success = True
+            error_msg = None
+            
+            try:
+                with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                    # Parse and execute with last-expression handling
+                    try:
+                        parsed = ast.parse(cell_source, mode='exec')
                         
-                        if setup_stmts:
-                            setup = ast.Module(body=setup_stmts, type_ignores=[])
-                            exec(compile(setup, '<cell>', 'exec'), namespace)
-                        
-                        # Evaluate and display last expression
-                        result = eval(compile(ast.Expression(body=last_expr), '<cell>', 'eval'), namespace)
-                        if result is not None:
-                            # Smart display for different types
-                            result_type = type(result).__name__
-                            result_module = type(result).__module__
+                        # Check if last statement is an expression
+                        if parsed.body and isinstance(parsed.body[-1], ast.Expr):
+                            # Execute all-but-last
+                            setup_stmts = parsed.body[:-1]
+                            last_expr = parsed.body[-1].value
                             
-                            # Check for pandas DataFrame/Series
-                            if 'pandas' in result_module and hasattr(result, 'to_string'):
-                                print(result.to_string())
-                            # Check for numpy arrays
-                            elif 'numpy' in result_module and hasattr(result, '__array__'):
-                                print(repr(result))
-                            # Default: use repr
-                            else:
-                                print(repr(result))
-                    else:
-                        # Just execute normally
+                            if setup_stmts:
+                                setup = ast.Module(body=setup_stmts, type_ignores=[])
+                                exec(compile(setup, '<cell>', 'exec'), namespace)
+                            
+                            # Evaluate and display last expression
+                            result = eval(compile(ast.Expression(body=last_expr), '<cell>', 'eval'), namespace)
+                            if result is not None:
+                                # Smart display for different types
+                                result_type = type(result).__name__
+                                result_module = type(result).__module__
+                                
+                                # Check for pandas DataFrame/Series
+                                if 'pandas' in result_module and hasattr(result, 'to_string'):
+                                    print(result.to_string())
+                                # Check for numpy arrays
+                                elif 'numpy' in result_module and hasattr(result, '__array__'):
+                                    print(repr(result))
+                                # Default: use repr
+                                else:
+                                    print(repr(result))
+                        else:
+                            # Just execute normally
+                            exec(cell_source, namespace)
+                    except SyntaxError as e:
+                        # If parsing fails, just execute
                         exec(cell_source, namespace)
-                except SyntaxError as e:
-                    # If parsing fails, just execute
-                    exec(cell_source, namespace)
-        except Exception as e:
-            success = False
-            error_msg = str(e)
-            import traceback
-            stderr_capture.write(traceback.format_exc())
-        
-        # Get captured output
-        stdout_text = stdout_capture.getvalue()
-        stderr_text = stderr_capture.getvalue()
-        
-        # Check for matplotlib figures and capture them
-        try:
-            if 'matplotlib' in sys.modules:
-                import matplotlib.pyplot as plt
-                import base64
-                from io import BytesIO
-                
-                # Get all figures
-                figs = [plt.figure(n) for n in plt.get_fignums()]
-                if len(figs) > 0:
-                    for fig in figs:
-                        # Save figure to bytes
-                        buf = BytesIO()
-                        fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
-                        buf.seek(0)
-                        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-                        buf.close()
-                        
-                        # Add as display_data output
-                        outputs.append({
-                            'output_type': 'display_data',
-                            'data': {
-                                'image/png': img_base64
-                            },
-                            'metadata': {}
-                        })
+            except Exception as e:
+                success = False
+                error_msg = str(e)
+                import traceback
+                stderr_capture.write(traceback.format_exc())
+            
+            # Get captured output
+            stdout_text = stdout_capture.getvalue()
+            stderr_text = stderr_capture.getvalue()
+            
+            # Check for matplotlib figures and capture them
+            try:
+                if 'matplotlib' in sys.modules:
+                    import matplotlib.pyplot as plt
+                    import base64
+                    from io import BytesIO
                     
-                    # Close all figures to free memory
-                    plt.close('all')
-        except Exception as e:
-            # If matplotlib capture fails, add error to stderr for debugging
-            stderr_capture.write(f"\\nMatplotlib capture error: {{str(e)}}\\n")
-            pass
-        
-        # Build outputs list
-        if stdout_text:
-            outputs.append({
-                'output_type': 'stream',
-                'name': 'stdout',
-                'text': stdout_text
-            })
-        if stderr_text:
-            outputs.append({
-                'output_type': 'stream',
-                'name': 'stderr',
-                'text': stderr_text
-            })
-        if not success:
-            outputs.append({
-                'output_type': 'error',
-                'ename': 'ExecutionError',
-                'evalue': error_msg or stderr_text,
-                'traceback': [stderr_text]
-            })
+                    # Get all figures
+                    figs = [plt.figure(n) for n in plt.get_fignums()]
+                    if len(figs) > 0:
+                        for fig in figs:
+                            # Save figure to bytes
+                            buf = BytesIO()
+                            fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+                            buf.seek(0)
+                            img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+                            buf.close()
+                            
+                            # Add as display_data output
+                            outputs.append({
+                                'output_type': 'display_data',
+                                'data': {
+                                    'image/png': img_base64
+                                },
+                                'metadata': {}
+                            })
+                        
+                        # Close all figures to free memory
+                        plt.close('all')
+            except Exception as e:
+                # If matplotlib capture fails, add error to stderr for debugging
+                stderr_capture.write(f"\\nMatplotlib capture error: {{str(e)}}\\n")
+                pass
+            
+            NBS_OUTPUT_LIMIT = 10000  # Max characters in output 10kb, defined here so it cannot be changed by notebook code
+            # Build outputs list
+            if stdout_text:
+                
+                # Truncate stdout if too long
+                if len(stdout_text) > NBS_OUTPUT_LIMIT:
+                    stdout_text = stdout_text[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR output truncated]\\n"
 
-        results.append({
-            'type': 'code',
-            'source': cell_source,
-            'outputs': outputs,
-            'execution_count': sum(1 for r in results if r.get('type') == 'code') + 1
-        })
+                outputs.append({
+                    'output_type': 'stream',
+                    'name': 'stdout',
+                    'text': stdout_text
+                })
+            if stderr_text:
+                
+                # Truncate stderr if too long
+                if len(stderr_text) > NBS_OUTPUT_LIMIT:
+                    stderr_text = stderr_text[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR output truncated]\\n"
+                    
+                outputs.append({
+                    'output_type': 'stream',
+                    'name': 'stderr',
+                    'text': stderr_text
+                })
+            if not success:
+
+                # Truncate error message if too long
+                if error_msg and len(error_msg) > NBS_OUTPUT_LIMIT:
+                    error_msg = error_msg[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR message truncated]\\n"
+
+                if stderr_text and len(stderr_text) > NBS_OUTPUT_LIMIT:
+                    stderr_text = stderr_text[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR message truncated]\\n"
+
+                outputs.append({
+                    'output_type': 'error',
+                    'ename': 'ExecutionError',
+                    'evalue': error_msg or stderr_text,
+                    'traceback': [stderr_text]
+                })
+
+            results.append({
+                'type': 'code',
+                'source': cell_source,
+                'outputs': outputs,
+                'execution_count': sum(1 for r in results if r.get('type') == 'code') + 1
+            })
 
 # Output results as JSON
 print('<<<RESULTS_START>>>')

@@ -714,27 +714,7 @@ class PythonExecutor(Executor):
             "mode": "rw"
         }
     }
-    
-    PIP_PACKAGE_WHITELIST = [
-        "numpy",
-        "pandas",
-        "matplotlib",
-        "scipy",
-        "scikit-learn",
-        "seaborn",
-        "requests",
-        "flask",
-        "django",
-        "beautifulsoup4",
-        "lxml",
-        "pytest",
-        "sympy",
-        "tensorflow",
-        "torch",
-        "opencv-python",
-        "Pillow",
-        "plotly",
-    ]
+   
     PIP_MODULE_TO_PACKAGE = {
         "sklearn": "scikit-learn",
         "cv2": "opencv-python",
@@ -863,6 +843,15 @@ class PythonExecutor(Executor):
             execution_time = (end_time - start_time).total_seconds()
             success = result.get('StatusCode', 1) == 0
             self.log(f"Execution completed in {execution_time:.2f}s with exit code {result.get('StatusCode', 1)}")
+
+            # Truncate output if too large
+            if len(stdout) > self.MAX_OUTPUT_SIZE:
+                self.log("Truncating stdout due to size limit")
+                stdout = "ERROR: Output truncated due to large output size\n" + stdout[:self.MAX_OUTPUT_SIZE] + "\n...[truncated stdout over limit]..."
+            if len(stderr) > self.MAX_OUTPUT_SIZE:
+                self.log("Truncating stderr due to size limit")
+                stderr = "ERROR: Output truncated due to large output size\n" + stderr[:self.MAX_OUTPUT_SIZE] + "\n...[truncated stderr over limit]..."
+
             result = ExecutionResult(
                 success=success,
                 stdout=stdout,
@@ -896,8 +885,6 @@ class PythonNotebookExecutor(Executor):
     PIP_CACHE_VOLUME_NAME = PythonExecutor.PIP_CACHE_VOLUME_NAME
     
     INIT_DOCKER_VOLUME = PythonExecutor.INIT_DOCKER_VOLUME.copy()
-    
-    PIP_PACKAGE_WHITELIST = PythonExecutor.PIP_PACKAGE_WHITELIST.copy()
 
     PIP_MODULE_TO_PACKAGE = PythonExecutor.PIP_MODULE_TO_PACKAGE.copy()
 
@@ -968,13 +955,11 @@ class PythonNotebookExecutor(Executor):
                 package_name = self.PIP_MODULE_TO_PACKAGE.get(module_name, module_name)
                 packages_to_install.add(package_name)
 
-        # Filter to only whitelisted packages
-        whitelist = set(self.PIP_PACKAGE_WHITELIST)
-        filtered_packages = [pkg for pkg in packages_to_install if pkg in whitelist]
+        packages = [pkg for pkg in packages_to_install ]
 
-        self.log(f"Detected packages to install: {filtered_packages}", "debug")
+        self.log(f"Detected packages to install: {packages}", "debug")
 
-        return filtered_packages
+        return packages
     def execute(self):
         self.log("Reading notebook data")
         if not self.file.data:
@@ -1087,7 +1072,7 @@ class PythonNotebookExecutor(Executor):
             # Check if results markers are present
             if "<<<RESULTS_START>>>" in stdout and "<<<RESULTS_END>>>" in stdout:
                 results_json = stdout.split("<<<RESULTS_START>>>")[1].split("<<<RESULTS_END>>>")[0].strip()
-                self.log(f"Parsing results JSON ({len(results_json)} bytes)")
+                
                 try:
                     executed_cells = json.loads(results_json)
                     self.log(f"Successfully parsed {len(executed_cells)} cells")
