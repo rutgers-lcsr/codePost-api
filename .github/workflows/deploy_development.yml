@@ -141,5 +141,9 @@ jobs:
                   docker compose -f docker-compose-worker.yml build
                   docker compose -f docker-compose-worker.yml up -d --remove-orphans
 
+            - name: Remove docker artifacts
+              run: |
+                  docker system prune -f
+
             - name: Notify workers deployment success
               run: echo "Workers deployment to development server successful!"
