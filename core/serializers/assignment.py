@@ -66,7 +66,7 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   class Meta:
     model = Assignment
     fields = ('id', 'name', 'isReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
-              'uploadDueDate', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'exposeDumpLogs', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions')
+              'uploadDueDate', 'maxLateDays', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'exposeDumpLogs', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions')
     POST_permissions_fields = ('course',)
     read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'exposeDumpLogs', 'nudgeMode')
 

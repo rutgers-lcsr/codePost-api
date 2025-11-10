@@ -306,6 +306,8 @@ class Assignment(BaseModel):
     testCategories: RelatedManager[TestCategory]
     dataSets: RelatedManager[AssignmentDataSet]
     course: models.ForeignKey[Course, Course]
+    uploadDueDate: models.DateTimeField[datetime, datetime]
+    maxLateDays: models.IntegerField[int, int]
 
   isVisible = models.BooleanField(default=True, help_text=(
       "A boolean field. 'True' if the assignment is viewable by students."))
@@ -340,6 +342,9 @@ class Assignment(BaseModel):
   allowStudentUploadWithPartners = models.BooleanField(default=False, help_text=("A boolean field. If true, students will be allowed to invite partners to their submission."))
   uploadDueDate = models.DateTimeField(null=True, help_text=(
       "The date after which students are not allowed to upload submissions. Only useful if allowStudentUpload is set to True."))
+  maxLateDays = models.IntegerField(default=2, help_text=(
+      "An integer representing the maximum number of late days to continue to accept submissions for this assignment."))
+  
   liveFeedbackMode = models.BooleanField(default=False, help_text=(
       "A boolean field. If true, students can see their submission and comments before finalization and published"))
   additiveGrading = models.BooleanField(default=False, help_text=(

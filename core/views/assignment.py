@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from core.logging import logEvent
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
@@ -556,8 +557,26 @@ class AssignmentViewSet(ListProtectedViewSet):
       if 'files' not in request.data or len(request.data['files']) == 0:
         raise serializers.ValidationError("No files provided")
 
-      if assignment.uploadDueDate and now() > assignment.uploadDueDate and (not assignment.allowLateUploads):
-        raise serializers.ValidationError("Due date has passed")
+
+      # Began late submission check
+      if assignment.uploadDueDate:
+        if now() < assignment.uploadDueDate:
+          pass
+        
+        if not assignment.allowLateUploads:
+          raise serializers.ValidationError("Late submissions are not allowed for this assignment.")
+        
+        # Calculate maxLateDate
+        maxLateDate = assignment.uploadDueDate + timedelta(days=assignment.maxLateDays)
+        if now() > maxLateDate:
+          raise serializers.ValidationError("The maximum late submission period has passed for this assignment.")
+          
+        
+        
+      # Ended late submission check
+      
+      
+      
 
       # Check to make sure the files are valid before we create the submission
       for f in request.data['files']:

@@ -336,7 +336,7 @@ class AssignmentAdmin(admin.ModelAdmin):
         }),
         ("Student Upload Settings", {
             "fields": ("allowStudentUpload", "allowStudentUploadWithPartners", 
-                      "uploadDueDate"),
+                      "uploadDueDate", "maxLateDays", "allowLateUploads"),
             "classes": ("collapse",)
         }),
         ("Grading Settings", {
