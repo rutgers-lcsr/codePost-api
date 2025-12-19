@@ -19,7 +19,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 
-from autograder.services.executor import  ExecutionResult, Executor
+from autograder.services.executors import  ExecutionResult, Executor
 from core.models import File, Submission, SubmissionFile, AssignmentFile, CourseFile, Assignment, Course, User
 from core.permissions.helpers import isAuthenticated, isStaffOfSub, returnNotAuthorized, returnForbidden
 from core.permissions.permissions import FileExecutionPermissions

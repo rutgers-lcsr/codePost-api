@@ -1107,6 +1107,17 @@ files = [
 dev = ["mypy (>=1.15)"]
 
 [[package]]
+name = "esprima"
+version = "4.0.1"
+description = "ECMAScript parsing infrastructure for multipurpose analysis in Python"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "esprima-4.0.1.tar.gz", hash = "sha256:08db1a876d3c2910db9cfaeb83108193af5411fc3a3a66ebefacd390d21323ee"},
+]
+
+[[package]]
 name = "factory-boy"
 version = "2.12.0"
 description = "A versatile test fixtures replacement based on thoughtbot's factory_bot for Ruby."
@@ -1371,6 +1382,22 @@ files = [
     {file = "itypes-1.2.0-py2.py3-none-any.whl", hash = "sha256:03da6872ca89d29aef62773672b2d408f490f80db48b23079a4b194c86dd04c6"},
     {file = "itypes-1.2.0.tar.gz", hash = "sha256:af886f129dea4a2a1e3d36595a2d139589e4dd287f5cab0b40e799ee81570ff1"},
 ]
+
+[[package]]
+name = "javalang"
+version = "0.13.0"
+description = "Pure Python Java parser and tools"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "javalang-0.13.0-py2-none-any.whl", hash = "sha256:5c20f9ee81c49062341e78a88485d6a16f2fa7282856fecf79d2a9dc32374cca"},
+    {file = "javalang-0.13.0-py3-none-any.whl", hash = "sha256:b203c258919b085b44b43b89effcba7291bb2d90c02906b915b39e86aa9fd8e6"},
+    {file = "javalang-0.13.0.tar.gz", hash = "sha256:1681a5a480a58116d42a7eedfd132abe25e6c0ffe552868d581ad84e6aa3424c"},
+]
+
+[package.dependencies]
+six = "*"
 
 [[package]]
 name = "jinja2"
@@ -3284,4 +3311,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "7a9905df052db4c7c1aaf14cc9f5ad665b520f238a276f93f2535d531d271640"
+content-hash = "71d37fbc086e7d94d1156692505d03d7fb20a5f0c2b6edba7645365ed9070251"

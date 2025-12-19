@@ -109,7 +109,7 @@ class CoursePermissions(TemplatePermission):
 
         # POST: organization member with course creation privilege
         if request.method == "POST":
-            return isOrganizationMember(user, course.organization) and hasCourseCreationPrivilege(user)
+            return user.is_superuser or (isOrganizationMember(user, course.organization) and hasCourseCreationPrivilege(user))
 
         # PUT/PATCH: course admin
         if request.method in ["PATCH", "PUT"]:

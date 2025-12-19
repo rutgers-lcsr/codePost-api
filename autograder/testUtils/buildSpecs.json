@@ -1,62 +1,131 @@
 {
-  "python-2.7": {
-    "install": "pip install",
-    "base": "FROM python:2.7-slim-buster\nRUN apt-get install bash\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "python-3.7": {
-    "install": "pip install",
-    "base": "FROM python:3.7-slim-buster\nRUN apt-get install bash\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "c/c++": {
-    "install": "apk add",
-    "base": "FROM frolvlad/alpine-gxx\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "java": {
-    "install": "apk add",
-    "base": "FROM openjdk:8-jdk-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "javascript": {
-    "install": "apk add",
-    "base": "FROM node:13.8.0-alpine3.10\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
-    "useradd": "RUN addgroup -S app && adduser -S -G app app"
-  },
-  "haskell": {
-    "install": "apt-get -y install",
-    "base": "FROM haskell:8\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "ocaml": {
-    "install": "apk add",
-    "base": "FROM ocaml/ocaml:latest\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get install bash\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "ruby": {
-    "install": "apk add",
-    "base": "FROM ruby:2.7-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "php": {
-    "install": "apk add",
-    "base": "FROM php:7.4-cli-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
-    "useradd": "RUN addgroup -S app && adduser -S -G app app"
-  },
-  "alpine": {
-    "install": "apk add",
-    "base": "FROM alpine:3.11\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\n",
-    "useradd": "RUN addgroup -S app && adduser -S -G app app"
-  },
-  "ubuntu": {
-    "install": "apt-get -y install",
-    "base": "FROM ubuntu:18.04\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
-    "useradd": "RUN addgroup --system app && adduser --system -group app"
-  },
-  "windows": {
-    "install": "",
-    "base": "",
-    "useradd": ""
-  }
+    "python-2.7": {
+        "install": "pip install",
+        "base": "FROM python:2.7-slim-buster\nRUN apt-get install bash\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost"
+    },
+    "java": {
+        "install": "apk add",
+        "base": "FROM openjdk:8-jdk-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+        "useradd": "RUN addgroup -S codepost && adduser -S -G codepost -h /home/codepost -s /bin/bash codepost",
+        "manifest": "pom.xml",
+        "manifestInstall": "RUN apk add maven\nCOPY pom.xml /tmp/pom.xml\nRUN mvn -f /tmp/pom.xml dependency:resolve\n"
+    },
+    "java-17": {
+        "install": "apt-get install",
+        "base": "FROM eclipse-temurin:17-jdk\nRUN apt-get update && apt-get install -y bash make build-essential python3\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "pom.xml",
+        "manifestInstall": "RUN apt-get install -y maven\nCOPY pom.xml /tmp/pom.xml\nRUN mvn -f /tmp/pom.xml dependency:resolve\n"
+    },
+    "java-11": {
+        "install": "apt-get install",
+        "base": "FROM eclipse-temurin:11-jdk\nRUN apt-get update && apt-get install -y bash make build-essential python3\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "pom.xml",
+        "manifestInstall": "RUN apt-get install -y maven\nCOPY pom.xml /tmp/pom.xml\nRUN mvn -f /tmp/pom.xml dependency:resolve\n"
+    },
+    "node-20": {
+        "install": "apt-get install",
+        "base": "FROM node:20-slim\nRUN apt-get update && apt-get install -y bash make build-essential python3\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "package.json",
+        "manifestInstall": "COPY package.json /tmp/package.json\nRUN cd /tmp && npm install\nENV NODE_PATH=/tmp/node_modules\n"
+    },
+    "node-18": {
+        "install": "apt-get install",
+        "base": "FROM node:18-slim\nRUN apt-get update && apt-get install -y bash make build-essential python3\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "package.json",
+        "manifestInstall": "COPY package.json /tmp/package.json\nRUN cd /tmp && npm install\nENV NODE_PATH=/tmp/node_modules\n"
+    },
+    "r-4": {
+        "install": "apt-get install",
+        "base": "FROM rocker/tidyverse:4.4.0\nRUN apt-get update && apt-get install -y bash libpoppler-cpp-dev libtesseract-dev tesseract-ocr libleptonica-dev\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "requirements.txt",
+        "manifestInstall": "COPY requirements.txt /tmp/requirements.txt\nRUN R -e \"pkgs <- readLines('/tmp/requirements.txt'); install.packages(pkgs, repos='https://cloud.r-project.org/', dependencies=TRUE, Ncpus=1); if (any(!pkgs %in% installed.packages()[,'Package'])) { quit(status=1) }\"\n"
+    },
+    "python-3.7": {
+        "install": "pip install",
+        "base": "FROM python:3.7-slim-buster\nRUN apt-get install bash\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "requirements.txt",
+        "manifestInstall": "COPY requirements.txt /tmp/requirements.txt\nRUN pip install -r /tmp/requirements.txt\n"
+    },
+    "python-3.12": {
+        "install": "pip install",
+        "base": "FROM python:3.12-slim\nRUN apt-get update && apt-get install -y bash make build-essential python3\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "requirements.txt",
+        "manifestInstall": "COPY requirements.txt /tmp/requirements.txt\nRUN pip install -r /tmp/requirements.txt\n"
+    },
+    "python-3.11": {
+        "install": "pip install",
+        "base": "FROM python:3.11-slim\nRUN apt-get update && apt-get install -y bash make build-essential python3\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "requirements.txt",
+        "manifestInstall": "COPY requirements.txt /tmp/requirements.txt\nRUN pip install -r /tmp/requirements.txt\n"
+    },
+    "python-3.10": {
+        "install": "pip install",
+        "base": "FROM python:3.10-slim\nRUN apt-get update && apt-get install -y bash make build-essential python3\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "requirements.txt",
+        "manifestInstall": "COPY requirements.txt /tmp/requirements.txt\nRUN pip install -r /tmp/requirements.txt\n"
+    },
+    "c/c++": {
+        "install": "apk add",
+        "base": "FROM frolvlad/alpine-gxx\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+        "useradd": "RUN addgroup -S codepost && adduser -S -G codepost -h /home/codepost -s /bin/bash codepost"
+    },
+    "javascript": {
+        "install": "apk add",
+        "base": "FROM node:13.8.0-alpine3.10\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+        "useradd": "RUN addgroup -S codepost && adduser -S -G codepost -h /home/codepost -s /bin/bash codepost",
+        "manifest": "package.json",
+        "manifestInstall": "COPY package.json /tmp/package.json\nRUN cd /tmp && npm install\nENV NODE_PATH=/tmp/node_modules\n"
+    },
+    "r": {
+        "install": "apt-get install",
+        "base": "FROM r-base:latest\nRUN apt-get update && apt-get install -y bash\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost",
+        "manifest": "requirements.txt",
+        "manifestInstall": "COPY requirements.txt /tmp/requirements.txt\nRUN R -e \"install.packages(readLines('/tmp/requirements.txt'), repos='http://cran.rstudio.com/')\"\n"
+    },
+    "haskell": {
+        "install": "apt-get -y install",
+        "base": "FROM haskell:8\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost"
+    },
+    "ocaml": {
+        "install": "apk add",
+        "base": "FROM ocaml/ocaml:latest\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get install bash\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost"
+    },
+    "ruby": {
+        "install": "apk add",
+        "base": "FROM ruby:2.7-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+        "useradd": "RUN addgroup -S codepost && adduser -S -G codepost -h /home/codepost -s /bin/bash codepost"
+    },
+    "php": {
+        "install": "apk add",
+        "base": "FROM php:7.4-cli-alpine\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\nRUN apk add python3\n",
+        "useradd": "RUN addgroup -S codepost && adduser -S -G codepost -h /home/codepost -s /bin/bash codepost"
+    },
+    "alpine": {
+        "install": "apk add",
+        "base": "FROM alpine:3.11\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\n",
+        "useradd": "RUN addgroup -S codepost && adduser -S -G codepost -h /home/codepost -s /bin/bash codepost"
+    },
+    "ubuntu": {
+        "install": "apt-get -y install",
+        "base": "FROM ubuntu:18.04\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
+        "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost"
+    },
+    "windows": {
+        "install": "",
+        "base": "",
+        "useradd": ""
+    }
 }

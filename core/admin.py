@@ -19,15 +19,14 @@ from core.models import (
     Environment,
     File,
     FileTemplate,
-    HelperFile,
+    # HelperFile, # Removed as per instruction
     OneTimeToken,
     Organization,
     Profile,
     RubricCategory,
     RubricComment,
     Section,
-    SolutionFile,
-    SourceFile,
+    # SolutionFile, # Removed as per instruction
     Submission,
     SubmissionFile,
     SubmissionHistory,
@@ -952,9 +951,9 @@ class SubmissionTestAdmin(admin.ModelAdmin):
 
 @admin.register(Environment)
 class EnvironmentAdmin(admin.ModelAdmin):
-    list_display = ("assignment", "language", "build_type", "created")
+    list_display = ("assignment", "language", "auto_detect", "build_type", "image_name", "build_status", "created")
     search_fields = ("assignment__name",)
-    list_filter = ("language", "buildType", "created")
+    list_filter = ("language", "auto_detect", "buildType", "created")
     readonly_fields = ("assignment", "created", "modified")
     autocomplete_fields = ["assignment"]
     
@@ -963,19 +962,18 @@ class EnvironmentAdmin(admin.ModelAdmin):
             "fields": ("assignment",)
         }),
         ("Configuration", {
-            "fields": ("language", "buildType", "dockerfile", "compileText")
+            "fields": ("language", "requirements", "auto_detect", "buildType", "dockerfile", "compileText")
         }),
         ("Docker Settings", {
             "fields": ("dockerRunInstructions",),
             "classes": ("collapse",)
         }),
         ("Testing Settings", {
-            "fields": ("allowNetworkAccess", "maxStudentTestRuns", "maxExposedFailedTests", 
-                      "exposeDumpLogs", "parseTestsOnSave"),
+            "fields": ("allowNetworkAccess", "maxStudentTestRuns", "maxExposedFailedTests"),
             "classes": ("collapse",)
         }),
         ("Build", {
-            "fields": ("buildID",),
+            "fields": ("buildID", "image_name", "build_status", "build_logs", "last_built"),
             "classes": ("collapse",)
         }),
         ("Timestamps", {
@@ -1000,43 +998,10 @@ class EnvironmentAdmin(admin.ModelAdmin):
         return qs.select_related("assignment")
 
 
-@admin.register(SolutionFile)
-class SolutionFileAdmin(admin.ModelAdmin):
-    list_display = ("name", "environment", "created")
-    search_fields = ("name", "environment__assignment__name")
-    list_filter = ("created",)
-    readonly_fields = ("environment", "created", "modified")
-    autocomplete_fields = ["environment"]
-    
-    def get_queryset(self, request: Any) -> Any:
-        qs = super().get_queryset(request)
-        return qs.select_related("environment", "environment__assignment")
 
 
-@admin.register(HelperFile)
-class HelperFileAdmin(admin.ModelAdmin):
-    list_display = ("name", "environment", "created")
-    search_fields = ("name", "environment__assignment__name")
-    list_filter = ("created",)
-    readonly_fields = ("environment", "created", "modified")
-    autocomplete_fields = ["environment"]
-    
-    def get_queryset(self, request: Any) -> Any:
-        qs = super().get_queryset(request)
-        return qs.select_related("environment", "environment__assignment")
 
 
-@admin.register(SourceFile)
-class SourceFileAdmin(admin.ModelAdmin):
-    list_display = ("name", "environment", "created")
-    search_fields = ("name", "environment__assignment__name")
-    list_filter = ("created",)
-    readonly_fields = ("environment", "created", "modified")
-    autocomplete_fields = ["environment"]
-    
-    def get_queryset(self, request: Any) -> Any:
-        qs = super().get_queryset(request)
-        return qs.select_related("environment", "environment__assignment")
 
 
 # Register File model with search_fields for autocomplete

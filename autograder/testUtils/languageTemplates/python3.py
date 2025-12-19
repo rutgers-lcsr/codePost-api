@@ -5,6 +5,23 @@ import traceback
 import os
 import re
 
+# Plot verification setup
+plot_generated = False
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    
+    _orig_show = plt.show
+    def _mock_show(*args, **kwargs):
+        global plot_generated
+        plot_generated = True
+        return _orig_show(*args, **kwargs)
+    
+    plt.show = _mock_show
+except ImportError:
+    pass
+
 try:
     import {fileName}
     isPassed = False
@@ -29,9 +46,17 @@ try:
         else:
             isPassed=False
             errorLogs = "\\n=============================\\nEXPECTED OUTPUT:\\n" + str(expectedToCompare) + "\\n------------------------------------------------------------\\nACTUAL OUTPUT:\\n" + str(resultToCompare) + "\\n=============================\\n"
+
+    # Plot verification check
+    if {expectPlot}:
+        if not plot_generated:
+            isPassed = False
+            errorLogs += "\\n[Failure] Expected a plot to be generated, but none was detected (via plt.show())."
+
 except Exception as e:
     isPassed=False
     errorLogs = traceback.format_exc()
+
 f = open(\"/outputs/{test}.json\", \"w\")
 json.dump({{\"id\": \"{test}\", \"passed\": isPassed, \"log\": str(errorLogs)}}, f)
 f.close()
@@ -46,6 +71,22 @@ from io import StringIO
 import sys
 import re
 
+# Plot verification setup
+plot_generated = False
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    
+    _orig_show = plt.show
+    def _mock_show(*args, **kwargs):
+        global plot_generated
+        plot_generated = True
+        return _orig_show(*args, **kwargs)
+    
+    plt.show = _mock_show
+except ImportError:
+    pass
 
 old_stdout = sys.stdout
 sys.stdout = mystdout = StringIO()
@@ -75,6 +116,12 @@ try:
             isPassed=False
             errorLogs = "\\n=============================\\nEXPECTED OUTPUT:\\n"+ expectedToCompare+ "\\n------------------------------------------------------------\\nACTUAL OUTPUT:\\n" + resultToCompare + "\\n=============================\\n"
 
+    # Plot verification check
+    if {expectPlot}:
+        if not plot_generated:
+            isPassed = False
+            errorLogs += "\\n[Failure] Expected a plot to be generated, but none was detected (via plt.show())."
+
 except Exception as e:
     isPassed=False
     errorLogs = traceback.format_exc()
@@ -97,6 +144,12 @@ class TestOutput:
         assert (isinstance(logs, str))
         self.passed = passed
         self.logs = logs
+
+# Plot verification setup
+# For Unit Tests, we don't automatically check for plots unless specified, 
+# but usually unit tests return TestOutput directly.
+# If expectPlot support is needed here, we'd need to thread it through.
+# For now, leaving as-is or adding safe mock.
 
 try:
     {cmd}

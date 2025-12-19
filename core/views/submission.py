@@ -319,10 +319,7 @@ class SubmissionViewSet(ListProtectedViewSet):
             tests = filterExposedSubmissionTests(list(submission.tests.all()), maxFailedTests)[0]
 
             try:
-                if assignment.environment.exposeDumpLogs:
-                    logCode = retrieve_log_code(submission)
-                else:
-                    logCode = ''
+                logCode = retrieve_log_code(submission)
             except:
                 logCode = ''
 

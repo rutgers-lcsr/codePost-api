@@ -9,6 +9,7 @@ from django.dispatch import receiver
 from django.conf import settings
 
 from core.models import Submission
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,18 @@ def auto_execute_submission(sender, instance, created, **kwargs):
         if not RunSubmission:
             logger.error("RunSubmission task not found. Cannot auto-execute submission.")
             return
+
+        # Attempt Auto-Detection of Environment
+        # We do this before execution so the run uses the correct environment settings.
+        try:
+            from autograder.services.autodetector import Autodetector
+            Autodetector.detect_and_update(instance)
+        except Exception as e:
+            logger.error(f"Auto-detection failed for submission {instance.id}: {e}")
+        
+        # wait 1 second
+        # Submission files are not immediately available after upload
+        time.sleep(1)
         
         # Queue the execution task
         task = RunSubmission.delay(instance.id) # type: ignore
@@ -80,3 +93,21 @@ def auto_execute_submission(sender, instance, created, **kwargs):
             f"Failed to queue execution for submission {instance.id}: {e}",
             exc_info=True
         )
+
+from core.models import AssignmentFile
+from django.db.models.signals import post_delete
+
+@receiver(post_save, sender=AssignmentFile)
+@receiver(post_delete, sender=AssignmentFile)
+def auto_detect_on_file_change(sender, instance, **kwargs):
+    """
+    Trigger auto-detection when assignment files change.
+    """
+    try:
+        from autograder.services.autodetector import Autodetector
+        # AssignmentFile has 'assignment' FK
+        assignment = instance.assignment
+        logger.info(f"AssignmentFile changed for {assignment.id}. Triggering auto-detection.")
+        Autodetector.detect_and_update(assignment=assignment)
+    except Exception as e:
+        logger.error(f"Failed to run auto-detection for assignment file change: {e}")

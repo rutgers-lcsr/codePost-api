@@ -187,7 +187,6 @@ CSRF_TRUSTED_ORIGINS = (
     "https://dev-codepost-1.cs.rutgers.edu",
     "https://dev-codepost-2.cs.rutgers.edu",
     "https://codepost.cs.rutgers.edu",
-    
 )
 
 checkCSRFTrustedOrigins(CLIENT_URL, CSRF_TRUSTED_ORIGINS)
@@ -349,6 +348,15 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = "static"
 
+# Only in docker 
+if DOCKER:
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = "/assignment_datasets"
+else:
+    # In local development
+    MEDIA_URL = "/media/"
+    MEDIA_ROOT = "assignment_datasets"
+
 if not DEBUG:
     # Tell Django to copy statics to the `staticfiles` directory
     # in your application directory on Render.
@@ -357,6 +365,7 @@ if not DEBUG:
     # Turn on WhiteNoise storage backend that takes care of compressing static files
     # and creating unique names for each version so they can safely be cached forever.
     STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    
 
 STATICFILES_DIRS = []
 
@@ -418,7 +427,12 @@ if DEBUG:
 # Used for communication between the API and the autograder.
 
 # Deprecate this soon, original codepost is going down
-AUTOGRADER_URL = "https://4bppxuryyz.codepost.io"
+
+if DEBUG:
+    AUTOGRADER_URL = "http://127.0.0.1:8000"
+else:
+    AUTOGRADER_URL = "https://4bppxuryyz.codepost.io"
+
 # AUTOGRADER_URL = "https://qoe9ev62y5.codepost.io"
 # AUTOGRADER_URL = "http://127.0.0.1:8002"
 # AUTOGRADER_URL = "https://autograder-cyl1.onrender.com"
@@ -437,10 +451,11 @@ AUTOGRADER_URL = "https://4bppxuryyz.codepost.io"
 # To run the worker locally, run the following in a second terminal:
 # > celery worker -A autograder --loglevel=info -Q dev-api-celery,dev-api-celery-long-tasks
 
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://codepost-redis:6379")
 
 if DEBUG:
     CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379")
+else:
+    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://codepost-redis:6379")
 
 CELERY_DEFAULT_QUEUE = "prod-celery"
 # CELERY_ROUTES = {
@@ -458,12 +473,16 @@ CELERY_CACHE_BACKEND = "django-cache"
 CELERY_IGNORE_RESULT = False
 CELERY_TRACK_STARTED = True
 CELERY_RESULT_EXTENDED = True
-# CELERYBEAT_SCHEDULE = {
-#     "daily-assignment-check": {
-#         "task": "autograder.run.daily_assignment_check",
-#         "schedule": crontab(day_of_week="*", hour="14", minute="1"),
-#     }
-# }
+CELERY_BEAT_SCHEDULE = {
+    # "daily-assignment-check": {
+    #     "task": "autograder.run.daily_assignment_check",
+    #     "schedule": crontab(day_of_week="*", hour="14", minute="1"),
+    # },
+    "delete-expired-courses": {
+        "task": "core.tasks.delete_expired_courses",
+        "schedule": crontab(minute=0, hour="*"), # Run every hour
+    }
+}
 BROKER_TRANSPORT_OPTIONS = {
     # "region": "us-east-2",
     "polling_interval": 20,
@@ -520,3 +539,4 @@ Django settings loaded successfully.
 Welcome to CodePost!      
       """)
 print("=" * 80)
+# Force reload Sat Dec 13 10:02:13 PM EST 2025

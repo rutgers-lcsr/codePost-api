@@ -5,7 +5,9 @@ from asyncio.log import logger
 from datetime import datetime, timedelta
 from decimal import Decimal
 import re
+import hashlib
 import uuid
+import shutil
 
 from django.contrib.auth.models import User  # type: ignore[assignment]
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
@@ -21,7 +23,6 @@ from regex import F
 from rest_framework.authtoken.models import Token
 from zmq import has
 from django.utils import timezone
-
 from core.validators import validate_hex_color
 from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
 from codepost.settings import DEBUG
@@ -109,6 +110,8 @@ class Organization(BaseModel):
                           help_text=("The name of the organization."))
   shortname = models.CharField(max_length=12, unique=True, help_text=(
       "A shortname for the organization (e.g. Princeton University -> PU)"))
+  email_domain = models.CharField(max_length=64, blank=True, null=True, help_text=(
+      "The email domain associated with the organization."))
 
   class Meta:
     ordering = ('name',)
@@ -258,6 +261,10 @@ class Course(BaseModel):
         
   manual_payments = JSONField(default=list, help_text="An array of manual payments", validators=[validate_manual_payments], blank=True)
   waiver_requested = models.BooleanField(default=False, help_text=("If True, the course has requested a waiver."))
+  studentsCanSeeGraders = models.BooleanField(default=False, help_text=(
+      "If True, students can see the grader who graded their submission."))
+  
+  expiration_date = models.DateTimeField(null=True, blank=True, help_text=("The date when the course will be automatically deleted."))
 
   class Meta:
     unique_together = ('name', 'period', 'organization')
@@ -351,6 +358,8 @@ class Assignment(BaseModel):
       "A boolean field. If true, grades begin at 0 (instead of assignment.points)"))
   hideGradersFromStudents = models.BooleanField(default=True, help_text=(
       "A boolean field. If True, the graders of a submission will be hidden from students."))
+  studentsCanSeeGraders = models.BooleanField(null=True, blank=True, default=None, help_text=(
+      "If set, overrides course setting. If True, students can see graders for this assignment."))
   collaborativeRubricMode = models.BooleanField(default=False, help_text=(
       "A boolean field. If true, admins and graders can edit the assignment rubric inline in the code console."))
 
@@ -536,6 +545,7 @@ class File(BaseModel):
       "Optional file path, delimited by slashes, to indicate a directory structure."))
 
   course = property(lambda self: self.get_course())
+  hash = models.CharField(max_length=256, help_text=("The SHA-256 hash of the file."), default="")
   
   def __repr__(self):
     return super().__repr__() + f" (name={self.name}, extension={self.extension})"
@@ -601,17 +611,40 @@ class File(BaseModel):
 
     return file, submission, assignment, course
   
+  @property
+  def handler(self):
+      """
+      Returns the appropriate FileHandler for this file.
+      Cached on the instance to avoid re-creation.
+      """
+      if not hasattr(self, '_handler'):
+          from core.services.file_handlers.factory import FileHandlerFactory
+          self._handler = FileHandlerFactory.get_handler(self)
+      return self._handler
+
+  def __getattr__(self, name):
+      # Delegate unknown attributes to the handler
+      # Avoid recursion if handler is missing
+      if name in ['_handler', 'handler']:
+          raise AttributeError(name)
+          
+      try:
+          return getattr(self.handler, name)
+      except AttributeError:
+          raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
   def save(self, *args, **kwargs):
     # Check if trying to use deprecated 'code' field
     if hasattr(self, 'code') and self.code:  # type: ignore[attr-defined]
       raise Exception("File.code is deprecated. Use File.data instead.")
  
     # Normalize newlines
-    if '\r\n' in self.data:
-      self.data = self.data.replace("\r\n", "\n")
+    if '\\r\\n' in self.data:
+      self.data = self.data.replace("\\r\\n", "\\n")
     
     # Ensure utf-8 encoding
     self.data = self.data.encode('utf-8').decode('utf-8')
+    self.hash = hashlib.sha256(self.data.encode('utf-8')).hexdigest()
     
     # Infer extension from name if not provided
     if not self.extension:
@@ -619,11 +652,17 @@ class File(BaseModel):
       if match:
         self.extension = match.group(1)
       else:
+        # Try to use handler logic? No, handler needs extension usually.
+        # But we could potentially use content sniffing in handler.
+        # For now keeping existing logic but maybe allowing handler to refine?
         raise ValidationError("File extension could not be inferred from file name. Please provide an extension.")
       
     
     return super(File, self).save(*args, **kwargs)
   
+
+
+
 class SubmissionFile(File):
   if TYPE_CHECKING:
     id: int
@@ -636,12 +675,15 @@ class SubmissionFile(File):
       "Whether this file should hidden to students before their feedback has been published. This is for autogenerated test files that shouldn't be exposed to students on upload."))
 
 
-def dataset_upload_path(instance, filename):
+def dataset_upload_path(instance: AssignmentDataSet|Assignment, filename: str) -> str:
   """
   Generate hierarchical upload path for dataset files.
   Path format: assignment_datasets/<org_shortname>/<course_name>/<period>/<assignment_name>/<filename>
   """
-  assignment = instance.assignment
+  if isinstance(instance, AssignmentDataSet):
+    assignment = instance.assignment
+  else:
+    assignment = instance
   course = assignment.course
   org = course.organization
   
@@ -651,7 +693,7 @@ def dataset_upload_path(instance, filename):
   period_safe = course.period.replace(' ', '_')
   assignment_safe = assignment.name.replace(' ', '_')
   
-  return f'assignment_datasets/{org_safe}/{course_safe}/{period_safe}/{assignment_safe}/{filename}'
+  return f'{org_safe}/{course_safe}/{period_safe}/{assignment_safe}/{filename}'
 
 
 class AssignmentDataSet(BaseModel):
@@ -691,7 +733,6 @@ class AssignmentDataSet(BaseModel):
   class Meta:
     unique_together = ('assignment', 'name')
     ordering = ('name',)
-
 
 class CachedExecutionResult(BaseModel):
   """
@@ -1017,6 +1058,9 @@ class TestCase(BaseModel):
       "A boolean field. 'True' if the output should be compared to the return of the function. False if it should be compared to std out."))
   isFlexible = models.BooleanField(default=False, help_text=("Flexible mode for output checking."))
   outputIsRegexp = models.BooleanField(default=False, help_text=("Is expected output specified in the form of a regexp?"))
+  expectPlot = models.BooleanField(default=False, help_text=("If True, the test will only pass if a plot is generated."))
+  dataSet = models.ForeignKey("AssignmentDataSet", null=True, blank=True, on_delete=models.SET_NULL, help_text=("The dataset to mount for this test."))
+  targetCellId = models.CharField(max_length=64, blank=True, null=True, help_text=("The ID of the notebook cell to target for execution."))
 
   course = property(lambda self: self.testCategory.course)
 
@@ -1080,24 +1124,26 @@ class Environment(BaseModel):
   if TYPE_CHECKING:
     id: int
     assignment: Assignment
-    solutionFiles: RelatedManager[SolutionFile]
-    helperFiles: RelatedManager[HelperFile]
-    sourceFiles: RelatedManager[SourceFile]
+    
     
   assignment: Assignment = models.OneToOneField(Assignment, on_delete=models.CASCADE,  # type: ignore[assignment]
                                     related_name="environment", help_text=("The related assignment__id."))
   dockerRunInstructions = JSONField(default=[], blank=True, help_text="Instructions to be added to the docker file with a RUN command.")
   language = models.CharField(max_length=25, choices=(
+      ('python-3.12', 'python-3.12'),
+      ('python-3.11', 'python-3.11'),
+      ('python-3.10', 'python-3.10'),
       ('python-3.7', 'python-3.7'),
       ('python-2.7', 'python-2.7'),
       ('java', 'java'),
+      ('java-17', 'java-17'),
+      ('java-11', 'java-11'),
       ('c/c++', 'c/c++'),
-      ('javascript', 'javascript'),
-      ('haskell', 'haskell'),
-      ('ocaml', 'ocaml'),
+      ('node-20', 'node-20'),
+      ('node-18', 'node-18'),
+      ('r-4', 'r-4'),
       ('ruby', 'ruby'),
-      ('php', 'php'),
-      ('other', 'other')), default='python-3.7')
+      ('php', 'php')), default='python-3.7')
   buildType = models.CharField(max_length=25, choices=(
       ('default', 'default'),
       ('alpine', 'alpine'),
@@ -1107,68 +1153,58 @@ class Environment(BaseModel):
       "A custom set of docker commands to append to the base image docker file"))
   compileText = models.TextField(default='', blank=True, help_text=(
       "Command to be run on every submission before tests"))
-  isRunning = models.BooleanField(default=False, help_text=(
-      "A boolean field indicating whether the environment currently is running all submissions with all tests."))
-  dumpMode = models.BooleanField(default=False, help_text=(
-      "A boolean field indicating whether all test outputs should be dumped to a _tests.txt file."))
-  testParsing = models.BooleanField(default=True, help_text=(
-      "A boolean field indicating whether tests should be parsed from sourcefiles on save."))
   allowNetworkAccess = models.BooleanField(default=False, help_text=(
       "A boolean field indicating whether tests should be run in a container that allows network access."))
   maxStudentTestRuns = models.PositiveIntegerField(null=True, blank=True, help_text=(
       "An integer field indicating the max times that tests will be run if tests are exposed."))
-  exposeDumpLogs = models.BooleanField(default=False, help_text=(
-      "If dumpMode is turned on, this boolean field determins whether the tests.txt is exposed to students on submit."))
   maxExposedFailedTests = models.PositiveIntegerField(null=True, blank=True, help_text=(
       "An integer field indicating the limit of the number of failed tests that will be exposed to a student (nudge mode)."))
+
   buildID = models.PositiveIntegerField(default=0, help_text=(
       "An integer field making each environment build distinct"))
+  
+  # New fields for custom environment support
+  image_name = models.CharField(max_length=255, null=True, blank=True, help_text="The Docker image name for this environment.")
+  build_status = models.IntegerField(choices=((0, 'Not Built'), (1, 'Building'), (2, 'Success'), (3, 'Failed')), default=0)
+  build_logs = models.TextField(default="", blank=True, help_text="Logs from the image build process.")
+  last_built = models.DateTimeField(null=True, blank=True, help_text="Timestamp of the last build.")
+  requirements = models.TextField(default="", blank=True, help_text="Python requirements.txt content.")
+  env_vars = JSONField(default=dict, blank=True, help_text="Dictionary of environment variables to set in the Docker container.")
+  auto_detect = models.BooleanField(default=True, help_text="Automatically detect environment settings from submissions.")
+  
+  # Convergence tracking
+  convergence_stats = JSONField(default=dict, blank=True, help_text="Tracks module error counts: {module_name: occurrence_count}")
+  successful_runs = models.PositiveIntegerField(default=0, help_text="Count of successful submission runs (for stability check)")
+  total_runs = models.PositiveIntegerField(default=0, help_text="Total submission runs")
+  
+  # Image versioning and rollback
+  current_build_version = models.PositiveIntegerField(default=1, help_text="Current image version number")
+  image_history = JSONField(default=list, blank=True, help_text="List of {version, image_name, requirements, built_at, status}")
+  convergence_pending = models.BooleanField(default=False, help_text="True if waiting to validate convergence after auto-update")
+  convergence_failed_notified = models.BooleanField(default=False, help_text="True if admin was notified of convergence failure")
 
   course = property(lambda self: self.assignment.course)
 
 
-class SolutionFile(BaseModel):
-  if TYPE_CHECKING:
-    id: int
-    environment: Environment
-    
-  name = models.CharField(max_length=48, help_text=("The name of the Solution file."))
-  code = models.TextField(blank=True, help_text=("The code in a file."))
-  path = models.CharField(null=True, blank=True, max_length=500, help_text=(
-      "Optional file path, delimited by slashes, to indicate a directory structure."))
-
-  environment: Environment = models.ForeignKey(Environment, on_delete=models.CASCADE,  # type: ignore[assignment]
-                                  related_name="solutionFiles", help_text=("The related environment_id."))
-
-  course = property(lambda self: self.environment.course)
 
 
-class HelperFile(BaseModel):
-  if TYPE_CHECKING:
-    id: int
-    environment: Environment
-    
-  name = models.CharField(max_length=48, help_text=("The name of the Helper file."))
-  code = models.TextField(blank=True, help_text=("The code in a file."))
-  path = models.CharField(null=True, blank=True, max_length=500, help_text=(
-      "Optional file path, delimited by slashes, to indicate a directory structure."))
-  environment: Environment = models.ForeignKey(Environment, on_delete=models.CASCADE,  # type: ignore[assignment]
-                                  related_name="helperFiles", help_text=("The related environment_id."))
+#### Data
 
-  course = property(lambda self: self.environment.course)
+# AssignmentDataSet
 
+@receiver(models.signals.pre_delete, sender=Assignment)
+def delete_assignment(sender, instance: Assignment, **kwargs):
+  # delete all related datasets, The rest of the assignment is deleted by the cascade delete
 
-class SourceFile(BaseModel):
-  if TYPE_CHECKING:
-    id: int
-    environment: Environment
-    
-  code = models.TextField(blank=True, help_text=("The code."))
-  name = models.CharField(max_length=48, help_text=("The name of the Test Group file."))
-  environment: Environment = models.ForeignKey(Environment, on_delete=models.CASCADE,  # type: ignore[assignment]
-                                  related_name="sourceFiles", help_text=("The related environment_id."))
+  if instance.dataSets.all() and instance.dataSets.all().count() > 0:
+    # just delete the directory assignment/dataset
+    try:
+      data_path = dataset_upload_path(instance, filename="")
+      logger.info(f"Deleting dataset directory: {data_path}")
+      shutil.rmtree(data_path)
+    except Exception as e:
+      logger.error(f"Failed to delete dataset directory: {e}")
 
-  course = property(lambda self: self.environment.course)
 
 ###############################################################################
 
@@ -1370,10 +1406,6 @@ __all__ = [
     "TestCase",
     "SubmissionTest",
     "SubmissionHistory",
-    "Environment",
-    "SolutionFile",
-    "HelperFile",
     "AssignmentDataSet",
     "CachedExecutionResult",
-    "SourceFile",
 ]

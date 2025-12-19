@@ -56,4 +56,12 @@ class FileViewSet(ListProtectedViewSet):
             elif isinstance(file_obj, CourseFile):
                 return CourseFileSerializer
         
+        if self.action == 'create' and self.request.data:
+            if 'submission' in self.request.data:
+                return SubmissionFileSerializer
+            elif 'assignment' in self.request.data:
+                return AssignmentFileSerializer
+            elif 'course' in self.request.data:
+                return CourseFileSerializer
+                
         return self.serializer_class

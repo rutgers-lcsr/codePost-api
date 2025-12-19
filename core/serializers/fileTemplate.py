@@ -8,5 +8,7 @@ class FileTemplateSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = FileTemplate
-    fields = ('name', 'code', 'extension', 'id', 'path', 'assignment', 'required', 'description')
-    extra_kwargs = {"code": {"trim_whitespace": False}}
+    fields = ('name', 'data', 'extension', 'id', 'path', 'assignment', 'required', 'description')
+    extra_kwargs = {
+        "data": {"trim_whitespace": False},
+    }

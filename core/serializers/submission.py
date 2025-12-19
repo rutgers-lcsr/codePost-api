@@ -178,13 +178,37 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
+  hasGrader = serializers.SerializerMethodField()
+
+  def get_hasGrader(self, obj):
+    return obj.grader is not None
 
   class Meta:
     model = Submission
     fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'grade', 'questionIsOpen', 'questionIsRegrade',
-              'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+              'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
     read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'grade', 'questionIsOpen', 'questionIsRegrade',
-                        'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+                        'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+
+  def to_representation(self, obj):
+    """Add grader field when studentsCanSeeGraders is enabled"""
+    ret = super().to_representation(obj)
+    assignment = obj.assignment
+    course = assignment.course
+    
+    # Check if students can see graders:
+    # Assignment setting overrides course, otherwise use course default
+    if assignment.studentsCanSeeGraders is not None:
+      show_grader = assignment.studentsCanSeeGraders
+    else:
+      show_grader = course.studentsCanSeeGraders
+    
+    if show_grader and obj.grader:
+      ret['grader'] = obj.grader.email
+    else:
+      ret['grader'] = None
+    
+    return ret
 
 class StudentSubmissionWithoutGradeSerializer(serializers.ModelSerializer):
   # Explicitly use SubmissionFileSerializer for the files relationship

@@ -1,0 +1,106 @@
+version: "3.8"
+
+services:
+  # Redis for Celery
+  codepost-redis:
+    image: redis:latest
+    container_name: codepost-redis-test
+    ports:
+      - "6380:6379" # Map to different port to avoid conflict with dev
+    volumes:
+      - redis-data-test:/data
+    restart: always
+
+  # Database
+  codepost-database:
+    image: mariadb:latest
+    container_name: codepost-database-test
+    ports:
+      - "3307:3306" # Map to different port
+    environment:
+      - MARIADB_ROOT_PASSWORD=root
+      - MARIADB_DATABASE=codepost
+      - MARIADB_USER=codepost_user
+      - MARIADB_PASSWORD=password
+    volumes:
+      - db-data-test:/var/lib/mysql
+    command:
+      - --innodb_page_size=16k
+      - --innodb_buffer_pool_size=128M # Smaller for test
+      - --innodb_log_file_size=64M
+    restart: always
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API
+  codepost-api:
+    container_name: codepost-api-test
+    build:
+      context: .
+      target: api
+    privileged: true
+    env_file:
+      - .env
+    environment:
+      - DB_HOSTNAME=codepost-database
+      - DB_PORT=3306
+      - CELERY_BROKER_URL=redis://codepost-redis:6379
+      - DB_NAME=codepost
+      - DB_USERNAME=codepost_user
+      - DB_PASSWORD=password
+      - DEBUG=TRUE
+      - SECRET_KEY=insecure_test_key
+      - API_USER=admin
+      - API_PASSWORD=admin_password
+    ports:
+      - "8001:8000" # Map to 8001
+    volumes:
+      - datasets-test:/assignment_datasets
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      codepost-database:
+        condition: service_healthy
+      codepost-redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery Worker
+  codepost-worker:
+    container_name: codepost-worker-test
+    build:
+      context: .
+      target: worker
+    privileged: true
+    env_file:
+      - .env
+    environment:
+      - DB_HOSTNAME=codepost-database
+      - DB_PORT=3306
+      - CELERY_BROKER_URL=redis://codepost-redis:6379
+      - DB_NAME=codepost
+      - DB_USERNAME=codepost_user
+      - DB_PASSWORD=password
+      - DEBUG=FALSE
+      - SECRET_KEY=insecure_test_key
+    volumes:
+      - datasets-test:/assignment_datasets
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      codepost-api:
+        condition: service_started
+      codepost-redis:
+        condition: service_started
+      codepost-database:
+        condition: service_healthy
+
+volumes:
+  redis-data-test:
+  db-data-test:
+  datasets-test:

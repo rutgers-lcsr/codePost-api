@@ -4,7 +4,7 @@ from core.logging import logEvent
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
 from rest_framework.request import Request
-from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary
+from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionStatusSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.serializers.rubricComment import RubricCommentSerializer
@@ -113,9 +113,9 @@ class AssignmentViewSet(ListProtectedViewSet):
         if (not assignment.isReleased and not assignment.liveFeedbackMode):
           return AssignmentStudentSerializer
         elif (not course.showStudentsStatistics):
-          return AssignmentSerializer
+          return AssignmentStudentSerializerNoStats
         else:
-          return AssignmentSerializerWithStatistics
+          return AssignmentStudentSerializerWithStats
     else:
       return AssignmentSerializer
 
@@ -542,6 +542,9 @@ class AssignmentViewSet(ListProtectedViewSet):
   def studentUpload(self, request, pk=None):
     """
     Upload of submission to an assignment
+
+
+    TODO: add file limits to 10mb
     """
     user = self.request.user
     assignment = Assignment.objects.get(id=pk)
@@ -559,10 +562,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 
       # Began late submission check
-      if assignment.uploadDueDate:
-        if now() < assignment.uploadDueDate:
-          pass
-        
+      if assignment.uploadDueDate and now() > assignment.uploadDueDate:
         if not assignment.allowLateUploads:
           raise serializers.ValidationError("Late submissions are not allowed for this assignment.")
         
@@ -570,8 +570,6 @@ class AssignmentViewSet(ListProtectedViewSet):
         maxLateDate = assignment.uploadDueDate + timedelta(days=assignment.maxLateDays)
         if now() > maxLateDate:
           raise serializers.ValidationError("The maximum late submission period has passed for this assignment.")
-          
-        
         
       # Ended late submission check
       
@@ -579,14 +577,42 @@ class AssignmentViewSet(ListProtectedViewSet):
       
 
       # Check to make sure the files are valid before we create the submission
+      uploaded_filenames = set()
+      MAX_FILE_SIZE = 10 * 1024 * 1024 # 10MB
+
       for f in request.data['files']:
         serializer = FileValidationSerializerWithoutSubmission(data=f)
 
         try:
           serializer.is_valid(raise_exception=True)
+          
+          # Check file size (10MB limit)
+          # 'data' field is the string content, but for size we might want bytes.
+          # Assuming 'data' is text or base64? The model says "should be utf-8 encoded text".
+          # A strict 10MB limit on text length is a fair approximation for now.
+          if len(f.get('data', '')) > MAX_FILE_SIZE:
+             raise ValidationError(f"File '{f['name']}' exceeds the 10MB size limit.")
+
+          uploaded_filenames.add(f['name'])
+
         except ValidationError as e:
-          e.detail['file'] = f['name']  # type: ignore
-          raise
+          if isinstance(e.detail, dict):
+            e.detail['file'] = f['name']
+          else:
+             # If it's a list or string, wrap it
+             e = ValidationError({'file': f['name'], 'error': e.detail})
+          raise e
+
+      # Check for required files
+      required_files = assignment.files.filter(required=True)
+      missing_files = []
+      for req_file in required_files:
+        if req_file.name not in uploaded_filenames:
+          missing_files.append(req_file.name)
+      
+      if missing_files:
+        raise serializers.ValidationError(f"Missing required files: {', '.join(missing_files)}")
+
 
 
       otherSubs = Submission.objects.filter(assignment=pk, students__in=[user])

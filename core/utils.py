@@ -199,20 +199,7 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
           startCommand=environment.startCommand
       )
 
-      for solutionFile in original_environment.solutionFiles.all():
-          solutionFile.pk = None
-          solutionFile.environment = new_environment
-          solutionFile.save()
 
-      for helperFile in original_environment.helperFiles.all():
-          helperFile.pk = None
-          helperFile.environment = new_environment
-          helperFile.save()
-
-      for sourceFile in original_environment.sourceFiles.all():
-          sourceFile.pk = None
-          sourceFile.environment = new_environment
-          sourceFile.save()
 
   return new_assignment
 

@@ -47,7 +47,7 @@ def isCourseAdmin(user, course):
   """
   Check if the user is a course admin.
   """
-  return course in user.courseAdmin_courses.all()
+  return user.is_superuser or course in user.courseAdmin_courses.all()
 
 def isCourseStaff(user, course):
   """

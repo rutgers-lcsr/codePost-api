@@ -96,6 +96,8 @@ django-stubs = "^5.2.7"
 nbformat = "^5.10.4"
 nbconvert = "^7.16.6"
 docker = "^7.1.0"
+javalang = "^0.13.0"
+esprima = "^4.0.1"
 
 
 [build-system]

@@ -13,9 +13,10 @@ from django.contrib.auth.models import User
 
 # Internal imports
 from autograder.celery import app, logger
-from autograder.services.executor import ExecutionResult, Executor
+from autograder.services.executors import ExecutionResult, Executor
+from autograder.services.TestService import TestService
 from codepost.settings import AUTOGRADER_URL
-from autograder.testUtils.logging import (
+from autograder.testUtils.ag_logging import (
     AutograderError,
     AutograderUsage,
     AutograderRunAllUsage,
@@ -30,9 +31,6 @@ from core.models import (
     Submission,
     Environment,
     TestCategory,
-    SourceFile,
-    File,
-    SolutionFile,
     Assignment,
 )
 from core.serializers.submissionTest import SubmissionTestSerializer
@@ -40,7 +38,7 @@ from core.tests.views.results import assignment
 from log.models import Event, TrackedAutograderRun
 
 from core.permissions.helpers import isStaffOfSub
-from autograder.testUtils.parse import parseTests, parseSourceFile, writeCmdScript
+from autograder.testUtils.parse import parseTests, writeCmdScript
 
 from core.emails import TestRunAllCompleteEmail
 
@@ -64,6 +62,177 @@ def add(x, y):
     logger.info(f"Adding {x} + {y}")
     return x + y
 
+from autograder.services.builder import Builder
+
+@app.task
+def AutoDetectEnvironment(assignment_id):
+    """
+    Celery task to run auto-detection on assignment files.
+    """
+    try:
+        from autograder.services.detection import detect_from_assignment_files
+        detect_from_assignment_files(assignment_id)
+    except Exception as e:
+        logger.error(f"[AutoDetect] Task failed for assignment {assignment_id}: {e}")
+
+@app.task
+def BuildEnvironment(environmentID, rerun_submission_ids: list[int] = None):
+    """
+    Builds the Docker environment for a given Environment ID.
+    Optionally reruns submissions after successful build.
+    """
+    
+    # --- AUTO-DETECT UPDATE TRIGGER ---
+    # When building explicitly, we should refresh auto-detected requirements.
+    # This handles "Update & Build" clicks and AssignmentFile updates.
+    try:
+        env = Environment.objects.get(id=environmentID)
+        if env.auto_detect:
+            from autograder.services.autodetector import Autodetector
+            logger.info(f"[BuildEnvironment] Triggering auto-detection for env {environmentID}")
+            Autodetector.detect_and_update(assignment=env.assignment, force=True)
+            # Re-fetch env to get updated requirements
+            env.refresh_from_db()
+    except Exception as e:
+        logger.error(f"[BuildEnvironment] Auto-detect failed: {e}")
+    # ----------------------------------
+
+    builder = Builder(environmentID)
+    result = builder.build()
+    
+    if result.get("success") and rerun_submission_ids:
+        logger.info(f"[BuildEnvironment] Triggering reruns for {len(rerun_submission_ids)} submissions")
+        for sub_id in rerun_submission_ids:
+            RunSubmission.delay(sub_id)
+            logger.info(f"[BuildEnvironment] Queued rerun for submission {sub_id}")
+    
+    return result
+
+
+@app.task
+def CleanupOldImages(environment_id: int, keep_count: int = 3):
+    """
+    Celery task to cleanup old Docker images for an environment.
+    Keeps the most recent `keep_count` versions.
+    """
+    from autograder.services.image_manager import ImageManager
+    deleted = ImageManager.cleanup_old_images(environment_id, keep_count)
+    logger.info(f"[CleanupOldImages] Cleaned up {deleted} images for env {environment_id}")
+    return {"deleted_count": deleted}
+
+
+@app.task
+def ValidateConvergence(environment_id: int):
+    """
+    Celery task to validate if convergence was successful.
+    Called after submissions have been rerun with new dependencies.
+    
+    If success rate >= 80%: Promote and cleanup old images
+    If success rate < 50% after min runs: Rollback and notify admin
+    """
+    from autograder.services.image_manager import ImageManager
+    
+    try:
+        env = Environment.objects.get(pk=environment_id)
+        
+        if not env.convergence_pending:
+            logger.info(f"[ValidateConvergence] No pending convergence for env {environment_id}")
+            return {"status": "no_pending"}
+        
+        # Need minimum runs to validate
+        MIN_RUNS_FOR_VALIDATION = 5
+        if env.total_runs < MIN_RUNS_FOR_VALIDATION:
+            logger.info(f"[ValidateConvergence] Not enough runs yet ({env.total_runs}/{MIN_RUNS_FOR_VALIDATION})")
+            return {"status": "waiting_for_runs", "runs": env.total_runs}
+        
+        success_rate = env.successful_runs / env.total_runs if env.total_runs > 0 else 0
+        
+        if success_rate >= 0.8:
+            # Success! Promote convergence
+            ImageManager.promote_pending_convergence(environment_id)
+            logger.info(f"[ValidateConvergence] Convergence successful for env {environment_id} ({success_rate:.0%})")
+            return {"status": "promoted", "success_rate": success_rate}
+        
+        elif success_rate < 0.5 and env.total_runs >= MIN_RUNS_FOR_VALIDATION:
+            # Failed! Rollback and notify admin
+            history = env.image_history or []
+            if len(history) >= 2:
+                # Rollback to previous version
+                previous_version = history[-2]["version"]
+                ImageManager.rollback_to_version(environment_id, previous_version)
+                logger.warning(f"[ValidateConvergence] Rolled back env {environment_id} to v{previous_version}")
+            
+            # Notify admin
+            if not env.convergence_failed_notified:
+                NotifyConvergenceFailure.delay(environment_id, success_rate)
+            
+            return {"status": "rolled_back", "success_rate": success_rate}
+        
+        else:
+            # Still inconclusive
+            logger.info(f"[ValidateConvergence] Inconclusive for env {environment_id} ({success_rate:.0%})")
+            return {"status": "inconclusive", "success_rate": success_rate}
+            
+    except Exception as e:
+        logger.error(f"[ValidateConvergence] Error for env {environment_id}: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+@app.task
+def NotifyConvergenceFailure(environment_id: int, success_rate: float):
+    """
+    Celery task to notify course admin of convergence failure.
+    """
+    from core.emails import send_email_to_admins
+    
+    try:
+        env = Environment.objects.get(pk=environment_id)
+        assignment = env.assignment
+        course = assignment.course
+        
+        # Mark as notified
+        env.convergence_failed_notified = True
+        env.save(update_fields=['convergence_failed_notified'])
+        
+        # Build notification
+        subject = f"[codePost] Auto-detect environment update failed - {assignment.name}"
+        body = f"""
+The auto-detect environment update for assignment "{assignment.name}" in course "{course.name}" has failed.
+
+Current success rate: {success_rate:.0%}
+
+The environment has been automatically rolled back to the previous working version.
+
+Pending modules that could not be resolved:
+{', '.join(env.convergence_stats.keys()) if env.convergence_stats else 'None'}
+
+Please review the environment settings and consider:
+1. Manually adding the required dependencies
+2. Converting to manual configuration
+3. Reviewing student submissions for issues
+
+Environment Admin URL: {os.environ.get('CODEPOST_CLIENT_URL', 'http://localhost:3000')}/admin/tests/{assignment.id}
+
+Best,
+codePost Autograder
+"""
+        
+        # Send to course admins
+        admins = course.administrators.all()
+        for admin in admins:
+            try:
+                admin.email_user(subject, body)
+                logger.info(f"[NotifyConvergenceFailure] Emailed {admin.email}")
+            except Exception as e:
+                logger.error(f"[NotifyConvergenceFailure] Failed to email {admin.email}: {e}")
+        
+        return {"status": "notified", "admins_count": admins.count()}
+        
+    except Exception as e:
+        logger.error(f"[NotifyConvergenceFailure] Error for env {environment_id}: {e}")
+        return {"status": "error", "error": str(e)}
+
+
 
 @app.task
 def RunAll(environmentID, user, sendEmail=False):
@@ -79,7 +248,6 @@ def RunAll(environmentID, user, sendEmail=False):
     submissions = environment.assignment.submissions.all()
 
     ######################## 2. Get TestFiles ######################################
-    sourceFiles = environment.sourceFiles.all()
     tests = TestCase.objects.filter(testCategory__assignment=assignment).exclude(
         type__in=testCase_types_to_exclude
     )
@@ -106,51 +274,35 @@ def RunAll(environmentID, user, sendEmail=False):
         ######################## 3. Run ######################################
         # If creating the submission tests fail (sql connection error), don't block other tests
         try:
-            fileObjs = s.files.all()
-            files = [
-                {"name": f.name, "code": f.data, "path": f.path if f.path else ""}
-                for f in fileObjs
-            ]
-            (response, logs) = _runTests(
-                tests,
-                sourceFiles,
-                environment,
-                files,
-                user,
-                str(s.id),
-                assignment=assignment,
-                submission=s,
-                test_case_set="all",
-                run_by_role="instructor",
-            )
+            # Legacy file preparation removed as TestService handles file retrieval
+            
+            try:
+                # Use Modern TestService Unified Architecture
+                results = TestService.run_suite(s.id, user_id=str(user))
+                
+                # Check for suite-level error
+                if results and isinstance(results[0], dict) and not results[0].get('success') and 'error' in results[0] and 'testCaseId' not in results[0]:
+                     # Catastrophic failure
+                     logs = results[0]['error']
+                     raise Exception(logs)
 
-            # There is an erorr in the result the user receives. We want to log this to help user education
-            if logs and "error" in logs.lower() or "Operation Timed Out." in logs:
-                AutograderTestError(
-                    str(user),
-                    "Test logs contains an error: {}".format(str(s.students.first())),
-                    logs,
-                )
+                # Fetch the created/updated SubmissionTest objects for progress tracking
+                # We filter by the tests we intended to run
+                newSubmissionTests = list(SubmissionTest.objects.filter(
+                    submission=s, 
+                    testCase__in=all_test_cases
+                ))
+                
+                logs = "Run Suite Completed via TestService"
 
-            ######################## 4. Parse results ######################################
-            if isinstance(response, RunError):
+            except Exception as e:
                 AutograderError(
                     str(user),
-                    "RUN ERROR: {}".format(str(s.students.first())),
-                    "RESPONSE: {}".format(response),
+                    "Run all - individual test failed: {}".format(str(s.students.first())),
+                    "Exception: {}".format(traceback.format_exc()),
                 )
-                results = [
-                    TestResult(t, t.testCategory, False, response, True)
-                    for t in all_test_cases
-                ]
-            else:
-                results = [_processResult(r, assignment, user) for r in response]
-                # Filter out any empty results (e.g., if a test case is deleted mid-run)
-                results = [r for r in results if r is not None]
-
-            results = _addMissingTests(results, all_test_cases, response, logs)
-
-            newSubmissionTests = [_createSubmissionTest(r, s) for r in results]
+                newSubmissionTests = []
+                logs = str(e)
 
             ######################## 5. Check for run and dump  ######################################
             _runAndDump(environment, s, logs)
@@ -200,7 +352,6 @@ def RunAll(environmentID, user, sendEmail=False):
 class RunType(str, Enum):
     Submission = "SUBMISSION"
     TestCase = "TESTCASE"
-    SourceFile = "SOURCEFILE"
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -223,9 +374,30 @@ def RunSubmission(self, submissionID: int):
     """
     try:
         submission = Submission.objects.get(id=submissionID)
+        logger.info(f"[RunSubmission] Processing submission {submission.id} for assignment {submission.assignment_id}")
+        
+        # Explicitly get environment using assignment_id to avoid descriptor ambiguity
+        environment = Environment.objects.get(assignment_id=submission.assignment_id)
+        logger.info(f"[RunSubmission] Found environment {environment.id} (image: {environment.image_name})")
+        
     except Submission.DoesNotExist:
         logger.error(f"Submission {submissionID} not found")
         return {"success": False, "error": "Submission not found"}
+    except Environment.DoesNotExist:
+        logger.error(f"Environment for assignment {submission.assignment_id} not found")
+        return {"success": False, "error": "Environment not found"}
+
+    # Wait for build if pending
+    if environment.build_status == 1: # Building
+        logger.info(f"[RunSubmission] Environment {environment.id} is building. Waiting...")
+        import time
+        # Wait up to 300 seconds
+        for _ in range(30):
+            time.sleep(10)
+            environment.refresh_from_db()
+            if environment.build_status != 1:
+                break
+        logger.info(f"[RunSubmission] Environment {environment.id} wait finished. Status: {environment.build_status}")
 
     file_objs = submission.files.all()
     
@@ -238,7 +410,8 @@ def RunSubmission(self, submissionID: int):
 
 
     for f in file_objs:
-        if Executor.is_executable_file(file=f.name):
+        executor = Executor.factory(f)
+        if executor:
             files.append(f)
     
     
@@ -253,12 +426,27 @@ def RunSubmission(self, submissionID: int):
     successful = 0
     failed = 0
     
+    # Cold Start Candidate Collection REMOVED - using Autodetector
+    # language_candidates = {} REMOVED
+    
+    # Get required files for heuristic
+    required_filenames = set()
+    try:
+        assignment = environment.assignment
+        required_files = assignment.files.filter(required=True)
+        required_filenames = {rf.name for rf in required_files}
+    except Exception:
+        pass
+    
     try:
         for f in files:
             result = None  # type: ignore[ExecutionResult]
             execution_error = None
             execution_complete = threading.Event()
-            executor = Executor.factory(f)
+
+            # Retrieve custom image name if built
+            image_name = environment.image_name if environment.image_name else None
+            executor = Executor.factory(f, image_name=image_name)
             
             if not executor:
                 logger.info(f"File {f.id} has no executor, skipping.")
@@ -299,11 +487,50 @@ def RunSubmission(self, submissionID: int):
                 continue
             
             # Save the cached result
+            # The try block is intended to catch errors during saving/processing the result, not the execution itself.
+            # This ensures that if saving fails, the main loop can continue.
             try:
                 result.save_cache(f)
                 successful += 1
                 results.append({"file_id": f.id, "file_name": f.name, "success": True, "execution_time": result.execution_time})
                 logger.info(f"[RunSubmission] Successfully cached execution for file {f.id}")
+
+
+                
+                # Convergence Hook: Analyze stderr for missing dependencies
+                if result.stderr or (not result.success and result.err):
+                    try:
+                        from autograder.services.converger import Converger
+                        logs_to_analyze = f"{result.stderr or ''}\n{result.err or ''}"
+                        
+                        # Track the run result
+                        if result.success:
+                            Converger.record_successful_run(environment.id)
+                        else:
+                            Converger.record_failed_run(environment.id)
+                        
+                        # Analyze with submission ID for tracking
+                        should_converge, added_modules, subs_to_rerun = Converger.analyze_and_converge(
+                            environment.id, logs_to_analyze, submission_id=submissionID
+                        )
+                        
+                        if should_converge and added_modules:
+                            logger.info(f"[RunSubmission] Convergence added {added_modules}")
+                            results[-1]["converged_modules"] = list(added_modules)
+                            
+                            # Trigger build and queue reruns
+                            if subs_to_rerun:
+                                logger.info(f"[RunSubmission] Triggering build and queueing reruns for {len(subs_to_rerun)} submissions")
+                                # Use delay to run asynchronously
+                                BuildEnvironment.delay(environment.id, rerun_submission_ids=subs_to_rerun)
+                            else:
+                                # Start build even if no reruns (e.g. just detected something)
+                                logger.info(f"[RunSubmission] Triggering build for env {environment.id}")
+                                BuildEnvironment.delay(environment.id)
+                                
+                    except Exception as conv_err:
+                        logger.warning(f"[RunSubmission] Converger failed: {conv_err}")
+                        
             except Exception as e:
                 logger.error(f"[RunSubmission] Failed to save cache for file {f.id}: {e}")
                 failed += 1
@@ -313,6 +540,15 @@ def RunSubmission(self, submissionID: int):
         logger.error(f"[RunSubmission] Unexpected error processing submission {submissionID}: {e}", exc_info=True)
         # Retry the task if we hit an unexpected error
         raise self.retry(exc=e)
+    
+    # --- Cold Start: Update Environment Language ---
+    try:
+        from autograder.services.autodetector import Autodetector
+        Autodetector.detect_and_update(submission)
+    except Exception as e:
+        logger.error(f"[ColdStart] Error running Autodetector: {e}")
+    # -----------------------------------------------
+    # -----------------------------------------------
     
     summary = {
         "success": True,
@@ -340,6 +576,7 @@ def Run(
     run_by_role="unknown",
 ):
     """
+    Deprecated!
     Removing Autograder Run Task
     
     This celery task does a single run of tests on an object of type Submission, TestCase, or SourceFile
@@ -347,7 +584,7 @@ def Run(
     For type Submission, all tests are run.
 
     Files: Submission(pk).files if type Submission else Submission(subID) if subID else SolutionFiles
-    Tests: TestCase(pk) if type TestCase else SourceFile(pk) if type SourceFile else All Tests
+    Tests: TestCase(pk) if type TestCase else All Tests
     """
 
     return False
@@ -370,10 +607,9 @@ def Run(
     if fileOverrides != None:
         files = fileOverrides
     else:
-        # If there's no submission specified, use the solution files
-        fileObjs = (
-            submission.files.all() if submission else environment.solutionFiles.all()
-        )
+        # If there's no submission specified, use the submission files if available
+        # Otherwise, this run will proceed without student files.
+        fileObjs = submission.files.all() if submission else []
         files = [
             {"name": f.name, "code": f.data, "path": f.path if f.path else ""}
             for f in fileObjs
@@ -386,19 +622,14 @@ def Run(
             testCategory__assignment=assignment
         ).exclude(type__in=testCase_types_to_exclude)
 
-        sourceFiles = environment.sourceFiles.all()
         _tracked_autograder_run_test_case_set = "all"
     else:
         testCases = TestCase.objects.filter(id=pk) if type == RunType.TestCase else []
-        sourceFiles = (
-            SourceFile.objects.filter(id=pk) if type == RunType.SourceFile else []
-        )
         _tracked_autograder_run_test_case_set = "partial"
 
     ######################## 3. Run ######################################
     (response, logs) = _runTests(
         testCases,
-        sourceFiles,
         environment,
         files,
         user,
@@ -484,8 +715,7 @@ def Run(
 
         # If the setting is turn on to epxose dumped logs to students, then we return it
         # We return none instead of a blank string in order to differentiate between results that have
-        # empty logs and results where the exposeDumpLogs setting is turned off
-        exposedLogs = logs if environment.exposeDumpLogs else None
+        exposedLogs = None
         toRet = {
             "logs": exposedLogs,
             "submissionTests": serializer.data,
@@ -564,7 +794,6 @@ class TestResult:
 ## Main Run function
 def _runTests(
     testCases,
-    sourceFiles,
     environment,
     files,
     user,
@@ -589,26 +818,21 @@ def _runTests(
     )
     tracked_autograder_run.started = datetime.now()
     tracked_autograder_run.save()
-    ########################### 1. Process files ###########################################
-    helpers = [
-        {"name": f.name, "code": f.data, "path": _parseFilePath(f.path)}
-        for f in environment.helperFiles.all()
-    ]
+    # Was processing helpers here, now removed
 
     ########################### 2. Process tests ###########################################
     caseTests = parseTests(testCases, environment.language)
-    sourceFileTests = [parseSourceFile(sF) for sF in sourceFiles]
 
     ########################### 3. Create command script ###################################
     command = writeCmdScript(
-        caseTests, sourceFileTests, environment.compileText, environment.language
+        caseTests, environment.compileText, environment.language
     )
 
     ########################### 4. Send payload to autograder ##############################
-    tests = caseTests + sourceFileTests
+    tests = caseTests
     payload = {
         "tests": tests,
-        "files": files + helpers,
+        "files": files,
         "assignment": environment.assignment.id,
         "buildID": environment.buildID if environment.buildID > 0 else None,
         "submission": submissionID,
@@ -656,6 +880,16 @@ def _runTests(
             return (RunError.JsonParseError, "")
     try:
         # Truncate logs to avoid db write timeouts for exceeding long logs
+
+        # Auto-Convergence Hook
+        try:
+            from autograder.services.converger import Converger
+            # Run convergence in background or synchronous? 
+            # It triggers a build (async task), so it's fast enough.
+            Converger.analyze_and_converge(environment.id, r.get("logs", ""))
+        except Exception as e:
+            pass # Be silent about converger errors to avoid disrupting run
+
         return (r["results"], _truncateLogs(r["logs"]))
     except:
         tracked_autograder_run.errors = resp.text
@@ -854,21 +1088,20 @@ def _formatLogs(logs, testCase):
 
 ## Check for run and dump and, if so, output logs to a _tests.TXT file
 def _runAndDump(environment, submission, logs):
-    if environment.dumpMode and submission:
-        try:
-            testFile = File.objects.get(submission=submission, name="_tests.txt")
-            testFile.data = logs
-            testFile.save()
-        except:
-            testFile = File.objects.create(
-                submission=submission,
-                name="_tests.txt",
-                extension=".txt",
-                code=logs,
-                path="",
-                hiddenBeforePublish=True,
-            )
-            testFile.save()
+    try:
+        testFile = File.objects.get(submission=submission, name="_tests.txt")
+        testFile.data = logs
+        testFile.save()
+    except:
+        testFile = File.objects.create(
+            submission=submission,
+            name="_tests.txt",
+            extension=".txt",
+            code=logs,
+            path="",
+            hiddenBeforePublish=True,
+        )
+        testFile.save()
     return
 
 
