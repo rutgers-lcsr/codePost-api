@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0029_file_hash'),
+        ('core', '0030_testcase_expectplot'),
     ]
 
     operations = [
@@ -15,10 +15,5 @@ class Migration(migrations.Migration):
             model_name='testcase',
             name='dataSet',
             field=models.ForeignKey(blank=True, help_text='The dataset to mount for this test.', null=True, on_delete=django.db.models.deletion.SET_NULL, to='core.assignmentdataset'),
-        ),
-        migrations.AddField(
-            model_name='testcase',
-            name='expectPlot',
-            field=models.BooleanField(default=False, help_text='If True, the test will only pass if a plot is generated.'),
         ),
     ]

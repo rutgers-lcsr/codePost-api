@@ -7,7 +7,6 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("core", "0030_testcase_dataset_testcase_expectplot"),
-        ("core", "0030_testcase_expectplot"),
     ]
 
     operations = []
