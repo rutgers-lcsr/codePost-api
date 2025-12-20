@@ -44,6 +44,7 @@ from webhooks.view import WebhookViewSet
 
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
+from core.views.system import SystemHealthView, SystemActivityView
 
 
 from django.http import HttpResponse
@@ -113,6 +114,8 @@ urlpatterns = [
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),
     re_path('health-check/', health_check),
+    path('system/health/', SystemHealthView.as_view(), name='system_health'),
+    path('system/activity/', SystemActivityView.as_view(), name='system_activity'),
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     re_path('', include(router.urls)),

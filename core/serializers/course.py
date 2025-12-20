@@ -24,6 +24,9 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
               'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders')
     read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks')
+    extra_kwargs = {
+        'organization': {'required': False}
+    }
 
   def validate_timezone(self, timezone):
     # Check that timezone corresponds to valid timezone

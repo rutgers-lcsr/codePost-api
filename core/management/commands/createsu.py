@@ -9,3 +9,8 @@ class Command(BaseCommand):
         if not User.objects.filter(username="vinay@codepost.io").exists():
             vinay = User.objects.create_superuser(username="vinay@codepost.io", email="vinay@codepost.io", password='rootabega')
             vinay.save()
+        # Make regular user test_user
+        if not User.objects.filter(username="test_user").exists():
+            test_user = User.objects.create_user(username="test_user", email="test_user@codepost.io", password='rootabega')
+            test_user.save()
+            

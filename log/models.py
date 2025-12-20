@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 
 class Event(models.Model):
-    created = models.DateTimeField(auto_now_add=True)
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
 
     category = models.CharField(max_length=255, default="uncategorized")
