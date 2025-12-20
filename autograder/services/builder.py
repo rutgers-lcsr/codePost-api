@@ -126,43 +126,35 @@ class Builder:
                      "codepost-npm-cache": {'bind': '/tmp/npm-cache', 'mode': 'rw'},
                  }
 
-            # Create temp dir for mapping
-            with tempfile.TemporaryDirectory() as temp_work:
-                # Ensure the temporary directory is writable by the container user (codepost: 1000)
-                os.chmod(temp_work, 0o777)
+            # Run container with volumes mounted
+            # Use sh -c to execute the command string
+            # Network must be enabled for install checks
+            log_generator = self.client.containers.run(
+                image_tag,
+                command=["sh", "-c", check_command],
+                volumes=volumes,
+                remove=True,
+                user='codepost', # Enforce user
+                stdout=True,
+                stderr=True,
+                stream=True,
+                environment=docker_env
+            )
+            
+            logs = ""
+            for chunk in log_generator:
+                logs += chunk.decode('utf-8')
                 
-                # Add temp_work to volumes
-                volumes[temp_work] = {'bind': '/work', 'mode': 'rw'}
-
-                # Run container with volumes mounted
-                # Use sh -c to execute the command string
-                # Network must be enabled for install checks
-                log_generator = self.client.containers.run(
-                    image_tag,
-                    command=["sh", "-c", check_command],
-                    volumes=volumes,
-                    remove=True,
-                    user='codepost', # Enforce user
-                    stdout=True,
-                    stderr=True,
-                    stream=True,
-                    environment=docker_env
-                )
-                
-                logs = ""
-                for chunk in log_generator:
-                    logs += chunk.decode('utf-8')
-                    
-                if "VERIFICATION SUCCESS" in logs:
-                    logger.info(f"[Builder] Verification passed for {image_tag}")
-                    env.build_logs += "\n[Verification] Permission & Sanity checks passed."
-                    env.save()
-                    return True
-                else:
-                    logger.error(f"[Builder] Verification failed for {image_tag}. Logs:\n{logs}")
-                    env.build_logs += f"\n[Verification] Failed:\n{logs}"
-                    env.save()
-                    return False
+            if "VERIFICATION SUCCESS" in logs:
+                logger.info(f"[Builder] Verification passed for {image_tag}")
+                env.build_logs += "\n[Verification] Permission & Sanity checks passed."
+                env.save()
+                return True
+            else:
+                logger.error(f"[Builder] Verification failed for {image_tag}. Logs:\n{logs}")
+                env.build_logs += f"\n[Verification] Failed:\n{logs}"
+                env.save()
+                return False
                     
         except Exception as e:
              logger.error(f"[Builder] Verification exception: {e}")
