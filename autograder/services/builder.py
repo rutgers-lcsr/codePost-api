@@ -221,9 +221,9 @@ class Builder:
 
         start_time = timezone.now()
         env.build_status = 1  # Building
-        env.build_logs = f"Starting build (Async Refactor v3)...\nTimestamp: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        env.build_logs = f"Starting build...\nTimestamp: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
         env.save()
-        logger.info(f"[Builder] Starting build for env {self.environment_id} (Refactor v3)")
+        logger.info(f"[Builder] Starting build for env {self.environment_id}")
 
         try:
             meta = {
