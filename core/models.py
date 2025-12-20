@@ -25,8 +25,9 @@ from zmq import has
 from django.utils import timezone
 from core.validators import validate_hex_color
 from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
-from codepost.settings import DEBUG
+from codepost.settings import DEBUG, MEDIA_ROOT
 from django.db import models
+import os
 
 def get_default_token_expiry():
   """Returns datetime 5 minutes from now for OneTimeToken expiration."""
@@ -1124,8 +1125,6 @@ class Environment(BaseModel):
   if TYPE_CHECKING:
     id: int
     assignment: Assignment
-    
-    
   assignment: Assignment = models.OneToOneField(Assignment, on_delete=models.CASCADE,  # type: ignore[assignment]
                                     related_name="environment", help_text=("The related assignment__id."))
   dockerRunInstructions = JSONField(default=[], blank=True, help_text="Instructions to be added to the docker file with a RUN command.")
@@ -1194,17 +1193,17 @@ class Environment(BaseModel):
 
 @receiver(models.signals.pre_delete, sender=Assignment)
 def delete_assignment(sender, instance: Assignment, **kwargs):
-  # delete all related datasets, The rest of the assignment is deleted by the cascade delete
+  # Delete any data releate to the assignment within the system. 
+  # The database will handle deleting on cascade, but the docker images and datasets will need to be deleted manually.
 
   if instance.dataSets.all() and instance.dataSets.all().count() > 0:
     # just delete the directory assignment/dataset
     try:
-      data_path = dataset_upload_path(instance, filename="")
+      data_path = os.path.join(MEDIA_ROOT, dataset_upload_path(instance, filename=""))
       logger.info(f"Deleting dataset directory: {data_path}")
       shutil.rmtree(data_path)
     except Exception as e:
       logger.error(f"Failed to delete dataset directory: {e}")
-
 
 ###############################################################################
 

@@ -104,10 +104,24 @@ def auto_detect_on_file_change(sender, instance, **kwargs):
     Trigger auto-detection when assignment files change.
     """
     try:
-        from autograder.services.autodetector import Autodetector
-        # AssignmentFile has 'assignment' FK
-        assignment = instance.assignment
-        logger.info(f"AssignmentFile changed for {assignment.id}. Triggering auto-detection.")
-        Autodetector.detect_and_update(assignment=assignment)
+        from autograder.run import AutoDetectEnvironment
+        # Use async task with delay to debounce and handle cascade deletions gracefully
+        # If assignment is deleted, the task will fail (benignly) when it runs
+        AutoDetectEnvironment.apply_async(args=[instance.assignment_id], countdown=2)
     except Exception as e:
-        logger.error(f"Failed to run auto-detection for assignment file change: {e}")
+        logger.error(f"Failed to queue auto-detection for assignment file change: {e}")
+
+
+from core.models import Environment
+
+@receiver(post_delete, sender=Environment)
+def cleanup_environment_images(sender, instance, **kwargs):
+    """
+    Trigger cleanup of Docker images when Environment is deleted.
+    """
+    try:
+        from autograder.run import DeleteEnvironmentImages
+        DeleteEnvironmentImages.delay(instance.id)
+        logger.info(f"Queued image cleanup for deleted environment {instance.id}")
+    except Exception as e:
+        logger.error(f"Failed to queue image cleanup for environment {instance.id}: {e}")

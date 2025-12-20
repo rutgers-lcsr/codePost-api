@@ -395,3 +395,31 @@ class ImageManager:
         except Exception as e:
             logger.error(f"Failed to get status for env {environment_id}: {e}")
             return {}
+
+    @classmethod
+    def delete_all_images_for_env(cls, environment_id: int) -> int:
+        """
+        Delete all images associated with an environment ID.
+        Useful for cleanup after environment deletion.
+        """
+        client = cls._get_docker_client()
+        if not client:
+            return 0
+            
+        deleted_count = 0
+        try:
+            # Pattern: codepost-env-{id}*
+            image_prefix = f"codepost-env-{environment_id}"
+            
+            all_images = client.images.list()
+            for img in all_images:
+                for tag in img.tags:
+                    if tag.startswith(image_prefix):
+                        if cls.delete_image(tag):
+                             deleted_count += 1
+            
+            logger.info(f"Deleted {deleted_count} images for deleted env {environment_id}")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Failed to delete images for deleted env {environment_id}: {e}")
+            return deleted_count

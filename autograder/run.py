@@ -122,6 +122,17 @@ def CleanupOldImages(environment_id: int, keep_count: int = 3):
 
 
 @app.task
+def DeleteEnvironmentImages(environment_id: int):
+    """
+    Celery task to delete all Docker images for a deleted environment.
+    """
+    from autograder.services.image_manager import ImageManager
+    deleted = ImageManager.delete_all_images_for_env(environment_id)
+    logger.info(f"[DeleteEnvironmentImages] Deleted {deleted} images for env {environment_id}")
+    return {"deleted_count": deleted}
+
+
+@app.task
 def ValidateConvergence(environment_id: int):
     """
     Celery task to validate if convergence was successful.
