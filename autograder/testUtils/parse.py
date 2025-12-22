@@ -18,7 +18,7 @@ from autograder.testUtils.languageTemplates.java import (
     JAVA_IO_OUTPUT_TEST,
     JAVA_UNIT_TEST,
 )
-from autograder.testUtils.types import TestType
+from autograder.testUtils.test_types import TestType
 
 from core.models import TestCase
 
@@ -40,17 +40,10 @@ def parseTests(testCases, language):
     return templates
 
 
-def parseSourceFile(sourceFile, includeName=False):
-    template_string = sourceFile.code
-    return {
-        "id": sourceFile.id,
-        "name": sourceFile.name,
-        "code": template_string,
-        "errorIfMissing": False,
-    }
 
 
-def writeCmdScript(testTemplates, sourceFileTemplates, runBefore, language):
+
+def writeCmdScript(testTemplates, runBefore, language):
     commands = ["#!/bin/bash"]
     commands.append(
         "##########################################################################################"
@@ -101,27 +94,7 @@ def writeCmdScript(testTemplates, sourceFileTemplates, runBefore, language):
     commands.append(
         "##########################################################################################"
     )
-    if len(sourceFileTemplates) > 0:
-        commands.append(
-            "\n##########################################################################################"
-        )
-        commands.append(
-            "# Defines the TestOutput syntax you can use in your test files"
-        )
-        commands.append(
-            "##########################################################################################"
-        )
-        commands.append(BASH_TEST_GROUP)
-        commands.append(
-            "##########################################################################################"
-        )
-        commands.append("# Test files")
-        commands.append(
-            "##########################################################################################"
-        )
-        for t in sorted(sourceFileTemplates, key=lambda x: x["id"], reverse=False):
-            # Figure out the run command based on the file
-            commands.append(getCmd(t, language))
+
 
     cmds_string = "\n".join(commands)
     return cmds_string
@@ -243,6 +216,7 @@ def _get_test_template(test_type, test):
             test=test.id,
             isFlexible=test.isFlexible,
             isRegExp=test.outputIsRegexp,
+            expectPlot=str(test.expectPlot),
         )
 
     if test_type == TestType.PYTHON3_IO_OUTPUT:
@@ -260,6 +234,7 @@ def _get_test_template(test_type, test):
             test=test.id,
             isFlexible=test.isFlexible,
             isRegExp=test.outputIsRegexp,
+            expectPlot=str(test.expectPlot),
         )
 
     if test_type == TestType.PYTHON3_UNIT:

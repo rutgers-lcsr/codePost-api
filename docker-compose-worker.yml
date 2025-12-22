@@ -1,0 +1,54 @@
+# docker-compose-worker.yml
+# Docker Compose configuration for codepost celery worker services
+# The celery workers require an external DATABASE and REDIS service to function properly.
+services:
+    codepost-worker:
+        container_name: codepost-worker
+        privileged: true
+        env_file:
+            - .env
+        environment:
+            - DEBUG=False
+            - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
+            - DB_NAME=codepost
+            - DB_HOSTNAME=${DB_HOSTNAME}
+            - DB_PORT=3306
+            - DB_USERNAME=codepost_user
+            - DB_PASSWORD=${DB_PASSWORD}
+            - SECRET_KEY=${SECRET_KEY}
+            - API_USER=${API_USER}
+            - API_PASSWORD=${API_PASSWORD}
+            - EMAIL_PORT=${EMAIL_PORT}
+            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
+        build:
+            context: .
+            target: worker
+        volumes:
+            - datasets:/assignment_datasets
+            - /var/run/docker.sock:/var/run/docker.sock
+        restart: always
+        healthcheck:
+            test: ["CMD", "celery", "--app", "autograder", "status"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+networks:
+    default:
+        name: codepost-network
+        driver: bridge
+
+volumes:
+    datasets:
+        name: codepost-datasets
+        driver: local
+        driver_opts:
+            type: nfs
+            o: addr=${NFS_SERVER_IP},ro
+            device: ":${NFS_SHARE_PATH}/datasets"

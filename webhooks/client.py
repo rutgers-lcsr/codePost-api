@@ -14,7 +14,7 @@ class FlushThread(threading.Thread):
         self.client.sync_flush()
 
 
-class Client(object):
+class Client:
     """
     Manages a simple pool of threads to flush the queue of requests.
     """

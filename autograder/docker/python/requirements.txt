@@ -1,0 +1,11 @@
+scikit-learn
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+pyyaml
+torch
+beautifulsoup4
+nltk
+spacy

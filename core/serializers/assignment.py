@@ -11,14 +11,18 @@ from core.serializers.submission import SubmissionSerializer
 from django.db.models import Max, Min, Avg
 
 
+from core.serializers.file import AssignmentFilePublicSerializer
+
 class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   """
   Assignment Serializer from which all other Assignment Serializer subclasses inherit from
   """
 
   maxStudentTestRuns = serializers.SerializerMethodField('get_max_test_runs')
-  exposeDumpLogs = serializers.SerializerMethodField('get_expose_dump_logs')
   nudgeMode = serializers.SerializerMethodField('get_nudge_mode')
+  files = serializers.SerializerMethodField('get_files')
+  dataSets = serializers.SerializerMethodField('get_datasets')
+  fileTemplates = serializers.SerializerMethodField('get_file_templates')
 
   lateDeductions = serializers.JSONField(default=[])
 
@@ -34,11 +38,18 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
     else:
       return False
 
-  def get_expose_dump_logs(self, obj):
-    if hasattr(obj, 'environment'):
-      return obj.environment.exposeDumpLogs
-    else:
-      return None
+
+  def get_files(self, obj):
+    # Return IDs of AssignmentFile objects
+    return list(obj.files.values_list('id', flat=True))
+
+  def get_datasets(self, obj):
+    # Return IDs of AssignmentDataSet objects
+    return list(obj.dataSets.values_list('id', flat=True))
+
+  def get_file_templates(self, obj):
+    # FileTemplate is deprecated - return empty array for backwards compatibility
+    return []
 
   def validate(self, data):
 
@@ -56,9 +67,9 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   class Meta:
     model = Assignment
     fields = ('id', 'name', 'isReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
-              'uploadDueDate', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'exposeDumpLogs', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions')
+              'uploadDueDate', 'maxLateDays', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions', 'studentsCanSeeGraders', 'dataSets')
     POST_permissions_fields = ('course',)
-    read_only_fields = ('rubricCategories', 'fileTemplates', 'environment', 'maxStudentTestRuns', 'exposeDumpLogs', 'nudgeMode')
+    read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'nudgeMode', 'dataSets')
 
 
 class AssignmentStudentSerializer(AssignmentSerializerBase):
@@ -67,12 +78,15 @@ class AssignmentStudentSerializer(AssignmentSerializerBase):
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + \
         ('course', 'isReleased', 'name', 'sortKey', 'lateDeductions')
 
+  def get_files(self, obj):
+    return AssignmentFilePublicSerializer(obj.files.all(), many=True).data
+
 
 class AssignmentSerializer(AssignmentSerializerBase):
 
   class Meta(AssignmentSerializerBase.Meta):
     fields = AssignmentSerializerBase.Meta.fields + ('points', 'hideGrades', 'sortKey', 'anonymousGrading',
-                                                     'hideGradersFromStudents', 'commentFeedback', 'additiveGrading', 'allowRegradeRequests', 'regradeInstructions',
+                                                     'hideGradersFromStudents', 'studentsCanSeeGraders', 'commentFeedback', 'additiveGrading', 'allowRegradeRequests', 'regradeInstructions',
                                                      'regradeDeadline', 'forcedRubricMode', 'templateMode', 'collaborativeRubricMode',
                                                      'testCategories',  'showFrequentlyUsedRubricComments')
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + ('testCategories',)
@@ -95,11 +109,20 @@ class AssignmentSerializer(AssignmentSerializerBase):
     return obj
 
 
+class AssignmentStudentSerializerNoStats(AssignmentSerializer):
+  def get_files(self, obj):
+    return AssignmentFilePublicSerializer(obj.files.all(), many=True).data
+
 class AssignmentSerializerWithStatistics(AssignmentSerializer):
 
   class Meta(AssignmentSerializer.Meta):
     fields = AssignmentSerializer.Meta.fields + ('mean', 'median')
     read_only_fields = AssignmentSerializer.Meta.read_only_fields + ('mean', 'median')
+
+
+class AssignmentStudentSerializerWithStats(AssignmentSerializerWithStatistics):
+  def get_files(self, obj):
+    return AssignmentFilePublicSerializer(obj.files.all(), many=True).data
 
 
 class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStatistics):

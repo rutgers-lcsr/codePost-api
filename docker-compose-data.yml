@@ -1,0 +1,124 @@
+# docker-compose-data.yml
+# Docker Compose for core utility services: database and redis for codepost
+services:
+    codepost-flower:
+        container_name: codepost-flower
+        build:
+            context: .
+            target: flower
+        ports:
+            - "5555:5555"
+        environment:
+            - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - FLOWER_BASIC_AUTH=${API_USER}:${API_PASSWORD}
+        depends_on:
+            - codepost-redis
+        restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    'curl -f -u "$$FLOWER_BASIC_AUTH" http://localhost:5555/ || exit 1',
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+    codepost-redis:
+        image: redis:latest
+        container_name: codepost-redis
+        ports:
+            - "6379:6379"
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 10s
+            retries: 5
+        volumes:
+            - redis-data:/data
+        restart: unless-stopped
+
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+    codepost-database:
+        image: mariadb:latest
+        container_name: codepost-database
+        ports:
+            - "3306:3306"
+        env_file:
+            - .env
+        environment:
+            - MARIADB_ROOT_PASSWORD=${ROOT_DATABASE_PASSWORD}
+            - MARIADB_DATABASE=codepost
+            - MARIADB_USER=codepost_user
+            - MARIADB_PASSWORD=${DB_PASSWORD}
+        volumes:
+            - db-data:/var/lib/mysql
+        command:
+            - --innodb_page_size=16k
+            - --innodb_buffer_pool_size=10G
+            - --innodb_log_file_size=256M
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "mariadb-admin",
+                    "ping",
+                    "-h",
+                    "codepost-database",
+                    "--silent",
+                    "--user=root",
+                    "--password=${ROOT_DATABASE_PASSWORD}",
+                ]
+            interval: 10s
+            timeout: 10s
+            retries: 10
+        restart: always
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+    adminer:
+        image: adminer:latest
+        container_name: codepost-adminer
+        environment:
+            - ADMINER_DEFAULT_DB=codepost
+        ports:
+            - "8080:8080"
+        depends_on:
+            - codepost-database
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+networks:
+    default:
+        name: codepost-network
+        driver: bridge
+
+volumes:
+    redis-data:
+        name: codepost-redis-data
+        driver: local
+    db-data:
+        name: codepost-db-data
+        driver: local
+        driver_opts:
+            type: nfs
+            o: addr=${NFS_SERVER_IP},rw
+            device: ":${NFS_SHARE_PATH}/mariadb"

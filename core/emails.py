@@ -29,7 +29,7 @@ class CodepostEmail(ABC):
     subject = "CodePost Notification"
     template = "emails/base_template.html"
 
-    def __init__(self, user:User = None):
+    def __init__(self, user:User|None= None):
         self.user = user
         self.from_email = DEFAULT_EMAIL_FROM
 

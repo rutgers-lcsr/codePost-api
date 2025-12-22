@@ -1,0 +1,284 @@
+import os
+import ast
+import re
+from datetime import datetime
+import tempfile
+import shutil
+import logging
+from typing import List, Optional
+import nbformat
+
+from .base import Executor, NotebookExecutor, ExecutionResult
+
+logger = logging.getLogger(__name__)
+import json
+
+
+class PythonExecutor(Executor):
+    LANGUAGE = "python-3.12"
+    TEMPLATE = "template.py"
+    DOCKER_IMAGE = "python:3.12-slim"
+
+    EXECUTABLE_EXTENSIONS = [".py"]
+        
+    PIP_CACHE_VOLUME_NAME = "codepost-pip-cache"
+    
+    INIT_DOCKER_VOLUME = {
+        PIP_CACHE_VOLUME_NAME: {
+            "bind": "/tmp/pip-cache",
+            "mode": "rw"
+        }
+    }
+   
+    PIP_MODULE_TO_PACKAGE = {
+        "sklearn": "scikit-learn",
+        "cv2": "opencv-python",
+        "PIL": "Pillow",
+        "bs4": "beautifulsoup4",
+        "yaml": "pyyaml",
+        "dateutil": "python-dateutil",
+    }
+    
+    @classmethod
+    def is_executable(cls, file_name: Optional[str] = None, extension: Optional[str] = None, code: Optional[str] = None) -> bool:
+        logger.info(f"Checking if {file_name} is executable")   
+
+        if file_name is not None:
+            extension = os.path.splitext(file_name)[1]
+        if extension is not None and extension.lower() in cls.EXECUTABLE_EXTENSIONS:
+            return True
+        return False
+    
+    def _detect_imports(self, code) -> List[str]:
+        # Refactored to use File Handler logic
+        if hasattr(self.file, 'handler'):
+            reqs = self.file.handler.get_requirements()
+            if reqs:
+                return reqs.split('\n')
+        
+        # Fallback if handler not available or not working
+        return []
+
+    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+        template = super()._get_code_template()
+        if not template:
+            return None
+        
+        if template and packages_to_install:
+            # Modify the template to include package installation
+            template = template.replace("packages_to_install = []", f"packages_to_install = {repr(packages_to_install)}")
+        
+        template = template.replace("#{FILLER_CODE}", code)
+        return template
+
+    def execute(self) -> ExecutionResult:
+        """Execute Python code in Docker container"""
+        # Implementation of Python code execution
+        timeout = self.DEFAULT_TIMEOUT
+        start_time = datetime.now()
+        
+        self.log(f"[{self.image}] [{self.file.name}] [{self.LANGUAGE}] Starting execution")
+        self.log(f"DEBUG_VERIFICATION: Volume definition: {self.INIT_DOCKER_VOLUME}", "info")
+        
+        if not self.file.data:
+            return ExecutionResult.error("No code to execute")
+        
+        code = self.file.data
+        
+        # Detect imports
+        packages_to_install = self._detect_imports(code)
+
+        # Get code template
+        template = self._get_code_template(code, packages_to_install)
+        if not template:
+            return ExecutionResult.error("Failed to get code template")
+
+        # Execute code in Docker container
+        
+        client = self._get_docker_client()
+        if not client:
+            return ExecutionResult.error("Docker is not available")
+
+        if not self._ensure_image(self.image):
+            return ExecutionResult.error("Docker image is not available")
+
+
+        if self.datasets or self.input_data:
+            temp_staging_dir = tempfile.mkdtemp(prefix='codepost_staging_')
+        else:
+            temp_staging_dir = "" 
+            
+        volumes = self._get_volume_mounts(temp_staging_dir if (self.datasets or self.input_data) else "")
+        
+        # Add input staging
+        if self.input_data:
+            input_mounts = self._prepare_input_staging(temp_staging_dir)
+            for container_path, host_path in input_mounts.items():
+                volumes[host_path] = {'bind': container_path, 'mode': 'ro'}
+        
+        # Build command: use reusable wrapper for pre-script
+        base_command = ["python", "-c", template]
+        
+        # Wrap with stdin first (logic: cmd < input)
+        command_with_stdin = self._wrap_command_with_stdin(base_command)
+        
+        # Then wrap with pre-script (logic: setup && cmd)
+        command = self._wrap_command_with_pre_script(command_with_stdin)
+        
+        docker_env = self._get_docker_environment()
+
+        needs_network = True if len(packages_to_install) > 0 else False
+
+        container = self.get_container(
+            image_name=self.image, # Use self.image property
+            command=command,
+            env=docker_env,
+            volumes=volumes,
+            needs_network=needs_network
+        )
+        if not container:
+            return ExecutionResult.error("Failed to create Docker container")
+        
+        self.add_additional_files(container)
+        self.add_pre_script(container)  # Inject the pre-script file
+        try:
+            container.start()
+            self.log("Starting code execution in Docker container")
+            adjusted_timeout = timeout + (30 * len(packages_to_install))
+            result = container.wait(timeout=adjusted_timeout)
+            stdout = container.logs(stdout=True, stderr=False).decode('utf-8', errors='replace')
+            stderr = container.logs(stdout=False, stderr=True).decode('utf-8', errors='replace')
+
+            # Parse template logs from stderr if marker exists
+            template_logs = ""
+            if "<<<RESULT>>>" in stderr:
+                parts = stderr.split("<<<RESULT>>>")
+                template_logs = parts[0]
+                stderr = parts[1]
+                if stderr.startswith("\n"):
+                    stderr = stderr[1:]
+                elif stderr.startswith("\r\n"):
+                    stderr = stderr[2:]
+
+            # Parse plots (like R executor)
+            import re
+            img_regex = re.compile(r'<<<CODEPOST_PLOT:(.*?)>>>', re.DOTALL)
+            images = []
+            
+            def replace_and_capture(match):
+                images.append(match.group(1).strip().replace('\n', '').replace('\r', ''))
+                return "" # Remove from stdout
+            
+            stdout = img_regex.sub(replace_and_capture, stdout)
+            
+            output_data = {}
+            if images:
+                output_data['image/png'] = images[-1] # Backward compat
+                output_data['images'] = images
+
+            end_time = datetime.now()
+            execution_time = (end_time - start_time).total_seconds()
+            success = result.get('StatusCode', 1) == 0
+            self.log(f"Execution completed in {execution_time:.2f}s with exit code {result.get('StatusCode', 1)}")
+
+            # Truncate output if too large
+            if len(stdout) > self.MAX_OUTPUT_SIZE:
+                self.log("Truncating stdout due to size limit")
+                stdout = "ERROR: Output truncated due to large output size\n" + stdout[:self.MAX_OUTPUT_SIZE] + "\n...[truncated stdout over limit]..."
+            if len(stderr) > self.MAX_OUTPUT_SIZE:
+                self.log("Truncating stderr due to size limit")
+                stderr = "ERROR: Output truncated due to large output size\n" + stderr[:self.MAX_OUTPUT_SIZE] + "\n...[truncated stderr over limit]..."
+
+            # Merge template logs into system_logs
+            full_system_logs = self.executor_logs
+            if template_logs:
+                full_system_logs += "\n--- Template Logs ---\n" + template_logs
+
+            result = ExecutionResult(
+                success=success,
+                stdout=stdout,
+                stderr=stderr,
+                err=None if success else f"Non-zero exit code: {result.get('StatusCode', 1)}",
+                execution_time=execution_time,
+                output_data=output_data,
+                system_logs=full_system_logs
+            )
+
+            return result
+        except ReadTimeout:
+            container.kill()
+            return ExecutionResult.error("Execution timed out")
+        except Exception as e:
+            container.kill()
+            return ExecutionResult.error(f"Execution failed: {e}")
+        finally:
+            self.log("Cleaning up Docker container")
+            container.remove()
+            if self.datasets:
+                shutil.rmtree(temp_staging_dir, ignore_errors=True)
+
+class PythonNotebookExecutor(NotebookExecutor):
+    LANGUAGE = "python"
+
+    TEMPLATE = "notebook_template.py"
+    DOCKER_IMAGE = "codepost/python-executor:latest"
+    EXECUTABLE_EXTENSIONS = ['.ipynb']
+    EXECUTION_COMMAND = ["python", "-c"]
+       
+    PIP_CACHE_VOLUME_NAME = PythonExecutor.PIP_CACHE_VOLUME_NAME
+    
+    INIT_DOCKER_VOLUME = PythonExecutor.INIT_DOCKER_VOLUME.copy()
+
+    PIP_MODULE_TO_PACKAGE = PythonExecutor.PIP_MODULE_TO_PACKAGE.copy()
+
+    @classmethod
+    def is_executable(cls, file_name: Optional[str] = None, extension: Optional[str] = None, code: Optional[str] = None) -> bool:
+        """
+        A notebook is converted into a executable python file which is parsed out by the notebook_template.py
+
+        For a notebook to be executable it must have a python kernel in the metadata
+        and a .ipynb extension
+        """
+        if file_name is not None:
+            extension = os.path.splitext(file_name)[1]
+
+        try:
+            kernel_name = cls.get_kernel_name(code)
+            # Check if it's a Python kernel
+            if kernel_name and not kernel_name.lower().startswith('python'):
+                return False
+        except:
+            pass  # If we can't get kernel name, check extension only
+            
+        if extension is not None and extension.lower() in cls.EXECUTABLE_EXTENSIONS:
+            return True
+
+        return False
+
+    def _detect_imports(self, nb: nbformat.NotebookNode) -> List[str]:
+        """
+        Detect imported packages from all notebook cells.
+        Refactored to use File Handler logic.
+        """
+        if hasattr(self.file, 'handler'):
+            reqs = self.file.handler.get_requirements()
+            if reqs:
+                self.log(f"Detected packages to install via Handler: {reqs}", "debug")
+                return reqs.split('\n')
+
+        # Fallback for now if needed, but redundant with Handlers
+        return []
+
+    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+        """Get the Python notebook template with cells and packages substituted."""
+        template = super()._get_code_template() # Corrected: Base Executor takes no args
+        if not template:
+            return None
+        
+        
+        # Replace installation packages
+        if packages_to_install:
+            template = template.replace("packages_to_install = []", f"packages_to_install = {repr(packages_to_install)}")
+
+        template = template.replace('{cells_b64}', code)
+        return template

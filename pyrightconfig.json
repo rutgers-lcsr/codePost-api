@@ -1,0 +1,16 @@
+{
+    "typeCheckingMode": "basic",
+    "reportMissingTypeStubs": false,
+    "reportIncompatibleMethodOverride": false,
+    "reportGeneralTypeIssues": false,
+    "reportUnknownMemberType": false,
+    "reportUnknownVariableType": false,
+    "reportUnknownArgumentType": false,
+    "reportOperatorIssue": false,
+
+    "stubPath": "typings",
+    "include": ["**/*.py"],
+    "exclude": ["**/migrations", "**/node_modules", "**/venv", "**/.venv", "**/.git", "**/.pytest_cache", "**/__pycache__"],
+    "venvPath": ".",
+    "venv": ".venv"
+}

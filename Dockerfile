@@ -12,7 +12,6 @@ RUN poetry config virtualenvs.create false \
 COPY . .
 
 RUN python manage.py collectstatic --no-input
-RUN python manage.py migrate
 
 RUN chmod +x init.sh
 
@@ -36,11 +35,6 @@ RUN pip install celery
 
 COPY . .
 
-RUN python manage.py collectstatic --no-input
-RUN python manage.py migrate
-
-
-
 CMD [ "celery", "--app", "autograder", "worker", "--loglevel", "info", "--concurrency", "4", "--task-events"]
 
 FROM python:3.12 AS flower
@@ -59,5 +53,4 @@ RUN pip install celery
 
 COPY . .
 
-# CHANGE THIS FOR DEPLOYMENT
-CMD ["celery", "--app", "autograder", "flower", "--basic-auth=richard:fruitabega"]
+CMD ["celery", "--app", "autograder", "flower"]

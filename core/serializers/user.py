@@ -10,9 +10,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 # Helpful source: https://medium.com/@dakota.lillie/django-react-jwt-authentication-5015ee00ef9a
 class UserSerializer(ModelSerializerWithPOSTCheck):
-  organization = serializers.CharField(source="profile.organization.name", required=False, default='no organization set')
-  api_token = serializers.PrimaryKeyRelatedField(source="profile.api_token", queryset=Token.objects.all())
-  # token = serializers.SerializerMethodField()
+  organization = serializers.PrimaryKeyRelatedField(source="profile.organization", queryset=Organization.objects.all(), required=False, allow_null=True)
+  api_token = serializers.PrimaryKeyRelatedField(source="profile.api_token", queryset=Token.objects.all(), required=False, allow_null=True)
   password = serializers.CharField(write_only=True)
   studentCourses = serializers.SerializerMethodField()
   hasCredentials = serializers.SerializerMethodField()
@@ -20,19 +19,20 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
   superGraderCourses = CourseSerializer(many=True, source="superGrader_courses")
   courseadminCourses = CourseSerializer(many=True, source="courseAdmin_courses")
   leaderSections = SectionSerializer(many=True, source="leader_sections")
-  codePostAdmin = serializers.SerializerMethodField()
+  codePostAdmin = serializers.BooleanField(source="is_superuser", required=False)
   hasCredentials = serializers.SerializerMethodField()
 
   canCreateCourses = serializers.BooleanField(source="profile.canCreateCourses")
   canModifyRosters = serializers.BooleanField(source="profile.canModifyRosters")
   showProductTips = serializers.BooleanField(source="profile.showProductTips")
-
+  token = serializers.SerializerMethodField()
+  
   class Meta:
     model = User
-    fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials')
+    fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials', 'token')
     POST_permissions_fields = ()
     extra_field_kwargs = {'url': {'lookup_field': 'email'}}
-    read_only_fields = ('codePostAdmin',)
+    read_only_fields = ()
     ordering = ('email',)
 
   # defining this as a SerializerMethodField so we can pass the request context into the CourseSerializer
@@ -45,10 +45,38 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
       return True
     return False
 
+  def get_token(self, obj):
+    from core.views.auth import JWTSerializer
+ 
+    # check if user is authenticated or admin
+    request = self.context.get('request', None)
+    if not request or not request.user.is_authenticated:
+      return None
+
+    # do not return token if the requestor is not the user themselves or a superuser
+    user = self.context.get('request').user
+    if not user.is_authenticated:
+      return None
+    if not (user.is_superuser or user.id == obj.id):
+      return None
+    token = JWTSerializer.get_token(obj)
+    
+  
+    return str(token)
+  
   def create(self, validated_data):
     # Extract parameters that can't be used in User constructor
     profile = validated_data.pop('profile')
     password = validated_data.pop('password', None)
+    
+    # Pop nested fields that are not handled by default create
+    validated_data.pop('grader_courses', None)
+    validated_data.pop('superGrader_courses', None)
+    validated_data.pop('courseAdmin_courses', None)
+    validated_data.pop('leader_sections', None)
+    
+    # We simply ignore them for now as we are just creating the user/student
+    # If we needed to set them, we would do it after creation.
 
     # Create object
     validated_data['username'] = validated_data['email']
@@ -64,5 +92,29 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
     obj.save()
     return obj
 
-  def get_codePostAdmin(self, obj):
-    return obj.is_superuser
+  def update(self, instance, validated_data):
+    profile_data = validated_data.pop('profile', {})
+    
+    # Update User instance
+    for attr, value in validated_data.items():
+      if attr == 'password':
+        instance.set_password(value)
+      else:
+        setattr(instance, attr, value)
+    instance.save()
+
+    # Update Profile instance
+    profile = instance.profile
+    for attr, value in profile_data.items():
+      setattr(profile, attr, value)
+    profile.save()
+
+    return instance
+
+  def get_profile(self, obj):
+    try:
+      return obj.profile
+    except (AttributeError, Profile.DoesNotExist):
+      # Create profile if it doesn't exist
+      profile, created = Profile.objects.get_or_create(user=obj)
+      return profile

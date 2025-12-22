@@ -4,46 +4,8 @@ import requests
 import json
 import time
 import socket
-from codepost.settings import DEBUG, LOKI_URL, HOSTNAME
-class LokiHandler(logging.Handler):
-    def emit(self, record):
-        # Prepare the payload for Loki
-        labels = {
-            "level": record.levelname,
-            "host": HOSTNAME,
-            "app": "codepost_django",
-        }
-
-        # If the message is a dict, use its keys as columns (labels)
-        if isinstance(record.msg, dict):
-            labels.update({k: str(v) for k, v in record.msg.items() if isinstance(v, (str, int, float))})
-            message = record.msg.get("message", "")
-        else:
-            message = record.getMessage()
-
-       
-
-        payload = {
-            "streams": [
-                {
-                    "stream": labels,
-                    "values": [
-                        [str(int(time.time() * 1000000000)), message]
-                    ],
-                }
-            ]
-        }
-        print("Sending log to Loki:", json.dumps(payload, indent=2))
-
-        try:
-            requests.post(LOKI_URL, json=payload)
-        except Exception as e:
-            print("Failed to send log to Loki:", e)
-
-# Attach to logging
-loki_handler = LokiHandler()
-loki_handler.setLevel(logging.INFO)
-logging.getLogger().addHandler(loki_handler)
+from codepost.settings import DEBUG, HOSTNAME
+from log.models import Event
 
 
 
@@ -80,6 +42,7 @@ events = [
     "Webhook Error",
     "Webhook Connection Error",
     "API Error",
+    "One-Time Token Generated"
 ]
 
 
@@ -103,6 +66,14 @@ def logEvent(event: str, level=logging.INFO, message: str=None):
 
         message = message or f"Event {event} logged."
 
+        Event.objects.create(category=event, user=None, description=message, courseID=None, meta=json.dumps({
+            "event": event,
+            "message": message,
+            "api-error": 'true',
+            "hostname": HOSTNAME,
+            "timestamp": time.time(),
+            "level": logging.getLevelName(level),
+        }))
         logger.log(
             level,
             msg={
@@ -110,7 +81,6 @@ def logEvent(event: str, level=logging.INFO, message: str=None):
                 "message": message,
                 "timestamp": time.time(),
             },
-            
         )
     except Exception as e:
 
@@ -124,25 +94,3 @@ def logEvent(event: str, level=logging.INFO, message: str=None):
                 error_message=f"Failed to log event {event}",
                 error_details=f"An error occurred while logging event {event}: {str(e)}"
             )
-
-def log_user_event(event_name):
-    def decorator(func):
-        from django.contrib.auth.models import User
-        @functools.wraps(func)
-        def wrapper(request, *args, **kwargs):
-            user: User = getattr(request, "user", None)
-
-            logger = logging.getLogger(__name__)
-
-            logger.info(msg= {
-                "message": f"User event: {event_name}",
-                "event": event_name or func.__name__,
-                "function": func.__name__,
-                "user": user.username if user and user.username else "anonymous",
-                "path": request.path if hasattr(request, 'path') else None,
-                "method": request.method if hasattr(request, 'method') else None,
-            })
-
-            return func(request, *args, **kwargs)
-        return wrapper
-    return decorator

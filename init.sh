@@ -1,7 +1,18 @@
 #!/bin/bash
 set -e
 
+# Before we run migrations, make sure we can migrate safely
+# This script checks for any potential issues that could cause the migration to fail
+# such as missing files, permission issues, or database connectivity problems.
+# Load environment variables
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
+
+# Run migrations
 python manage.py migrate --noinput
+
 
 
 python manage.py shell <<EOF

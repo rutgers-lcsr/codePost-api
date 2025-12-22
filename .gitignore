@@ -15,3 +15,5 @@ deploy.zip
 certs
 .env*
 .venv
+
+assignment_datasets

@@ -15,7 +15,7 @@ OLD_FILE_WITH_CHANGE = {'name': 'hello.java', 'code': 'updated',
                         'extension': 'java'}
 
 
-class Tests(object):
+class Tests:
 
     def get_api_token(self):
         return requests.post('%s/users/requestAPIToken/' % BASE_URL,

@@ -10,9 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 class OrganizationSerializer(ModelSerializerWithPOSTCheck):
+  emailDomain = serializers.CharField(source="email_domain", required=False, allow_null=True)
+
   class Meta:
     model = Organization
-    fields = ('id', 'name', 'shortname',)
+    fields = ('id', 'name', 'shortname', 'emailDomain')
 
   def create(self, validated_data):
     user: User = self.context['request'].user

@@ -25,7 +25,7 @@ def returnNotFound(message=None):
   else:
     return Response(message, status.HTTP_404_NOT_FOUND)
 
-def isAuthenticated(user):
+def isAuthenticated(user) -> bool:
   return user.is_authenticated
 
 def isOrganizationMember(user, organization):
@@ -38,12 +38,21 @@ def isGrader(user, course):
   return course in user.grader_courses.all()
 
 def isSuperGrader(user, course):
+  """
+  Check if the user is a super grader.
+  """
   return course in user.superGrader_courses.all()
 
 def isCourseAdmin(user, course):
-  return course in user.courseAdmin_courses.all()
+  """
+  Check if the user is a course admin.
+  """
+  return user.is_superuser or course in user.courseAdmin_courses.all()
 
 def isCourseStaff(user, course):
+  """
+  Check if the user is a staff member of the course.
+  """
   return isGrader(user, course) or isCourseAdmin(user, course)
 
 def isCourseMember(user, course):
@@ -56,6 +65,15 @@ def isStudentOfSub(user, submission):
   return user in submission.students.all()
 
 def isStaffOfSub(user, submission):
+  """
+  Staff of submission includes:
+  - The grader assigned to the submission
+  - Any course admin of the course the submission belongs to
+  - Any super grader of the course the submission belongs to
+  - Any section leader of a section that contains any student of the submission
+  """
+  
+  
   if (user == submission.grader):
     return True
   elif isCourseAdmin(user, submission.assignment.course):

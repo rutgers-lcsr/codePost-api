@@ -18,15 +18,16 @@ services:
                 max-file: "3"
     codepost-api:
         container_name: codepost-api
+        privileged: true
         env_file:
             - .env
         environment:
-            - DEBUG=TRUE
-            - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - DEBUG=${DEBUG:-FALSE}
+            - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
             - API_URL=${API_URL}
             - CLIENT_URL=${CLIENT_URL}
             - DB_NAME=codepost
-            - DB_HOSTNAME=codepost-database
+            - DB_HOSTNAME=${DB_HOSTNAME}
             - DB_PORT=3306
             - DB_USERNAME=codepost_user
             - DB_PASSWORD=${DB_PASSWORD}
@@ -34,11 +35,7 @@ services:
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
             - EMAIL_HOST=${EMAIL_HOST}
-            - EMAIL_PORT=${EMAIL_PORT}
-            - EMAIL_USE_TLS=${EMAIL_USE_TLS}
-            - EMAIL_USE_SSL=${EMAIL_USE_SSL}
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
-            - LOKI_URL=http://loki:3100/loki/api/v1/push
         ports:
             - "8000:8000"
         build:
@@ -49,46 +46,9 @@ services:
             interval: 30s
             timeout: 10s
             retries: 5
-        depends_on:
-            codepost-database:
-                condition: service_healthy
-            codepost-redis:
-                condition: service_healthy
-        restart: unless-stopped
-        logging:
-            driver: json-file
-            options:
-                max-size: "10m"
-                max-file: "3"
-    codepost-worker:
-        container_name: codepost-worker
-        env_file:
-            - .env
-        environment:
-            - DEBUG=TRUE
-            - CELERY_BROKER_URL=redis://codepost-redis:6379
-            - API_URL=${API_URL}
-            - CLIENT_URL=${CLIENT_URL}
-            - DB_NAME=codepost
-            - DB_HOSTNAME=codepost-database
-            - DB_PORT=3306
-            - DB_USERNAME=codepost_user
-            - DB_PASSWORD=${DB_PASSWORD}
-            - SECRET_KEY=${SECRET_KEY}
-            - API_USER=${API_USER}
-            - API_PASSWORD=${API_PASSWORD}
-            - EMAIL_HOST=${EMAIL_HOST}
-            - EMAIL_PORT=${EMAIL_PORT}
-            - EMAIL_USE_TLS=${EMAIL_USE_TLS}
-            - EMAIL_USE_SSL=${EMAIL_USE_SSL}
-            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
-            - LOKI_URL=http://loki:3100/loki/api/v1/push
-            - API_HOSTNAME=codepost-api
-        build:
-            context: .
-            target: worker
-        depends_on:
-            - codepost-api
+        volumes:
+            - datasets:/assignment_datasets
+            - /var/run/docker.sock:/var/run/docker.sock
         restart: unless-stopped
         logging:
             driver: json-file
@@ -96,121 +56,16 @@ services:
                 max-size: "10m"
                 max-file: "3"
 
-    codepost-flower:
-        container_name: codepost-flower
-        build:
-            context: .
-            target: flower
-        ports:
-            - "5555:5555"
-        environment:
-            - CELERY_BROKER_URL=redis://codepost-redis:6379
-            - PYTHON_VERSION=3.8.17
-        depends_on:
-            - codepost-api
-        restart: unless-stopped
-        logging:
-            driver: json-file
-            options:
-                max-size: "10m"
-                max-file: "3"
-    codepost-redis:
-        image: redis:latest
-        container_name: codepost-redis
-        ports:
-            - "6379:6379"
-        healthcheck:
-            test: ["CMD", "redis-cli", "ping"]
-            interval: 10s
-            timeout: 10s
-            retries: 5
-        volumes:
-            - redis-data:/data
-        restart: unless-stopped
-        logging:
-            driver: json-file
-            options:
-                max-size: "10m"
-                max-file: "3"
-    codepost-database:
-        image: mariadb:latest
-        container_name: codepost-database
-        env_file:
-            - .env
-        environment:
-            - MARIADB_ROOT_PASSWORD=${ROOT_DATABASE_PASSWORD}
-            - MARIADB_DATABASE=codepost
-            - MARIADB_USER=codepost_user
-            - MARIADB_PASSWORD=${DB_PASSWORD}
-        volumes:
-            - db-data:/var/lib/mysql
-        command:
-            - --innodb_page_size=16k
-            - --innodb_buffer_pool_size=1G
-            - --innodb_log_file_size=256M
-        healthcheck:
-            test: ["CMD", "mariadb-admin", "ping", "-h", "codepost-database", "--silent", "--user=root", "--password=${ROOT_DATABASE_PASSWORD}"]
-            interval: 10s
-            timeout: 10s
-            retries: 10
-        restart: unless-stopped
-        logging:
-            driver: json-file
-            options:
-                max-size: "10m"
-                max-file: "3"
-    loki:
-        image: grafana/loki:latest
-        container_name: loki
-        ports:
-            - "3100:3100"
-        volumes:
-            - ./loki-config.yaml:/etc/loki/local-config.yaml
-            - loki-data:/loki
-        command: -config.file=/etc/loki/local-config.yaml
-
-        restart: unless-stopped
-        logging:
-            driver: json-file
-            options:
-                max-size: "10m"
-                max-file: "3"
-    promtail:
-        image: grafana/promtail:latest
-        container_name: promtail
-        volumes:
-            - /var/log:/var/log
-            - ./promtail-config.yaml:/etc/promtail/config.yaml
-            - loki-data:/loki
-        command: -config.file=/etc/promtail/config.yaml
-        depends_on:
-            - loki
-        restart: unless-stopped
-        logging:
-            driver: json-file
-            options:
-                max-size: "10m"
-                max-file: "3"
 networks:
     default:
         name: codepost-network
         driver: bridge
 
 volumes:
-    redis-data:
-        name: codepost-redis-data
-        driver: local
-    db-data:
-        name: codepost-db-data
+    datasets:
+        name: codepost-datasets
         driver: local
         driver_opts:
             type: nfs
             o: addr=${NFS_SERVER_IP},rw
-            device: ":${NFS_SHARE_PATH}/mariadb"
-    loki-data:
-        name: codepost-loki-data
-        driver: local
-        driver_opts:
-            type: nfs
-            o: addr=${NFS_SERVER_IP},rw
-            device: ":${NFS_SHARE_PATH}/loki"
+            device: ":${NFS_SHARE_PATH}/datasets"

@@ -1,30 +1,57 @@
-from core.models import FileTemplate
-from core.serializers.fileTemplate import FileTemplateSerializer
-from core.views.template import ListProtectedViewSet
-from rest_framework.permissions import IsAuthenticated
-from core.permissions.permissions import FileTemplatePermissions
+from django.views import View
+from rest_framework.response import Response
+from rest_framework import viewsets
+
+from core.tests.views import action
+from django.shortcuts import redirect
+from django.urls import reverse
 
 
-class FileTemplateViewSet(ListProtectedViewSet):
+class FileTemplateViewSet(viewsets.ViewSet):
   """
-  list:
-  Return a list of all the file templates.
-
-  create:
-  Create a new file template.
-
-  retrieve:
-  Return the given file template.
-
-  update:
-  Update a file template.
-
-  partial_update:
-  Update a file template.
-
-  delete:
-  Delete a file template.
+  Deprecated - redirects to AssignmentFile endpoint.
   """
-  queryset = FileTemplate.objects.all()
-  serializer_class = FileTemplateSerializer
-  permission_classes = (IsAuthenticated, FileTemplatePermissions)
+  
+  def list(self, request):
+    return redirect(reverse('assignmentfile-list'), permanent=True)
+  
+  def create(self, request):
+    return redirect(reverse('assignmentfile-list'), permanent=True)
+  
+  def retrieve(self, request, pk=None):
+    # Redirect to assignmentfile detail if pk is provided
+    return redirect(reverse('assignmentfile-detail', args=[pk]), permanent=True)
+  
+  def update(self, request, pk=None):
+    return redirect(reverse('assignmentfile-detail', args=[pk]), permanent=True)
+  
+  def partial_update(self, request, pk=None):
+    return redirect(reverse('assignmentfile-detail', args=[pk]), permanent=True)
+  
+  def destroy(self, request, pk=None):
+    return redirect(reverse('assignmentfile-detail', args=[pk]), permanent=True)
+
+
+# class FileTemplateViewSet(ListProtectedViewSet):
+#   """
+#   list:
+#   Return a list of all the file templates.
+
+#   create:
+#   Create a new file template.
+
+#   retrieve:
+#   Return the given file template.
+
+#   update:
+#   Update a file template.
+
+#   partial_update:
+#   Update a file template.
+
+#   delete:
+#   Delete a file template.
+#   """
+#   queryset = FileTemplate.objects.all()
+#   serializer_class = FileTemplateSerializer
+#   permission_classes = (IsAuthenticated, FileTemplatePermissions)

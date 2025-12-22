@@ -463,7 +463,7 @@ def get_roster_permission_errors(user, request, course):
         ):
             return returnForbidden()
     elif request.method == "PATCH":
-        if not (isCourseAdmin(user, course) and user.profile.canModifyRosters):
+        if not (user.is_superuser or (isCourseAdmin(user, course) and user.profile.canModifyRosters)):
             return returnForbidden()
     return False
 

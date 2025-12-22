@@ -3,7 +3,7 @@ import pytz
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Submission, User
-from core.serializers.file import FileSerializer
+from core.serializers.file import FileSerializer, SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 from core.permissions.helpers import isStudent, isGrader, should_use_student_captions
 from datetime import timezone
@@ -49,6 +49,8 @@ class SubmissionSerializerWithoutFiles(ModelSerializerWithPOSTCheck):
     return ret
 
 class SubmissionSerializer(SubmissionSerializerWithoutFiles):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
 
   class Meta(SubmissionSerializerWithoutFiles.Meta):
     fields = SubmissionSerializerWithoutFiles.Meta.fields + ('files',)
@@ -139,6 +141,8 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
 
 
 class AnonymousSubmissionSerializer(serializers.ModelSerializer):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
   grader = serializers.SlugRelatedField(many=False, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
@@ -169,18 +173,46 @@ class SubmissionStatusSerializer(serializers.ModelSerializer):
                         'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'testRunsCompleted', 'lateDayCreditsUsed')
 
 class StudentSubmissionSerializer(serializers.ModelSerializer):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
+  hasGrader = serializers.SerializerMethodField()
+
+  def get_hasGrader(self, obj):
+    return obj.grader is not None
 
   class Meta:
     model = Submission
     fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'grade', 'questionIsOpen', 'questionIsRegrade',
-              'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+              'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
     read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'grade', 'questionIsOpen', 'questionIsRegrade',
-                        'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+                        'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+
+  def to_representation(self, obj):
+    """Add grader field when studentsCanSeeGraders is enabled"""
+    ret = super().to_representation(obj)
+    assignment = obj.assignment
+    course = assignment.course
+    
+    # Check if students can see graders:
+    # Assignment setting overrides course, otherwise use course default
+    if assignment.studentsCanSeeGraders is not None:
+      show_grader = assignment.studentsCanSeeGraders
+    else:
+      show_grader = course.studentsCanSeeGraders
+    
+    if show_grader and obj.grader:
+      ret['grader'] = obj.grader.email
+    else:
+      ret['grader'] = None
+    
+    return ret
 
 class StudentSubmissionWithoutGradeSerializer(serializers.ModelSerializer):
+  # Explicitly use SubmissionFileSerializer for the files relationship
+  files = SubmissionFileSerializer(many=True, read_only=True)
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
@@ -191,6 +223,19 @@ class StudentSubmissionWithoutGradeSerializer(serializers.ModelSerializer):
               'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
     read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'questionIsOpen', 'questionIsRegrade',
                         'questionText', 'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'tests', 'testRunsCompleted', 'lateDayCreditsUsed')
+
+class StudentSubmissionFilesOnlySerializer(serializers.ModelSerializer):
+  """
+  Serializer for student submissions with files only (no comments, no grade, no tests).
+  Used when students can view their files but not feedback.
+  """
+  files = SubmissionFileWithoutCommentsSerializer(many=True, read_only=True)
+  students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
+
+  class Meta:
+    model = Submission
+    fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'dateUploaded')
+    read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'files', 'dateUploaded')
 
 # This is a light-weight serializer to return submission tests
 class SubmissionWithTestsSerializer(serializers.ModelSerializer):

@@ -1,6 +1,6 @@
 from core.models import Submission, SubmissionTest, TestCase, TestCategory, File
 
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionStatusSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer, SubmissionStatusSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 
@@ -28,9 +28,19 @@ from rest_framework import serializers
 from core.permissions.tokens import submission_token_generator
 
 from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail
+from django.db.models import Q
 
-def get_student_serializer_class(submission):
-    if (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
+def get_student_serializer_class(submission, files_only=False):
+    """
+    Get the appropriate serializer for a student viewing their submission.
+    
+    Args:
+        submission: The submission object
+        files_only: If True, return serializer with only files (no comments/grades)
+    """
+    if files_only:
+        return StudentSubmissionFilesOnlySerializer
+    elif (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
         return SubmissionStatusSerializer
     elif submission.assignment.hideGrades:
         return StudentSubmissionWithoutGradeSerializer
@@ -70,6 +80,9 @@ class SubmissionViewSet(ListProtectedViewSet):
         assignment = submission.assignment
         course = submission.assignment.course
 
+        # Check if files-only mode is requested
+        files_only = self.request.query_params.get('filesOnly', 'false').lower() == 'true'
+
         # NOTE: we need to write this logic in descending order of privilege. For example, if a user
         # is both an admin and a student, we don't want to restrict that user's access to submissions
         # of which that user is a student before the associated assignment is released
@@ -78,14 +91,14 @@ class SubmissionViewSet(ListProtectedViewSet):
             return SubmissionSerializer
         elif isCourseStaff(user, course):
           if isStudentOfSub(user, submission):
-            return get_student_serializer_class(submission)
+            return get_student_serializer_class(submission, files_only=files_only)
           elif (not assignment.anonymousGrading) or canViewUnanonymizedSubmissions(user, course):
             return SubmissionSerializer
           else:
             return AnonymousSubmissionSerializer
         else:
           # user is *only* a student
-          return get_student_serializer_class(submission)
+          return get_student_serializer_class(submission, files_only=files_only)
 
     else:
         return SubmissionSerializer
@@ -103,16 +116,21 @@ class SubmissionViewSet(ListProtectedViewSet):
       toRet = {
         'read': True,
         'write': True,
+        'filesOnly': False,
       }
     elif isStudentOfSub(user, submission):
+      # Students can view files before release if assignment allows, but only see full feedback after release
+      canReadFull = (submission.assignment.isReleased and submission.isFinalized) or submission.assignment.liveFeedbackMode
       toRet = {
-        'read': (submission.assignment.isReleased and submission.isFinalized) or submission.assignment.liveFeedbackMode,
+        'read': canReadFull,
         'write': False,
+        'filesOnly': not canReadFull,  # If can't read full, can still see files only
       }
     else:
       toRet = {
         'read': False,
         'write': False,
+        'filesOnly': False,
       }
 
     return Response(toRet)
@@ -138,12 +156,16 @@ class SubmissionViewSet(ListProtectedViewSet):
     else:
     # Retrieve student
       try:
-        studentParam = User.objects.get(username=student)
+        studentParam = User.objects.filter(Q(username=student) | Q(email=student)).first()
+        if studentParam is None:
+          raise User.DoesNotExist
       except User.DoesNotExist:
+        
         if isCourseAdmin(user, course):
           return returnNotFound(message="The user does not exist")
         else:
           return returnForbidden()
+        
 
     # If you want to filter by the student, and want to post/patch/delete, you need to be the student
     # If you want to filter by the student, and get, then you need to be an admin, supergrader, or sectioNleader of student
@@ -155,12 +177,14 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     histories = submissionHistories.filter(student=studentParam) if studentParam is not None else submissionHistories
     if (request.method == "PATCH") and 'hasViewed' in request.data:
-        newFields = {"student": studentParam, "hasViewed": request.data['hasViewed']}
+        newFields = {"student": studentParam.email, "hasViewed": request.data['hasViewed']}
+
         serializer = SubmissionHistorySerializer(histories[0], newFields, many=False, context={"request": request})
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
     else:
         serializer = SubmissionHistorySerializer(histories, many=True, context={"request": request})
+        
     return Response(serializer.data)
 
 
@@ -273,7 +297,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     def retrieve_log_code(submission):
         try:
             logFile = File.objects.get(submission=submission, name="_tests.txt")
-            return logFile.code
+            return logFile.data
         except:
             return ''
 
@@ -295,10 +319,7 @@ class SubmissionViewSet(ListProtectedViewSet):
             tests = filterExposedSubmissionTests(list(submission.tests.all()), maxFailedTests)[0]
 
             try:
-                if assignment.environment.exposeDumpLogs:
-                    logCode = retrieve_log_code(submission)
-                else:
-                    logCode = ''
+                logCode = retrieve_log_code(submission)
             except:
                 logCode = ''
 

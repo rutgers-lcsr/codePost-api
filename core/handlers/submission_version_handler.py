@@ -37,6 +37,6 @@ class SubmissionVersionHandler:
 
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
             for file in files:
-                zip_file.writestr(file.name, file.code)
+                zip_file.writestr(file.name, file.data)
 
         return base64.b64encode(zip_buffer.getvalue()).decode()

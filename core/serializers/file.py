@@ -1,33 +1,123 @@
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
-from core.models import File
+from core.models import File, SubmissionFile, AssignmentFile, CourseFile
 from django import forms
 
 
 class FileSerializer(ModelSerializerWithPOSTCheck):
+    """
+    Base serializer for File objects.
+    """
 
-  class Meta:
-    model = File
-    fields = ('name', 'code', 'extension', 'submission', 'id', 'comments', 'path', 'created')
-    read_only_fields = ('comments', )
-    POST_permissions_fields = ('submission',)
-    extra_kwargs = {"code": {"trim_whitespace": False}}
+    class Meta:
+        model = File
+        fields = ('name', 'data', 'extension', 'id', 'path', 'created', 'modified')
+        read_only_fields = ('created', 'modified')
+        extra_kwargs = {
+            "data": {"trim_whitespace": False},
+        }
 
 
-class FileStudentUploadSerializer(ModelSerializerWithPOSTCheck):
+class SubmissionFileSerializer(ModelSerializerWithPOSTCheck):
+    """
+    Serializer for SubmissionFile objects.
+    These are files that belong to student submissions.
+    """
 
-  class Meta:
-    model = File
-    fields = ('name', 'code', 'extension', 'submission', 'id', 'path')
-    POST_permissions_fields = ('submission',)
-    extra_kwargs = {"code": {"trim_whitespace": False}}
+    class Meta:
+        model = SubmissionFile
+        fields = ('name', 'data', 'extension', 'submission', 'id', 'comments', 'path', 
+                  'hiddenBeforePublish', 'created', 'modified')
+        read_only_fields = ('comments', 'created', 'modified')
+        POST_permissions_fields = ('submission',)
+        extra_kwargs = {
+            "data": {"trim_whitespace": False},
+        }
+
+
+class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
+    """
+    Serializer for SubmissionFile objects without comments field.
+    Used for files-only view where students can see files but not comments.
+    """
+
+    class Meta:
+        model = SubmissionFile
+        fields = ('name', 'data', 'extension', 'submission', 'id', 'path', 
+                  'hiddenBeforePublish', 'created', 'modified')
+        read_only_fields = ('created', 'modified')
+        POST_permissions_fields = ('submission',)
+        extra_kwargs = {
+            "data": {"trim_whitespace": False},
+        }
+
+
+class SubmissionFileStudentUploadSerializer(ModelSerializerWithPOSTCheck):
+    """
+    Simplified serializer for students uploading submission files.
+    """
+
+    class Meta:
+        model = SubmissionFile
+        fields = ('name', 'data', 'extension', 'submission', 'id', 'path')
+        POST_permissions_fields = ('submission',)
+        extra_kwargs = {
+            "data": {"trim_whitespace": False},
+        }
+
+
+class AssignmentFileSerializer(ModelSerializerWithPOSTCheck):
+    """
+    Serializer for AssignmentFile objects.
+    These are files that belong to assignments (templates, instructions, etc.).
+    """
+
+    class Meta:
+        model = AssignmentFile
+        fields = ('name', 'data', 'extension', 'assignment', 'id', 'path', 'required', 'description', 'created', 'modified')
+        read_only_fields = ('created', 'modified')
+        POST_permissions_fields = ('assignment',)
+        extra_kwargs = {
+            "data": {"trim_whitespace": False},
+        }
+
+
+class AssignmentFilePublicSerializer(serializers.ModelSerializer):
+    """
+    Public serializer for AssignmentFile objects.
+    Used for listing files in the student dashboard (excludes data).
+    """
+
+    class Meta:
+        model = AssignmentFile
+        fields = ('id', 'name', 'extension', 'required', 'description', 'created', 'modified', 'assignment', 'path')
+        read_only_fields = fields
+
+
+class CourseFileSerializer(ModelSerializerWithPOSTCheck):
+    """
+    Serializer for CourseFile objects.
+    These are files that belong to courses (syllabi, resources, etc.).
+    """
+
+    class Meta:
+        model = CourseFile
+        fields = ('name', 'data', 'extension', 'course', 'id', 'path', 'created', 'modified')
+        read_only_fields = ('created', 'modified')
+        POST_permissions_fields = ('course',)
+        extra_kwargs = {
+            "data": {"trim_whitespace": False},
+        }
 
 
 class FileValidationSerializerWithoutSubmission(serializers.Serializer):
-  """
-  Validate data without creating a submission
-  """
-  name = serializers.CharField(max_length=150, required=True)
-  code = serializers.CharField(required=True, trim_whitespace=False)
-  extension = serializers.CharField(max_length=36, required=True)
-  path = serializers.CharField(max_length=500, allow_null=True, allow_blank=True, required=False)
+    """
+    Validate file data without creating a submission.
+    """
+    name = serializers.CharField(max_length=250, required=True)
+    data = serializers.CharField(required=True, trim_whitespace=False, allow_blank=True)
+    extension = serializers.CharField(max_length=36, required=True)
+    path = serializers.CharField(max_length=500, allow_null=True, allow_blank=True, required=False)
+
+    def validate(self, attrs):
+        return attrs

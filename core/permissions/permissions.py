@@ -1,292 +1,513 @@
-from core.models import Assignment
+"""
+Permission classes for codePost API.
+
+This module defines permissions for all major models in the codePost system.
+Permissions are organized by domain area for easier navigation and maintenance.
+
+Reference: https://stackoverflow.com/questions/36553197/permission-checks-in-drf-viewsets-are-not-working-right
+"""
+
+from core.models import Assignment, AssignmentFile, CourseFile, SubmissionFile, SubmissionTest
 from core.permissions.helpers import (
-  hasCourseCreationPrivilege,
-  isAuthenticated,
-  isCourseAdmin,
-  isCourseMember,
-  isCourseStaff,
-  isOrganizationMember,
-  isStaffOfSub,
-  isStudent,
-  isStudentOfSub,
+    hasCourseCreationPrivilege,
+    isAuthenticated,
+    isCourseAdmin,
+    isCourseMember,
+    isCourseStaff,
+    isOrganizationMember,
+    isStaffOfSub,
+    isStudent,
+    isStudentOfSub,
 )
 from core.permissions.template import TemplatePermission
 from rest_framework import permissions
+from codepost.settings import logger
 
-# Notes
-# https://stackoverflow.com/questions/36553197/permission-checks-in-drf-viewsets-are-not-working-right
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
 
-############# User Section ####################################################
+def _is_safe_method(method):
+    """Check if HTTP method is safe (GET, HEAD, OPTIONS)."""
+    return method in ['GET', 'HEAD', 'OPTIONS']
+
+
+def _is_write_method(method):
+    """Check if HTTP method is a write operation (POST, PUT, PATCH)."""
+    return method in ['POST', 'PUT', 'PATCH']
+
+
+# =============================================================================
+# USER & ORGANIZATION PERMISSIONS
+# =============================================================================
 
 
 class OrganizationPermissions(TemplatePermission):
+    """
+    Permissions for Organization objects.
+    
+    - Only superusers can create, modify, or view organizations
+    - DELETE is disabled to prevent catastrophic cascade effects
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
+    def has_object_permission(self, request, view, obj):
+        user = request.user
 
-    if request.method == "POST":
-      return user.is_superuser
-    if request.method == "DELETE":
-      # Since deleting an organization can have catastrophic cascade effects,
-      # we should only allow deletion of an organization object from the terminal.
-      # Maybe we can protect it with a confirm pattern.
-      return False
-    if request.method == "PATCH" or request.method == "PUT":
-      return user.is_superuser
-    if request.method == "GET":
-      return user.is_superuser
+        # DELETE is prohibited - use terminal/admin console only
+        if request.method == "DELETE":
+            return False
+
+        # All other operations require superuser
+        return user.is_superuser
 
 
 class UserPermissions(TemplatePermission):
+    """
+    Permissions for User objects.
+    
+    - Only superusers can create or modify users
+    - Users can view their own profile
+    - DELETE is disabled to prevent catastrophic cascade effects
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
+    def has_object_permission(self, request, view, obj):
+        user = request.user
 
-    if request.method == "POST":
-      return user.is_superuser
-    if request.method == "DELETE":
-      # Since deleting a user can have catastrophic cascade effects,
-      # we should only allow deletion of an user object from the terminal.
-      # Maybe we can protect it with a confirm pattern.
-      return False
-    if request.method == "PATCH" or request.method == "PUT":
-      return user.is_superuser
-    if request.method == "GET":
-      return user.is_superuser or user == obj
+        # DELETE is prohibited - use terminal/admin console only
+        if request.method == "DELETE":
+            return False
+
+        # GET: superuser or viewing own profile
+        if request.method == "GET":
+            return user.is_superuser or user == obj
+
+        # POST, PUT, PATCH: superuser only
+        return user.is_superuser
 
 
 class CoursePermissions(TemplatePermission):
+    """
+    Permissions for Course objects.
+    
+    - POST: Organization members with course creation privilege
+    - GET: Superuser or course members
+    - PUT/PATCH: Course admins only
+    - DELETE: Prohibited (use terminal/admin console)
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    course = obj
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        course = obj
 
-    if request.method == "POST":
-      return isOrganizationMember(user, course.organization) and hasCourseCreationPrivilege(user)
-    if request.method == "DELETE":
-      # Since deleting a course can have catastrophic cascade effects,
-      # we should only allow deletion of an course object from the terminal.
-      # Maybe we can protect it with a confirm pattern.
-      return False
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return user.is_superuser or isCourseMember(user, course)
+        # DELETE is prohibited - use terminal/admin console only
+        if request.method == "DELETE":
+            return False
+
+        # GET: superuser or course member
+        if request.method == "GET":
+            return user.is_superuser or isCourseMember(user, course)
+
+        # POST: organization member with course creation privilege
+        if request.method == "POST":
+            return user.is_superuser or (isOrganizationMember(user, course.organization) and hasCourseCreationPrivilege(user))
+
+        # PUT/PATCH: course admin
+        if request.method in ["PATCH", "PUT"]:
+            return isCourseAdmin(user, course)
+
+        return False
+
 
 class BillingPermissions(permissions.BasePermission):
-  def has_permission(self, request, view):
-    if view.action in ['create_checkout_session', 'details', 'request_waiver']:
-      return isAuthenticated(request.user)
+    """
+    Permissions for billing operations.
+    
+    - Authenticated users can access billing actions
+    - Course admins can perform billing operations on their courses
+    """
 
-  def has_object_permission(self, request, view, obj):
-    if isAuthenticated(request.user) and  isCourseAdmin(request.user, obj):
-      if view.action in ['create_checkout_session', 'details', 'request_waiver']:
-        return True
-    return False
+    def has_permission(self, request, view):
+        if view.action in ['create_checkout_session', 'details', 'request_waiver']:
+            return isAuthenticated(request.user)
+        return False
 
-################################################################################
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if view.action in ['create_checkout_session', 'details', 'request_waiver']:
+            return isAuthenticated(user) and isCourseAdmin(user, obj)
+        return False
 
-############# Course Infrastructure Section ####################################
+
+# =============================================================================
+# COURSE STRUCTURE PERMISSIONS (Sections, Assignments, Rubrics)
+# =============================================================================
 
 
 class SectionPermissions(TemplatePermission):
+    """
+    Permissions for Section objects.
+    
+    - POST/PUT/PATCH/DELETE: Course admins only
+    - GET: Superuser or course staff
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    course = obj.course
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        course = obj.course
 
-    if request.method == "POST":
-      return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return user.is_superuser or isCourseStaff(user, course)
+        # GET: superuser or course staff
+        if request.method == "GET":
+            return user.is_superuser or isCourseStaff(user, course)
+
+        # All write operations: course admin only
+        return isCourseAdmin(user, course)
 
 
 class AssignmentPermissions(TemplatePermission):
+    """
+    Permissions for Assignment objects.
+    
+    - POST/PUT/PATCH/DELETE: Course admins only
+    - GET: Superuser, course staff, or students (if assignment is visible)
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    course = obj.course
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        course = obj.course
 
-    if request.method == "POST":
-      return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return user.is_superuser or isCourseStaff(user, course) or (obj.isVisible and isCourseMember(user, course))
+        # GET: superuser, course staff, or course members (if visible)
+        if request.method == "GET":
+            return (
+                user.is_superuser
+                or isCourseStaff(user, course)
+                or (obj.isVisible and isCourseMember(user, course))
+            )
+
+        # All write operations: course admin only
+        return isCourseAdmin(user, course)
 
 
 class RubricCategoryPermissions(TemplatePermission):
+    """
+    Permissions for RubricCategory objects.
+    
+    Write permissions depend on collaborativeRubricMode:
+    - Collaborative mode: All course staff can modify
+    - Standard mode: Only course admins can modify
+    
+    Read permissions:
+    - Superuser or course staff can always view
+    - Students can view if assignment is released or in live feedback mode
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    assignment = obj.assignment
-    course = obj.assignment.course
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        assignment = obj.assignment
+        course = assignment.course
 
-    if request.method == "POST":
-      if assignment.collaborativeRubricMode:
-        return isCourseStaff(user, course)
-      else:
-        return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      if assignment.collaborativeRubricMode:
-        return isCourseStaff(user, course)
-      else:
-        return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      if assignment.collaborativeRubricMode:
-        return isCourseStaff(user, course)
-      else:
-        return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return user.is_superuser or isCourseStaff(user, course) or (isStudent(user, course) and (obj.assignment.isReleased or obj.assignment.liveFeedbackMode))
+        # GET: superuser, staff, or students (if released/live feedback)
+        if request.method == "GET":
+            return (
+                user.is_superuser
+                or isCourseStaff(user, course)
+                or (isStudent(user, course) and (assignment.isReleased or assignment.liveFeedbackMode))
+            )
+
+        # Write operations: depends on collaborative mode
+        if assignment.collaborativeRubricMode:
+            return isCourseStaff(user, course)
+        else:
+            return isCourseAdmin(user, course)
 
 
 class RubricCommentPermissions(TemplatePermission):
+    """
+    Permissions for RubricComment objects.
+    
+    Similar to RubricCategory, permissions depend on collaborativeRubricMode:
+    - Collaborative mode: All course staff can modify
+    - Standard mode: Only course admins can modify
+    
+    Read permissions:
+    - Superuser or course staff can always view
+    - Students can view if assignment is released or in live feedback mode
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
+    def has_object_permission(self, request, view, obj):
+        user = request.user
 
-    if type(obj) == Assignment:
-      assignment = obj
-      course = assignment.course
-    else:
-      assignment = obj.category.assignment
-      course = obj.category.assignment.course
+        # Handle both Assignment objects and RubricComment objects
+        if type(obj) == Assignment:
+            assignment = obj
+            course = assignment.course
+        else:
+            assignment = obj.category.assignment
+            course = assignment.course
 
-    def hasLinkedComments(rubricComment):
-      return rubricComment.comments.count() > 0
+        # GET: superuser, staff, or students (if released/live feedback)
+        if request.method == "GET":
+            return (
+                user.is_superuser
+                or isCourseStaff(user, course)
+                or (isStudent(user, course) and (assignment.isReleased or assignment.liveFeedbackMode))
+            )
 
-    if request.method == "POST":
-      if assignment.collaborativeRubricMode:
-        return isCourseStaff(user, course)
-      else:
-        return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      if assignment.collaborativeRubricMode:
-        return isCourseStaff(user, course)
-      else:
-        return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      if assignment.collaborativeRubricMode:
-        return isCourseStaff(user, course)
-      else:
-        return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return user.is_superuser or isCourseStaff(user, course) or (isStudent(user, course) and (assignment.isReleased or assignment.liveFeedbackMode))
+        # Write operations: depends on collaborative mode
+        if assignment.collaborativeRubricMode:
+            return isCourseStaff(user, course)
+        else:
+            return isCourseAdmin(user, course)
 
-###############################################################################
 
-############# Submissions Section #############################################
+# =============================================================================
+# SUBMISSION & FILE PERMISSIONS
+# =============================================================================
 
 
 class SubmissionPermissions(TemplatePermission):
+    """
+    Permissions for Submission objects.
+    
+    - POST/DELETE: Course admins only
+    - PUT/PATCH: Course admins or staff assigned to submission
+    - GET: Staff of submission, or students (if assignment released/live feedback)
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    course = obj.assignment.course
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        course = obj.assignment.course
+        assignment = obj.assignment
 
-    if request.method == "POST":
-      return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course) or isStaffOfSub(user, obj)
-    if request.method == "GET":
-      return isStaffOfSub(user, obj) or (isStudentOfSub(user, obj) and (obj.assignment.isReleased or obj.assignment.liveFeedbackMode))
+        # GET: staff of submission, or students (if released/live feedback)
+        if request.method == "GET":
+            return (
+                isStaffOfSub(user, obj)
+                or (isStudentOfSub(user, obj) and (assignment.isReleased or assignment.liveFeedbackMode))
+            )
+
+        # PUT/PATCH: course admin or staff of submission
+        if request.method in ["PUT", "PATCH"]:
+            return isCourseAdmin(user, course) or isStaffOfSub(user, obj)
+
+        # POST/DELETE: course admin only
+        return isCourseAdmin(user, course)
 
 
 class FileTemplatePermissions(TemplatePermission):
+    """
+    Permissions for FileTemplate objects.
+    
+    - POST/PUT/PATCH/DELETE: Course admins only
+    - GET: All course members
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    assignment = obj.assignment
-    course = obj.assignment.course
-
-    if request.method == "POST":
-      return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return isCourseMember(user, course)
+    def has_object_permission(self, request, view, obj):
+        raise NotImplementedError("FileTemplatePermissions is deprecated. Use specific file permissions instead.")
+        
 
 
 class FilePermissions(TemplatePermission):
+    """
+    Permissions for File objects.
+    
+    Inherits permission logic from parent depending on the type of file.
+    """
 
-  def has_object_permission(self, request, view, obj):
-    return SubmissionPermissions.has_object_permission(self, request, view, obj.submission)
+    def has_object_permission(self, request, view, obj):
+      logger.info(f"FilePermissions: Checking permissions for File object ({obj.id}) of type {type(obj)}")
+      
+      # Handle polymorphic file types - check for child model attributes
+      # Django MTI may pass the base File object, so we need to check for the child model relationship
+      # Check in order: SubmissionFile, AssignmentFile, CourseFile
+      # Note: Must check child model name (lowercase), not foreign key field names
+      
+      # Check if it's a SubmissionFile
+      if isinstance(obj, SubmissionFile) or hasattr(obj, 'submissionfile'):
+        try:
+          submission_file = obj if isinstance(obj, SubmissionFile) else obj.submissionfile
+          logger.info(f"FilePermissions: Delegating to SubmissionPermissions for submission {submission_file.submission.id}")
+          return SubmissionPermissions().has_object_permission(request, view, submission_file.submission)
+        except AttributeError as e:
+          logger.warning(f"FilePermissions: Failed to access submissionfile for File {obj.id}: {e}")
+          return False
+      
+      # Check if it's an AssignmentFile
+      if isinstance(obj, AssignmentFile) or hasattr(obj, 'assignmentfile'):
+        try:
+          assignment_file = obj if isinstance(obj, AssignmentFile) else obj.assignmentfile
+          logger.info(f"FilePermissions: Delegating to AssignmentPermissions for assignment {assignment_file.assignment.id}")
+          return AssignmentPermissions().has_object_permission(request, view, assignment_file.assignment)
+        except AttributeError as e:
+          logger.warning(f"FilePermissions: Failed to access assignmentfile for File {obj.id}: {e}")
+          return False
+      
+      # Check if it's a CourseFile
+      if isinstance(obj, CourseFile) or hasattr(obj, 'coursefile'):
+        try:
+          course_file = obj if isinstance(obj, CourseFile) else obj.coursefile
+          logger.info(f"FilePermissions: Delegating to CourseFilePermissions for course {course_file.course.id}")
+          return CourseFilePermissions().has_object_permission(request, view, course_file.course)
+        except AttributeError as e:
+          logger.warning(f"FilePermissions: Failed to access coursefile for File {obj.id}: {e}")
+          return False
+      
+      # If we can't determine the file type, deny access
+      logger.error(f"FilePermissions: Could not determine file type for File {obj.id}. No child model found.")
+      return False
 
+class CourseFilePermissions(TemplatePermission):
+    """
+    Permissions for CourseFile objects.
+    
+    - POST/PUT/PATCH/DELETE: Course admins only
+    - GET: Superuser or course members
+    """
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        course = obj
+
+        # GET: superuser or course member
+        if request.method == "GET":
+            return user.is_superuser or isCourseMember(user, course)
+
+        # All write operations: course admin only
+        return isCourseAdmin(user, course)
+
+
+class FileExecutionPermissions(TemplatePermission):
+    """
+    Permissions for FileExecution on Files. 
+    
+    If the file is a SubmissionFile, the user must be the submitter, or a staff member of the course the submission belongs to.
+    If the file is an AssignmentFile, the user must be a staff member of the course the assignment belongs to.
+    If the file is a CourseFile, the user must be a staff member of the course the file belongs to.
+    
+    Note: This is different then the File Permissions because its for executing files, not viewing them. Students can view CourseFiles, but cannot execute them.
+
+    """
+    
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if isinstance(obj, SubmissionFile) or hasattr(obj, 'submissionfile'):
+            submission = obj if isinstance(obj, SubmissionFile) else obj.submissionfile.submission
+            return isStudentOfSub(user, submission) or isStaffOfSub(user, submission)
+        elif isinstance(obj, AssignmentFile) or hasattr(obj, 'assignmentfile'):
+            assignment = obj if isinstance(obj, AssignmentFile) else obj.assignmentfile.assignment
+            return isCourseStaff(user, assignment.course)
+        elif isinstance(obj, CourseFile) or hasattr(obj, 'coursefile'):
+            course = obj if isinstance(obj, CourseFile) else obj.coursefile.course
+            return isCourseStaff(user, course)
+        return False
+    
 
 class CommentPermissions(TemplatePermission):
+    """
+    Permissions for Comment objects.
+    Note: Staff are defined as graders, super graders, or course admins.
+    
+    - POST/PUT/PATCH/DELETE: Staff assigned to submission
+    - GET: Inherits from submission permissions
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    submission = obj.file.submission
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        submission = obj.file.submission
 
-    if request.method == "POST":
-      return isStaffOfSub(user, submission)
-    if request.method == "DELETE":
-      return isStaffOfSub(user, submission)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isStaffOfSub(user, submission)
-    if request.method == "GET":
-      return SubmissionPermissions.has_object_permission(self, request, view, submission)
+        # GET: inherit submission permissions
+        if request.method == "GET":
+            return SubmissionPermissions().has_object_permission( request, view, submission)
 
-########################## Autograder Models #####################################################
+        # All write operations: staff of submission only
+        return isStaffOfSub(user, submission)
+
+
+# =============================================================================
+# AUTOGRADER PERMISSIONS (Test Cases, Test Categories, Submission Tests)
+# =============================================================================
 
 
 class TestCasePermissions(TemplatePermission):
+    """
+    Permissions for TestCase objects.
+    
+    - POST/PUT/PATCH/DELETE: Course admins only
+    - GET: Course staff
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    course = obj.testCategory.assignment.course
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        course = obj.testCategory.assignment.course
 
-    if request.method == "POST":
-      return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return isCourseStaff(user, course)
+        # GET: course staff
+        if request.method == "GET":
+            return isCourseStaff(user, course)
+
+        # All write operations: course admin only
+        return isCourseAdmin(user, course)
 
 
 class TestCategoryPermissions(TemplatePermission):
+    """
+    Permissions for TestCategory objects.
+    
+    - POST/PUT/PATCH/DELETE: Course admins only
+    - GET: Course staff
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    course = obj.assignment.course
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        course = obj.assignment.course
 
-    if request.method == "POST":
-      return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course)
-    if request.method == "GET":
-      return isCourseStaff(user, course)
+        # GET: course staff
+        if request.method == "GET":
+            return isCourseStaff(user, course)
+
+        # All write operations: course admin only
+        return isCourseAdmin(user, course)
 
 
 class SubmissionTestPermissions(TemplatePermission):
+    """
+    Permissions for SubmissionTest objects.
+    
+    - POST/DELETE: Course admins only
+    - PUT/PATCH: Course admins or staff of submission
+    - GET: Staff of submission, or students under specific conditions:
+      * Assignment is released AND submission is finalized, OR
+      * Assignment is in live feedback mode, OR
+      * Test case is explicitly exposed
+    """
 
-  def has_object_permission(self, request, view, obj):
-    user = request.user
-    course = obj.submission.assignment.course
-    assignment = obj.submission.assignment
-    submission = obj.submission
+    def has_object_permission(self, request, view, obj: SubmissionTest):
+        user = request.user
+        submission = obj.submission
+        assignment = submission.assignment
+        course = assignment.course
 
-    if request.method == "POST":
-      return isCourseAdmin(user, course)
-    if request.method == "DELETE":
-      return isCourseAdmin(user, course)
-    if request.method == "PATCH" or request.method == "PUT":
-      return isCourseAdmin(user, course) or isStaffOfSub(user, submission)
-    if request.method == "GET":
-      return isStaffOfSub(user, submission) or (isStudentOfSub(user, submission) and ((assignment.isReleased and submission.isFinalized) or assignment.liveFeedbackMode or (obj.testCase.exposed)))
+        # GET: staff of submission, or students (under specific conditions)
+        if request.method == "GET":
+            # Staff can always view
+            if isStaffOfSub(user, submission):
+                return True
+            
+            # Students can view if:
+            if isStudentOfSub(user, submission):
+                # 1. Assignment released AND submission finalized
+                if assignment.isReleased and submission.isFinalized:
+                    return True
+                # 2. Live feedback mode is enabled
+                if assignment.liveFeedbackMode:
+                    return True
+                # 3. Test case is explicitly exposed
+                if obj.testCase.exposed:
+                    return True
+            
+            return False
+
+        # PUT/PATCH: course admin or staff of submission
+        if request.method in ["PUT", "PATCH"]:
+            return isCourseAdmin(user, course) or isStaffOfSub(user, submission)
+
+        # POST/DELETE: course admin only
+        return isCourseAdmin(user, course)

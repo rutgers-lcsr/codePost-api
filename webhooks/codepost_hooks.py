@@ -49,7 +49,7 @@ codepost_hooks = {
     'file.added':               'core.File.created',
     'file.changed':             'core.File.updated',
     'file.removed':             'core.File.deleted',
-    'file.code':                'core.File.code',
+    'file.data':                'core.File.data',
     'file.name':                'core.File.name',
     'file.extension':           'core.File.extension',
 

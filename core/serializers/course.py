@@ -22,8 +22,11 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
               'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
-              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks')
+              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders')
     read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks')
+    extra_kwargs = {
+        'organization': {'required': False}
+    }
 
   def validate_timezone(self, timezone):
     # Check that timezone corresponds to valid timezone
@@ -33,7 +36,12 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     return timezone
 
   def get_assignments(self, obj):
+    
+    if not self.context.get('request'):
+      return []
+    
     user = self.context.get('request').user
+
     if (user.is_active):
         if (isCourseStaff(user, obj)):
             return list(map(lambda x: x.id, obj.assignments.all()))
@@ -46,14 +54,25 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
 
   def validate(self, data):
     # Add server-generated fields
-    organization = self.context['request'].user.profile.organization
-    data['organization'] = organization
+    user = self.context['request'].user
+    if user.is_superuser and 'organization' in data:
+      # If superuser specifies an organization, let them use it
+      # Verify it exists or is a valid instance (if serializer passed ID, it might be resolved already if ModelSerializer)
+      # But since 'organization' might not be in the input fields of the serializer (it wasn't in Meta fields explicitly before I check),
+      # I need to ensure it is writable.
+      pass 
+    else:
+      # Default behavior for non-superusers or if org not specified
+      organization = user.profile.organization
+      data['organization'] = organization
+      
     newData = super().validate(data)
     newFields = self.genProposedFields(newData)
 
     # Manually establish unique_together(name, organization, period) constraint. Django provides an error messages
     # in UniqueTogetherValidator but only seems to apply to fields of 2. With 3 fields in unique_together it
     # provides a 500 error
+    organization = newFields['organization'] # Get the final organization
     others = Course.objects.filter(name=newFields['name'], period=newFields['period'], organization=organization)
     if (self.instance and len(others) > 1) or (not self.instance and len(others) > 0):  # don't count this course!
       raise serializers.ValidationError("A course with this name and period already exists in your organization.")
