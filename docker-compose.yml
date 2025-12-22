@@ -22,7 +22,7 @@ services:
         env_file:
             - .env
         environment:
-            - DEBUG=TRUE
+            - DEBUG=${DEBUG:-FALSE}
             - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
             - API_URL=${API_URL}
             - CLIENT_URL=${CLIENT_URL}
@@ -35,9 +35,6 @@ services:
             - API_USER=${API_USER}
             - API_PASSWORD=${API_PASSWORD}
             - EMAIL_HOST=${EMAIL_HOST}
-            - EMAIL_PORT=${EMAIL_PORT}
-            - EMAIL_USE_TLS=${EMAIL_USE_TLS}
-            - EMAIL_USE_SSL=${EMAIL_USE_SSL}
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
         ports:
             - "8000:8000"

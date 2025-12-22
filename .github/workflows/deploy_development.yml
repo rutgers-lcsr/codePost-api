@@ -1,149 +1,143 @@
 name: Deploy to Development Server
 
 on:
-    push:
-        branches:
-            - render
+  push:
+    branches:
+      - render
 
 jobs:
-    deploy_data:
-        environment: development
-        runs-on: development-data
-        env:
-            ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
-            DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
-            DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-            API_USER: ${{ vars.API_USER }}
-            API_PASSWORD: ${{ secrets.API_PASSWORD }}
-            NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
-            NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v5
+  deploy_data:
+    environment: development
+    runs-on: development-data
+    env:
+      ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
+      DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      API_USER: ${{ vars.API_USER }}
+      API_PASSWORD: ${{ secrets.API_PASSWORD }}
+      NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
+      NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-            - name: Set up .env
-              run: |
-                  cat <<EOF > .env
-                  ROOT_DATABASE_PASSWORD=${{ secrets.ROOT_DATABASE_PASSWORD }}
-                  DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-                  DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
-                  API_USER=${{ vars.API_USER }}
-                  API_PASSWORD=${{ secrets.API_PASSWORD }}
-                  NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
-                  NFS_SHARE_PATH=${{ vars.NFS_SHARE_PATH }}
-                  EOF
-            - name: Deploy docker containers for database, redis, adminer, and flower
-              run: |
-                  docker compose -f docker-compose-data.yml build
-                  docker compose -f docker-compose-data.yml up -d --remove-orphans
-            - name: Remove docker artifacts
-              run: |
-                  docker system prune -f
-            - name: Notify database deployment success
-              run: echo "Database deployment to development server successful!"
-    deploy:
-        environment: development
-        runs-on: development-api
-        env:
-            DEBUG: true
-            API_URL: ${{ vars.API_URL }}
-            CLIENT_URL: ${{ vars.CLIENT_URL }}
-            DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
-            DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-            API_USER: ${{ vars.API_USER }}
-            API_PASSWORD: ${{ secrets.API_PASSWORD }}
-            SECRET_KEY: ${{ secrets.SECRET_KEY }}
-            EMAIL_HOST: ${{ vars.EMAIL_HOST }}
-            DEFAULT_EMAIL_FROM: ${{ vars.DEFAULT_EMAIL_FROM }}
-            NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
-            NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v5
+      - name: Set up .env
+        run: |
+          cat <<EOF > .env
+          ROOT_DATABASE_PASSWORD=${{ secrets.ROOT_DATABASE_PASSWORD }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
+          API_USER=${{ vars.API_USER }}
+          API_PASSWORD=${{ secrets.API_PASSWORD }}
+          NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
+          NFS_SHARE_PATH=${{ vars.NFS_SHARE_PATH }}
+          EOF
+      - name: Deploy docker containers for database, redis, adminer, and flower
+        run: |
+          docker compose -f docker-compose-data.yml build
+          docker compose -f docker-compose-data.yml up -d --remove-orphans
+      - name: Remove docker artifacts
+        run: |
+          docker system prune -f
+      - name: Notify database deployment success
+        run: echo "Database deployment to development server successful!"
+  deploy:
+    environment: development
+    runs-on: development-api
+    env:
+      DEBUG: true
+      API_URL: ${{ vars.API_URL }}
+      CLIENT_URL: ${{ vars.CLIENT_URL }}
+      DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      API_USER: ${{ vars.API_USER }}
+      API_PASSWORD: ${{ secrets.API_PASSWORD }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      EMAIL_HOST: ${{ vars.EMAIL_HOST }}
+      DEFAULT_EMAIL_FROM: ${{ vars.DEFAULT_EMAIL_FROM }}
+      NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
+      NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-            - name: Set up Certs
-              run: |
-                  HOSTNAME=$(hostname)
-                  cp -rflT /etc/letsencrypt/live/$HOSTNAME/ certs/
+      - name: Set up Certs
+        run: |
+          HOSTNAME=$(hostname)
+          cp -rflT /etc/letsencrypt/live/$HOSTNAME/ certs/
 
-            - name: Set up .env
-              run: |
-                  cat <<EOF > .env
-                  DEBUG=${{ env.DEBUG }}
-                  API_URL=${{ vars.API_URL }}
-                  CLIENT_URL=${{ vars.CLIENT_URL }}
-                  SECRET_KEY=${{ secrets.SECRET_KEY }}
-                  DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
-                  DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-                  API_USER=${{ vars.API_USER }}
-                  API_PASSWORD=${{ secrets.API_PASSWORD }}
-                  EMAIL_HOST=${{ vars.EMAIL_HOST }}
-                  DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
-                  NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
-                  NFS_SHARE_PATH=${{ vars.NFS_SHARE_PATH }}
-                  EOF
+      - name: Set up .env
+        run: |
+          cat <<EOF > .env
+          DEBUG=${{ env.DEBUG }}
+          API_URL=${{ vars.API_URL }}
+          CLIENT_URL=${{ vars.CLIENT_URL }}
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          API_USER=${{ vars.API_USER }}
+          API_PASSWORD=${{ secrets.API_PASSWORD }}
+          EMAIL_HOST=${{ vars.EMAIL_HOST }}
+          DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
+          NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
+          NFS_SHARE_PATH=${{ vars.NFS_SHARE_PATH }}
+          EOF
 
-            - name: Build and deploy
-              run: |
-                  docker compose build
-                  docker compose up -d --remove-orphans
+      - name: Build and deploy
+        run: |
+          docker compose build
+          docker compose up -d --remove-orphans
 
-            - name: Remove docker artifacts
-              run: |
-                  docker system prune -f
+      - name: Remove docker artifacts
+        run: |
+          docker system prune -f
 
-            - name: Notify deployment success
-              run: echo "Deployment to development server successful!"
-    deploy_workers:
-        environment: development
-        runs-on: development-workers
-        env:
-            DEBUG: true
-            API_URL: ${{ vars.API_URL }}
-            CLIENT_URL: ${{ vars.CLIENT_URL }}
-            DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
-            DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-            ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
-            EMAIL_HOST: ${{ vars.EMAIL_HOST }}
-            EMAIL_PORT: ${{ vars.EMAIL_PORT }}
-            EMAIL_USE_TLS: ${{ vars.EMAIL_USE_TLS }}
-            EMAIL_USE_SSL: ${{ vars.EMAIL_USE_SSL }}
-            DEFAULT_EMAIL_FROM: ${{ vars.DEFAULT_EMAIL_FROM }}
-            NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
-            NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v5
+      - name: Notify deployment success
+        run: echo "Deployment to development server successful!"
+  deploy_workers:
+    environment: development
+    runs-on: development-workers
+    env:
+      DEBUG: true
+      API_URL: ${{ vars.API_URL }}
+      CLIENT_URL: ${{ vars.CLIENT_URL }}
+      DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
+      EMAIL_HOST: ${{ vars.EMAIL_HOST }}
+      DEFAULT_EMAIL_FROM: ${{ vars.DEFAULT_EMAIL_FROM }}
+      NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
+      NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-            - name: Set up .env
-              run: |
-                  cat <<EOF > .env
-                  DEBUG=${{ env.DEBUG }}
-                  API_URL=${{ vars.API_URL }}
-                  CLIENT_URL=${{ vars.CLIENT_URL }}
-                  SECRET_KEY=${{ secrets.SECRET_KEY }}
-                  DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
-                  DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-                  ROOT_DATABASE_PASSWORD=${{ secrets.ROOT_DATABASE_PASSWORD }}
-                  API_USER=${{ vars.API_USER }}   
-                  API_PASSWORD=${{ secrets.API_PASSWORD }}
-                  EMAIL_HOST=${{ vars.EMAIL_HOST }}
-                  EMAIL_PORT=${{ vars.EMAIL_PORT }}
-                  EMAIL_USE_TLS=${{ vars.EMAIL_USE_TLS }}
-                  EMAIL_USE_SSL=${{ vars.EMAIL_USE_SSL }}
-                  DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
-                  NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
-                  NFS_SHARE_PATH=${{ vars.NFS_SHARE_PATH }}
-                  EOF
+      - name: Set up .env
+        run: |
+          cat <<EOF > .env
+          DEBUG=${{ env.DEBUG }}
+          API_URL=${{ vars.API_URL }}
+          CLIENT_URL=${{ vars.CLIENT_URL }}
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          ROOT_DATABASE_PASSWORD=${{ secrets.ROOT_DATABASE_PASSWORD }}
+          API_USER=${{ vars.API_USER }}   
+          API_PASSWORD=${{ secrets.API_PASSWORD }}
+          EMAIL_HOST=${{ vars.EMAIL_HOST }}
+          DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
+          NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
+          NFS_SHARE_PATH=${{ vars.NFS_SHARE_PATH }}
+          EOF
 
-            - name: Build and deploy workers only
-              run: |
-                  docker compose -f docker-compose-worker.yml build
-                  docker compose -f docker-compose-worker.yml up -d --remove-orphans
+      - name: Build and deploy workers only
+        run: |
+          docker compose -f docker-compose-worker.yml build
+          docker compose -f docker-compose-worker.yml up -d --remove-orphans
 
-            - name: Remove docker artifacts
-              run: |
-                  docker system prune -f
+      - name: Remove docker artifacts
+        run: |
+          docker system prune -f
 
-            - name: Notify workers deployment success
-              run: echo "Workers deployment to development server successful!"
+      - name: Notify workers deployment success
+        run: echo "Workers deployment to development server successful!"
