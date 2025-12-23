@@ -511,17 +511,6 @@ class Executor(abc.ABC):
                     logger.warning(f"[DatasetMount] Dataset file not found: {host_file_path}")
                     continue
                 
-                # Get mount path in container
-                mount_path = dataset.mount_path or f'shared/{dataset.name}'
-                
-                # Ensure mount_path doesn't start with /
-                if mount_path.startswith('/'):
-                    mount_path = mount_path[1:]
-                
-                # Remove 'shared/' prefix if it exists (since we're already mounting at /root/shared)
-                if mount_path.startswith('shared/'):
-                    mount_path = mount_path[7:]  # Remove 'shared/' prefix
-                
                 # Get just the filename
                 filename = os.path.basename(host_file_path)
                 
@@ -533,13 +522,20 @@ class Executor(abc.ABC):
                 shutil.copy2(host_file_path, staged_path)
                 os.chmod(staged_path, 0o644)  # Ensure readable
                 
-                # Build full container path
-                # If mount_path is empty or just the filename, mount directly at /root/shared/<filename>
-                # Otherwise mount at /root/shared/<mount_path>
-                if mount_path and mount_path != filename:
-                    container_path = os.path.join('/shared', mount_path)
+                # Get mount path in container
+                # If absolute, mount there. If relative, mount in /shared
+                mount_path = dataset.mount_path or f'shared/{dataset.name}'
+                
+                if mount_path.startswith('/'):
+                    # Absolute path
+                    container_path = mount_path
                 else:
-                    container_path = os.path.join('/shared', filename)
+                    # Relative path - ensure it goes to /shared
+                    # Remove 'shared/' prefix if it exists to avoid duplication if user typed 'shared/foo'
+                    if mount_path.startswith('shared/'):
+                        mount_path = mount_path[7:]
+                    
+                    container_path = os.path.join('/shared', mount_path)
 
                 container_path = os.path.normpath(container_path)
                 

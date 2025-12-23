@@ -712,7 +712,7 @@ class AssignmentDataSet(BaseModel):
   mount_path = models.CharField(
     max_length=256, 
     blank=True,
-    help_text=("Path where dataset will be mounted in execution environment (e.g., 'shared/mnist'). Defaults to 'shared/<name>'."))
+    help_text=("Path where dataset will be mounted in execution environment. Can be an absolute path (e.g. '/etc/config.json') or a relative path (e.g. 'mnist'). Relative paths are mounted under '/shared'."))
   
   # Whether this dataset is available to students during upload/execution
   is_active = models.BooleanField(
