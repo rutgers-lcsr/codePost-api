@@ -7,7 +7,7 @@ COPY pyproject.toml poetry.lock* /opt/app/
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
- && poetry install --no-root
+    && poetry install --no-root
 
 COPY . .
 
@@ -29,13 +29,13 @@ WORKDIR /opt/app
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
- && poetry install --no-root
+    && poetry install --no-root
 
 RUN pip install celery
 
 COPY . .
 
-CMD [ "celery", "--app", "autograder", "worker", "--loglevel", "info", "--concurrency", "4", "--task-events"]
+CMD ["sh", "-c", "celery --app autograder worker --loglevel info --concurrency ${CELERY_CONCURRENCY:-4} --task-events"]
 
 FROM python:3.12 AS flower
 COPY --from=api /opt/app /opt/app
@@ -48,7 +48,7 @@ WORKDIR /opt/app
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
- && poetry install --no-root
+    && poetry install --no-root
 RUN pip install celery
 
 COPY . .
