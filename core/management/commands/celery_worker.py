@@ -10,7 +10,7 @@ class Command(BaseCommand):
     
     def add_arguments(self, parser):
         parser.add_argument("--loglevel", default="info", help="Log level")
-        parser.add_argument("--concurrency", default=4, type=int, help="Number of worker processes")
+        parser.add_argument("--concurrency", default=os.environ.get("CELERY_CONCURRENCY", 4), type=int, help="Number of worker processes")
     
     def handle(self, *args, **options):
         from celery import Celery
