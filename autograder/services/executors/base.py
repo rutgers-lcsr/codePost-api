@@ -525,6 +525,10 @@ class Executor(abc.ABC):
                 # Get mount path in container
                 # If absolute, mount there. If relative, mount in /shared
                 mount_path = dataset.mount_path or f'shared/{dataset.name}'
+
+                # If mount path ends with /, assume it's a directory and append filename
+                if mount_path.endswith('/'):
+                    mount_path = os.path.join(mount_path, filename)
                 
                 if mount_path.startswith('/'):
                     # Absolute path
