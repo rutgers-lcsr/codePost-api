@@ -30,7 +30,7 @@ services:
             target: worker
         volumes:
             - datasets:/assignment_datasets
-            - ./staging:/staging
+            - /tmp/codepost-staging:/staging
             - /var/run/docker.sock:/var/run/docker.sock
         restart: always
         healthcheck:
