@@ -11,6 +11,7 @@ from django.http import FileResponse, Http404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.response import Response
 
 from core.models import Assignment, AssignmentDataSet
 from core.permissions.helpers import (
