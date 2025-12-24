@@ -543,6 +543,11 @@ class Executor(abc.ABC):
 
                 container_path = os.path.normpath(container_path)
 
+                # Fallback to Staging Strategy
+                # Copy file to staging directory (Docker needs read access)
+                shutil.copy2(host_file_path, staged_path)
+                os.chmod(staged_path, 0o644)  # Ensure readable
+
                 # Translate path for Docker-in-Docker if necessary
                 bind_source_path = staged_path
                 worker_root = os.environ.get('WORKER_STAGING_ROOT')
@@ -618,9 +623,13 @@ class Executor(abc.ABC):
                 worker_staging_root = os.environ.get('WORKER_STAGING_ROOT')
                 if worker_staging_root and os.path.exists(worker_staging_root):
                     # Use shared staging directory if configured
-                    temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_', dir=worker_staging_root)
-                    # Ensure directory is readable/traversable by other users (containers)
-                    os.chmod(temp_staging_dir, 0o755)
+                    try:
+                        temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_', dir=worker_staging_root)
+                        # Ensure directory is readable/traversable by other users (containers)
+                        os.chmod(temp_staging_dir, 0o755)
+                    except Exception as e:
+                        self.log(f"Failed to use shared staging root: {e}. Falling back to default.", "warning")
+                        temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
                 else:
                     temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
                 

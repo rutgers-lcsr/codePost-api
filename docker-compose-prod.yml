@@ -35,6 +35,8 @@ services:
             - EMAIL_HOST=${EMAIL_HOST}
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
             - API_HOSTNAME=codepost-api
+            - HOST_STAGING_ROOT=/home/runner/actions-runner/_work/codePost-api/codePost-api/staging
+            - WORKER_STAGING_ROOT=/staging
         build:
             context: .
             target: api
@@ -45,6 +47,7 @@ services:
             retries: 5
         volumes:
             - datasets:/assignment_datasets
+            - ./staging:/staging
             - /var/run/docker.sock:/var/run/docker.sock
         restart: unless-stopped
         logging:
