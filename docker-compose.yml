@@ -36,6 +36,8 @@ services:
             - API_PASSWORD=${API_PASSWORD}
             - EMAIL_HOST=${EMAIL_HOST}
             - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
+            - HOST_STAGING_ROOT=${PWD}/staging
+            - WORKER_STAGING_ROOT=/staging
         ports:
             - "8000:8000"
         build:
@@ -48,6 +50,7 @@ services:
             retries: 5
         volumes:
             - datasets:/assignment_datasets
+            - ./staging:/staging
             - /var/run/docker.sock:/var/run/docker.sock
         restart: unless-stopped
         logging:
