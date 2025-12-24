@@ -774,6 +774,24 @@ class Executor(abc.ABC):
         self.input_data = kwargs.get('input_data')
         
         additional_files = {}
+
+        # 1. Load Assignment Files (Starter Code / Config / Data)
+        # These are shared across all submissions for this assignment.
+        if assignment:
+            for assignment_file in assignment.files.all():
+                if assignment_file.id == file.id:
+                    continue
+                
+                if assignment_file.path:
+                    full_path = os.path.join(assignment_file.path, assignment_file.name)
+                else:
+                    full_path = assignment_file.name
+                
+                if hasattr(assignment_file, 'data') and assignment_file.data:
+                    additional_files[full_path] = assignment_file.data
+
+        # 2. Load Submission Files (Student Work)
+        # These overwrite assignment files if the paths collide (standard overlay behavior)
         if submission:
             all_files = submission.files.all()
             
@@ -783,15 +801,13 @@ class Executor(abc.ABC):
                 
                 # Construct full path if path is provided
                 if other_file.path:
-                    # Remove leading slash if it makes it absolute? 
-                    # No, we want to support absolute paths now as per user request.
-                    # But if it is relative (e.g. 'src'), we join it.
                     full_path = os.path.join(other_file.path, other_file.name)
                 else:
                     full_path = other_file.name
                 
                 if hasattr(other_file, 'data') and other_file.data:
                     additional_files[full_path] = other_file.data
+        
         self.additional_files = additional_files
         self.custom_image_name = kwargs.get('image_name')
         
