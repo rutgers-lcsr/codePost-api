@@ -484,6 +484,7 @@ class Executor(abc.ABC):
         
         if not self.datasets:
             return volume_mounts
+        
         if not temp_dir:
             raise ValueError("Temporary directory is required for dataset staging")
         
@@ -495,30 +496,52 @@ class Executor(abc.ABC):
                 continue
             
             try:
-                # Get the absolute file path on host
+                # Get the absolute file path on host (worker)
                 host_file_path = os.path.abspath(dataset.file.path)
                 
-                if not os.path.exists(host_file_path):
-                    logger.warning(f"[DatasetMount] Dataset file not found: {host_file_path}")
-                    continue
+                # Check for Direct Host Mounting Optimization
+                worker_dataset_root = os.environ.get('WORKER_DATASET_ROOT')
+                host_dataset_root = os.environ.get('HOST_DATASET_ROOT')
                 
-                # Get just the filename
-                filename = os.path.basename(host_file_path)
+                using_direct_mount = False
+                bind_source_path = ""
                 
-                # Destination in the staging directory
-                staged_path = os.path.join(temp_dir, filename)
+                # Check if file is within the worker dataset root
+                if worker_dataset_root and host_dataset_root and host_file_path.startswith(worker_dataset_root):
+                     # Translate path: /assignment_datasets/X -> /mnt/nfs/datasets/X
+                     # Remove worker root prefix
+                     rel_path = os.path.relpath(host_file_path, worker_dataset_root)
+                     bind_source_path = os.path.join(host_dataset_root, rel_path)
+                     using_direct_mount = True
+                     
+                if not using_direct_mount:
+                    # Fallback: Copy to staging
+                    if not os.path.exists(host_file_path):
+                        logger.warning(f"[DatasetMount] Dataset file not found: {host_file_path}")
+                        continue
+                    
+                    # Get just the filename
+                    filename = os.path.basename(host_file_path)
+                    
+                    # Destination in the staging directory
+                    staged_path = os.path.join(temp_dir, filename)
+                    
+                    # Copy file to staging directory (Docker needs read access)
+                    shutil.copy2(host_file_path, staged_path)
+                    os.chmod(staged_path, 0o644)  # Ensure readable
+                    
+                    bind_source_path = staged_path
                 
-                # Copy file to staging directory (Docker needs read access)
-                # If file exists (e.g. duplicate filenames in different datasets?), overwrite.
-                shutil.copy2(host_file_path, staged_path)
-                os.chmod(staged_path, 0o644)  # Ensure readable
                 
                 # Get mount path in container
                 mount_path = dataset.mount_path or f'shared/{dataset.name}'
                 
                 # If mount path ends with /, assume it's a directory and append filename
+                filename = os.path.basename(host_file_path)
                 if mount_path.endswith('/'):
-                    mount_path = os.path.join(mount_path, filename)
+                    # Use the dataset name as the filename if available, otherwise fallback to the disk filename
+                    final_filename = dataset.name if dataset.name else filename
+                    mount_path = os.path.join(mount_path, final_filename)
                 
                 if mount_path.startswith('/'):
                     # Absolute path
@@ -526,29 +549,26 @@ class Executor(abc.ABC):
                 else:
                     # Relative path - ensure it goes to /shared
                     if mount_path.startswith('shared/'):
-                        mount_path = mount_path[7:]
+                         mount_path = mount_path[7:]
                     container_path = os.path.join('/shared', mount_path)
 
                 container_path = os.path.normpath(container_path)
 
-                # Translate path for Docker-in-Docker
-                # The bind source path must be the path visible to the Docker Daemon (Host)
-                bind_source_path = staged_path
+                # Translate path for Docker-in-Docker (Staging Dir Translation)
+                # Only needed if we are NOT using direct mount (which is already translated)
+                # AND if we are using the shared staging root
                 
-                worker_root = os.environ.get('WORKER_STAGING_ROOT')
-                host_root = os.environ.get('HOST_STAGING_ROOT')
+                if not using_direct_mount:
+                    worker_root = os.environ.get('WORKER_STAGING_ROOT')
+                    host_root = os.environ.get('HOST_STAGING_ROOT')
 
-                if worker_root and host_root and staged_path.startswith(worker_root):
-                    # Replace worker prefix with host prefix
-                    # e.g. /staging/file.csv -> /home/runner/.../staging/file.csv
-                    bind_source_path = staged_path.replace(worker_root, host_root, 1)
+                    if worker_root and host_root and bind_source_path.startswith(worker_root):
+                        # Replace worker prefix with host prefix
+                        bind_source_path = bind_source_path.replace(worker_root, host_root, 1)
 
                 volume_mounts[bind_source_path] = {'bind': container_path, 'mode': 'ro'}
                 
-                logger.info(f"[DatasetMount] Staged '{host_file_path}' -> '{staged_path}'")
-                if bind_source_path != staged_path:
-                    logger.info(f"[DatasetMount] Translated bind path: '{staged_path}' -> '{bind_source_path}'")
-                logger.info(f"[DatasetMount] Will mount as '{container_path}'")
+                logger.info(f"[DatasetMount] Mounting '{bind_source_path}' -> '{container_path}' (Direct: {using_direct_mount})")
             
             except Exception as e:
                 logger.error(f"[DatasetMount] Failed to stage dataset '{dataset.name}': {e}")
@@ -591,7 +611,9 @@ class Executor(abc.ABC):
             # Merging it directly into volumes which fits the Docker client syntax expectations
             volumes.update(dataset_mounts)
             
-        self.log(f"Volume mounts: {volumes}", "debug")
+        for k,v in volumes.items():
+            self.log(f"Volume mount: {k} -> {v}", "debug")
+        
         return volumes
     
     @abc.abstractmethod
