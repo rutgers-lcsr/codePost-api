@@ -475,15 +475,7 @@ class Executor(abc.ABC):
         temp_dir: str
     ) -> Dict[str, str]:
         """
-        Stage dataset files in a temporary directory for Docker mounting
-        
-        Creates symlinks in a temp directory that Docker can access, avoiding
-        permission issues with direct file mounts.
-    
-            
-        Returns:
-            Dict mapping container paths to staged file paths
-            Format: {'/root/shared/path/file.csv': '/tmp/staging/file.csv'}
+        Stage dataset files in the provided temporary directory for Docker mounting.
         """
         import os
         import shutil
@@ -495,9 +487,8 @@ class Executor(abc.ABC):
         if not temp_dir:
             raise ValueError("Temporary directory is required for dataset staging")
         
-        # Create a staging directory for datasets
-        staging_dir = os.path.join(temp_dir, 'datasets')
-        os.makedirs(staging_dir, exist_ok=True)
+        # We use the provided temp_dir directly. No subdirectories.
+        # This temp_dir is already created in the correct location (shared root or tmp) by the caller.
 
         for dataset in self.datasets:
             if not dataset.is_active or not dataset.file:
@@ -514,16 +505,15 @@ class Executor(abc.ABC):
                 # Get just the filename
                 filename = os.path.basename(host_file_path)
                 
-                # Create a unique staging filename to avoid conflicts
-                staged_filename = f"{dataset.id}_{filename}"
-                staged_path = os.path.join(staging_dir, staged_filename)
+                # Destination in the staging directory
+                staged_path = os.path.join(temp_dir, filename)
                 
                 # Copy file to staging directory (Docker needs read access)
+                # If file exists (e.g. duplicate filenames in different datasets?), overwrite.
                 shutil.copy2(host_file_path, staged_path)
                 os.chmod(staged_path, 0o644)  # Ensure readable
                 
                 # Get mount path in container
-                # If absolute, mount there. If relative, mount in /shared
                 mount_path = dataset.mount_path or f'shared/{dataset.name}'
 
                 # If mount path ends with /, assume it's a directory and append filename
@@ -535,21 +525,22 @@ class Executor(abc.ABC):
                     container_path = mount_path
                 else:
                     # Relative path - ensure it goes to /shared
-                    # Remove 'shared/' prefix if it exists to avoid duplication if user typed 'shared/foo'
                     if mount_path.startswith('shared/'):
                         mount_path = mount_path[7:]
-                    
                     container_path = os.path.join('/shared', mount_path)
 
                 container_path = os.path.normpath(container_path)
 
-                # Translate path for Docker-in-Docker if necessary
+                # Translate path for Docker-in-Docker
+                # The bind source path must be the path visible to the Docker Daemon (Host)
                 bind_source_path = staged_path
+                
                 worker_root = os.environ.get('WORKER_STAGING_ROOT')
                 host_root = os.environ.get('HOST_STAGING_ROOT')
 
                 if worker_root and host_root and staged_path.startswith(worker_root):
                     # Replace worker prefix with host prefix
+                    # e.g. /staging/file.csv -> /home/runner/.../staging/file.csv
                     bind_source_path = staged_path.replace(worker_root, host_root, 1)
 
                 volume_mounts[bind_source_path] = {'bind': container_path, 'mode': 'ro'}
@@ -564,6 +555,31 @@ class Executor(abc.ABC):
                 continue
         
         return volume_mounts
+
+    def _create_staging_directory(self) -> str:
+        """
+        Create a temporary directory for staging files.
+        Tries to use the shared staging root (WORKER_STAGING_ROOT) if available,
+        otherwise falls back to local /tmp.
+        """
+        import tempfile
+        import os
+        
+        worker_staging_root = os.environ.get('WORKER_STAGING_ROOT')
+        
+        if worker_staging_root and os.path.exists(worker_staging_root):
+            try:
+                temp_dir = tempfile.mkdtemp(prefix='codepost_staging_', dir=worker_staging_root)
+                # Ensure directory is readable/traversable by other users (containers)
+                os.chmod(temp_dir, 0o755)
+                self.log(f"Created staging dir in shared root: {temp_dir}", "debug")
+                return temp_dir
+            except Exception as e:
+                self.log(f"Failed to use shared staging root: {e}. Falling back to default.", "warning")
+        
+        # Fallback
+        self.log("Using local /tmp for staging (shared root unavailable)", "debug")
+        return tempfile.mkdtemp(prefix='codepost_staging_')
 
     def _get_volume_mounts(self, temp_staging_dir: str) -> Dict[str, Dict[str, str]]:
         """Get init volume mount with repo caches and dataset staging"""
@@ -615,15 +631,7 @@ class Executor(abc.ABC):
 
         # 5. Create temp directory and volume mounts
             if self.datasets:
-                worker_staging_root = os.environ.get('WORKER_STAGING_ROOT')
-                if worker_staging_root and os.path.exists(worker_staging_root):
-                    # Use shared staging directory if configured
-                    temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_', dir=worker_staging_root)
-                    # Ensure directory is readable/traversable by other users (containers)
-                    os.chmod(temp_staging_dir, 0o755)
-                else:
-                    temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
-                
+                temp_staging_dir = self._create_staging_directory()
                 volumes = self._get_volume_mounts(temp_staging_dir if self.datasets else "")
         
         # 6. Get docker environment
@@ -1102,8 +1110,7 @@ class NotebookExecutor(Executor):
             return ExecutionResult.error("Docker image is not available")
         timeout = self.DEFAULT_TIMEOUT
         
-        import tempfile
-        temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
+        temp_staging_dir = self._create_staging_directory()
         volumes = self._get_volume_mounts(temp_staging_dir)
         docker_env = self._get_docker_environment()
         

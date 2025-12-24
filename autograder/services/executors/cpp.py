@@ -76,7 +76,7 @@ class CPPExecutor(Executor):
             image_name=self.image,
             command=command,
             env=self._get_docker_environment(),
-            volumes=self._get_volume_mounts("" if not self.datasets else tempfile.mkdtemp()),
+            volumes=self._get_volume_mounts("" if not self.datasets else self._create_staging_directory()),
             needs_network=False
         )
         # Note: Datasets temp dir handling logic is duplicated from base/python.

@@ -131,10 +131,9 @@ class RExecutor(Executor):
         command = ["sh", "-c", full_cmd_str]
         
         # Volumes
-        import tempfile
         import shutil
         if self.datasets:
-            temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
+            temp_staging_dir = self._create_staging_directory()
         else:
             temp_staging_dir = ""
             
