@@ -611,7 +611,9 @@ class Executor(abc.ABC):
             # Merging it directly into volumes which fits the Docker client syntax expectations
             volumes.update(dataset_mounts)
             
-        self.log(f"Volume mounts: {volumes}", "debug")
+        for k,v in volumes.items():
+            self.log(f"Volume mount: {k} -> {v}", "debug")
+        
         return volumes
     
     @abc.abstractmethod
