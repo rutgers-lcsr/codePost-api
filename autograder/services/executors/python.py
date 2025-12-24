@@ -104,7 +104,7 @@ class PythonExecutor(Executor):
 
 
         if self.datasets or self.input_data:
-            temp_staging_dir = tempfile.mkdtemp(prefix='codepost_staging_')
+            temp_staging_dir = self._create_staging_directory()
         else:
             temp_staging_dir = "" 
             

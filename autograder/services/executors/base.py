@@ -556,6 +556,31 @@ class Executor(abc.ABC):
         
         return volume_mounts
 
+    def _create_staging_directory(self) -> str:
+        """
+        Create a temporary directory for staging files.
+        Tries to use the shared staging root (WORKER_STAGING_ROOT) if available,
+        otherwise falls back to local /tmp.
+        """
+        import tempfile
+        import os
+        
+        worker_staging_root = os.environ.get('WORKER_STAGING_ROOT')
+        
+        if worker_staging_root and os.path.exists(worker_staging_root):
+            try:
+                temp_dir = tempfile.mkdtemp(prefix='codepost_staging_', dir=worker_staging_root)
+                # Ensure directory is readable/traversable by other users (containers)
+                os.chmod(temp_dir, 0o755)
+                self.log(f"Created staging dir in shared root: {temp_dir}", "debug")
+                return temp_dir
+            except Exception as e:
+                self.log(f"Failed to use shared staging root: {e}. Falling back to default.", "warning")
+        
+        # Fallback
+        self.log("Using local /tmp for staging (shared root unavailable)", "debug")
+        return tempfile.mkdtemp(prefix='codepost_staging_')
+
     def _get_volume_mounts(self, temp_staging_dir: str) -> Dict[str, Dict[str, str]]:
         """Get init volume mount with repo caches and dataset staging"""
         volumes = self.INIT_DOCKER_VOLUME.copy()
@@ -606,19 +631,7 @@ class Executor(abc.ABC):
 
         # 5. Create temp directory and volume mounts
             if self.datasets:
-                worker_staging_root = os.environ.get('WORKER_STAGING_ROOT')
-                if worker_staging_root and os.path.exists(worker_staging_root):
-                    # Use shared staging directory if configured
-                    try:
-                        temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_', dir=worker_staging_root)
-                        # Ensure directory is readable/traversable by other users (containers)
-                        os.chmod(temp_staging_dir, 0o755)
-                    except Exception as e:
-                        self.log(f"Failed to use shared staging root: {e}. Falling back to default.", "warning")
-                        temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
-                else:
-                    temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
-                
+                temp_staging_dir = self._create_staging_directory()
                 volumes = self._get_volume_mounts(temp_staging_dir if self.datasets else "")
         
         # 6. Get docker environment
@@ -1097,8 +1110,7 @@ class NotebookExecutor(Executor):
             return ExecutionResult.error("Docker image is not available")
         timeout = self.DEFAULT_TIMEOUT
         
-        import tempfile
-        temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
+        temp_staging_dir = self._create_staging_directory()
         volumes = self._get_volume_mounts(temp_staging_dir)
         docker_env = self._get_docker_environment()
         
