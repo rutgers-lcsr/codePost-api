@@ -54,5 +54,5 @@ volumes:
         driver: local
         driver_opts:
             type: nfs
-            o: addr=${NFS_SERVER_IP},ro
+            o: addr=${NFS_SERVER_IP},ro,nolock,soft,timeo=60,retrans=3
             device: ":${NFS_SHARE_PATH}/datasets"

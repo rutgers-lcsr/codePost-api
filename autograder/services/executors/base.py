@@ -515,7 +515,7 @@ class Executor(abc.ABC):
                 
                 # Get mount path in container
                 mount_path = dataset.mount_path or f'shared/{dataset.name}'
-
+                
                 # If mount path ends with /, assume it's a directory and append filename
                 if mount_path.endswith('/'):
                     mount_path = os.path.join(mount_path, filename)
@@ -774,14 +774,40 @@ class Executor(abc.ABC):
         self.input_data = kwargs.get('input_data')
         
         additional_files = {}
+
+        # 1. Load Assignment Files (Starter Code / Config / Data)
+        # These are shared across all submissions for this assignment.
+        if assignment:
+            for assignment_file in assignment.files.all():
+                if assignment_file.id == file.id:
+                    continue
+                
+                if assignment_file.path:
+                    full_path = os.path.join(assignment_file.path, assignment_file.name)
+                else:
+                    full_path = assignment_file.name
+                
+                if hasattr(assignment_file, 'data') and assignment_file.data:
+                    additional_files[full_path] = assignment_file.data
+
+        # 2. Load Submission Files (Student Work)
+        # These overwrite assignment files if the paths collide (standard overlay behavior)
         if submission:
             all_files = submission.files.all()
             
             for other_file in all_files:
                 if other_file.id == file.id:
                     continue  # Skip the main file being executed
+                
+                # Construct full path if path is provided
+                if other_file.path:
+                    full_path = os.path.join(other_file.path, other_file.name)
+                else:
+                    full_path = other_file.name
+                
                 if hasattr(other_file, 'data') and other_file.data:
-                    additional_files[other_file.name] = other_file.data
+                    additional_files[full_path] = other_file.data
+        
         self.additional_files = additional_files
         self.custom_image_name = kwargs.get('image_name')
         
@@ -864,26 +890,49 @@ class Executor(abc.ABC):
             return
         from io import BytesIO
         self.log(f"Injecting {len(self.additional_files)} files into container")
-                
-        # Create tar archive in memory
-        tar_stream = BytesIO()
-        with tarfile.open(fileobj=tar_stream, mode='w') as tar:
-            for filename, content in self.additional_files.items():
-                # Create tarinfo for this file
-                content_bytes = content.encode('utf-8')
-                tarinfo = tarfile.TarInfo(name=filename)
-                tarinfo.size = len(content_bytes)
-                tarinfo.mode = 0o644
-                
-                # Add file to tar
-                tar.addfile(tarinfo, BytesIO(content_bytes))
         
-        # Seek to beginning of stream
-        tar_stream.seek(0)
-        tar_data = tar_stream.read()
+        # Separate absolute (system paths) and relative (project paths) files
+        relative_files = {}
+        absolute_files = {}
+
+        for filename, content in self.additional_files.items():
+            if filename.startswith('/'):
+                self.log(f"Detected absolute path file: {filename}")
+                absolute_files[filename] = content
+            else:
+                self.log(f"Detected relative path file: {filename}")
+                relative_files[filename] = content
+
+        # Helper to inject files
+        def inject_tar(files: Dict[str, str], dest_path: str):
+            if not files:
+                return
+            
+            tar_stream = BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                for filename, content in files.items():
+                    # If absolute, strip leading slash for tar name (extracted relative to dest_path)
+                    # When extracting to '/', stripping leading slash makes it work: /etc/foo -> etc/foo -> /etc/foo
+                    tar_name = filename.lstrip('/') if filename.startswith('/') else filename
+                    
+                    self.log(f"Adding to tar: {tar_name} (from {filename})")
+                    
+                    content_bytes = content.encode('utf-8')
+                    tarinfo = tarfile.TarInfo(name=tar_name)
+                    tarinfo.size = len(content_bytes)
+                    tarinfo.mode = 0o644
+                    
+                    tar.addfile(tarinfo, BytesIO(content_bytes))
+            
+            tar_stream.seek(0)
+            container.put_archive(dest_path, tar_stream.read())
+            self.log(f"Injected {len(files)} files into {dest_path}")
+
+        # Inject relative files to /work
+        inject_tar(relative_files, '/work')
         
-        # Inject files into container at /work
-        container.put_archive('/work', tar_data)
+        # Inject absolute files to / (root)
+        inject_tar(absolute_files, '/')
 
     def add_pre_script(self, container: Any):
         """Inject pre_script as .pre_script.sh file into container"""

@@ -10,7 +10,7 @@ import logging
 from django.http import FileResponse, Http404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 
 from core.models import Assignment, AssignmentDataSet
@@ -41,7 +41,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
     
     queryset = AssignmentDataSet.objects.all()
     serializer_class = AssignmentDataSetSerializer
-    parser_classes = (MultiPartParser, FormParser)
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
     
     def get_serializer_class(self):
         """Use different serializers for different actions"""
