@@ -92,6 +92,36 @@ class TestDatasetMounting(unittest.TestCase):
     @patch('os.chmod')
     @patch.dict(os.environ, {
         'WORKER_DATASET_ROOT': '/assignment_datasets',
+        'HOST_DATASET_ROOT': '/mnt/datasets'
+    })
+    def test_directory_mount_filename_logic(self, mock_chmod, mock_exists, mock_copy):
+        """
+        Verify that when mount_path ends in a slash, the dataset.name is used for the filename,
+        NOT the random disk filename.
+        """
+        mock_exists.return_value = True
+        
+        # Setup dataset with different name vs disk filename
+        self.dataset_mock.name = "expected_name.csv"
+        self.dataset_mock.file.path = "/assignment_datasets/random_disk_name_123.csv"
+        self.dataset_mock.mount_path = "/srv/share/test/"
+        
+        mounts = self.executor._prepare_dataset_staging("/tmp/staging")
+        
+        # We expect the bind source to be correct (direct mount logic)
+        expected_bind = "/mnt/datasets/random_disk_name_123.csv"
+        self.assertIn(expected_bind, mounts)
+        
+        # CRITICAL CHECK: The container bind target should use dataset.name
+        # /srv/share/test/expected_name.csv
+        expected_target = "/srv/share/test/expected_name.csv"
+        self.assertEqual(mounts[expected_bind]['bind'], expected_target)
+        
+    @patch('shutil.copy2')
+    @patch('os.path.exists')
+    @patch('os.chmod')
+    @patch.dict(os.environ, {
+        'WORKER_DATASET_ROOT': '/assignment_datasets',
         'HOST_DATASET_ROOT': '/mnt/datasets',
         'WORKER_STAGING_ROOT': '/staging',
         'HOST_STAGING_ROOT': '/tmp/codepost-staging'

@@ -539,7 +539,9 @@ class Executor(abc.ABC):
                 # If mount path ends with /, assume it's a directory and append filename
                 filename = os.path.basename(host_file_path)
                 if mount_path.endswith('/'):
-                    mount_path = os.path.join(mount_path, filename)
+                    # Use the dataset name as the filename if available, otherwise fallback to the disk filename
+                    final_filename = dataset.name if dataset.name else filename
+                    mount_path = os.path.join(mount_path, final_filename)
                 
                 if mount_path.startswith('/'):
                     # Absolute path
