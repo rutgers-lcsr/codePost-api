@@ -881,8 +881,10 @@ class Executor(abc.ABC):
 
         for filename, content in self.additional_files.items():
             if filename.startswith('/'):
+                self.log(f"Detected absolute path file: {filename}")
                 absolute_files[filename] = content
             else:
+                self.log(f"Detected relative path file: {filename}")
                 relative_files[filename] = content
 
         # Helper to inject files
@@ -896,6 +898,8 @@ class Executor(abc.ABC):
                     # If absolute, strip leading slash for tar name (extracted relative to dest_path)
                     # When extracting to '/', stripping leading slash makes it work: /etc/foo -> etc/foo -> /etc/foo
                     tar_name = filename.lstrip('/') if filename.startswith('/') else filename
+                    
+                    self.log(f"Adding to tar: {tar_name} (from {filename})")
                     
                     content_bytes = content.encode('utf-8')
                     tarinfo = tarfile.TarInfo(name=tar_name)
