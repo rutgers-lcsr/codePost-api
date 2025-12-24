@@ -542,10 +542,21 @@ class Executor(abc.ABC):
                     container_path = os.path.join('/shared', mount_path)
 
                 container_path = os.path.normpath(container_path)
-                
-                volume_mounts[container_path] = staged_path
+
+                # Translate path for Docker-in-Docker if necessary
+                bind_source_path = staged_path
+                worker_root = os.environ.get('WORKER_STAGING_ROOT')
+                host_root = os.environ.get('HOST_STAGING_ROOT')
+
+                if worker_root and host_root and staged_path.startswith(worker_root):
+                    # Replace worker prefix with host prefix
+                    bind_source_path = staged_path.replace(worker_root, host_root, 1)
+
+                volume_mounts[bind_source_path] = {'bind': container_path, 'mode': 'ro'}
                 
                 logger.info(f"[DatasetMount] Staged '{host_file_path}' -> '{staged_path}'")
+                if bind_source_path != staged_path:
+                    logger.info(f"[DatasetMount] Translated bind path: '{staged_path}' -> '{bind_source_path}'")
                 logger.info(f"[DatasetMount] Will mount as '{container_path}'")
             
             except Exception as e:
@@ -554,16 +565,16 @@ class Executor(abc.ABC):
         
         return volume_mounts
 
-
-
     def _get_volume_mounts(self, temp_staging_dir: str) -> Dict[str, Dict[str, str]]:
         """Get init volume mount with repo caches and dataset staging"""
         volumes = self.INIT_DOCKER_VOLUME.copy()
         if self.datasets:
             self.log("Preparing dataset staging for volume mounts")
             dataset_mounts = self._prepare_dataset_staging(temp_staging_dir)
-            for container_path, host_path in dataset_mounts.items():
-                    volumes[host_path] = {'bind': container_path, 'mode': 'ro'}
+            # dataset_mounts now returns {HOST_PATH: {'bind': CONTAINER_PATH, 'mode': 'ro'}}
+            # Merging it directly into volumes which fits the Docker client syntax expectations
+            volumes.update(dataset_mounts)
+            
         self.log(f"Volume mounts: {volumes}", "debug")
         return volumes
     
@@ -604,7 +615,14 @@ class Executor(abc.ABC):
 
         # 5. Create temp directory and volume mounts
             if self.datasets:
-                temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
+                worker_staging_root = os.environ.get('WORKER_STAGING_ROOT')
+                if worker_staging_root and os.path.exists(worker_staging_root):
+                    # Use shared staging directory if configured
+                    temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_', dir=worker_staging_root)
+                    # Ensure directory is readable/traversable by other users (containers)
+                    os.chmod(temp_staging_dir, 0o755)
+                else:
+                    temp_staging_dir = tempfile.mkdtemp(prefix='codepost_datasets_')
                 
                 volumes = self._get_volume_mounts(temp_staging_dir if self.datasets else "")
         
