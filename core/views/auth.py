@@ -121,7 +121,7 @@ class ImpersonateView(APIView):
 
 
 
-@api_view(['GET'])
+@api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def generate_one_time_token(request):
   """
@@ -131,7 +131,7 @@ def generate_one_time_token(request):
   """
   params = request.query_params
   # Invalidate previous tokens
-  username = params.get('username', None)
+  username = params.get('username') or request.data.get('username')
   if not username:
     return Response({"error": "username query parameter is required"}, status=400)
   
@@ -177,7 +177,7 @@ def generate_one_time_token(request):
   })
   
   
-@api_view(['GET'])
+@api_view(['GET', 'POST'])
 @permission_classes([])
 def validate_one_time_token(request):
   """
@@ -186,7 +186,7 @@ def validate_one_time_token(request):
   Used for long lived Jupyter server sessions. Should stay in memory. 
   """
   params = request.query_params
-  token_str = params.get('token', None)
+  token_str = params.get('token') or request.data.get('token')
   if not token_str:
     return Response({"error": "token query parameter is required"}, status=400)
   
