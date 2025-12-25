@@ -61,7 +61,7 @@ def logEvent(event: str, level=logging.INFO, message: str=None, skip_email: bool
         
         if event not in events:
             from core.emails import CodepostAPIErrorEmail
-            print(f"Unknown event logged: {event}")
+            logger.log(level, "Unknown event logged: {}".format(event))
 
             if not skip_email:
                 CodepostAPIErrorEmail().send_email(
