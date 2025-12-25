@@ -123,7 +123,7 @@ class CodepostEmail(ABC):
             email.send()
         except Exception as e:
             # Will log out the error in the Django logs
-            logEvent(event="Email Failed", message=str(e), level=logging.ERROR)
+            logEvent(event="Email Failed", message=str(e), level=logging.ERROR, skip_email=True)
             return None
 class CodepostAPIErrorEmail(CodepostEmail):
     subject = "CodePost API Error Notification"
