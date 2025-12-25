@@ -46,11 +46,13 @@ events = [
 ]
 
 
-def logEvent(event: str, level=logging.INFO, message: str=None):
+def logEvent(event: str, level=logging.INFO, message: str=None, skip_email: bool=False):
     """
     Log an event to Loki.
     :param event: The event to log.
     :param level: The logging level (default is INFO).
+    :param message: The message to log (default is None).
+    :param skip_email: Whether to skip sending an email notification (default is False).
     """
     try:
         logger = logging.getLogger(__name__)
@@ -83,6 +85,12 @@ def logEvent(event: str, level=logging.INFO, message: str=None):
             },
         )
     except Exception as e:
+        if skip_email:
+            return
+        # check if E is failed to send email
+        if "Failed to send email" in str(e):
+            print(f"Failed to log event {event}: {e}")
+            return
 
         # If logging to loki fails, that means something is wrong with the Loki server or network.
         # We should log this error to the console and send an email notification to the admin.
