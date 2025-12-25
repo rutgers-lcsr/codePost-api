@@ -38,6 +38,7 @@ events = [
     "Admin New Request Error",
     "Admin New Request Denied",
     "Admin New Request Approved",
+    "Generate One-Time Token",
     "CIP Activation",
     "Webhook Error",
     "Webhook Connection Error",
@@ -61,10 +62,13 @@ def logEvent(event: str, level=logging.INFO, message: str=None, skip_email: bool
         if event not in events:
             from core.emails import CodepostAPIErrorEmail
 
-            CodepostAPIErrorEmail().send_email(
-                error_message=f"Unknown event logged: {event}",
-                error_details=f"An unknown event was logged: {event}"
-            )
+            if not skip_email:
+                CodepostAPIErrorEmail().send_email(
+                    error_message=f"Unknown event logged: {event}",
+                    error_details=f"An unknown event was logged: {event}"
+                )
+            else:
+                print(f"Unknown event logged: {event}")
 
         message = message or f"Event {event} logged."
 
