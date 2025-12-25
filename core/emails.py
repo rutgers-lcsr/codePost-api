@@ -118,8 +118,6 @@ class CodepostEmail(ABC):
         try:
             email.content_subtype = type 
             logEvent(event="Email Sent", message="{} sent to {}".format(self.subject, self.get_to_address(),))
-
-
             email.send()
         except Exception as e:
             # Will log out the error in the Django logs
