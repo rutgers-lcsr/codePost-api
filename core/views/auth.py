@@ -135,6 +135,8 @@ def generate_one_time_token(request):
   if not username:
     return Response({"error": "username query parameter is required"}, status=400)
   
+  # Remove leading and trailing whitespace
+  username = username.strip()
   
   # Check if the becomee user exists
   try:
@@ -155,15 +157,18 @@ def generate_one_time_token(request):
   )
 
   if not sharded_course.exists() and not request.user.username == username:
-    return Response({"error": "You do not have permission to impersonate this user."}, status=403)
+    return Response({"error": "You do not have permission to generate a one-time token for this user."}, status=403)
 
   
-  # Log the impersonation event
+  # Log the event
   logEvent(
       event="Generate One-Time Token",
-      message=f"User {request.user.username} is generating a one-time token for {user.username}",
+      message=f"User {request.user.username} is generating a one-time token for {user.username}, from {request.META.get('REMOTE_ADDR', 'unknown')}, {request.META.get('HTTP_USER_AGENT', 'unknown')}",
       level=logging.INFO
   )
+
+  # remove previous tokens
+  OneTimeToken.objects.filter(user=user).delete()
   
   token = OneTimeToken.objects.create(user=user)
   return Response({
