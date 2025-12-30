@@ -214,7 +214,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     """
     from django.utils import timezone
     from datetime import timedelta
-    from core.models import Course, Submission
+    from core.models import Course, Submission, Assignment
     
     organization = self.get_object()
     
@@ -232,8 +232,11 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     total_courses = Course.objects.filter(organization=organization).count()
     active_courses = Course.objects.filter(organization=organization, archived=False).count()
     
-    # Submissions
+    # Assignments
     org_courses = Course.objects.filter(organization=organization)
+    total_assignments = Assignment.objects.filter(course__in=org_courses).count()
+
+    # Submissions
     total_submissions = Submission.objects.filter(assignment__course__in=org_courses).count()
     submissions_this_month = Submission.objects.filter(
         assignment__course__in=org_courses,
@@ -245,6 +248,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         'active_users': active_users,
         'total_courses': total_courses,
         'active_courses': active_courses,
+        'total_assignments': total_assignments,
         'total_submissions': total_submissions,
         'submissions_this_month': submissions_this_month,
     })
