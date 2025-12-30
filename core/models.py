@@ -114,6 +114,11 @@ class Organization(BaseModel):
   email_domain = models.CharField(max_length=64, blank=True, null=True, help_text=(
       "The email domain associated with the organization."))
 
+  sso_enabled = models.BooleanField(default=False, help_text=("If True, new users in this organization are automatically activated and assume external authentication."))
+  sso_provider = models.CharField(max_length=32, blank=True, null=True, help_text=("The SSO provider (e.g. CAS, AZURE, OIDC, GOOGLE)."))
+  sso_config = JSONField(default=dict, blank=True, help_text=("JSON configuration for the SSO provider."))
+  send_welcome_email = models.BooleanField(default=True, help_text=("If False, suppresses welcome/added-to-course emails for users in this organization."))
+
   class Meta:
     ordering = ('name',)
 
@@ -137,6 +142,7 @@ class Profile(BaseModel):
                                    null=True, related_name="profiles", help_text=("The related organization_id"))
   canCreateCourses = models.BooleanField(default=False)
   canModifyRosters = models.BooleanField(default=False)
+  isOrgStaff = models.BooleanField(default=False, help_text=("If True, user can manage Organization settings (SSO, Defaults)."))
   pendingValidation = models.BooleanField(default=False)
   showProductTips = models.BooleanField(default=True)
   isPasswordSet = models.BooleanField(default=False, help_text=(

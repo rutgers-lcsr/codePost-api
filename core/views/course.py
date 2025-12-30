@@ -77,9 +77,14 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not isAuthenticated(user):
             return returnNotAuthorized()
 
+        courses = user.courseAdmin_courses.all()
+        if user.profile.isOrgStaff:
+            courses = courses | Course.objects.filter(organization=user.profile.organization)
+            courses = courses.distinct()
+
         return Response(
             CourseSerializer(
-                user.courseAdmin_courses.all(), many=True, context={"request": request}
+                courses, many=True, context={"request": request}
             ).data
         )
 
@@ -195,6 +200,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                                         course_name=course.name,
                                         course_period=course.period,
                                         user_type=roleType,
+                                        force_send=True
                                     )
                                     # send_new_user_email(userInRoster, roleType, course)
 
@@ -293,6 +299,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                     course_name=course.name,
                     course_period=course.period,
                     user_type="admin",
+                    force_send=course.emailNewUsers
                 )
 
         # If course setting is set, email newly created users
@@ -307,6 +314,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                         course_name=course.name,
                         course_period=course.period,
                         user_type=roleType,
+                        force_send=True
                     )
 
         serializer = CourseRosterSerializer(course, context={"request": request})

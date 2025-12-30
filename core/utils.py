@@ -82,7 +82,13 @@ def get_or_create_user(email: str, organization: Any, auto_activate: bool = Fals
       thisUser = User.objects.get(email=email)
       return thisUser
     except User.DoesNotExist:
-      newUser = User.objects.create(username=email, email=email, is_active=auto_activate)
+      # Check if organization supports SSO auto-activation
+      # If so, we auto-activate the user so they can get an OTT immediately
+      sso_activate = False
+      if organization and hasattr(organization, 'sso_enabled') and organization.sso_enabled:
+          sso_activate = True
+
+      newUser = User.objects.create(username=email, email=email, is_active=auto_activate or sso_activate)
       newUser.profile.organization = organization
       newUser.profile.isPasswordSet = False
       newUser.save()

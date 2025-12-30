@@ -20,17 +20,31 @@ from core.emails import USER_ACCESSIBLE_TEMPLATES, GraderReminderEmail, PublishN
 from core.permissions.helpers import isCourseMember, isCourseAdmin
 
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
+from rest_framework import filters
 
 from core.models import Course, Assignment
 
+class UserPagination(PageNumberPagination):
+  page_size = 50
+  page_size_query_param = 'page_size'
+  max_page_size = 100
+
 class UserViewSet(SuperUserListProtectedViewSet):
-  queryset = User.objects.all().order_by('-date_joined')
+  queryset = User.objects.select_related('profile').all().order_by('-date_joined')
   serializer_class = UserSerializer
   permission_classes = (IsAuthenticated, UserPermissions)
+  pagination_class = UserPagination
+  filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+  search_fields = ['email', 'first_name', 'last_name']
+  ordering_fields = ['date_joined', 'email', 'last_login']
 
   # Instead of id, index into /users/ detail routes with email
   lookup_field = 'email'
   lookup_value_regex = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+
+  # Note: LightUserSerializer is available for future paginated endpoints
+  # but list() uses full UserSerializer for backward compatibility with UsersTable
 
 
   @action(detail=False, methods=['POST'])

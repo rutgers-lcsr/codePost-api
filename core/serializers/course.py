@@ -16,17 +16,21 @@ logger = logging.getLogger(__name__)
 
 class CourseSerializer(ModelSerializerWithPOSTCheck):
   assignments = serializers.SerializerMethodField()
+  studentCount = serializers.SerializerMethodField()
 
   class Meta:
     model = Course
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
               'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
-              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders')
-    read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks')
+              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders', 'studentCount')
+    read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount')
     extra_kwargs = {
         'organization': {'required': False}
     }
+
+  def get_studentCount(self, obj):
+    return obj.students.count()
 
   def validate_timezone(self, timezone):
     # Check that timezone corresponds to valid timezone

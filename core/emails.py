@@ -150,11 +150,25 @@ class UserAddedToCourseEmail(CodepostEmail):
     subject = "You have been added to a course on CodePost"
     template = "emails/user/add_to_course_template.html"
 
-    def send_email(self, course_name:str, course_period:str, user_type:str):
+    def send_email(self, course_name:str, course_period:str, user_type:str, force_send:bool=False):
         """
         Sends an email to the user notifying them that they have been added to a course.
         """
-        if self.user.is_active and self.user.profile.isPasswordSet:
+        
+        # Check if organization desires to suppress welcome emails
+        # force_send can override this (e.g. if Course.emailNewUsers is explicitly set)
+        if self.user.profile.organization and hasattr(self.user.profile.organization, 'send_welcome_email'):
+             if not self.user.profile.organization.send_welcome_email and not force_send:
+                 return None
+
+        # Determine if we should send the "Active User" template or the "Activate Account" template
+        # Users in SSO Orgs are active, but might not have passwords set. 
+        # But if they are SSO, they don't need to "activate" via email token.
+        is_sso = False
+        if self.user.profile.organization and hasattr(self.user.profile.organization, 'sso_enabled'):
+            is_sso = self.user.profile.organization.sso_enabled
+
+        if self.user.is_active and (self.user.profile.isPasswordSet or is_sso):
             context = self.get_context(
                 role=user_type,
                 course_name=course_name,

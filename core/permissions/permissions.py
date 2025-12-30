@@ -58,6 +58,9 @@ class OrganizationPermissions(TemplatePermission):
             return False
 
         # All other operations require superuser
+        if request.method == "GET":
+             return user.is_superuser or (user.profile.isOrgStaff and user.profile.organization == obj)
+
         return user.is_superuser
 
 
@@ -105,15 +108,15 @@ class CoursePermissions(TemplatePermission):
 
         # GET: superuser or course member
         if request.method == "GET":
-            return user.is_superuser or isCourseMember(user, course)
+            return user.is_superuser or isCourseMember(user, course) or (user.profile.isOrgStaff and user.profile.organization == course.organization)
 
         # POST: organization member with course creation privilege
         if request.method == "POST":
             return user.is_superuser or (isOrganizationMember(user, course.organization) and hasCourseCreationPrivilege(user))
 
-        # PUT/PATCH: course admin
+        # PUT/PATCH: course admin or Org Staff
         if request.method in ["PATCH", "PUT"]:
-            return isCourseAdmin(user, course)
+            return isCourseAdmin(user, course) or (user.profile.isOrgStaff and user.profile.organization == course.organization)
 
         return False
 
