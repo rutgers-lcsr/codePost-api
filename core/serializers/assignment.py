@@ -66,7 +66,7 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = Assignment
-    fields = ('id', 'name', 'isReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
+    fields = ('id', 'name', 'isReleased', 'submissionsReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
               'uploadDueDate', 'maxLateDays', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions', 'studentsCanSeeGraders', 'dataSets')
     POST_permissions_fields = ('course',)
     read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'nudgeMode', 'dataSets')
@@ -76,7 +76,7 @@ class AssignmentStudentSerializer(AssignmentSerializerBase):
 
   class Meta(AssignmentSerializerBase.Meta):
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + \
-        ('course', 'isReleased', 'name', 'sortKey', 'lateDeductions')
+        ('course', 'isReleased', 'submissionsReleased', 'name', 'sortKey', 'lateDeductions')
 
   def get_files(self, obj):
     return AssignmentFilePublicSerializer(obj.files.all(), many=True).data

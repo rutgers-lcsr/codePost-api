@@ -348,6 +348,10 @@ class Assignment(BaseModel):
   # Settings
   hideGrades = models.BooleanField(default=False, help_text=(
       "A boolean field. 'True' if the students should not see their grades for this assignment. 'False' otherwise."))
+
+  submissionsReleased = models.BooleanField(default=False, help_text=(
+      "A boolean field. 'True' if grades/feedback are released for students to view. 'False' otherwise."))
+
   anonymousGrading = models.BooleanField(default=False, help_text=(
       "A boolean field. If 'True', graders will not have access to the students field of submission objects, unless they have elevated privileges."))
   commentFeedback = models.BooleanField(default=True, help_text=(

@@ -1,6 +1,6 @@
 from core.models import Submission, SubmissionTest, TestCase, TestCategory, File
 
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer, SubmissionStatusSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer, SubmissionStatusSerializer, SubmissionStatusUnreleasedSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 
@@ -40,6 +40,11 @@ def get_student_serializer_class(submission, files_only=False):
     """
     if files_only:
         return StudentSubmissionFilesOnlySerializer
+    
+    # If grades are not released and not in live feedback mode, mask everything
+    if (not submission.assignment.submissionsReleased) and (not submission.assignment.liveFeedbackMode):
+        return SubmissionStatusUnreleasedSerializer
+
     elif (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
         return SubmissionStatusSerializer
     elif submission.assignment.hideGrades:

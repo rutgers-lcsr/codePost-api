@@ -172,6 +172,12 @@ class SubmissionStatusSerializer(serializers.ModelSerializer):
     read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'questionIsOpen', 'questionIsRegrade', 'questionText',
                         'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'testRunsCompleted', 'lateDayCreditsUsed')
 
+class SubmissionStatusUnreleasedSerializer(SubmissionStatusSerializer):
+  isFinalized = serializers.SerializerMethodField()
+
+  def get_isFinalized(self, obj):
+    return False
+
 class StudentSubmissionSerializer(serializers.ModelSerializer):
   # Explicitly use SubmissionFileSerializer for the files relationship
   files = SubmissionFileSerializer(many=True, read_only=True)

@@ -252,7 +252,7 @@ class RubricCommentPermissions(TemplatePermission):
             return (
                 user.is_superuser
                 or isCourseStaff(user, course)
-                or (isStudent(user, course) and (assignment.isReleased or assignment.liveFeedbackMode))
+                or (isStudent(user, course) and (assignment.submissionsReleased or assignment.liveFeedbackMode))
             )
 
         # Write operations: depends on collaborative mode
