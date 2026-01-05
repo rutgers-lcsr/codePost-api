@@ -23,6 +23,7 @@ from regex import F
 from rest_framework.authtoken.models import Token
 from zmq import has
 from django.utils import timezone
+from django.utils.text import slugify
 from core.validators import validate_hex_color
 from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
 from codepost.settings import DEBUG, MEDIA_ROOT
@@ -693,14 +694,14 @@ def dataset_upload_path(instance: AssignmentDataSet|Assignment, filename: str) -
     assignment = instance
   course = assignment.course
   org = course.organization
-  
   # Sanitize path components for filesystem safety
-  org_safe = org.shortname.replace(' ', '_')
-  course_safe = course.name.replace(' ', '_')
-  period_safe = course.period.replace(' ', '_')
-  assignment_safe = assignment.name.replace(' ', '_')
+  org_safe = slugify(org.shortname)
+  course_safe = slugify(course.name)
+  period_safe = slugify(course.period)
+  assignment_safe = slugify(assignment.name)
+  filename_safe = os.path.basename(filename)
   
-  return f'{org_safe}/{course_safe}/{period_safe}/{assignment_safe}/{filename}'
+  return f'{org_safe}/{course_safe}/{period_safe}/{assignment_safe}/{filename_safe}'
 
 
 class AssignmentDataSet(BaseModel):

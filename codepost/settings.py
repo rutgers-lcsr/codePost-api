@@ -483,6 +483,8 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute=0, hour="*"), # Run every hour
     }
 }
+CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "FALSE").upper() == "TRUE"
+
 BROKER_TRANSPORT_OPTIONS = {
     # "region": "us-east-2",
     "polling_interval": 20,
