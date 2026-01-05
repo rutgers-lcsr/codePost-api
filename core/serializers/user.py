@@ -24,12 +24,15 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
 
   canCreateCourses = serializers.BooleanField(source="profile.canCreateCourses")
   canModifyRosters = serializers.BooleanField(source="profile.canModifyRosters")
+  isOrgStaff = serializers.BooleanField(source="profile.isOrgStaff", required=False)
   showProductTips = serializers.BooleanField(source="profile.showProductTips")
   token = serializers.SerializerMethodField()
   
   class Meta:
     model = User
-    fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials', 'token')
+    fields = ('id', 'email', 'password', 'organization', 'studentCourses', 'graderCourses', 'superGraderCourses', 
+              'courseadminCourses', 'leaderSections', 'codePostAdmin', 'canCreateCourses', 'canModifyRosters', 
+              'isOrgStaff', 'showProductTips', 'api_token', 'student_sections', 'hasCredentials', 'token')
     POST_permissions_fields = ()
     extra_field_kwargs = {'url': {'lookup_field': 'email'}}
     read_only_fields = ()
@@ -118,3 +121,25 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
       # Create profile if it doesn't exist
       profile, created = Profile.objects.get_or_create(user=obj)
       return profile
+
+
+class LightUserSerializer(serializers.ModelSerializer):
+  """
+  Minimal user serializer for list views - no nested objects to avoid N+1 queries.
+  """
+  organization = serializers.PrimaryKeyRelatedField(source="profile.organization", read_only=True)
+  codePostAdmin = serializers.BooleanField(source="is_superuser", read_only=True)
+  isOrgStaff = serializers.BooleanField(source="profile.isOrgStaff", read_only=True)
+  pendingValidation = serializers.BooleanField(source="profile.pendingValidation", read_only=True)
+  hasCredentials = serializers.SerializerMethodField()
+
+  class Meta:
+    model = User
+    fields = ('id', 'email', 'organization', 'codePostAdmin', 'isOrgStaff', 'pendingValidation', 
+              'hasCredentials', 'is_active', 'date_joined', 'last_login')
+    read_only_fields = fields
+
+  def get_hasCredentials(self, obj):
+    if obj.password and obj.has_usable_password():
+      return True
+    return False

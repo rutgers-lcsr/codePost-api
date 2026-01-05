@@ -39,6 +39,7 @@ from core.views.submissionTest import SubmissionTestViewSet
 from core.views.testCase import TestCaseViewSet
 from core.views.testCategory import TestCategoryViewSet
 from core.views.assignmentDataSet import AssignmentDataSetViewSet
+from core.views.dashboard import DashboardViewSet
 
 from webhooks.view import WebhookViewSet
 
@@ -78,11 +79,13 @@ router.register(r'assignmentFiles', AssignmentFileViewSet)
 router.register(r'courseFiles', CourseFileViewSet)
 # router.register(r'fileTemplates', AssignmentFileViewSet)  # Deprecated - redirects to AssignmentFileViewSet
 router.register(r'testCases', TestCaseViewSet)
-router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'testCategories', TestCategoryViewSet)
-router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
-# router.register(r'billing', BillingViewSet, basename='billing')
+router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'webhooks', WebhookViewSet)
+router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
+router.register(r'dashboard', DashboardViewSet, basename='dashboard')
+
+# router.register(r'billing', BillingViewSet, basename='billing')
 
 #############################################
 # CoreAPI (built into Django)
@@ -111,6 +114,7 @@ urlpatterns = [
     path('ott/validate/', validate_one_time_token, name='validate_one_time_token_by_query'),
     path('ott/', get_jwt_ott, name='get_jwt_ott'),
     re_path('registration/', include(('core.registration_urls', 'core'), namespace='registration')),
+    path('auth/sso/', include(('core.sso_urls', 'core'), namespace='sso')),
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),
     re_path('health-check/', health_check),

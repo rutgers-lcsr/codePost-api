@@ -74,11 +74,10 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
-    list_display = ("user_email", "organization", "can_create_courses", "can_modify_rosters", 
+    list_display = ("user_email", "organization", "can_create_courses", "can_modify_rosters", "is_org_staff",
                     "pending_validation", "is_password_set", "created")
     search_fields = ("user__email", "user__username", "organization__name")
-    list_filter = ("canCreateCourses", "canModifyRosters", "pendingValidation", 
-                   "isPasswordSet", "organization", "created")
+    list_filter = ("canCreateCourses", "canModifyRosters", "pendingValidation", "isOrgStaff", "isPasswordSet", "organization", "created")
     readonly_fields = ("api_token", "created", "modified")
     autocomplete_fields = ["user", "organization"]
     
@@ -87,7 +86,7 @@ class ProfileAdmin(admin.ModelAdmin):
             "fields": ("user", "organization", "api_token")
         }),
         ("Permissions", {
-            "fields": ("canCreateCourses", "canModifyRosters", "pendingValidation")
+            "fields": ("canCreateCourses", "canModifyRosters", "isOrgStaff", "pendingValidation")
         }),
         ("Settings", {
             "fields": ("showProductTips", "isPasswordSet", "stripeCustomerId")
@@ -113,6 +112,11 @@ class ProfileAdmin(admin.ModelAdmin):
         return obj.canModifyRosters
     can_modify_rosters.short_description = "Can Modify Rosters"
     can_modify_rosters.boolean = True
+
+    def is_org_staff(self, obj: Profile) -> bool:
+        return obj.isOrgStaff
+    is_org_staff.short_description = "Org Staff"
+    is_org_staff.boolean = True
     
     def pending_validation(self, obj: Profile) -> bool:
         return obj.pendingValidation

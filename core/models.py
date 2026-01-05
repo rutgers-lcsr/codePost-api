@@ -23,6 +23,7 @@ from regex import F
 from rest_framework.authtoken.models import Token
 from zmq import has
 from django.utils import timezone
+from django.utils.text import slugify
 from core.validators import validate_hex_color
 from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
 from codepost.settings import DEBUG, MEDIA_ROOT
@@ -114,6 +115,11 @@ class Organization(BaseModel):
   email_domain = models.CharField(max_length=64, blank=True, null=True, help_text=(
       "The email domain associated with the organization."))
 
+  sso_enabled = models.BooleanField(default=False, help_text=("If True, new users in this organization are automatically activated and assume external authentication."))
+  sso_provider = models.CharField(max_length=32, blank=True, null=True, help_text=("The SSO provider (e.g. CAS, AZURE, OIDC, GOOGLE)."))
+  sso_config = JSONField(default=dict, blank=True, help_text=("JSON configuration for the SSO provider."))
+  send_welcome_email = models.BooleanField(default=True, help_text=("If False, suppresses welcome/added-to-course emails for users in this organization."))
+
   class Meta:
     ordering = ('name',)
 
@@ -137,6 +143,7 @@ class Profile(BaseModel):
                                    null=True, related_name="profiles", help_text=("The related organization_id"))
   canCreateCourses = models.BooleanField(default=False)
   canModifyRosters = models.BooleanField(default=False)
+  isOrgStaff = models.BooleanField(default=False, help_text=("If True, user can manage Organization settings (SSO, Defaults)."))
   pendingValidation = models.BooleanField(default=False)
   showProductTips = models.BooleanField(default=True)
   isPasswordSet = models.BooleanField(default=False, help_text=(
@@ -687,14 +694,14 @@ def dataset_upload_path(instance: AssignmentDataSet|Assignment, filename: str) -
     assignment = instance
   course = assignment.course
   org = course.organization
-  
   # Sanitize path components for filesystem safety
-  org_safe = org.shortname.replace(' ', '_')
-  course_safe = course.name.replace(' ', '_')
-  period_safe = course.period.replace(' ', '_')
-  assignment_safe = assignment.name.replace(' ', '_')
+  org_safe = slugify(org.shortname)
+  course_safe = slugify(course.name)
+  period_safe = slugify(course.period)
+  assignment_safe = slugify(assignment.name)
+  filename_safe = os.path.basename(filename)
   
-  return f'{org_safe}/{course_safe}/{period_safe}/{assignment_safe}/{filename}'
+  return f'{org_safe}/{course_safe}/{period_safe}/{assignment_safe}/{filename_safe}'
 
 
 class AssignmentDataSet(BaseModel):
