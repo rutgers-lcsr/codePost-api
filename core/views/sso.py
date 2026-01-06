@@ -147,7 +147,7 @@ def sso_callback(request, provider):
     Handles the callback from the SSO provider.
     Validates ticket/code, creates session, redirects to frontend.
     """
-    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000') 
+    frontend_url = getattr(settings, 'CLIENT_URL', 'http://localhost:3000') 
     
     def error_redirect(msg):
         msg = urllib.parse.quote(msg)

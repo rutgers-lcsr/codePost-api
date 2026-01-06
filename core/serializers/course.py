@@ -28,6 +28,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     extra_kwargs = {
         'organization': {'required': False}
     }
+    validators = []
 
   def get_studentCount(self, obj):
     return obj.students.count()
