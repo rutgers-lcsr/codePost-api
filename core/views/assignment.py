@@ -420,7 +420,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       # move to get SerializerClass back to be more readable
       # If assignment is in live feedback mode, don't check for finalized or assingment release
       # If grades are not released and not in live feedback mode, mask everything
-      if (not assignment.submissionsReleased) and (not assignment.liveFeedbackMode):
+      if (not assignment.feedbackReleased) and (not assignment.liveFeedbackMode):
          serializer = SubmissionStatusUnreleasedSerializer(filteredSubs, many=True, context={'request': request})
 
       # If assignment is in live feedback mode, don't check for finalized or assingment release

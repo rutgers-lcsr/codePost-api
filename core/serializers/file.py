@@ -44,8 +44,13 @@ class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
     class Meta:
         model = SubmissionFile
         fields = ('name', 'data', 'extension', 'submission', 'id', 'path', 
-                  'hiddenBeforePublish', 'created', 'modified')
+                  'hiddenBeforePublish', 'created', 'modified', 'comments')
         read_only_fields = ('created', 'modified')
+
+    comments = serializers.SerializerMethodField()
+
+    def get_comments(self, obj):
+        return []
         POST_permissions_fields = ('submission',)
         extra_kwargs = {
             "data": {"trim_whitespace": False},

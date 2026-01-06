@@ -42,7 +42,7 @@ def get_student_serializer_class(submission, files_only=False):
         return StudentSubmissionFilesOnlySerializer
     
     # If grades are not released and not in live feedback mode, mask everything
-    if (not submission.assignment.submissionsReleased) and (not submission.assignment.liveFeedbackMode):
+    if (not submission.assignment.feedbackReleased) and (not submission.assignment.liveFeedbackMode):
         return SubmissionStatusUnreleasedSerializer
 
     elif (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):

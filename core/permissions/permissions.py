@@ -252,7 +252,7 @@ class RubricCommentPermissions(TemplatePermission):
             return (
                 user.is_superuser
                 or isCourseStaff(user, course)
-                or (isStudent(user, course) and (assignment.submissionsReleased or assignment.liveFeedbackMode))
+                or (isStudent(user, course) and (assignment.feedbackReleased or assignment.liveFeedbackMode))
             )
 
         # Write operations: depends on collaborative mode
@@ -285,7 +285,7 @@ class SubmissionPermissions(TemplatePermission):
         if request.method == "GET":
             return (
                 isStaffOfSub(user, obj)
-                or (isStudentOfSub(user, obj) and (assignment.isReleased or assignment.liveFeedbackMode))
+                or isStudentOfSub(user, obj)
             )
 
         # PUT/PATCH: course admin or staff of submission
@@ -419,7 +419,19 @@ class CommentPermissions(TemplatePermission):
 
         # GET: inherit submission permissions
         if request.method == "GET":
-            return SubmissionPermissions().has_object_permission( request, view, submission)
+            # For comments, we don't just inherit submission permissions because submissions are now always visible to students.
+            # We must explicitly check if feedback is released.
+            
+            # Staff of submission can always view
+            if isStaffOfSub(user, submission):
+                return True
+
+            # Students can view ONLY if feedback is released or live feedback mode is on
+            assignment = submission.assignment
+            if isStudentOfSub(user, submission):
+                return assignment.feedbackReleased or assignment.liveFeedbackMode
+            
+            return False
 
         # All write operations: staff of submission only
         return isStaffOfSub(user, submission)

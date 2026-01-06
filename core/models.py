@@ -349,7 +349,7 @@ class Assignment(BaseModel):
   hideGrades = models.BooleanField(default=False, help_text=(
       "A boolean field. 'True' if the students should not see their grades for this assignment. 'False' otherwise."))
 
-  submissionsReleased = models.BooleanField(default=False, help_text=(
+  feedbackReleased = models.BooleanField(default=False, help_text=(
       "A boolean field. 'True' if grades/feedback are released for students to view. 'False' otherwise."))
 
   anonymousGrading = models.BooleanField(default=False, help_text=(
