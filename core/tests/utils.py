@@ -242,7 +242,9 @@ def setUpSubmission(self):
   return submission
 
 
-def setUpFile(self, name="hello.java", path="", submission=None, created=now()):
+def setUpFile(self, name="hello.java", path="", submission=None, created=None):
+  if created is None:
+    created = timezone.now()
   thisSubmission = setUpSubmission(self) if submission is None else submission
   code = "public static void main {\nSystem.out.println('Hello, World!')\n}"
   file = File.objects.create(name=name, path=path, code=code, submission=thisSubmission,

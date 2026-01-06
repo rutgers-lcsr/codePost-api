@@ -108,14 +108,14 @@ class CommentFactory(factory.django.DjangoModelFactory):
 
 
 @factory.django.mute_signals(post_save)
-class FileFactory(factory.django.DjangoModelFactory):
-
+class SubmissionFileFactory(factory.django.DjangoModelFactory):
+  
   class Meta:
-    model = File
+    model = SubmissionFile
 
   name = "hello.java"
   extension = ".java"
-  code = """public class LoopUtils {
+  data = """public class LoopUtils {
 
   // Find the max element of an array
   public static int max(int[] arr) {
@@ -126,13 +126,30 @@ class FileFactory(factory.django.DjangoModelFactory):
 
 
 @factory.django.mute_signals(post_save)
+class FileFactory(factory.django.DjangoModelFactory):
+
+  class Meta:
+    model = File
+
+  name = "hello.java"
+  extension = ".java"
+  data = """public class LoopUtils {
+
+  // Find the max element of an array
+  public static int max(int[] arr) {
+
+  }
+}"""
+
+
+@factory.django.mute_signals(post_save)
 class SubmissionFactory(factory.django.DjangoModelFactory):
 
   class Meta:
     model = Submission
 
   assignment = factory.SubFactory('core.tests.factories.user.AssignmentFactory')
-  files = factory.RelatedFactory(FileFactory, 'submission')
+  files = factory.RelatedFactory(SubmissionFileFactory, 'submission')
 
 
 @factory.django.mute_signals(post_save)
