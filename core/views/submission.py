@@ -1,6 +1,6 @@
 from core.models import Submission, SubmissionTest, TestCase, TestCategory, File
 
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer, SubmissionStatusSerializer, SubmissionStatusUnreleasedSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 
@@ -41,16 +41,11 @@ def get_student_serializer_class(submission, files_only=False):
     if files_only:
         return StudentSubmissionFilesOnlySerializer
     
-    # If grades are not released and not in live feedback mode, mask everything
-    if (not submission.assignment.submissionsReleased) and (not submission.assignment.liveFeedbackMode):
-        return SubmissionStatusUnreleasedSerializer
-
-    elif (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
-        return SubmissionStatusSerializer
-    elif submission.assignment.hideGrades:
-        return StudentSubmissionWithoutGradeSerializer
-    else:
-        return StudentSubmissionSerializer
+    # StudentSubmissionSerializer handles all cases:
+    # - Masks grade when feedbackReleased is False
+    # - Returns files without comments when feedbackReleased is False
+    # - Preserves real isFinalized status so frontend can show submission correctly
+    return StudentSubmissionSerializer
 
 
 
@@ -124,12 +119,13 @@ class SubmissionViewSet(ListProtectedViewSet):
         'filesOnly': False,
       }
     elif isStudentOfSub(user, submission):
-      # Students can view files before release if assignment allows, but only see full feedback after release
-      canReadFull = (submission.assignment.isReleased and submission.isFinalized) or submission.assignment.liveFeedbackMode
+      # Students can ALWAYS view their submission (files)
+      # But can only see full feedback (comments/grades) after feedbackReleased is True or liveFeedbackMode is on
+      canReadFull = submission.assignment.feedbackReleased or submission.assignment.liveFeedbackMode
       toRet = {
-        'read': canReadFull,
+        'read': True,  # Always allow read access to files
         'write': False,
-        'filesOnly': not canReadFull,  # If can't read full, can still see files only
+        'filesOnly': not canReadFull,  # If feedback not released, restrict to files only
       }
     else:
       toRet = {
@@ -227,10 +223,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission.questionDate = now()
     submission.save()
 
-    if submission.assignment.hideGrades:
-      serializer = StudentSubmissionWithoutGradeSerializer(submission, many=False, context={"request": request})
-    else:
-      serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
+    serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
 
     return Response(serializer.data)
 
@@ -251,10 +244,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission.questionDate = None
     submission.save()
 
-    if submission.assignment.hideGrades:
-      serializer = StudentSubmissionWithoutGradeSerializer(submission, many=False, context={"request": request})
-    else:
-      serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
+    serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
 
     return Response(serializer.data)
 

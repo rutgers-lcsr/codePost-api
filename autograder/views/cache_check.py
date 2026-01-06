@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile, CachedExecutionResult
-from core.permissions.helpers import isAuthenticated, returnNotAuthorized, returnForbidden
+from core.permissions.helpers import isAuthenticated, returnNotAuthorized, returnForbidden, isStaffOfSub
 from core.permissions.permissions import FileExecutionPermissions
 
 logger = logging.getLogger(__name__)
@@ -101,12 +101,34 @@ class CheckExecutionCache(APIView):
         
         if cached_result:
             logger.info(f"[CheckExecutionCache] Cache found for file {file_id}")
-            return JsonResponse({
+            
+            # Privacy check: Only show executed_by/at to staff
+            show_details = True
+            
+            # If it's a submission file, check if user is staff of that submission
+            if hasattr(file_obj, 'submissionfile'):
+                submission = file_obj.submissionfile.submission
+                if not isStaffOfSub(request.user, submission):
+                    show_details = False
+            
+            # For other files (Assignment/Course files), FileExecutionPermissions 
+            # likely already restricted access to staff only, so details are fine.
+            
+            response_data = {
                 "has_cache": True,
-                "executed_at": cached_result.executed_at.isoformat(),
-                "executed_by": cached_result.executed_by.username if cached_result.executed_by else None,
                 "execution_time": cached_result.execution_time_seconds
-            })
+            }
+            
+            if show_details:
+                response_data["executed_at"] = cached_result.executed_at.isoformat()
+                response_data["executed_by"] = cached_result.executed_by.username if cached_result.executed_by else None
+            else:
+                # Explicitly exclude or set to None/Generic for students to match frontend expectation
+                # The frontend expects these keys might be missing or handles them
+                response_data["executed_at"] = None
+                response_data["executed_by"] = None
+
+            return JsonResponse(response_data)
         else:
             logger.info(f"[CheckExecutionCache] No cache found for file {file_id}")
             return JsonResponse({

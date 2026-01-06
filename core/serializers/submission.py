@@ -155,32 +155,16 @@ class AnonymousSubmissionSerializer(serializers.ModelSerializer):
     read_only_fields = ('id', 'assignment', 'files',
                         'questionText', 'questionDate', 'responseDate', 'tests', 'testRunsCompleted')
 
-
-class SubmissionStatusSerializer(serializers.ModelSerializer):
-  students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
-  hasGrader = serializers.SerializerMethodField()
-  questionResponder = serializers.SlugRelatedField(
-      many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
-
-  def get_hasGrader(self, obj):
-    return obj.grader != None
-
-  class Meta:
-    model = Submission
-    fields = ('id', 'assignment', 'students', 'isFinalized', 'questionIsOpen', 'questionIsRegrade', 'questionText',
-              'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'testRunsCompleted', 'lateDayCreditsUsed')
-    read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'questionIsOpen', 'questionIsRegrade', 'questionText',
-                        'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'testRunsCompleted', 'lateDayCreditsUsed')
-
-class SubmissionStatusUnreleasedSerializer(SubmissionStatusSerializer):
-  isFinalized = serializers.SerializerMethodField()
-
-  def get_isFinalized(self, obj):
-    return False
+# NOTE: SubmissionStatusSerializer and SubmissionStatusUnreleasedSerializer have been removed.
+# StudentSubmissionSerializer now handles all student cases:
+# - Shows real isFinalized status so students can see their submission
+# - Masks grade to None when feedbackReleased is False
+# - Returns files without comments when feedbackReleased is False
 
 class StudentSubmissionSerializer(serializers.ModelSerializer):
   # Explicitly use SubmissionFileSerializer for the files relationship
-  files = SubmissionFileSerializer(many=True, read_only=True)
+  # files = SubmissionFileSerializer(many=True, read_only=True)
+  files = serializers.SerializerMethodField()
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
   questionResponder = serializers.SlugRelatedField(
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
@@ -214,7 +198,22 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
     else:
       ret['grader'] = None
     
+    # Grade masking logic
+    # Only show grade if feedback is released or live feedback mode is on
+    can_view_feedback = assignment.feedbackReleased or assignment.liveFeedbackMode
+    if not can_view_feedback:
+       ret['grade'] = None
+
     return ret
+
+  def get_files(self, obj):
+    assignment = obj.assignment
+    # If feedback is released or live feedback mode is on, return files with comments
+    if assignment.feedbackReleased or assignment.liveFeedbackMode:
+      return SubmissionFileSerializer(obj.files.all(), many=True).data
+    else:
+      # Otherwise, return files WITHOUT comments to prevent 403 errors on frontend
+      return SubmissionFileWithoutCommentsSerializer(obj.files.all(), many=True).data
 
 class StudentSubmissionWithoutGradeSerializer(serializers.ModelSerializer):
   # Explicitly use SubmissionFileSerializer for the files relationship

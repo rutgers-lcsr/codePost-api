@@ -26,8 +26,17 @@ class RunTestView(APIView):
         # TODO: Add robust permission checks (is Admin or Student owner)
         try:
              submission = Submission.objects.get(id=submission_id)
-             # Basic check: requester must be staff or the student owner
-             if not (request.user.is_staff or request.user in submission.students.all()):
+             submitter_is_staff = False
+             try:
+                 from core.permissions.helpers import isStaffOfSub
+                 if isStaffOfSub(request.user, submission):
+                    submitter_is_staff = True
+             except ImportError:
+                 # Fallback if helpers not available/circular import
+                 pass
+
+             # Strict Check: requester must be staff
+             if not (request.user.is_staff or submitter_is_staff):
                   return Response(
                       {"error": "Permission denied"}, 
                       status=status.HTTP_403_FORBIDDEN

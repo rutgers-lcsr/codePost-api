@@ -1,7 +1,7 @@
 from rest_framework import status
 from core.tests.views.personas import Persona
 
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionStatusSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer
 
 
 PERMISSIONS = {

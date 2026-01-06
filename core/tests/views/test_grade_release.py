@@ -17,7 +17,7 @@ class GradeReleaseTestCase(TestCase):
             name="Test Assignment",
             course=self.course,
             isReleased=True, # Assignment is released for submission
-            submissionsReleased=False, # Grades are NOT released
+            feedbackReleased=False, # Grades are NOT released
             points=100
         )
         
@@ -33,57 +33,52 @@ class GradeReleaseTestCase(TestCase):
         # Authenticate as student
         self.client.force_authenticate(user=self.student)
 
-    def test_submission_details_masked_when_submissions_unreleased(self):
+    def test_submission_visible_but_grade_hidden_when_feedback_unreleased(self):
         """
-        Verify that isFinalized is masked (False) and grade is hidden when submissionsReleased is False.
+        Students can always see their submission (isFinalized shows true value),
+        but grade is hidden when feedbackReleased is False.
         """
         url = f'/submissions/{self.submission.id}/'
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(response.data['isFinalized'], "isFinalized should be False when submissionsReleased is False")
-        self.assertIsNone(response.data.get('grade'), "Grade should be None/Hidden")
+        # isFinalized should show TRUE value so students know their submission exists
+        self.assertTrue(response.data['isFinalized'], "isFinalized should show true value")
+        # Grade should be masked to None
+        self.assertIsNone(response.data.get('grade'), "Grade should be None/Hidden when feedbackReleased is False")
 
-    def test_submission_details_visible_when_submissions_released(self):
+    def test_submission_and_grade_visible_when_feedback_released(self):
         """
-        Verify that isFinalized is True and grade is visible when submissionsReleased is True.
+        Verify that isFinalized is True and grade is visible when feedbackReleased is True.
         """
-        self.assignment.submissionsReleased = True
+        self.assignment.feedbackReleased = True
         self.assignment.save()
         
         url = f'/submissions/{self.submission.id}/'
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(response.data['isFinalized'], "isFinalized should be True when submissionsReleased is True")
+        self.assertTrue(response.data['isFinalized'], "isFinalized should be True when feedbackReleased is True")
         self.assertEqual(float(response.data['grade']), 100.0, "Grade should be visible")
 
     def test_submission_details_visible_if_live_feedback(self):
         """
-        Verify that details are visible if liveFeedbackMode is True, even if submissionsReleased is False.
+        Verify that details are visible if liveFeedbackMode is True, even if feedbackReleased is False.
         """
         self.assignment.liveFeedbackMode = True
-        self.assignment.submissionsReleased = False
+        self.assignment.feedbackReleased = False
         self.assignment.save()
         
         url = f'/submissions/{self.submission.id}/'
         response = self.client.get(url)
         
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # In live feedback mode, students see isFinalized as it is (True) or False?
-        # Current logic: line 377 in views/submission.py:
-        # if not assignment.submissionsReleased and not liveFeedback: mask
-        # elif not isFinalized and not liveFeedback: status
-        # else: full details.
-        
-        # So if liveFeedback is True, it falls through to "else: returns StudentSubmissionSerializer".
-        # Which shows isFinalized and grade.
         self.assertTrue(response.data['isFinalized'])
         self.assertEqual(float(response.data['grade']), 100.0)
 
-    def test_list_submissions_masked(self):
+    def test_list_submissions_grade_hidden(self):
         """
-        Verify listing submissions also masks data.
+        Verify listing submissions shows true isFinalized but hides grade when feedback not released.
         """
         url = f'/assignments/{self.assignment.id}/submissions/?student={self.student.email}'
         response = self.client.get(url)
@@ -91,21 +86,7 @@ class GradeReleaseTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(len(response.data) > 0)
         sub_data = response.data[0]
-        self.assertFalse(sub_data['isFinalized'])
+        # isFinalized shows true value
+        self.assertTrue(sub_data['isFinalized'])
+        # Grade is hidden
         self.assertIsNone(sub_data.get('grade'))
-
-    def test_grade_hidden_flag_respects_submissions_released(self):
-        """
-        Even if submissionsReleased is True, if hideGrades is True, grade should be hidden but isFinalized shown.
-        """
-        self.assignment.submissionsReleased = True
-        self.assignment.hideGrades = True
-        self.assignment.save()
-        
-        url = f'/submissions/{self.submission.id}/'
-        response = self.client.get(url)
-        
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # serializer should be StudentSubmissionWithoutGradeSerializer
-        self.assertTrue(response.data['isFinalized'])
-        self.assertNotIn('grade', response.data) # or None, depending on serializer fields

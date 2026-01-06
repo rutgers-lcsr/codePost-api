@@ -106,28 +106,18 @@ class TestSerializer_AnonymousSubmissionSerializer(APITestCase):
         pass
 
 
-class TestSerializer_SubmissionStatusSerializer(APITestCase):
+class TestSerializer_SubmissionStatusSerializer_Removed(APITestCase):
+    """
+    NOTE: SubmissionStatusSerializer has been removed.
+    This test class is kept as a stub but the serializer no longer exists.
+    StudentSubmissionSerializer now handles all student submission cases.
+    """
 
     def setUp(self):
         setUpBase(self)
 
-        # self.instance_attributes = {
-
-        # }
-
-        # self.serializer_data = {
-
-        # }
-
-        # self.instance = ##.objects.create(**self.instance_attributes)
-        # self.serializer = ##(instance=self.instance)
-
     def test_contains_expected_fields(self):
-        # data = self.serializer.data
-
-        # expected = []
-        # self.assertEqual(set(data.keys()), set(expected))
-        # self.fail('not implemented yet')
+        # This test is now obsolete - SubmissionStatusSerializer has been removed
         pass
 
 

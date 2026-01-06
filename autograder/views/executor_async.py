@@ -34,7 +34,10 @@ class ExecuteFileAsyncView(APIView):
              
         # Enforce force_execute permissions (Staff only)
         if submission and not isStaffOfSub(request.user, submission):
-             force_execute = False
+             return Response(
+                 {"error": "Students cannot trigger background execution. Please utilize the streaming endpoint or cache check."}, 
+                 status=status.HTTP_403_FORBIDDEN
+             )
 
         # Dispatch Task
         task = run_file_task.delay(file_id, request.user.id, timeout, force_execute)

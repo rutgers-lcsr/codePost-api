@@ -5,7 +5,7 @@ from core.models import Assignment, AssignmentFile, RubricCategory, RubricCommen
 from rest_framework import serializers
 from rest_framework.request import Request
 from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionStatusSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer, SubmissionStatusUnreleasedSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.serializers.rubricComment import RubricCommentSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
@@ -417,26 +417,11 @@ class AssignmentViewSet(ListProtectedViewSet):
       subCandidate = filteredSubs[0]
 
 
-      # move to get SerializerClass back to be more readable
-      # If assignment is in live feedback mode, don't check for finalized or assingment release
-      # If grades are not released and not in live feedback mode, mask everything
-      if (not assignment.submissionsReleased) and (not assignment.liveFeedbackMode):
-         serializer = SubmissionStatusUnreleasedSerializer(filteredSubs, many=True, context={'request': request})
-
-      # If assignment is in live feedback mode, don't check for finalized or assingment release
-      elif assignment.liveFeedbackMode:
-        if assignment.hideGrades:
-          serializer = StudentSubmissionWithoutGradeSerializer(filteredSubs, many=True, context={'request': request})
-        else:
-          serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
-
-      else:
-        if not subCandidate.isFinalized:
-          serializer = SubmissionStatusSerializer(filteredSubs, many=True, context={'request': request})
-        elif assignment.hideGrades:
-          serializer = StudentSubmissionWithoutGradeSerializer(filteredSubs, many=True, context={'request': request})
-        else:
-          serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
+      # StudentSubmissionSerializer handles all cases:
+      # - Masks grade when feedbackReleased is False
+      # - Returns files without comments when feedbackReleased is False
+      # - Preserves real isFinalized status so frontend can show submission correctly
+      serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
 
     # Client has privilege that exceeds a student's
     else:
@@ -742,7 +727,7 @@ class AssignmentViewSet(ListProtectedViewSet):
                      message=f"Error emailing student receipt: {e} for submission by user {user.email}", level=logging.ERROR)
       
 
-      serializer = SubmissionStatusSerializer(submission, many=False, context={"request": request})
+      serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
       return Response(serializer.data)
 
     # If a GET request, pass back the files for the submission
