@@ -216,9 +216,9 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
       ret['grader'] = None
     
     # Grade masking logic
-    # If grades are hidden, OR if feedback is not released AND not in live feedback mode, hide the grade.
+    # Only show grade if feedback is released or live feedback mode is on
     can_view_feedback = assignment.feedbackReleased or assignment.liveFeedbackMode
-    if assignment.hideGrades or not can_view_feedback:
+    if not can_view_feedback:
        ret['grade'] = None
 
     return ret

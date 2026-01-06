@@ -47,8 +47,6 @@ def get_student_serializer_class(submission, files_only=False):
 
     elif (not submission.isFinalized) and (not submission.assignment.liveFeedbackMode):
         return SubmissionStatusSerializer
-    elif submission.assignment.hideGrades:
-        return StudentSubmissionWithoutGradeSerializer
     else:
         return StudentSubmissionSerializer
 
@@ -227,10 +225,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission.questionDate = now()
     submission.save()
 
-    if submission.assignment.hideGrades:
-      serializer = StudentSubmissionWithoutGradeSerializer(submission, many=False, context={"request": request})
-    else:
-      serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
+    serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
 
     return Response(serializer.data)
 
@@ -251,10 +246,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission.questionDate = None
     submission.save()
 
-    if submission.assignment.hideGrades:
-      serializer = StudentSubmissionWithoutGradeSerializer(submission, many=False, context={"request": request})
-    else:
-      serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
+    serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
 
     return Response(serializer.data)
 

@@ -425,16 +425,11 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       # If assignment is in live feedback mode, don't check for finalized or assingment release
       elif assignment.liveFeedbackMode:
-        if assignment.hideGrades:
-          serializer = StudentSubmissionWithoutGradeSerializer(filteredSubs, many=True, context={'request': request})
-        else:
-          serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
+        serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
 
       else:
         if not subCandidate.isFinalized:
           serializer = SubmissionStatusSerializer(filteredSubs, many=True, context={'request': request})
-        elif assignment.hideGrades:
-          serializer = StudentSubmissionWithoutGradeSerializer(filteredSubs, many=True, context={'request': request})
         else:
           serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
 

@@ -94,18 +94,3 @@ class GradeReleaseTestCase(TestCase):
         self.assertFalse(sub_data['isFinalized'])
         self.assertIsNone(sub_data.get('grade'))
 
-    def test_grade_hidden_flag_respects_submissions_released(self):
-        """
-        Even if feedbackReleased is True, if hideGrades is True, grade should be hidden but isFinalized shown.
-        """
-        self.assignment.feedbackReleased = True
-        self.assignment.hideGrades = True
-        self.assignment.save()
-        
-        url = f'/submissions/{self.submission.id}/'
-        response = self.client.get(url)
-        
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # serializer should be StudentSubmissionWithoutGradeSerializer
-        self.assertTrue(response.data['isFinalized'])
-        self.assertNotIn('grade', response.data) # Grade field should be absent
