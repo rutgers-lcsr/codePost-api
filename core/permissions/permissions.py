@@ -394,7 +394,17 @@ class FileExecutionPermissions(TemplatePermission):
         user = request.user
         if isinstance(obj, SubmissionFile) or hasattr(obj, 'submissionfile'):
             submission = obj if isinstance(obj, SubmissionFile) else obj.submissionfile.submission
-            return isStudentOfSub(user, submission) or isStaffOfSub(user, submission)
+            
+            # Staff can always execute
+            if isStaffOfSub(user, submission):
+                return True
+                
+            # Students can execute only if feedback is released or live feedback is on
+            if isStudentOfSub(user, submission):
+                assignment = submission.assignment
+                return assignment.feedbackReleased or assignment.liveFeedbackMode
+                
+            return False
         elif isinstance(obj, AssignmentFile) or hasattr(obj, 'assignmentfile'):
             assignment = obj if isinstance(obj, AssignmentFile) else obj.assignmentfile.assignment
             return isCourseStaff(user, assignment.course)

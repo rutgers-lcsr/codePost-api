@@ -151,7 +151,14 @@ class ExecuteFileStreaming(APIView):
                     yield self._sse_message("complete", response_data)
                     return
             
+            
             logger.info(f"[ExecuteFileStreaming] Cache MISS for file {file_obj.id}, executing...")
+
+            # If student (and not staff), they cannot execute new code - only view cache
+            if submission and not isStaffOfSub(user, submission):
+                logger.warning(f"[ExecuteFileStreaming] Student {user.id} attempted to execute file {file_obj.id} without cache")
+                yield self._sse_message("error", {"error": "No cached execution result available."})
+                return
             
             yield self._sse_message("progress", {"status": "fetching", "message": "Loading file content..."})
             
