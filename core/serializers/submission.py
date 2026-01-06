@@ -155,28 +155,11 @@ class AnonymousSubmissionSerializer(serializers.ModelSerializer):
     read_only_fields = ('id', 'assignment', 'files',
                         'questionText', 'questionDate', 'responseDate', 'tests', 'testRunsCompleted')
 
-
-class SubmissionStatusSerializer(serializers.ModelSerializer):
-  students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
-  hasGrader = serializers.SerializerMethodField()
-  questionResponder = serializers.SlugRelatedField(
-      many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
-
-  def get_hasGrader(self, obj):
-    return obj.grader != None
-
-  class Meta:
-    model = Submission
-    fields = ('id', 'assignment', 'students', 'isFinalized', 'questionIsOpen', 'questionIsRegrade', 'questionText',
-              'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'testRunsCompleted', 'lateDayCreditsUsed')
-    read_only_fields = ('id', 'assignment', 'students', 'isFinalized', 'questionIsOpen', 'questionIsRegrade', 'questionText',
-                        'questionResponder', 'questionResponse', 'questionDate', 'responseDate', 'dateUploaded', 'hasGrader', 'testRunsCompleted', 'lateDayCreditsUsed')
-
-class SubmissionStatusUnreleasedSerializer(SubmissionStatusSerializer):
-  isFinalized = serializers.SerializerMethodField()
-
-  def get_isFinalized(self, obj):
-    return False
+# NOTE: SubmissionStatusSerializer and SubmissionStatusUnreleasedSerializer have been removed.
+# StudentSubmissionSerializer now handles all student cases:
+# - Shows real isFinalized status so students can see their submission
+# - Masks grade to None when feedbackReleased is False
+# - Returns files without comments when feedbackReleased is False
 
 class StudentSubmissionSerializer(serializers.ModelSerializer):
   # Explicitly use SubmissionFileSerializer for the files relationship
