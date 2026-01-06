@@ -122,12 +122,13 @@ class SubmissionViewSet(ListProtectedViewSet):
         'filesOnly': False,
       }
     elif isStudentOfSub(user, submission):
-      # Students can view files before release if assignment allows, but only see full feedback after release
-      canReadFull = (submission.assignment.isReleased and submission.isFinalized) or submission.assignment.liveFeedbackMode
+      # Students can ALWAYS view their submission (files)
+      # But can only see full feedback (comments/grades) after feedbackReleased is True or liveFeedbackMode is on
+      canReadFull = submission.assignment.feedbackReleased or submission.assignment.liveFeedbackMode
       toRet = {
-        'read': canReadFull,
+        'read': True,  # Always allow read access to files
         'write': False,
-        'filesOnly': not canReadFull,  # If can't read full, can still see files only
+        'filesOnly': not canReadFull,  # If feedback not released, restrict to files only
       }
     else:
       toRet = {
