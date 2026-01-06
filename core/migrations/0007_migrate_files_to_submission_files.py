@@ -1,24 +1,69 @@
 # Generated manually to handle File -> SubmissionFile/AssignmentFile/CourseFile migration
 # This migration handles both clean (production) and partial (staging) states
+# PATCHED for SQLite compatibility (tests)
 
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
 
-
-def safe_rename_code_to_data(apps, schema_editor):
-    """Check if code column exists before renaming"""
-    with schema_editor.connection.cursor() as cursor:
+def column_exists(cursor, table, column, vendor):
+    if vendor == 'sqlite':
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = [row[1] for row in cursor.fetchall()]
+        return column in columns
+    else:
         cursor.execute("""
             SELECT COUNT(*)
             FROM information_schema.COLUMNS
             WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'code'
-        """)
-        if cursor.fetchone()[0] > 0:
+            AND TABLE_NAME = %s
+            AND COLUMN_NAME = %s
+        """, [table, column])
+        return cursor.fetchone()[0] > 0
+
+def table_exists(cursor, table, vendor):
+    if vendor == 'sqlite':
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=%s", [table])
+        return cursor.fetchone() is not None
+    else:
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = %s
+        """, [table])
+        return cursor.fetchone()[0] > 0
+
+def drop_sqlite_indexes(cursor, table, column):
+    try:
+        cursor.execute(f"PRAGMA index_list({table})")
+        indexes = cursor.fetchall() # (seq, name, unique, origin, partial)
+        for idx in indexes:
+            index_name = idx[1]
+            # origin 'c' means create index statement. 'pk' and 'u' might be constraint related.
+            # We try to drop explicit indexes.
+            
+            cursor.execute(f"PRAGMA index_info({index_name})")
+            cols = cursor.fetchall() # (seqno, cid, name)
+            # Check if column is in this index
+            for c in cols:
+                if c[2] == column:
+                    print(f"→ Dropping SQLite index {index_name} on {column}")
+                    cursor.execute(f"DROP INDEX IF EXISTS {index_name}")
+                    break
+    except Exception as e:
+        print(f"Warning: Failed to enumerate/drop indexes for {table}.{column}: {e}")
+
+def safe_rename_code_to_data(apps, schema_editor):
+    """Check if code column exists before renaming"""
+    with schema_editor.connection.cursor() as cursor:
+        vendor = schema_editor.connection.vendor
+        if column_exists(cursor, 'core_file', 'code', vendor):
             print("→ Renaming 'code' to 'data'")
-            cursor.execute("ALTER TABLE core_file CHANGE COLUMN code data LONGTEXT NOT NULL")
+            if vendor == 'sqlite':
+                cursor.execute("ALTER TABLE core_file RENAME COLUMN code TO data")
+            else:
+                cursor.execute("ALTER TABLE core_file CHANGE COLUMN code data LONGTEXT NOT NULL")
         else:
             print("✓ Column 'code' already renamed to 'data', skipping")
 
@@ -30,48 +75,41 @@ def rename_fields_in_file(apps, schema_editor):
     Also drops the foreign key constraint on submission_id.
     """
     with schema_editor.connection.cursor() as cursor:
+        vendor = schema_editor.connection.vendor
+
         # Check if submission_id exists (not already renamed)
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'submission_id'
-        """)
-        
-        if cursor.fetchone()[0] > 0:
+        if column_exists(cursor, 'core_file', 'submission_id', vendor):
             # First, drop the foreign key constraint
-            cursor.execute("""
-                SELECT CONSTRAINT_NAME
-                FROM information_schema.KEY_COLUMN_USAGE
-                WHERE TABLE_SCHEMA = DATABASE()
-                AND TABLE_NAME = 'core_file'
-                AND COLUMN_NAME = 'submission_id'
-                AND REFERENCED_TABLE_NAME IS NOT NULL
-            """)
-            fk_result = cursor.fetchone()
-            if fk_result:
-                fk_name = fk_result[0]
-                print(f"→ Dropping foreign key constraint {fk_name}")
-                cursor.execute(f"ALTER TABLE core_file DROP FOREIGN KEY {fk_name}")
+            if vendor != 'sqlite':
+                cursor.execute("""
+                    SELECT CONSTRAINT_NAME
+                    FROM information_schema.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'core_file'
+                    AND COLUMN_NAME = 'submission_id'
+                    AND REFERENCED_TABLE_NAME IS NOT NULL
+                """)
+                fk_result = cursor.fetchone()
+                if fk_result:
+                    fk_name = fk_result[0]
+                    print(f"→ Dropping foreign key constraint {fk_name}")
+                    cursor.execute(f"ALTER TABLE core_file DROP FOREIGN KEY {fk_name}")
             
             print("→ Renaming submission_id to temp_submission_id in File")
-            cursor.execute("ALTER TABLE core_file CHANGE COLUMN submission_id temp_submission_id bigint")
+            if vendor == 'sqlite':
+                cursor.execute("ALTER TABLE core_file RENAME COLUMN submission_id TO temp_submission_id")
+            else:
+                cursor.execute("ALTER TABLE core_file CHANGE COLUMN submission_id temp_submission_id bigint")
         else:
             print("✓ submission_id already renamed or removed")
         
         # Check if hiddenBeforePublish exists (not already renamed)
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'hiddenBeforePublish'
-        """)
-        
-        if cursor.fetchone()[0] > 0:
+        if column_exists(cursor, 'core_file', 'hiddenBeforePublish', vendor):
             print("→ Renaming hiddenBeforePublish to temp_hiddenBeforePublish in File")
-            cursor.execute("ALTER TABLE core_file CHANGE COLUMN hiddenBeforePublish temp_hiddenBeforePublish tinyint(1) NOT NULL DEFAULT 0")
+            if vendor == 'sqlite':
+                cursor.execute("ALTER TABLE core_file RENAME COLUMN hiddenBeforePublish TO temp_hiddenBeforePublish")
+            else:
+                cursor.execute("ALTER TABLE core_file CHANGE COLUMN hiddenBeforePublish temp_hiddenBeforePublish tinyint(1) NOT NULL DEFAULT 0")
         else:
             print("✓ hiddenBeforePublish already renamed or removed")
 
@@ -79,14 +117,7 @@ def rename_fields_in_file(apps, schema_editor):
 def check_hidden_in_file(apps, schema_editor):
     """Check if hiddenBeforePublish exists in File table"""
     with schema_editor.connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'hiddenBeforePublish'
-        """)
-        return cursor.fetchone()[0] > 0
+        return column_exists(cursor, 'core_file', 'hiddenBeforePublish', schema_editor.connection.vendor)
 
 
 def migrate_existing_files_to_submissionfiles(apps, schema_editor):
@@ -95,16 +126,9 @@ def migrate_existing_files_to_submissionfiles(apps, schema_editor):
     This happens AFTER SubmissionFile table is created but BEFORE fields are removed from File.
     """
     with schema_editor.connection.cursor() as cursor:
+        vendor = schema_editor.connection.vendor
         # Check if temp_submission_id exists in File (after rename)
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'temp_submission_id'
-        """)
-        
-        if cursor.fetchone()[0] == 0:
+        if not column_exists(cursor, 'core_file', 'temp_submission_id', vendor):
             print("✓ temp_submission_id doesn't exist, skipping data migration")
             return
         
@@ -133,15 +157,9 @@ def migrate_filetemplates_to_assignmentfiles(apps, schema_editor):
     Creates new File records and corresponding AssignmentFile child records.
     """
     with schema_editor.connection.cursor() as cursor:
+        vendor = schema_editor.connection.vendor
         # Check if FileTemplate table exists
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_filetemplate'
-        """)
-        
-        if cursor.fetchone()[0] == 0:
+        if not table_exists(cursor, 'core_filetemplate', vendor):
             print("✓ FileTemplate table doesn't exist, skipping AssignmentFile migration")
             return
         
@@ -191,14 +209,25 @@ def copy_submission_data_from_file(apps, schema_editor):
     This runs after the columns are added to SubmissionFile.
     """
     with schema_editor.connection.cursor() as cursor:
+        vendor = schema_editor.connection.vendor
         # Copy data from File temp columns to SubmissionFile
-        cursor.execute("""
-            UPDATE core_submissionfile sf
-            INNER JOIN core_file f ON sf.file_ptr_id = f.id
-            SET 
-                sf.submission_id = f.temp_submission_id,
-                sf.hiddenBeforePublish = COALESCE(f.temp_hiddenBeforePublish, 0)
-        """)
+        if vendor == 'sqlite':
+            # SQLite specific update using subqueries (works on all versions)
+            cursor.execute("""
+                UPDATE core_submissionfile
+                SET 
+                    submission_id = (SELECT temp_submission_id FROM core_file WHERE id = core_submissionfile.file_ptr_id),
+                    hiddenBeforePublish = (SELECT COALESCE(temp_hiddenBeforePublish, 0) FROM core_file WHERE id = core_submissionfile.file_ptr_id)
+                WHERE EXISTS (SELECT 1 FROM core_file WHERE id = core_submissionfile.file_ptr_id AND temp_submission_id IS NOT NULL)
+            """)
+        else:
+            cursor.execute("""
+                UPDATE core_submissionfile sf
+                INNER JOIN core_file f ON sf.file_ptr_id = f.id
+                SET 
+                    sf.submission_id = f.temp_submission_id,
+                    sf.hiddenBeforePublish = COALESCE(f.temp_hiddenBeforePublish, 0)
+            """)
         
         rows_updated = cursor.rowcount
         print(f"✓ Copied submission data for {rows_updated} SubmissionFile records")
@@ -210,46 +239,38 @@ def cleanup_temp_columns(apps, schema_editor):
     Drops any remaining indexes first to avoid constraint errors.
     """
     with schema_editor.connection.cursor() as cursor:
-        # Check if temp_submission_id exists
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'temp_submission_id'
-        """)
+        vendor = schema_editor.connection.vendor
         
-        if cursor.fetchone()[0] > 0:
-            # Drop any indexes on temp_submission_id
-            cursor.execute("""
-                SELECT DISTINCT INDEX_NAME
-                FROM information_schema.STATISTICS
-                WHERE TABLE_SCHEMA = DATABASE()
-                AND TABLE_NAME = 'core_file'
-                AND COLUMN_NAME = 'temp_submission_id'
-                AND INDEX_NAME != 'PRIMARY'
-            """)
-            
-            for (index_name,) in cursor.fetchall():
-                try:
-                    print(f"→ Dropping index {index_name} on temp_submission_id")
-                    cursor.execute(f"ALTER TABLE core_file DROP INDEX {index_name}")
-                except Exception as e:
-                    print(f"  Note: Could not drop index {index_name}: {e}")
+        # Check if temp_submission_id exists
+        if column_exists(cursor, 'core_file', 'temp_submission_id', vendor):
+            if vendor != 'sqlite':
+                # Drop any indexes on temp_submission_id
+                cursor.execute("""
+                    SELECT DISTINCT INDEX_NAME
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'core_file'
+                    AND COLUMN_NAME = 'temp_submission_id'
+                    AND INDEX_NAME != 'PRIMARY'
+                """)
+                
+                for (index_name,) in cursor.fetchall():
+                    try:
+                        print(f"→ Dropping index {index_name} on temp_submission_id")
+                        cursor.execute(f"ALTER TABLE core_file DROP INDEX {index_name}")
+                    except Exception as e:
+                        print(f"  Note: Could not drop index {index_name}: {e}")
+            else:
+                drop_sqlite_indexes(cursor, 'core_file', 'temp_submission_id')
             
             print("→ Dropping temp_submission_id column")
             cursor.execute("ALTER TABLE core_file DROP COLUMN temp_submission_id")
         
         # Check if temp_hiddenBeforePublish exists
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'core_file'
-            AND COLUMN_NAME = 'temp_hiddenBeforePublish'
-        """)
-        
-        if cursor.fetchone()[0] > 0:
+        if column_exists(cursor, 'core_file', 'temp_hiddenBeforePublish', vendor):
+            if vendor == 'sqlite':
+                drop_sqlite_indexes(cursor, 'core_file', 'temp_hiddenBeforePublish')
+
             print("→ Dropping temp_hiddenBeforePublish column")
             cursor.execute("ALTER TABLE core_file DROP COLUMN temp_hiddenBeforePublish")
         
@@ -302,23 +323,6 @@ class Migration(migrations.Migration):
                 ),
             ],
             database_operations=[],  # No database changes - already renamed in Step 1c
-        ),
-        
-        # Step 2: Alter File model fields
-        migrations.AlterField(
-            model_name="file",
-            name="name",
-            field=models.CharField(help_text="The name of the file.", max_length=250),
-        ),
-        migrations.AlterField(
-            model_name="file",
-            name="path",
-            field=models.CharField(
-                blank=True,
-                help_text="Optional file path, delimited by slashes, to indicate a directory structure.",
-                max_length=500,
-                null=True,
-            ),
         ),
         
         # Step 3: Create SubmissionFile - fields depend on what's still in File
@@ -472,6 +476,7 @@ class Migration(migrations.Migration):
                 on_delete=django.db.models.deletion.CASCADE,
                 related_name="files",
                 to="core.submission",
+                null=False,
             ),
         ),
         
@@ -480,6 +485,23 @@ class Migration(migrations.Migration):
         migrations.RunPython(
             cleanup_temp_columns,
             migrations.RunPython.noop,
+        ),
+        
+        # Step 2: Alter File model fields (Moved to end to prevent table rebuild deleting temp columns on SQLite)
+        migrations.AlterField(
+            model_name="file",
+            name="name",
+            field=models.CharField(help_text="The name of the file.", max_length=250),
+        ),
+        migrations.AlterField(
+            model_name="file",
+            name="path",
+            field=models.CharField(
+                blank=True,
+                help_text="Optional file path, delimited by slashes, to indicate a directory structure.",
+                max_length=500,
+                null=True,
+            ),
         ),
         
         # Step 7: Update other model fields (from original migration)

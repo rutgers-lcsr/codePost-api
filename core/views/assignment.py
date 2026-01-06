@@ -5,7 +5,7 @@ from core.models import Assignment, AssignmentFile, RubricCategory, RubricCommen
 from rest_framework import serializers
 from rest_framework.request import Request
 from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionStatusSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionStatusSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer, SubmissionStatusUnreleasedSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.serializers.rubricComment import RubricCommentSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
@@ -163,9 +163,62 @@ class AssignmentViewSet(ListProtectedViewSet):
     assignment = self.get_object()
     course = assignment.course
 
+    section = self.request.query_params.get('section', None)
+    
+    # Base query: submissions for this assignment that are unassigned
+    # We also filter for students enrolled in the course
+    if isCourseAdmin(user, course):
+      submissions = assignment.submissions.filter(
+          grader=None, students__in=course.students.all())
+    else:
+      submissions = assignment.submissions.filter(
+          ~Q(students__in=[user]), grader=None, students__in=course.students.all())
+
+    # Apply section filter if provided
+    # Note: query param 'section' can be a list if multiple sections are selected?
+    # The frontend code sends params.append('section', id) multiple times for multiple sections
+    # Django's request.query_params.getlist('section') should be used if we support multiple
+    # but the frontend code: 
+    # params.append('section', section.id.toString());
+    # implies we might get multiple sections.
+    # However, let's look at how drawUnassigned handles it. 
+    # drawUnassigned: section = self.request.query_params.get('section', None)
+    # it only handles ONE section.
+    # Let's check the frontend again...
+    
+    # Frontend:
+    # if (sections && sections.length > 0) {
+    #   sections.forEach((section) => {
+    #     params.append('section', section.id.toString());
+    #   });
+    # }
+    
+    # So potentially multiple 'section' keys.
+    # But drawUnassigned only gets one: section = self.request.query_params.get('section', None)
+    # The frontend claimSubmission logic calls fetchSubmission (which calls drawUnassigned) in a loop for each section.
+    # BUT fetchQueueLength sends ALL sections at once.
+    
+    # So for queueLength, we should support multiple sections.
+    
+    sections = self.request.query_params.getlist('section')
+    
+    if sections:
+        # Filter submissions that belong to any of the provided sections
+        # Logic: submission -> students -> section
+        # We want submissions where at least one student is in one of the provided sections
+        
+        # This can be complex if we need to verify section existence / course membership
+        # effectively:
+        # valid_sections = Section.objects.filter(id__in=sections, course=course)
+        # submissions = submissions.filter(students__section__in=valid_sections).distinct()
+        
+        valid_sections = Section.objects.filter(id__in=sections, course=course)
+        if valid_sections.exists():
+            submissions = submissions.filter(students__student_sections__in=valid_sections).distinct()
+    
     toRet = {
         'id': assignment.id,
-        'unclaimed': assignment.submissions.filter(grader=None).count(),
+        'unclaimed': submissions.count(),
         'finalized': assignment.submissions.filter(grader=user, isFinalized=True).count(),
         'unfinalized': assignment.submissions.filter(grader=user, isFinalized=False).count(),
     }
@@ -366,14 +419,19 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       # move to get SerializerClass back to be more readable
       # If assignment is in live feedback mode, don't check for finalized or assingment release
-      if assignment.liveFeedbackMode:
+      # If grades are not released and not in live feedback mode, mask everything
+      if (not assignment.submissionsReleased) and (not assignment.liveFeedbackMode):
+         serializer = SubmissionStatusUnreleasedSerializer(filteredSubs, many=True, context={'request': request})
+
+      # If assignment is in live feedback mode, don't check for finalized or assingment release
+      elif assignment.liveFeedbackMode:
         if assignment.hideGrades:
           serializer = StudentSubmissionWithoutGradeSerializer(filteredSubs, many=True, context={'request': request})
         else:
           serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
 
       else:
-        if (not assignment.isReleased) or (not subCandidate.isFinalized):
+        if not subCandidate.isFinalized:
           serializer = SubmissionStatusSerializer(filteredSubs, many=True, context={'request': request})
         elif assignment.hideGrades:
           serializer = StudentSubmissionWithoutGradeSerializer(filteredSubs, many=True, context={'request': request})
