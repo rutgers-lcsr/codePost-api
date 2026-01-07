@@ -148,6 +148,16 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   # Reset student-facing settings for safety when cloning to a new course
   new_assignment.isReleased = False
   new_assignment.isVisible = False
+  new_assignment.feedbackReleased = False
+  new_assignment.liveFeedbackMode = False
+  
+  # Reset dates
+  new_assignment.uploadDueDate = None
+  new_assignment.regradeDeadline = None
+  
+  # Reset stats
+  new_assignment.mean = None
+  new_assignment.median = None
   
   new_assignment.save()
 
