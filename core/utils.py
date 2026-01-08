@@ -148,6 +148,16 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   # Reset student-facing settings for safety when cloning to a new course
   new_assignment.isReleased = False
   new_assignment.isVisible = False
+  new_assignment.feedbackReleased = False
+  new_assignment.liveFeedbackMode = False
+  
+  # Reset dates
+  new_assignment.uploadDueDate = None
+  new_assignment.regradeDeadline = None
+  
+  # Reset stats
+  new_assignment.mean = None
+  new_assignment.median = None
   
   new_assignment.save()
 
@@ -199,11 +209,48 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
 
   if environment is not None:
       original_environment = Environment.objects.get(id=environment.id)
+      # Clone environment with all fields
       new_environment = Environment.objects.create(
           assignment=new_assignment,
-          image=environment.image,
-          startCommand=environment.startCommand
+          language=environment.language,
+          buildType=environment.buildType,
+          dockerfile=environment.dockerfile,
+          dockerRunInstructions=environment.dockerRunInstructions,
+          compileText=environment.compileText,
+          allowNetworkAccess=environment.allowNetworkAccess,
+          maxStudentTestRuns=environment.maxStudentTestRuns,
+          maxExposedFailedTests=environment.maxExposedFailedTests,
+          
+          # Custom environment fields
+          image_name=environment.image_name, # Reuse image to avoid rebuild
+          build_status=environment.build_status, # Keep status if we reuse image
+          requirements=environment.requirements,
+          env_vars=environment.env_vars,
+          auto_detect=environment.auto_detect
       )
+  
+  # Copy DataSets
+  from core.models import AssignmentDataSet
+  from django.core.files.base import ContentFile
+  
+  for dataset in original_assignment.dataSets.all():
+      # We must duplicate the file content so the new dataset has its own file
+      if dataset.file:
+          new_dataset = AssignmentDataSet(
+              assignment=new_assignment,
+              name=dataset.name,
+              description=dataset.description,
+              mount_path=dataset.mount_path,
+              is_active=dataset.is_active
+          )
+          # Read original file and save to new dataset
+          # This creates a new physical file in storage
+          try:
+            with dataset.file.open('rb') as f:
+                new_dataset.file.save(dataset.file.name, ContentFile(f.read()), save=False)
+            new_dataset.save()
+          except Exception as e:
+              logger.error(f"Failed to clone dataset {dataset.id}: {e}")
 
 
 
