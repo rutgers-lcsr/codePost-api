@@ -386,7 +386,7 @@ class FileExecutionPermissions(TemplatePermission):
     If the file is an AssignmentFile, the user must be a staff member of the course the assignment belongs to.
     If the file is a CourseFile, the user must be a staff member of the course the file belongs to.
     
-    Note: This is different then the File Permissions because its for executing files, not viewing them. Students can view CourseFiles, but cannot execute them.
+    Note: This is different then the File Permissions because its for executing files, not viewing them. Students can view CourseFiles, but cannot execute them. Students can only exeute their own files, but they can only get a result if the result has been cached by a StaffofSubmission. Execution should check if the current user is a student of the submission as well. If the user is a student of the submission, they should be able to execute the file, but only if the result has been cached by a StaffofSubmission. If the user is a staff of the submission, they should be able to execute the file and get a result.
 
     """
     
@@ -399,10 +399,9 @@ class FileExecutionPermissions(TemplatePermission):
             if isStaffOfSub(user, submission):
                 return True
                 
-            # Students can execute only if feedback is released or live feedback is on
+            # Students can execute (view cache) if they are on the submission
             if isStudentOfSub(user, submission):
-                assignment = submission.assignment
-                return assignment.feedbackReleased or assignment.liveFeedbackMode
+                return True
                 
             return False
         elif isinstance(obj, AssignmentFile) or hasattr(obj, 'assignmentfile'):
