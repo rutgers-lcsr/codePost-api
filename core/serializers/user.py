@@ -106,6 +106,21 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
         setattr(instance, attr, value)
     instance.save()
 
+    profile_data = validated_data.pop('profile', {})
+    
+    # Explicitly handle isOrgStaff if it appears in root validated_data
+    # This happens because source='profile.isOrgStaff' might not nest it automatically in all DRF versions/configs
+    if 'isOrgStaff' in validated_data:
+        profile_data['isOrgStaff'] = validated_data.pop('isOrgStaff')
+
+    # Update User instance
+    for attr, value in validated_data.items():
+      if attr == 'password':
+        instance.set_password(value)
+      else:
+        setattr(instance, attr, value)
+    instance.save()
+
     # Update Profile instance
     profile = instance.profile
     for attr, value in profile_data.items():
