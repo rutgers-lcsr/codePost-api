@@ -22,6 +22,7 @@ services:
         environment:
             - DEBUG=False
             - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
+            - AUTOGRADER_AUTO_EXECUTE=True
             - API_URL=${API_URL}
             - CLIENT_URL=${CLIENT_URL}
             - DB_NAME=codepost
