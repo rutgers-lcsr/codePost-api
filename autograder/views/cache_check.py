@@ -88,7 +88,6 @@ class CheckExecutionCache(APIView):
         
         
         # Check permissions using FileExecutionPermissions class
-        # Check permissions using FileExecutionPermissions class
         file_permissions = FileExecutionPermissions()
         if not file_permissions.has_object_permission(request, self, file_obj):
             logger.warning(f"[CheckExecutionCache] Permission denied for user {request.user.id} on file {file_obj.id}")
