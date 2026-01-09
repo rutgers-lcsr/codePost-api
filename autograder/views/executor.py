@@ -66,7 +66,7 @@ class FileExecutionSerializer(serializers.Serializer):
 
 class ExecuteFileView(APIView):
     """
-    Execute a codePost file - use stream execution instead. 
+    Execute a codePost file - use stream execution instead. This endpoint is used for testing file execution.
     
     Permissions:
     - Codepost staff only: Superusers can execute any file
