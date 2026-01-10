@@ -97,6 +97,9 @@ if SECRET_KEY == "your secret key":
         message="You are using the default secret key. This is insecure and should not be used in production."
     )
 
+# Encryption settings
+FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "a8ZLWym0lKXZW2iwQw8mx3kdsX7EiGxjfznpPeGBZ4M=")
+
 
 # Allowed host settings
 ALLOWED_HOSTS = [
@@ -297,6 +300,7 @@ INSTALLED_APPS = [
     "django_celery_results",
     "webhooks",
     "log",
+    "encrypted_model_fields",
 ]
 
 MIDDLEWARE = [

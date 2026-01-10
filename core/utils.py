@@ -159,6 +159,9 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   new_assignment.mean = None
   new_assignment.median = None
   
+  # Copy AI settings
+  new_assignment.ai_system_prompt = original_assignment.ai_system_prompt
+
   new_assignment.save()
 
   # copy assignment files (template files)

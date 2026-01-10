@@ -51,6 +51,8 @@ class AIService:
     AI service for generating grading comments.
     Supports multiple providers through a unified interface.
     """
+    # This is to ensure the ai response is consistently in markdown format
+    GLOBAL_SYSTEM_PROMPT =""""""
     
     DEFAULT_SYSTEM_PROMPT = """You are an AI assistant helping grade student code submissions.
 Your task is to generate clear, constructive feedback for students.
@@ -100,7 +102,8 @@ Context:
             template = self.DEFAULT_SYSTEM_PROMPT
             
         try:
-            return template.format(
+            return "\n\n".join([
+                template.format(
                 assignment_name=context.assignment_name,
                 file_name=context.file_name,
                 file_content=context.file_content,
@@ -108,11 +111,16 @@ Context:
                 rubric_context=context.rubric_context,
                 grader_draft=context.grader_draft,
                 all_files=context.all_files_content,
-            )
+            ),
+            self.GLOBAL_SYSTEM_PROMPT
+        ])
         except Exception as e:
             # Fallback if the user's template contains invalid placeholders or syntax
             logger.warning(f"Failed to format system prompt template: {e}")
-            return template
+            return "\n\n".join([
+                template,
+                self.GLOBAL_SYSTEM_PROMPT
+            ])
     
     def build_user_prompt(self, context: GenerationContext, system_prompt_template: str = "") -> str:
         """
@@ -174,6 +182,7 @@ Context:
             
             # Call the appropriate provider
             if self.provider == 'gemini':
+                logger.info(f"Calling Gemini with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
                 text = await self._call_gemini(system_prompt, user_prompt)
             elif self.provider == 'openai':
                 text = await self._call_openai(system_prompt, user_prompt)
@@ -329,22 +338,16 @@ def build_context_from_file(
             notebook = json.loads(file.data)
             cells = notebook.get('cells', [])
             
-            def get_cell_text(cell) -> str:
-                source = cell.get('source', [])
-                if isinstance(source, list):
-                    return "".join(source)
-                return str(source)
-            
             # Get selected cells
             selected_parts = []
-            # Bound the indices (Notebook cells are likely 0-indexed from frontend)
-            start_idx = max(0, start_line)
-            end_idx = min(len(cells) - 1, end_line)
+            # Bound the indices (treating inputs as 0-based indices)
+            start_idx = max(0, min(start_line, len(cells) - 1)) if cells else 0
+            end_idx = max(0, min(end_line, len(cells) - 1)) if cells else 0
             
             for i in range(start_idx, end_idx + 1):
                 cell = cells[i]
                 cell_type = cell.get('cell_type', 'code')
-                content = get_cell_text(cell)
+                content = _parse_notebook_cell(cell, include_outputs=True)
                 selected_parts.append(f"[{cell_type.upper()} CELL]\n{content}")
             
             selected_content = "\n\n".join(selected_parts)
@@ -354,7 +357,7 @@ def build_context_from_file(
                 parts = []
                 for i, cell in enumerate(cells):
                     cell_type = cell.get('cell_type', 'code')
-                    content = get_cell_text(cell)
+                    content = _parse_notebook_cell(cell, include_outputs=True)
                     parts.append(f"## Cell {i} ({cell_type})\n{content}")
                 return "\n\n".join(parts)
                 
@@ -367,9 +370,9 @@ def build_context_from_file(
     else:
         # Standard text file handling
         lines = file.data.split('\n')
-        # Bound the indices (converting 1-based line numbers to 0-based indices)
-        start_idx = max(0, min(start_line - 1, len(lines) - 1)) if lines else 0
-        end_idx = max(0, min(end_line - 1, len(lines) - 1)) if lines else 0
+        # Bound the indices (treating inputs as 0-based indices)
+        start_idx = max(0, min(start_line, len(lines) - 1)) if lines else 0
+        end_idx = max(0, min(end_line, len(lines) - 1)) if lines else 0
         
         selected_lines = lines[start_idx:end_idx + 1]
         selected_content = '\n'.join(selected_lines)
@@ -408,3 +411,49 @@ def build_context_from_file(
         context.all_files_content = '\n\n'.join(other_files)
     
     return context
+
+
+def _parse_notebook_cell(cell, include_outputs=False) -> str:
+    """Parse a notebook cell to extract content and optionally outputs. These are nbformat v4 cells."""
+    source = cell.get('source', [])
+    content = ""
+    if isinstance(source, list):
+        content = "".join(source)
+    else:
+        content = str(source)
+    
+    if include_outputs and cell.get('cell_type') == 'code':
+        outputs = cell.get('outputs', [])
+        output_text = []
+        for output in outputs:
+            # Handle stream output (stdout/stderr)
+            if output.get('output_type') == 'stream':
+                text = output.get('text', [])
+                if isinstance(text, list):
+                    output_text.append("".join(text))
+                else:
+                    output_text.append(str(text))
+            # Handle execute_result or display_data
+            elif output.get('output_type') in ('execute_result', 'display_data'):
+                data = output.get('data', {})
+                # Prefer plain text representation
+                if 'text/plain' in data:
+                    text = data['text/plain']
+                    if isinstance(text, list):
+                        output_text.append("".join(text))
+                    else:
+                        output_text.append(str(text))
+                elif 'text/html' in data:
+                    output_text.append("[HTML Output]")
+                elif 'image/png' in data:
+                    output_text.append("[Image Output]")
+            # Handle errors
+            elif output.get('output_type') == 'error':
+                ename = output.get('ename', '')
+                evalue = output.get('evalue', '')
+                output_text.append(f"Error: {ename}: {evalue}")
+
+        if output_text:
+            content += "\n\n[OUTPUT]:\n" + "\n".join(output_text)
+    
+    return content

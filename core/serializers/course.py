@@ -18,12 +18,14 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
   assignments = serializers.SerializerMethodField()
   studentCount = serializers.SerializerMethodField()
 
+  clone_from = serializers.IntegerField(write_only=True, required=False)
+
   class Meta:
     model = Course
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
               'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
-              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders', 'studentCount')
+              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders', 'studentCount', 'clone_from')
     read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount')
     extra_kwargs = {
         'organization': {'required': False}
@@ -88,6 +90,8 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     from core.views.course import generate_invite_code
 
     courseAdmin: User = self.context['request'].user
+    clone_from_id = validated_data.pop('clone_from', None)
+
     obj: Course = super().create(validated_data)
 
     token = str(self.context['request'].auth)
@@ -106,6 +110,35 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     # Create inaugural invite code. We create this code here because our database can't handle
     # default values produced by a function.
     obj.inviteCode = generate_invite_code()
+
+    # Handle cloning if requested
+    if clone_from_id:
+        try:
+            source_course = Course.objects.get(id=clone_from_id)
+            # Permission check: User must be admin of source course to clone its settings (esp. API keys)
+            if isCourseStaff(courseAdmin, source_course) or courseAdmin.is_superuser:
+                # Copy AI Settings
+                obj.ai_provider = source_course.ai_provider
+                obj.ai_api_key = source_course.ai_api_key  # Secure copy of encrypted key
+                obj.ai_base_url = source_course.ai_base_url
+                obj.ai_model = source_course.ai_model
+                
+                # Copy other settings if consistent with tooltips.tsx claim:
+                # "Cloning a course will copy all assignments (including rubrics) and course settings"
+                obj.sendReleasedSubmissionsToBack = source_course.sendReleasedSubmissionsToBack
+                obj.showStudentsStatistics = source_course.showStudentsStatistics
+                obj.emailNewUsers = source_course.emailNewUsers
+                obj.anonymousGradingDefault = source_course.anonymousGradingDefault
+                obj.allowGradersToEditRubric = source_course.allowGradersToEditRubric
+                obj.minComments = source_course.minComments
+                obj.noUnfinalize = source_course.noUnfinalize
+                obj.lateDayCreditsAllowable = source_course.lateDayCreditsAllowable
+                
+            else:
+                 logger.warning(f"User {courseAdmin.email} tried to clone course {clone_from_id} without permission")
+
+        except Course.DoesNotExist:
+            logger.warning(f"Clone source course {clone_from_id} not found")
 
     # save changes we made
     obj.save()

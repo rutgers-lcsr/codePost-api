@@ -8,6 +8,7 @@ import re
 import hashlib
 import uuid
 import shutil
+from encrypted_model_fields.fields import EncryptedCharField
 
 from django.contrib.auth.models import User  # type: ignore[assignment]
 from django.core.exceptions import ValidationError, ObjectDoesNotExist
@@ -288,7 +289,10 @@ class Course(BaseModel):
       choices=AI_PROVIDER_CHOICES,
       help_text="AI provider for comment generation"
   )
-  ai_api_key = models.TextField(
+
+
+  ai_api_key = EncryptedCharField(
+      max_length=512,
       blank=True,
       null=True,
       help_text="API key for AI provider (stored encrypted)"

@@ -21,6 +21,7 @@ services:
             - .env
         environment:
             - DEBUG=False
+            - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY}
             - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
             - AUTOGRADER_AUTO_EXECUTE=True
             - API_URL=${API_URL}
