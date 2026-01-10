@@ -88,8 +88,9 @@ class AssignmentSerializer(AssignmentSerializerBase):
     fields = AssignmentSerializerBase.Meta.fields + ('points', 'hideGrades', 'sortKey', 'anonymousGrading',
                                                      'hideGradersFromStudents', 'studentsCanSeeGraders', 'commentFeedback', 'additiveGrading', 'allowRegradeRequests', 'regradeInstructions',
                                                      'regradeDeadline', 'forcedRubricMode', 'templateMode', 'collaborativeRubricMode',
-                                                     'testCategories',  'showFrequentlyUsedRubricComments')
+                                                     'testCategories', 'showFrequentlyUsedRubricComments', 'ai_system_prompt')
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + ('testCategories',)
+
 
   def create(self, validated_data):
     user = self.context['request'].user

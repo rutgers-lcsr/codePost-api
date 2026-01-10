@@ -98,6 +98,9 @@ nbconvert = "^7.16.6"
 docker = "^7.1.0"
 javalang = "^0.13.0"
 esprima = "^4.0.1"
+google-genai = "^1.0.0"
+openai = "^1.50.0"
+httpx = "^0.27.0"
 
 
 [build-system]

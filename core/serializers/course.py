@@ -121,6 +121,22 @@ class CourseSettingsSerializer(ModelSerializerWithPOSTCheck):
               'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 'archived', 'lateDayCreditsAllowable')
 
 
+class CourseAISettingsSerializer(serializers.ModelSerializer):
+  """Serializer for course AI configuration. Admin-only access."""
+  ai_enabled = serializers.SerializerMethodField()
+  
+  class Meta:
+    model = Course
+    fields = ('id', 'ai_provider', 'ai_api_key', 'ai_base_url', 'ai_model', 'ai_enabled')
+    extra_kwargs = {
+      'ai_api_key': {'write_only': True}  # Never return API key in response
+    }
+  
+  def get_ai_enabled(self, obj):
+    """Returns True if AI is configured for this course."""
+    return bool(obj.ai_provider and obj.ai_api_key)
+
+
 class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
   graders = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)

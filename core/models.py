@@ -274,6 +274,37 @@ class Course(BaseModel):
   
   expiration_date = models.DateTimeField(null=True, blank=True, help_text=("The date when the course will be automatically deleted."))
 
+  # AI Configuration for comment generation
+  AI_PROVIDER_CHOICES = [
+      ('gemini', 'Google Gemini'),
+      ('openai', 'OpenAI'),
+      ('ollama', 'Ollama (Self-hosted)'),
+      ('custom', 'Custom Provider'),
+  ]
+  ai_provider = models.CharField(
+      max_length=32,
+      blank=True,
+      null=True,
+      choices=AI_PROVIDER_CHOICES,
+      help_text="AI provider for comment generation"
+  )
+  ai_api_key = models.TextField(
+      blank=True,
+      null=True,
+      help_text="API key for AI provider (stored encrypted)"
+  )
+  ai_base_url = models.URLField(
+      blank=True,
+      null=True,
+      help_text="Base URL for Ollama or custom provider"
+  )
+  ai_model = models.CharField(
+      max_length=64,
+      blank=True,
+      null=True,
+      help_text="Model name (e.g., gemini-1.5-flash, gpt-4)"
+  )
+
   class Meta:
     unique_together = ('name', 'period', 'organization')
     ordering = ('name', 'period')
@@ -336,11 +367,11 @@ class Assignment(BaseModel):
       max_length=32, help_text=("The name of the assignment."))
   isReleased = models.BooleanField(default=False, help_text=(
       "A boolean field. 'True' if the assignment is released for students to view. 'False' otherwise."))
-  points = models.DecimalField(validators=[MinValueValidator(0.0)], max_digits=5,
+  points = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5,
                                decimal_places=2, help_text=("Total points for the assignment."))
-  mean = models.DecimalField(validators=[MinValueValidator(0.0)], max_digits=5, decimal_places=2, blank=True, null=True, help_text=(
+  mean = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5, decimal_places=2, blank=True, null=True, help_text=(
       "The average grade of the assignment. Null if no submissions yet"))
-  median = models.DecimalField(validators=[MinValueValidator(0.0)], max_digits=5, decimal_places=2, blank=True, null=True, help_text=(
+  median = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5, decimal_places=2, blank=True, null=True, help_text=(
       "The median grade of the assignment. Null if no submissions yet"))
   sortKey = models.IntegerField(default=0, help_text=(
       "Optional integer to specify the order of a Course's Assignments."))
@@ -392,6 +423,15 @@ class Assignment(BaseModel):
   allowLateUploads = models.BooleanField(default=False, help_text=(
       "A boolean field. If True and an uploadDueDate is set, students will still be able to submit after a deadline has passed."))
   lateDeductions = JSONField(default=[], help_text="An array of point deductions for each day late.")
+
+  # AI-powered comment generation
+  ai_system_prompt = models.TextField(
+      blank=True,
+      default="",
+      help_text="System prompt for AI comment generation. "
+                "Placeholders: {assignment_name}, {file_content}, {selected_content}, {rubric_context}, {grader_draft}"
+  )
+
 
   def __str__(self):
     return str(self.name) + " | " + str(self.course)
@@ -498,7 +538,7 @@ class Submission(BaseModel):
       "A boolean field. 'True' if the submission is finalized. 'False' otherwise."))
   dateEdited = models.DateTimeField(default=now, help_text=(
       "The date this submission (or any of its associated files or comments) was last edited."))
-  grade = models.DecimalField(validators=[MinValueValidator(0.0)], max_digits=5, decimal_places=2,
+  grade = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5, decimal_places=2,
                               blank=True, null=True, help_text=("The grade for the submission. Null if not graded yet."))
   queueOrderKey = models.IntegerField(default=0, help_text=(
       "Index used to order the queue from which graders draw submissions. Will sort low to high."))

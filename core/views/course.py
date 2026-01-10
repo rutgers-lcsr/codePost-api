@@ -5,6 +5,7 @@ from core.serializers.course import (
     CourseSerializer,
     CourseRosterSerializer,
     CourseSettingsSerializer,
+    CourseAISettingsSerializer,
 )
 from core.serializers.section import SectionSerializer
 from core.serializers.user import UserSerializer
@@ -127,6 +128,36 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         course.save()
 
         return Response(course.inviteCode)
+
+    @action(detail=True, methods=["GET", "PATCH"])
+    def aiSettings(self, request, pk=None):
+        """
+        get:
+        Get AI configuration for the course.
+
+        patch:
+        Update AI configuration for the course. Admin-only.
+        """
+        user = request.user
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+
+        course = self.get_object()
+
+        # Only course admins can view/modify AI settings
+        if not isCourseAdmin(user, course):
+            return returnForbidden()
+
+        if request.method == "GET":
+            serializer = CourseAISettingsSerializer(course, context={"request": request})
+            return Response(serializer.data)
+        elif request.method == "PATCH":
+            serializer = CourseAISettingsSerializer(
+                course, data=request.data, partial=True, context={"request": request}
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return Response(serializer.data)
 
     @action(detail=True, methods=["GET", "PATCH"])
     def roster(self, request, pk=None):

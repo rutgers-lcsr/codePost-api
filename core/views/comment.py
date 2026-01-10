@@ -73,3 +73,142 @@ class CommentViewSet(ListProtectedViewSet):
             comment.feedback = feedback
             comment.save()
             return Response(CommentBasicSerializer(comment).data)
+
+    @action(detail=False, methods=['POST'])
+    def generate(self, request):
+        """
+        Generate an AI-powered comment suggestion. 
+        
+        Note: The system prompt determines what gets put into the comments context. This way the instructor can define what we add. If they want all the files they can add all the files. if they just want the current file we can. This way we can make the objective turth of the system prompt be from the instructor. The frontend should let the instructor know what varibles to use to enable what we put into the system prompt. 
+
+        Request body:
+        - file_id: int (required) - ID of the SubmissionFile
+        - start_line: int (required) - Start line of selection (0-indexed)
+        - end_line: int (required) - End line of selection (0-indexed)
+        - rubric_comment_id: int (optional) - ID of linked RubricComment
+        - existing_text: str (optional) - Grader's draft text to improve
+        """
+        from asgiref.sync import async_to_sync
+        from rest_framework import status
+        from core.models import SubmissionFile, RubricComment
+        from core.services.ai_service import AIService, build_context_from_file, GenerationContext
+        from core.permissions.helpers import isAuthenticated
+
+        user = request.user
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+
+        # Parse request data
+        file_id = request.data.get('file_id')
+        start_line = request.data.get('start_line')
+        end_line = request.data.get('end_line')
+        rubric_comment_id = request.data.get('rubric_comment_id')
+        existing_text = request.data.get('existing_text', '')
+        points_override = request.data.get('points')
+
+        # Validate required fields
+        if not file_id or start_line is None or end_line is None:
+            return Response(
+                {'error': 'file_id, start_line, and end_line are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            file = SubmissionFile.objects.get(id=file_id)
+        except SubmissionFile.DoesNotExist:
+            return Response(
+                {'error': 'File not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check permissions - only staff can generate comments
+        if not isStaffOfSub(user, file.submission):
+            return returnForbidden()
+
+        # Get course and check if AI is configured
+        course = file.submission.assignment.course
+        assignment = file.submission.assignment
+
+        if not course.ai_provider or not course.ai_api_key:
+            return Response(
+                {'error': 'AI is not configured for this course'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Build context
+        context = build_context_from_file(
+            file=file,
+            start_line=start_line,
+            end_line=end_line,
+        )
+        
+        # Add supplementary context
+        request_context = {
+            'grader_draft': existing_text,
+        }
+        
+        # Add rubric context if provided
+        if rubric_comment_id:
+            try:
+                rubric_comment = RubricComment.objects.get(id=rubric_comment_id)
+                # Use points override if provided, otherwise default to rubric comment pointDelta
+                point_delta = points_override if points_override is not None else rubric_comment.pointDelta
+                
+                # Convert to float/decimal for comparison if it came from JSON
+                try:
+                    point_delta = float(point_delta)
+                except (ValueError, TypeError):
+                    point_delta = 0
+
+                points_str = ""
+                if point_delta > 0:
+                    points_str = f"Deduction: {point_delta} points"
+                elif point_delta < 0:
+                    points_str = f"Bonus: {abs(point_delta)} points"
+                else:
+                    points_str = "Points: 0"
+                
+                request_context['rubric_context'] = (
+                    f"Rubric Item: {rubric_comment.text}\n"
+                    f"Category: {rubric_comment.category.name}\n"
+                    f"Description: {rubric_comment.explanation}\n"
+                    f"{points_str}"
+                )
+            except RubricComment.DoesNotExist:
+                # from core.models import RubricComment # This import is already at the top of the method
+                logger.warning(f"Rubric comment {rubric_comment_id} not found")
+        elif points_override is not None:
+             # Handle manual points without rubric
+            try:
+                point_delta = float(points_override)
+            except (ValueError, TypeError):
+                point_delta = 0
+
+            points_str = ""
+            if point_delta > 0:
+                points_str = f"Deduction: {point_delta} points"
+            elif point_delta < 0:
+                points_str = f"Bonus: {abs(point_delta)} points"
+            else:
+                 points_str = "Points: 0"
+            
+            request_context['rubric_context'] = (
+                f"Manual Points Adjustment\n"
+                f"{points_str}"
+            )
+
+        # Update context helper
+        context.grader_draft = request_context.get('grader_draft', '')
+        context.rubric_context = request_context.get('rubric_context', '')
+        
+        # Generate comment
+        service = AIService(course, assignment)
+        result = async_to_sync(service.generate_comment)(context)
+
+        if result.success:
+            return Response({'text': result.text})
+        else:
+            return Response(
+                {'error': result.error or 'Generation failed'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
