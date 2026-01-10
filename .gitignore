@@ -13,7 +13,8 @@ static/*
 staticfiles/
 deploy.zip
 certs
-.env*
+.env
+!.env.example
 .venv
 
 assignment_datasets

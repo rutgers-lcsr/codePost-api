@@ -16,7 +16,7 @@ princeton = Organization.objects.create(name="Princeton University", shortname="
 
 # Add james, rich, vinay as admins
 superUsers = []
-for name in ['richard@codepost.io', 'vinay@codepost.io', 'james@codepost.io']:
+for name in ['richard@example.com', 'vinay@example.com', 'james@example.com']:
     newUser = User.objects.create(username=name, email=name, password="rootabega")
     newUser.profile.canCreateCourses = True
     newUser.profile.canModifyRosters = True

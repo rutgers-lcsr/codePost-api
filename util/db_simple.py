@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from core.models import Organization
 
 # Create superuser
-james = User.objects.create(username="james@codepost.io", email="james@codepost.io")
+james = User.objects.create(username="james@example.com", email="james@example.com")
 princeton = Organization.objects.create(name="Princeton University", shortname="Princeton")
 james.is_superuser = True
 james.set_password('rootabega')

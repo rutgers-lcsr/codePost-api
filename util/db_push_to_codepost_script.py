@@ -40,9 +40,9 @@ assignments.append(markovs2019)
 
 # Create some superusers
 admin = User.objects.create(
-    username='admin@codepost.io', email='admin@codepost.io', password="rootabega")
+    username='admin@example.com', email='admin@example.com', password="rootabega")
 superadmin = User.objects.create(
-    username='superadmin@codepost.io', email='superadmin@codepost.io', password="rootabega")
+    username='superadmin@example.com', email='superadmin@example.com', password="rootabega")
 superadmin.profile.organization = princeton
 admin.profile.organization = princeton
 admin.profile.canCreateCourses = True

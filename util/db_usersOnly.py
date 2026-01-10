@@ -5,7 +5,7 @@ from core.models import Section, Assignment
 from core.models import Submission, File, Comment
 
 # Create superuser
-james = User.objects.create(username="james@codepost.io", email="james@codepost.io")
+james = User.objects.create(username="james@example.com", email="james@example.com")
 james.is_superuser = True
 james.set_password('rootabega')
 james.save()
