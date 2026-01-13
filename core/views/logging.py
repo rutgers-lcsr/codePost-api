@@ -7,7 +7,7 @@ from django.conf import settings
 from core.auth import Authentications, type_of_auth
 from core.logging import logEvent
 from log.models import Event
-
+from codepost.settings import DEBUG
 
 import json
 
@@ -49,6 +49,9 @@ def logError(request):
       "errorDetail": errorDetail,
       "message": message,
     }
+    if DEBUG:
+      logging.warning(meta)
+
     Event.objects.create(category="UI Error", user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
   except:
     pass

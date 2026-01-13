@@ -11,6 +11,23 @@ from core.permissions.helpers import isStudentOfSub, isStaffOfSub
 from core.permissions.helpers import returnNotAuthorized, returnForbidden
 
 from rest_framework import serializers
+from logging import getLogger
+logger = getLogger(__name__)
+
+
+def _format_points_str(point_delta) -> str:
+    """Format a point delta into a human-readable string for AI context."""
+    try:
+        point_delta = float(point_delta)
+    except (ValueError, TypeError):
+        point_delta = 0
+    
+    if point_delta > 0:
+        return f"Deduction: {point_delta} points"
+    elif point_delta < 0:
+        return f"Bonus: {abs(point_delta)} points"
+    else:
+        return "Points: 0"
 
 class CommentViewSet(ListProtectedViewSet):
     """
@@ -129,9 +146,9 @@ class CommentViewSet(ListProtectedViewSet):
         course = file.submission.assignment.course
         assignment = file.submission.assignment
 
-        if not course.ai_provider or not course.ai_api_key:
+        if not course.ai_provider or not course.ai_api_key or course.ai_disabled:
             return Response(
-                {'error': 'AI is not configured for this course'},
+                {'error': 'AI is not available. Please ask your instructor if you think this is a problem.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -153,20 +170,7 @@ class CommentViewSet(ListProtectedViewSet):
                 rubric_comment = RubricComment.objects.get(id=rubric_comment_id)
                 # Use points override if provided, otherwise default to rubric comment pointDelta
                 point_delta = points_override if points_override is not None else rubric_comment.pointDelta
-                
-                # Convert to float/decimal for comparison if it came from JSON
-                try:
-                    point_delta = float(point_delta)
-                except (ValueError, TypeError):
-                    point_delta = 0
-
-                points_str = ""
-                if point_delta > 0:
-                    points_str = f"Deduction: {point_delta} points"
-                elif point_delta < 0:
-                    points_str = f"Bonus: {abs(point_delta)} points"
-                else:
-                    points_str = "Points: 0"
+                points_str = _format_points_str(point_delta)
                 
                 request_context['rubric_context'] = (
                     f"Rubric Item: {rubric_comment.text}\n"
@@ -175,22 +179,10 @@ class CommentViewSet(ListProtectedViewSet):
                     f"{points_str}"
                 )
             except RubricComment.DoesNotExist:
-                # from core.models import RubricComment # This import is already at the top of the method
                 logger.warning(f"Rubric comment {rubric_comment_id} not found")
         elif points_override is not None:
-             # Handle manual points without rubric
-            try:
-                point_delta = float(points_override)
-            except (ValueError, TypeError):
-                point_delta = 0
-
-            points_str = ""
-            if point_delta > 0:
-                points_str = f"Deduction: {point_delta} points"
-            elif point_delta < 0:
-                points_str = f"Bonus: {abs(point_delta)} points"
-            else:
-                 points_str = "Points: 0"
+            # Handle manual points without rubric
+            points_str = _format_points_str(points_override)
             
             request_context['rubric_context'] = (
                 f"Manual Points Adjustment\n"

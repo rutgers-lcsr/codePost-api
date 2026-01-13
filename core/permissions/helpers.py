@@ -43,6 +43,12 @@ def isSuperGrader(user, course):
   """
   return course in user.superGrader_courses.all()
 
+def isRubricEditor(user, course):
+  """
+  Check if the user is allowed to edit rubrics in the course.
+  """
+  return course in user.rubricEditor_courses.all()
+
 def isCourseAdmin(user, course):
   """
   Check if the user is a course admin.

@@ -220,7 +220,8 @@ class RubricCategoryPermissions(TemplatePermission):
         if assignment.collaborativeRubricMode:
             return isCourseStaff(user, course)
         else:
-            return isCourseAdmin(user, course)
+            from core.permissions.helpers import isRubricEditor
+            return isCourseAdmin(user, course) or isRubricEditor(user, course)
 
 
 class RubricCommentPermissions(TemplatePermission):
@@ -259,7 +260,8 @@ class RubricCommentPermissions(TemplatePermission):
         if assignment.collaborativeRubricMode:
             return isCourseStaff(user, course)
         else:
-            return isCourseAdmin(user, course)
+            from core.permissions.helpers import isRubricEditor
+            return isCourseAdmin(user, course) or isRubricEditor(user, course)
 
 
 # =============================================================================

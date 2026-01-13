@@ -24,7 +24,7 @@ from core.permissions.helpers import (
     returnNotFound,
 )
 from core.permissions.helpers import isAuthenticated
-from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember
+from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub, isSuperGrader
 
 from core.pagination import LargeObjectsPagination
@@ -144,9 +144,12 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         course = self.get_object()
 
-        # Only course admins can view/modify AI settings
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        if request.method == "GET":
+            if not isCourseStaff(user, course):
+                return returnForbidden()
+        else:
+            if not isCourseAdmin(user, course):
+                return returnForbidden()
 
         if request.method == "GET":
             serializer = CourseAISettingsSerializer(course, context={"request": request})
@@ -304,9 +307,10 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         newGraders: list[User] = []
         newAdmins: list[User] = []
         newSuperGraders: list[User] = []
+        newRubricEditors: list[User] = []
         for keyEl, userList in zip(
-            ("students", "graders", "courseAdmins", "superGraders"),
-            (newStudents, newGraders, newAdmins, newSuperGraders),
+            ("students", "graders", "courseAdmins", "superGraders", "rubricEditors"),
+            (newStudents, newGraders, newAdmins, newSuperGraders, newRubricEditors),
         ):
             parse_new_users(keyEl, request, userList)
         # Add the users to the course
@@ -317,6 +321,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         course.courseAdmins.add(*newAdmins)
         course.inactive_courseAdmins.remove(*newAdmins)
         course.superGraders.add(*newSuperGraders)
+        course.rubricEditors.add(*newRubricEditors)
         course.save()
 
         for admin in newAdmins:
@@ -368,15 +373,16 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return error
 
         # Pre-filter fields for any users who do not exist yet
-        inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders = (
+        inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders, inactiveRubricEditors = (
+            [],
             [],
             [],
             [],
             [],
         )
         for keyEl, userList in zip(
-            ("students", "graders", "courseAdmins", "superGraders"),
-            (inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders),
+            ("students", "graders", "courseAdmins", "superGraders", "rubricEditors"),
+            (inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders, inactiveRubricEditors),
         ):
             parse_new_users(keyEl, request, userList)
         # Add the users to the course
@@ -387,6 +393,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         course.courseAdmins.remove(*inactiveAdmins)
         course.inactive_courseAdmins.add(*inactiveAdmins)
         course.superGraders.remove(*inactiveGraders, *inactiveSuperGraders)
+        course.rubricEditors.remove(*inactiveGraders, *inactiveRubricEditors)
         course.save()
 
         # remove inactive graders and students from their sections

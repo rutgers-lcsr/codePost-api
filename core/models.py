@@ -224,6 +224,8 @@ class Course(BaseModel):
       "A list of usernames of graders for the course."))
   superGraders = models.ManyToManyField(User, related_name="superGrader_courses", help_text=(
       "A list of usernames of graders for the course who have expanded permissions."))
+  rubricEditors = models.ManyToManyField(User, related_name="rubricEditor_courses", help_text=(
+      "A list of usernames of graders for the course who are allowed to edit the rubric."))
   courseAdmins = models.ManyToManyField(User, related_name="courseAdmin_courses", help_text=(
       "A list of usernames for admins for the course."))
 
@@ -307,6 +309,10 @@ class Course(BaseModel):
       blank=True,
       null=True,
       help_text="Model name (e.g., gemini-1.5-flash, gpt-4)"
+  )
+  ai_disabled = models.BooleanField(
+      default=False,
+      help_text="If True, AI comment generation is disabled even if configured"
   )
 
   class Meta:
@@ -1439,6 +1445,28 @@ def updateRegradeResponse(sender, instance, **kwargs):
       instance.responseDate = now()
 
 
+class CommentTemplate(BaseModel):
+  if TYPE_CHECKING:
+    id: int
+    owner: User
+    assignment: Assignment
+    rubricComment: RubricComment | None
+    sourceComment: Comment | None
+
+  text = models.TextField(help_text=("The text of the template."))
+  owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comment_templates", help_text=("The creator of the template."))
+  assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name="comment_templates", help_text=("The assignment this template belongs to."))
+  isGlobal = models.BooleanField(default=False, help_text=("If True, this template is visible to all graders in the assignment."))
+  cellId = models.CharField(max_length=36, null=True, blank=True, help_text=("Optional notebook cell ID. If set, template only shows for this cell."))
+  filePath = models.CharField(max_length=500, null=True, blank=True, help_text=("Optional file path pattern. If set, template only shows for matching files."))
+  
+  pointDelta = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, help_text=("Points delta for this template."))
+  rubricComment = models.ForeignKey('RubricComment', null=True, blank=True, on_delete=models.SET_NULL, related_name="templates", help_text=("Optional linked rubric comment."))
+  sourceComment = models.ForeignKey('Comment', null=True, blank=True, on_delete=models.SET_NULL, related_name="derived_templates", help_text=("The original comment this template was created from. Null if manually created or source was deleted."))
+
+  def __str__(self):
+    return self.text[:20] + "..."
+
 # Export all model classes for wildcard imports
 __all__ = [
     "BaseModel",
@@ -1462,4 +1490,5 @@ __all__ = [
     "SubmissionHistory",
     "AssignmentDataSet",
     "CachedExecutionResult",
+    "CommentTemplate",
 ]

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class CourseSerializer(ModelSerializerWithPOSTCheck):
   assignments = serializers.SerializerMethodField()
   studentCount = serializers.SerializerMethodField()
+  isRubricEditor = serializers.SerializerMethodField()
 
   clone_from = serializers.IntegerField(write_only=True, required=False)
 
@@ -25,8 +26,8 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
               'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
-              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders', 'studentCount', 'clone_from')
-    read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount')
+              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders', 'studentCount', 'isRubricEditor', 'clone_from')
+    read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount', 'isRubricEditor')
     extra_kwargs = {
         'organization': {'required': False}
     }
@@ -34,6 +35,12 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
 
   def get_studentCount(self, obj):
     return obj.students.count()
+
+  def get_isRubricEditor(self, obj):
+    request = self.context.get('request')
+    if request and request.user.is_authenticated:
+      return obj.rubricEditors.filter(pk=request.user.pk).exists()
+    return False
 
   def validate_timezone(self, timezone):
     # Check that timezone corresponds to valid timezone
@@ -160,20 +167,22 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
   
   class Meta:
     model = Course
-    fields = ('id', 'ai_provider', 'ai_api_key', 'ai_base_url', 'ai_model', 'ai_enabled')
+    fields = ('id', 'ai_provider', 'ai_api_key', 'ai_base_url', 'ai_model', 'ai_disabled', 'ai_enabled')
     extra_kwargs = {
       'ai_api_key': {'write_only': True}  # Never return API key in response
     }
   
   def get_ai_enabled(self, obj):
-    """Returns True if AI is configured for this course."""
-    return bool(obj.ai_provider and obj.ai_api_key)
+    """Returns True if AI is configured and not disabled for this course."""
+    return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled)
 
 
 class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
   students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
   graders = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
   superGraders = serializers.SlugRelatedField(
+      many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
+  rubricEditors = serializers.SlugRelatedField(
       many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
   courseAdmins = serializers.SlugRelatedField(
       many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
@@ -187,7 +196,7 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = Course
-    fields = ('id', 'organization', 'name', 'period', 'students', 'graders', 'superGraders', 'courseAdmins',
+    fields = ('id', 'organization', 'name', 'period', 'students', 'graders', 'superGraders', 'rubricEditors', 'courseAdmins',
               'inactive_students', 'inactive_graders', 'inactive_courseAdmins', 'not_activated')
     read_only_fields = ('name', 'period', 'inactive_students', 'inactive_graders',
                         'inactive_courseAdmins', 'organization', 'not_activated')
@@ -253,6 +262,14 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
       if superGrader in newFields['graders']:
         newSuperGraders.append(superGrader)
     newData['superGraders'] = newSuperGraders
+
+    # remove all rubricEditors who are not enrolled as graders.
+    # This will occur if any grader is unenrolled or someone patches a non-grader to be a rubricEditor
+    newRubricEditors = []
+    for rubricEditor in newFields['rubricEditors']:
+      if rubricEditor in newFields['graders']:
+        newRubricEditors.append(rubricEditor)
+    newData['rubricEditors'] = newRubricEditors
 
     # # Check to make sure that no student is a grader or course Admin
     # for student in newFields['students']:

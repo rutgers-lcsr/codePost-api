@@ -2,6 +2,7 @@ from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile
 from django import forms
+from core.services.file_handlers.notebook import NotebookHandler
 
 
 class FileSerializer(ModelSerializerWithPOSTCheck):
@@ -85,6 +86,12 @@ class AssignmentFileSerializer(ModelSerializerWithPOSTCheck):
         extra_kwargs = {
             "data": {"trim_whitespace": False},
         }
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get('extension') == '.ipynb' and attrs.get('data'):
+            attrs['data'] = NotebookHandler.inject_cell_ids(attrs['data'])
+        return attrs
 
 
 class AssignmentFilePublicSerializer(serializers.ModelSerializer):

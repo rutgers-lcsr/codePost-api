@@ -163,6 +163,10 @@ class AssignmentViewSet(ListProtectedViewSet):
     assignment = self.get_object()
     course = assignment.course
 
+    # Only graders can view the queue length
+    if not isGrader(user, course):
+      return returnForbidden()
+
     section = self.request.query_params.get('section', None)
     
     # Base query: submissions for this assignment that are unassigned

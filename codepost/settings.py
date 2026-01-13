@@ -488,6 +488,7 @@ CELERY_BEAT_SCHEDULE = {
     }
 }
 CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "FALSE").upper() == "TRUE"
+CELERY_TASK_STORE_EAGER_RESULT = True
 
 BROKER_TRANSPORT_OPTIONS = {
     # "region": "us-east-2",

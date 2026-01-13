@@ -1,4 +1,5 @@
 import json
+import uuid
 import logging
 from typing import Set, Optional, Dict, List
 from .base import BaseFileHandler
@@ -104,3 +105,26 @@ class NotebookHandler(BaseFileHandler):
                     elif isinstance(source, str):
                         code_cells.append(source)
         return "\n".join(code_cells)
+
+    @staticmethod
+    def inject_cell_ids(content: str) -> str:
+        try:
+            nb = json.loads(content)
+            if 'cells' in nb and isinstance(nb['cells'], list):
+                changed = False
+                for cell in nb['cells']:
+                    if 'metadata' not in cell:
+                        cell['metadata'] = {}
+                    
+                    if not isinstance(cell['metadata'], dict):
+                        cell['metadata'] = {}
+
+                    if 'id' not in cell['metadata']:
+                        cell['metadata']['id'] = str(uuid.uuid4())
+                        changed = True
+                
+                if changed:
+                    return json.dumps(nb, indent=1)
+            return content
+        except Exception:
+            return content

@@ -40,6 +40,9 @@ from core.views.testCase import TestCaseViewSet
 from core.views.testCategory import TestCategoryViewSet
 from core.views.assignmentDataSet import AssignmentDataSetViewSet
 from core.views.dashboard import DashboardViewSet
+from core.views.commentTemplate import CommentTemplateViewSet
+from core.views.dev_auth import LoginAsRoleView
+from codepost.settings import DEBUG
 
 from webhooks.view import WebhookViewSet
 
@@ -84,6 +87,7 @@ router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'webhooks', WebhookViewSet)
 router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
 router.register(r'dashboard', DashboardViewSet, basename='dashboard')
+router.register(r'commentTemplates', CommentTemplateViewSet, basename='commentTemplate')
 
 # router.register(r'billing', BillingViewSet, basename='billing')
 
@@ -124,3 +128,8 @@ urlpatterns = [
     path('tmp-script/', activate_cip),
     re_path('', include(router.urls)),
 ]
+
+if DEBUG:
+    urlpatterns += [
+        path('dev-auth/login-as/', LoginAsRoleView.as_view()),
+    ]
