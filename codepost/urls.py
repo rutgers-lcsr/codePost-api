@@ -130,6 +130,12 @@ urlpatterns = [
 ]
 
 if DEBUG:
+    # Careful with this endpoint, 
+    # you need to run `python manage.py createtestusers` to create the users first
+    # and then you can use this endpoint to login as those users, 
+    # Make sure to have a course and org set up with assignments, as these users will be added to every
+    # course in the database.
+
     urlpatterns += [
         path('dev-auth/login-as/', LoginAsRoleView.as_view()),
     ]

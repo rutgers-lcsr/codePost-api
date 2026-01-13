@@ -546,4 +546,3 @@ Django settings loaded successfully.
 Welcome to CodePost!      
       """)
 print("=" * 80)
-# Force reload Sat Dec 13 10:02:13 PM EST 2025
