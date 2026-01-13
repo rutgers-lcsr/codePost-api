@@ -73,6 +73,7 @@ jobs:
           API_URL=${{ vars.API_URL }}
           CLIENT_URL=${{ vars.CLIENT_URL }}
           SECRET_KEY=${{ secrets.SECRET_KEY }}
+          FIELD_ENCRYPTION_KEY= ${{secrets.FIELD_ENCRYPTION_KEY}}
           DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
           DB_PASSWORD=${{ secrets.DB_PASSWORD }}
           API_USER=${{ secrets.API_USER }}
