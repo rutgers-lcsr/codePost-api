@@ -96,7 +96,7 @@ def emailRegistration(request):
                     UserAddedToCourseEmail(newUser).send_email(
                         course_name=course.name,
                         course_period=course.period,
-                        role="student",
+                        user_type="student",
                     )
                     return Response(
                         {"success": True, "code_valid": True, "email_valid": True},

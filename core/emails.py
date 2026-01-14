@@ -314,7 +314,7 @@ class NewAdminRequestEmail(CodepostEmail):
 
         return self.send(email)
 class NewAdminActivationEmail(CodepostEmail):
-    subject = "New Admin Activation on CodePost"
+    subject = "Your CodePost account has been approved!"
     template = "emails/admin/activation_template.html"
 
     def send_email(self, organization_name:str):
