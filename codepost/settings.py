@@ -160,7 +160,67 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'codePost API',
-    'DESCRIPTION': 'An API for administrators to mine course data and automate common tasks.',
+    'DESCRIPTION': """
+An API for administrators to mine course data and automate common tasks.
+
+## Quick Start
+
+### Installation
+
+```bash
+pip install git+https://github.com/rutgers-lcsr/codepost-python.git
+```
+
+### Basic Usage
+
+```python
+import codepost_api_client as codepost
+
+# Configure the client
+config = codepost.Configuration(
+    host="https://codepost-api.cs.rutgers.edu",
+    api_key={"tokenAuth": "Token YOUR_API_KEY"}
+)
+
+# Use the API
+with codepost.ApiClient(config) as client:
+    courses_api = codepost.CoursesApi(client)
+    assignments_api = codepost.AssignmentsApi(client)
+    
+    # 1. List all courses
+    print("--- Courses ---")
+    courses = courses_api.courses_list()
+    for course in courses:
+        print(f"ID: {course.id} | {course.name} ({course.period})")
+        
+    if courses:
+        my_course_id = courses[0].id
+        
+        # 2. List assignments for a course
+        # Note: Course object contains list of assignment IDs
+        course_data = courses_api.courses_retrieve(my_course_id)
+        
+        print(f"--- Assignments for Course {my_course_id} ---")
+        for assignment_id in course_data.assignments:
+            # Fetch full assignment details
+            assignment = assignments_api.assignments_retrieve(assignment_id)
+            print(f"ID: {assignment.id} | {assignment.name}")
+
+    # 3. Create a new Course
+    new_course = codepost.Course(name="CS101", period="Fall 2026")
+    created_course = courses_api.courses_create(new_course)
+    print(f"Created Course: {created_course.id}")
+
+    # 4. Create an Assignment
+    new_assignment = codepost.Assignment(
+        name="Homework 1", 
+        course=created_course.id
+    )
+    created_assignment = assignments_api.assignments_create(new_assignment)
+```
+
+See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for more examples.
+""",
     'VERSION': '3.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_SETTINGS': {
