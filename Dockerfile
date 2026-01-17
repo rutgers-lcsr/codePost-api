@@ -7,6 +7,7 @@ COPY pyproject.toml poetry.lock* /opt/app/
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
+    && rm -f poetry.lock \
     && poetry install --no-root
 
 COPY . .
@@ -29,6 +30,7 @@ WORKDIR /opt/app
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
+    && rm -f poetry.lock \
     && poetry install --no-root
 
 RUN pip install celery
@@ -48,6 +50,7 @@ WORKDIR /opt/app
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
+    && rm -f poetry.lock \
     && poetry install --no-root
 RUN pip install celery
 
