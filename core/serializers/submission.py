@@ -1,6 +1,7 @@
 import pytz
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Submission, User
 from core.serializers.file import FileSerializer, SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer
@@ -35,6 +36,7 @@ class SubmissionSerializerWithoutFiles(ModelSerializerWithPOSTCheck):
                         'responseDate', 'tests', 'testRunsCompleted')
     POST_permissions_fields = ('assignment',)
 
+  @extend_schema_field(serializers.DateTimeField)
   def get_dateEdited(self, obj):
     tz = pytz.timezone(obj.assignment.course.timezone)
     return obj.dateEdited.astimezone(tz)
@@ -170,6 +172,7 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
       many=False, slug_field='email', queryset=User.objects.all(), required=False, allow_null=True)
   hasGrader = serializers.SerializerMethodField()
 
+  @extend_schema_field(serializers.BooleanField)
   def get_hasGrader(self, obj):
     return obj.grader is not None
 
@@ -206,6 +209,7 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
 
     return ret
 
+  @extend_schema_field(SubmissionFileSerializer(many=True))
   def get_files(self, obj):
     assignment = obj.assignment
     # If feedback is released or live feedback mode is on, return files with comments

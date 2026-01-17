@@ -2,7 +2,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema
 from autograder.services.TestService import TestService
+from autograder.serializers.execution import (
+    TestExecutionRequestSerializer,
+    TestExecutionResultSerializer,
+)
 from core.models import Submission, TestCase
 
 class RunTestView(APIView):
@@ -12,6 +17,10 @@ class RunTestView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        request=TestExecutionRequestSerializer,
+        responses={200: TestExecutionResultSerializer}
+    )
     def post(self, request):
         test_id = request.data.get('testId')
         submission_id = request.data.get('submissionId')

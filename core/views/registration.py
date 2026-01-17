@@ -1,9 +1,10 @@
 import re
 
-from rest_framework import status
+from rest_framework import status, serializers as drf_serializers
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
 
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
@@ -44,6 +45,27 @@ import logging
 ##########################################################################
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='EmailRegistrationRequest',
+        fields={
+            'email': drf_serializers.EmailField(),
+            'token': drf_serializers.CharField(help_text='Invite code for the course'),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='EmailRegistrationResponse',
+            fields={
+                'success': drf_serializers.BooleanField(),
+                'code_valid': drf_serializers.BooleanField(),
+                'email_valid': drf_serializers.BooleanField(),
+            }
+        ),
+        400: OpenApiResponse(description='Invalid form data'),
+        403: OpenApiResponse(description='Email not on whitelist or invalid code'),
+    }
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def emailRegistration(request):
@@ -132,6 +154,24 @@ def emailRegistration(request):
         )
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='VerifyRegistrationTokenRequest',
+        fields={
+            'uid': drf_serializers.CharField(),
+            'token': drf_serializers.CharField(),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='VerifyRegistrationTokenResponse',
+            fields={
+                'isValid': drf_serializers.BooleanField(),
+                'email': drf_serializers.EmailField(required=False),
+            }
+        ),
+    }
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def verifyRegistrationToken(request):
@@ -164,6 +204,23 @@ def verifyRegistrationToken(request):
         )
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='RegisterAndSetPasswordRequest',
+        fields={
+            'uid': drf_serializers.CharField(),
+            'token': drf_serializers.CharField(),
+            'password1': drf_serializers.CharField(),
+            'password2': drf_serializers.CharField(),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='RegisterAndSetPasswordResponse',
+            fields={'isValid': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def registerAndSetPassword(request):
@@ -207,8 +264,24 @@ def registerAndSetPassword(request):
 
 
 ## CIP specific ##
+@extend_schema(
+    request=inline_serializer(
+        name='SetCredentialsRequest',
+        fields={
+            'organization': drf_serializers.CharField(),
+            'password1': drf_serializers.CharField(),
+            'password2': drf_serializers.CharField(),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='SetCredentialsResponse',
+            fields={'isValid': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(["POST"])
-@permission_classes([isAuthenticated])
+@permission_classes([IsAuthenticated])
 def setCredentials(request):
     """
     If a user is logged in by hasn't yet set a usable password, they can use this endpoint to do so, as well
@@ -249,8 +322,16 @@ def setCredentials(request):
 
 
 ## CIP specific ##
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='GraderToAdminResponse',
+            fields={}
+        ),
+    }
+)
 @api_view(["POST"])
-@permission_classes([isAuthenticated])
+@permission_classes([IsAuthenticated])
 def graderToAdmin(request):
     """
     Allows a user who is only a grader to elevate their status to level of admin within their organization.
@@ -278,6 +359,24 @@ def graderToAdmin(request):
 
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='ValidateNewAdminUserRequest',
+        fields={
+            'organization': drf_serializers.CharField(),
+            'email': drf_serializers.EmailField(),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='ValidateNewAdminUserResponse',
+            fields={
+                'success': drf_serializers.BooleanField(),
+                'action_id': drf_serializers.CharField(),
+            }
+        ),
+    }
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def validateNewAdminUser(request):
@@ -434,6 +533,14 @@ def validateNewAdminUser(request):
         )
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='HandleValidationResponse',
+            fields={'isValid': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def handleValidationResponse(request):
@@ -501,6 +608,17 @@ def handleValidationResponse(request):
         return Response({"errors": form.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='CheckStatusNewAdminUserResponse',
+            fields={
+                'pending': drf_serializers.BooleanField(),
+                'status': drf_serializers.BooleanField(),
+            }
+        ),
+    }
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def checkStatusNewAdminUser(request):
@@ -582,6 +700,18 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
 ##########################################################################
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='EmailPasswordResetRequest',
+        fields={'email': drf_serializers.EmailField()}
+    ),
+    responses={
+        200: inline_serializer(
+            name='EmailPasswordResetResponse',
+            fields={'success': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def emailPasswordReset(request):
@@ -604,6 +734,24 @@ def emailPasswordReset(request):
         )
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='VerifyResetTokenRequest',
+        fields={
+            'uid': drf_serializers.CharField(),
+            'token': drf_serializers.CharField(),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='VerifyResetTokenResponse',
+            fields={
+                'isValid': drf_serializers.BooleanField(),
+                'email': drf_serializers.EmailField(required=False),
+            }
+        ),
+    }
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def verifyResetToken(request):
@@ -627,6 +775,25 @@ def verifyResetToken(request):
         return Response({"isValid": False}, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='ResetPasswordRequest',
+        fields={
+            'uid': drf_serializers.CharField(),
+            'token': drf_serializers.CharField(),
+            'password': drf_serializers.CharField(),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='ResetPasswordResponse',
+            fields={
+                'isValid': drf_serializers.BooleanField(),
+                'success': drf_serializers.BooleanField(),
+            }
+        ),
+    }
+)
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def resetPassword(request):

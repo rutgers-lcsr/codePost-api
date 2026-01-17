@@ -1,11 +1,13 @@
 from rest_framework import viewsets
 from rest_framework.response import Response
 from django_celery_results.models import TaskResult
+from drf_spectacular.utils import extend_schema
 import json
 import logging
 
 from celery.result import AsyncResult
 from autograder.celery import app
+from autograder.serializers.execution import TaskStatusResponseSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,9 @@ class TaskViewSet(viewsets.ViewSet):
     A simple ViewSet for retrieving task results
     """
 
+    @extend_schema(
+        responses={200: TaskStatusResponseSerializer}
+    )
     def retrieve(self, request, pk=None):
         res = AsyncResult(pk)
         

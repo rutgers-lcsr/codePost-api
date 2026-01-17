@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.serializers.course import CourseSerializer
 from core.serializers.section import SectionSerializer
@@ -39,15 +40,18 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
     ordering = ('email',)
 
   # defining this as a SerializerMethodField so we can pass the request context into the CourseSerializer
+  @extend_schema_field(CourseSerializer(many=True))
   def get_studentCourses(self, obj):
     request = self.context.get('request', None)
     return CourseSerializer(list(obj.student_courses.all()), many=True, context={"request": request}).data
 
+  @extend_schema_field(serializers.BooleanField)
   def get_hasCredentials(self, obj):
     if obj.password and obj.has_usable_password():
       return True
     return False
 
+  @extend_schema_field(serializers.CharField(allow_null=True))
   def get_token(self, obj):
     from core.views.auth import JWTSerializer
  
@@ -154,6 +158,7 @@ class LightUserSerializer(serializers.ModelSerializer):
               'hasCredentials', 'is_active', 'date_joined', 'last_login')
     read_only_fields = fields
 
+  @extend_schema_field(serializers.BooleanField)
   def get_hasCredentials(self, obj):
     if obj.password and obj.has_usable_password():
       return True

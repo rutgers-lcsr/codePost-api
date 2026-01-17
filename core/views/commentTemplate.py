@@ -12,6 +12,10 @@ class CommentTemplateViewSet(viewsets.ModelViewSet):
     search_fields = ['text', 'filePath']
 
     def get_queryset(self):
+        # During schema generation, return empty queryset
+        if getattr(self, 'swagger_fake_view', False):
+            return CommentTemplate.objects.none()
+            
         user = self.request.user
         # Return templates that are either owned by the user or global
         return CommentTemplate.objects.filter(Q(owner=user) | Q(isGlobal=True))

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 
 from core.models import AssignmentDataSet
 
@@ -29,6 +30,7 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created', 'modified', 'file_url', 'file_size', 'file_name']
     
+    @extend_schema_field(serializers.URLField(allow_null=True))
     def get_file_url(self, obj):
         """Get the URL to download the dataset file"""
         if obj.file:
@@ -38,6 +40,7 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
             return obj.file.url
         return None
     
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
     def get_file_size(self, obj):
         """Get the size of the dataset file in bytes"""
         if obj.file:
@@ -47,6 +50,7 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
                 return None
         return None
     
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_file_name(self, obj):
         """Get the original filename"""
         if obj.file:

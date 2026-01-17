@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import SubmissionHistory, User
 
@@ -13,6 +14,7 @@ class SubmissionHistorySerializer(ModelSerializerWithPOSTCheck):
     fields = ('id', 'student', 'submission', 'hasViewed','dateViewed')
     read_only_fields = ('student','submission','dateViewed')
 
+  @extend_schema_field(serializers.DateTimeField(allow_null=True))
   def get_dateViewed(self, obj):
     if(obj.dateViewed):
       tz = pytz.timezone(obj.submission.assignment.course.timezone)

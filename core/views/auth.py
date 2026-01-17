@@ -5,7 +5,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import serializers as drf_serializers
 import logging
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
 from core.logging import logEvent
 from core.models import Course, OneTimeToken
 from core.serializers.user import UserSerializer
@@ -15,6 +17,7 @@ from rest_framework_simplejwt import serializers, views
 from rest_framework_simplejwt.views import TokenRefreshSlidingView
 from core.forms.forms import ImpersonateForm
 from codepost.settings import DEBUG
+@extend_schema(responses={200: UserSerializer})
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def current_user(request):
@@ -121,6 +124,21 @@ class ImpersonateView(APIView):
 
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='GenerateOTTRequest',
+        fields={'username': drf_serializers.CharField()}
+    ),
+    responses={
+        200: inline_serializer(
+            name='GenerateOTTResponse',
+            fields={
+                'token': drf_serializers.CharField(),
+                'expires_at': drf_serializers.DateTimeField(),
+            }
+        ),
+    }
+)
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def generate_one_time_token(request):
@@ -177,6 +195,13 @@ def generate_one_time_token(request):
   })
   
   
+@extend_schema(
+    request=inline_serializer(
+        name='ValidateOTTRequest',
+        fields={'token': drf_serializers.CharField()}
+    ),
+    responses={200: UserSerializer}
+)
 @api_view(['GET', 'POST'])
 @permission_classes([])
 def validate_one_time_token(request):
@@ -217,6 +242,17 @@ def validate_one_time_token(request):
   
   return Response(data)
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='JWTOTTResponse',
+            fields={
+                'token': drf_serializers.CharField(),
+                'expires_at': drf_serializers.IntegerField(),
+            }
+        ),
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_jwt_ott(request):

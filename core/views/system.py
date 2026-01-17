@@ -2,6 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework import serializers as drf_serializers
+from drf_spectacular.utils import extend_schema, inline_serializer
 from django.db import connection, DatabaseError
 from log.models import Event
 from django.core.paginator import Paginator
@@ -11,6 +13,17 @@ from django.core.paginator import Paginator
 class SystemHealthView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
 
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name='SystemHealthResponse',
+                fields={
+                    'database': drf_serializers.CharField(),
+                    'celery': drf_serializers.CharField(),
+                }
+            ),
+        }
+    )
     def get(self, request):
         health = {
             "database": "Unknown",
@@ -44,6 +57,19 @@ class SystemHealthView(APIView):
 class SystemActivityView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
 
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name='SystemActivityResponse',
+                fields={
+                    'results': drf_serializers.ListField(child=drf_serializers.DictField()),
+                    'total': drf_serializers.IntegerField(),
+                    'page': drf_serializers.IntegerField(),
+                    'pages': drf_serializers.IntegerField(),
+                }
+            ),
+        }
+    )
     def get(self, request):
         # Fetch recent events
         page_size = int(request.query_params.get('pageSize', 20))
@@ -71,3 +97,4 @@ class SystemActivityView(APIView):
             "page": page_num,
             "pages": paginator.num_pages
         })
+

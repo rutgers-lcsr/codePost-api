@@ -1,6 +1,7 @@
 import pytz
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Course, Organization, User
@@ -33,9 +34,11 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     }
     validators = []
 
+  @extend_schema_field(serializers.IntegerField)
   def get_studentCount(self, obj):
     return obj.students.count()
 
+  @extend_schema_field(serializers.BooleanField)
   def get_isRubricEditor(self, obj):
     request = self.context.get('request')
     if request and request.user.is_authenticated:
@@ -49,6 +52,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
       raise serializers.ValidationError("Timezone is not valid. See pytz.all_timezones for options.")
     return timezone
 
+  @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
   def get_assignments(self, obj):
     
     if not self.context.get('request'):
@@ -172,6 +176,7 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'ai_api_key': {'write_only': True}  # Never return API key in response
     }
   
+  @extend_schema_field(serializers.BooleanField)
   def get_ai_enabled(self, obj):
     """Returns True if AI is configured and not disabled for this course."""
     return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled)
@@ -201,6 +206,7 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
     read_only_fields = ('name', 'period', 'inactive_students', 'inactive_graders',
                         'inactive_courseAdmins', 'organization', 'not_activated')
 
+  @extend_schema_field(serializers.ListField(child=serializers.EmailField()))
   def get_not_activated(self, instance):
     return map(lambda x: x.email, list(set(
         list(instance.students.filter(is_active=False)) + list(instance.graders.filter(is_active=False)) +

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile
 from django import forms
@@ -50,6 +51,7 @@ class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
 
     comments = serializers.SerializerMethodField()
 
+    @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
     def get_comments(self, obj):
         return []
         POST_permissions_fields = ('submission',)

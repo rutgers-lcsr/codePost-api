@@ -85,3 +85,4 @@ django-encrypted-model-fields
 google-genai
 openai
 httpx
+drf-spectacular

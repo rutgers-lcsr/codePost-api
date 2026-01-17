@@ -12,7 +12,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.throttling import UserRateThrottle
+from drf_spectacular.utils import extend_schema
 from autograder.services.executors import Executor
+from autograder.serializers.execution import (
+    FileExecutionRequestSerializer,
+    ExecutionResultSerializer,
+)
 from core.models import File
 from core.permissions.helpers import returnForbidden
 
@@ -57,13 +62,6 @@ class NotebookCellExecutionSerializer(serializers.Serializer):
     kernel_name = serializers.CharField(required=False, default="python3")
 
 
-class FileExecutionSerializer(serializers.Serializer):
-    """Serializer for file execution requests"""
-
-    file_id = serializers.IntegerField(required=True)
-    timeout = serializers.IntegerField(required=False, default=30)
-
-
 class ExecuteFileView(APIView):
     """
     Execute a codePost file - use stream execution instead. This endpoint is used for testing file execution.
@@ -84,13 +82,17 @@ class ExecuteFileView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [ExecutionRateThrottle]
 
+    @extend_schema(
+        request=FileExecutionRequestSerializer,
+        responses={200: ExecutionResultSerializer}
+    )
     def post(self, request):
         # Restrict to superusers only
         if not request.user.is_superuser:
             return returnForbidden()
         
         
-        serializer = FileExecutionSerializer(data=request.data)
+        serializer = FileExecutionRequestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
@@ -111,5 +113,4 @@ class ExecuteFileView(APIView):
 
         execution_result = executor.execute()
         return Response(execution_result.to_dict(), status=status.HTTP_200_OK)
-
 

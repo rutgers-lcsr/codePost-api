@@ -1,8 +1,9 @@
 import logging
-from rest_framework import status
+from rest_framework import status, serializers as drf_serializers
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema, inline_serializer
 from django.conf import settings
 from core.auth import Authentications, type_of_auth
 from core.logging import logEvent
@@ -17,6 +18,22 @@ import json
 ##########################################################################
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='LogErrorRequest',
+        fields={
+            'error': drf_serializers.CharField(required=False),
+            'errorDetail': drf_serializers.CharField(required=False),
+            'url': drf_serializers.CharField(required=False),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='LogErrorResponse',
+            fields={'success': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(['POST'])
 @permission_classes((IsAuthenticated,))
 def logError(request):
@@ -58,6 +75,21 @@ def logError(request):
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='LogHappinessRequest',
+        fields={
+            'message': drf_serializers.CharField(required=False),
+            'url': drf_serializers.CharField(required=False),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='LogHappinessResponse',
+            fields={'success': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(['POST'])
 @permission_classes((IsAuthenticated,))
 def logHappiness(request):
@@ -80,6 +112,21 @@ def logHappiness(request):
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    request=inline_serializer(
+        name='LogDumpRequest',
+        fields={
+            'attachments': drf_serializers.ListField(child=drf_serializers.DictField(), required=False),
+            'courseID': drf_serializers.IntegerField(required=False),
+        }
+    ),
+    responses={
+        200: inline_serializer(
+            name='LogDumpResponse',
+            fields={'success': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(['POST'])
 @permission_classes((IsAuthenticated,))
 def logDump(request):
@@ -102,5 +149,4 @@ def logDump(request):
   Event.objects.create(category="User Dump", user=request.user.email, description=description, courseID=courseID, meta=json.dumps(attachments))
 
   return Response({'success': True}, status=status.HTTP_200_OK)
-
 

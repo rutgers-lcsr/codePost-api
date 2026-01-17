@@ -96,6 +96,10 @@ class AssignmentViewSet(ListProtectedViewSet):
 
   # return an assignment serializer with statistics if the user is allowed to see them
   def get_serializer_class(self):
+    # During schema generation, return default serializer
+    if getattr(self, 'swagger_fake_view', False):
+        return AssignmentSerializer
+        
     if self.action == 'retrieve':
       user = self.request.user
       assignment = self.get_object()

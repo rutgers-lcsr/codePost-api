@@ -18,8 +18,10 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from autograder.services.executors import  ExecutionResult, Executor
+from autograder.serializers.execution import FileExecutionRequestSerializer
 from core.models import File, Submission, SubmissionFile, AssignmentFile, CourseFile, Assignment, Course, User
 from core.permissions.helpers import isAuthenticated, isStaffOfSub, returnNotAuthorized, returnForbidden
 from core.permissions.permissions import FileExecutionPermissions
@@ -70,6 +72,12 @@ class ExecuteFileStreaming(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [StreamingExecutionRateThrottle]
     
+    @extend_schema(
+        request=FileExecutionRequestSerializer,
+        responses={
+            200: OpenApiResponse(description='Server-Sent Events stream with ExecutionResult data'),
+        }
+    )
     def post(self, request):
         """Handle streaming execution request"""
         

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Assignment
@@ -26,12 +27,14 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
 
   lateDeductions = serializers.JSONField(default=[])
 
+  @extend_schema_field(serializers.IntegerField(allow_null=True))
   def get_max_test_runs(self, obj):
     if hasattr(obj, 'environment'):
       return obj.environment.maxStudentTestRuns
     else:
       return None
 
+  @extend_schema_field(serializers.BooleanField)
   def get_nudge_mode(self, obj):
     if hasattr(obj, 'environment'):
       return isinstance(obj.environment.maxExposedFailedTests, int)
@@ -39,14 +42,17 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
       return False
 
 
+  @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
   def get_files(self, obj):
     # Return IDs of AssignmentFile objects
     return list(obj.files.values_list('id', flat=True))
 
+  @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
   def get_datasets(self, obj):
     # Return IDs of AssignmentDataSet objects
     return list(obj.dataSets.values_list('id', flat=True))
 
+  @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
   def get_file_templates(self, obj):
     # FileTemplate is deprecated - return empty array for backwards compatibility
     return []
@@ -143,24 +149,30 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
          'submissions_unclaimed_count', 'submissions_missing_count', 'stats_max', 'stats_min',
          'stats_mean')
 
+  @extend_schema_field(serializers.IntegerField)
   def get_submissions_count(self, obj):
     return obj.submissions.count()
 
+  @extend_schema_field(serializers.IntegerField)
   def get_submissions_finalized_count(self, obj):
     return obj.submissions.filter(isFinalized=True).count()
 
+  @extend_schema_field(serializers.IntegerField)
   def get_submissions_inprogress_count(self, obj):
     return obj.submissions.filter(isFinalized=False).exclude(grader=None).count()
 
+  @extend_schema_field(serializers.IntegerField)
   def get_submissions_unclaimed_count(self, obj):
     return obj.submissions.filter(grader=None).count()
 
+  @extend_schema_field(serializers.IntegerField)
   def get_submissions_missing_count(self, obj):
     all_students = User.objects.filter(student_courses=obj.course)
     num_students = all_students.count()
     submitted_students = all_students.filter(student_submissions__assignment=obj).count()
     return num_students - submitted_students
 
+  @extend_schema_field(serializers.FloatField)
   def get_stats_max(self, obj):
     stats_max = obj.submissions.filter(isFinalized=True).aggregate(Max('grade'))['grade__max']
 
@@ -169,6 +181,7 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
     else:
       return 0
 
+  @extend_schema_field(serializers.FloatField)
   def get_stats_min(self, obj):
     stats_min = obj.submissions.filter(isFinalized=True).aggregate(Min('grade'))['grade__min']
 
@@ -177,6 +190,7 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
     else:
       return 0
 
+  @extend_schema_field(serializers.FloatField)
   def get_stats_mean(self, obj):
     stats_mean = obj.submissions.filter(isFinalized=True).aggregate(Avg('grade'))['grade__avg']
     if stats_mean:

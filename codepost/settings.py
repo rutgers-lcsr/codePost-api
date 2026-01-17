@@ -155,6 +155,19 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'codePost API',
+    'DESCRIPTION': 'An API for administrators to mine course data and automate common tasks.',
+    'VERSION': '3.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,
+        'displayOperationId': True,
+    },
 }
 
 # CORS settings
@@ -301,6 +314,7 @@ INSTALLED_APPS = [
     "webhooks",
     "log",
     "encrypted_model_fields",
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
@@ -530,6 +544,14 @@ print(f"  TLS: {EMAIL_USE_TLS} SSL: {EMAIL_USE_SSL}")
 print(f"  DEFAULT_EMAIL_FROM: {DEFAULT_EMAIL_FROM}")
 if OVERRIDE_EMAIL:
     print(f"  OVERRIDE_EMAIL: {OVERRIDE_EMAIL}")
+print("=" * 80)
+
+
+
+print("=" * 80)
+print("API Documentation info:")
+print(f"API Documentation URL: {API_URL}/api/schema/")
+print(f"API Documentation YAML: {API_URL}/api/schema/yaml/")
 print("=" * 80)
 
 print("""

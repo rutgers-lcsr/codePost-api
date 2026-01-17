@@ -8,10 +8,12 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
+from drf_spectacular.utils import extend_schema
 
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile, CachedExecutionResult
 from core.permissions.helpers import isAuthenticated, returnNotAuthorized, returnForbidden, isStaffOfSub
 from core.permissions.permissions import FileExecutionPermissions
+from autograder.serializers.execution import CacheCheckResponseSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,9 @@ class CheckExecutionCache(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [CacheCheckRateThrottle]
     
+    @extend_schema(
+        responses={200: CacheCheckResponseSerializer}
+    )
     def get(self, request):
         """Check if cache exists for file"""
         

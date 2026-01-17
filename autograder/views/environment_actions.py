@@ -8,9 +8,10 @@ Provides API endpoints for:
 """
 import logging
 from django.http import JsonResponse
-from rest_framework import status
+from rest_framework import status, serializers as drf_serializers
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
 from core.models import Environment
 from core.permissions.helpers import isCourseAdmin
 
@@ -26,6 +27,22 @@ class EnvironmentRollback(APIView):
     """
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        request=inline_serializer(
+            name='EnvironmentRollbackRequest',
+            fields={'version': drf_serializers.IntegerField(required=False)}
+        ),
+        responses={
+            200: inline_serializer(
+                name='EnvironmentRollbackResponse',
+                fields={
+                    'success': drf_serializers.BooleanField(),
+                    'message': drf_serializers.CharField(),
+                    'version': drf_serializers.IntegerField(),
+                }
+            ),
+        }
+    )
     def post(self, request, environment_id):
         # Permission check
         try:
@@ -68,6 +85,22 @@ class EnvironmentCleanup(APIView):
     """
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        request=inline_serializer(
+            name='EnvironmentCleanupRequest',
+            fields={'keep_count': drf_serializers.IntegerField(required=False, default=3)}
+        ),
+        responses={
+            200: inline_serializer(
+                name='EnvironmentCleanupResponse',
+                fields={
+                    'success': drf_serializers.BooleanField(),
+                    'deleted_count': drf_serializers.IntegerField(),
+                    'message': drf_serializers.CharField(),
+                }
+            ),
+        }
+    )
     def post(self, request, environment_id):
         try:
             env = Environment.objects.get(pk=environment_id)
@@ -99,6 +132,21 @@ class EnvironmentConvertToManual(APIView):
     """
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        request=inline_serializer(
+            name='EnvironmentConvertToManualRequest',
+            fields={'from_version': drf_serializers.IntegerField(required=False)}
+        ),
+        responses={
+            200: inline_serializer(
+                name='EnvironmentConvertToManualResponse',
+                fields={
+                    'success': drf_serializers.BooleanField(),
+                    'message': drf_serializers.CharField(),
+                }
+            ),
+        }
+    )
     def post(self, request, environment_id):
         try:
             env = Environment.objects.get(pk=environment_id)
@@ -131,6 +179,18 @@ class EnvironmentStatus(APIView):
     """
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        responses={
+            200: inline_serializer(
+                name='EnvironmentStatusResponse',
+                fields={
+                    'environment_id': drf_serializers.IntegerField(),
+                    'current_version': drf_serializers.IntegerField(required=False),
+                    'history': drf_serializers.ListField(child=drf_serializers.DictField()),
+                }
+            ),
+        }
+    )
     def get(self, request, environment_id):
         try:
             env = Environment.objects.get(pk=environment_id)
@@ -144,3 +204,4 @@ class EnvironmentStatus(APIView):
         status_data = ImageManager.get_current_status(environment_id)
         
         return JsonResponse(status_data)
+

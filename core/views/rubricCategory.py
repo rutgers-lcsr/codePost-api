@@ -30,6 +30,10 @@ class RubricCategoryViewSet(ListProtectedViewSet):
   permission_classes = (IsAuthenticated, RubricCategoryPermissions)
 
   def get_serializer_class(self):
+    # During schema generation, return default serializer
+    if getattr(self, 'swagger_fake_view', False):
+        return RubricCategorySerializer
+        
     if self.action == 'retrieve':
       user = self.request.user
       rubricCategory = self.get_object()

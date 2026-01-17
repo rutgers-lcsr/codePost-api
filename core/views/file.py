@@ -46,6 +46,10 @@ class FileViewSet(ListProtectedViewSet):
         """
         Return appropriate serializer based on the file type.
         """
+        # During schema generation, return default serializer
+        if getattr(self, 'swagger_fake_view', False):
+            return FileSerializer
+            
         if self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
             # For object-specific actions, use the appropriate serializer
             file_obj = self.get_object()

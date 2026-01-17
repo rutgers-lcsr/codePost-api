@@ -74,6 +74,10 @@ class SubmissionViewSet(ListProtectedViewSet):
   permission_classes = (IsAuthenticated, SubmissionPermissions)
 
   def get_serializer_class(self):
+    # During schema generation, return default serializer
+    if getattr(self, 'swagger_fake_view', False):
+        return SubmissionSerializer
+        
     if self.action in ['retrieve', 'update', 'partial_update']:
         user = self.request.user
         submission = self.get_object()

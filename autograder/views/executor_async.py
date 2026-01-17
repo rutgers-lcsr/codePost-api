@@ -3,11 +3,16 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 import logging
+from drf_spectacular.utils import extend_schema
 
 from core.models import File, CachedExecutionResult
 from core.permissions.permissions import FileExecutionPermissions
 from core.permissions.helpers import isStaffOfSub
 from autograder.tasks import run_file_task
+from autograder.serializers.execution import (
+    AsyncExecutionRequestSerializer,
+    AsyncTaskResponseSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +27,10 @@ class ExecuteFileAsyncView(APIView):
     """
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        request=AsyncExecutionRequestSerializer,
+        responses={200: AsyncTaskResponseSerializer}
+    )
     def post(self, request):
         file_id = request.data.get("file_id")
         timeout = request.data.get("timeout", 30)

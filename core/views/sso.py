@@ -1,6 +1,8 @@
 from django.http import HttpResponseRedirect, JsonResponse
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.permissions import AllowAny
+from rest_framework import serializers as drf_serializers
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
 from django.conf import settings
 from core.models import Organization, User
 from core.utils import get_or_create_user
@@ -27,6 +29,9 @@ def get_service_url(request, provider, org_id=None):
         url += f"?org={org_id}"
     return url
 
+@extend_schema(
+    responses={302: OpenApiResponse(description='Redirect to SSO provider')}
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def initiate_sso(request, provider):
@@ -140,6 +145,9 @@ def initiate_sso(request, provider):
     return JsonResponse({'error': f'Unknown provider {provider}'}, status=400)
 
 
+@extend_schema(
+    responses={302: OpenApiResponse(description='Redirect to frontend with token')}
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def sso_callback(request, provider):
@@ -364,6 +372,19 @@ def sso_callback(request, provider):
     return HttpResponseRedirect(f"{frontend_url}/?token={token}")
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='CheckSSOAvailabilityResponse',
+            fields={
+                'sso_enabled': drf_serializers.BooleanField(),
+                'provider': drf_serializers.CharField(required=False),
+                'org_id': drf_serializers.IntegerField(required=False),
+                'org_name': drf_serializers.CharField(required=False),
+            }
+        ),
+    }
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def check_sso_availability(request):

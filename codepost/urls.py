@@ -139,3 +139,13 @@ if DEBUG:
     urlpatterns += [
         path('dev-auth/login-as/', LoginAsRoleView.as_view()),
     ]
+    
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from django.views.generic import TemplateView
+
+urlpatterns += [
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    # Optional UI:
+    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/schema/elements/', TemplateView.as_view(template_name='elements.html'), name='elements'),
+]

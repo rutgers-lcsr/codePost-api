@@ -2,10 +2,11 @@
 
 import logging
 logger = logging.getLogger("django")
-from rest_framework import status
+from rest_framework import status, serializers as drf_serializers
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema, inline_serializer
 
 from core.logging import logEvent
 from core.permissions.helpers import returnForbidden
@@ -13,6 +14,14 @@ from core.models import Course
 
 
 
+@extend_schema(
+    responses={
+        200: inline_serializer(
+            name='ActivateCIPResponse',
+            fields={'success': drf_serializers.BooleanField()}
+        ),
+    }
+)
 @api_view(['POST'])
 @permission_classes((IsAuthenticated,))
 def activate_cip(request):

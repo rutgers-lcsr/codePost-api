@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Comment, User, CommentTag
 from core.permissions.helpers import isCourseStaff
@@ -22,6 +23,7 @@ class CommentSerializer(ModelSerializerWithPOSTCheck):
     POST_permissions_fields = ('file',)
     extra_kwargs = {'endLine': {'required': False}, 'startChar': {'required': False}, 'endChar': {'required': False}, "text": {"trim_whitespace": False}}
 
+  @extend_schema_field(serializers.CharField(allow_null=True))
   def get_color(self, obj):
     return getattr(obj, 'color', None)
 
