@@ -19,6 +19,10 @@ from celery.schedules import crontab
 from urllib.parse import urlparse
 import regex
 import structlog
+import mimetypes
+
+# Fix for .mjs files serving with wrong mime type
+mimetypes.add_type("application/javascript", ".mjs", True)
 
 logger = structlog.get_logger(__name__)
 
