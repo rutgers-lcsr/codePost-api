@@ -29,6 +29,11 @@ class FileExecutionRequestSerializer(serializers.Serializer):
         default=False,
         help_text="If true, bypass cache and force new execution"
     )
+    test_code = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Optional test script to inject during execution"
+    )
 
 
 class AsyncExecutionRequestSerializer(FileExecutionRequestSerializer):

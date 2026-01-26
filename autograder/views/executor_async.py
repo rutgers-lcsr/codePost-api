@@ -7,7 +7,7 @@ from drf_spectacular.utils import extend_schema
 
 from core.models import File, CachedExecutionResult
 from core.permissions.permissions import FileExecutionPermissions
-from core.permissions.helpers import isStaffOfSub
+from core.permissions.helpers import isStaffOfSub, isCourseStaff
 from autograder.tasks import run_file_task
 from autograder.serializers.execution import (
     AsyncExecutionRequestSerializer,
@@ -35,6 +35,8 @@ class ExecuteFileAsyncView(APIView):
         file_id = request.data.get("file_id")
         timeout = request.data.get("timeout", 30)
         force_execute = request.data.get("force_execute", False)
+        test_code = request.data.get("test_code", None)
+        example_code = request.data.get("example_code", None)  # For testing against filled-out templates
         
         if not file_id:
             return Response(
@@ -58,14 +60,24 @@ class ExecuteFileAsyncView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Determine if user is staff of the submission
-        is_staff = submission and isStaffOfSub(request.user, submission)
+        # Determine if user is staff of the submission or the assignment/course
+        is_staff = False
+        if submission:
+            is_staff = isStaffOfSub(request.user, submission)
+        else:
+            # For AssignmentFiles (Solution Code), check if user is course staff
+            _, assignment, course = file_obj.get_file_info()
+            if course:
+                is_staff = isCourseStaff(request.user, course)
         
         # Students cannot force execute and must have cached result
         if not is_staff:
             # Since this is a student, setting force_execute to False will prevent them from 
             # triggering a new execution if the cached result does not exist.
             force_execute = False
+            # Students also cannot inject test code or example code
+            test_code = None
+            example_code = None
             
             if not CachedExecutionResult.get_cached_result(file_obj):
                 return Response(
@@ -74,7 +86,10 @@ class ExecuteFileAsyncView(APIView):
                 )
 
         # Dispatch task
-        task = run_file_task.delay(file_id, request.user.id, timeout, force_execute)
+        task = run_file_task.delay(
+            file_id, request.user.id, timeout, force_execute, 
+            test_code=test_code, example_code=example_code
+        )
         
         return Response({
             "task_id": task.id,

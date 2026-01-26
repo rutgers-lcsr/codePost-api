@@ -1077,7 +1077,8 @@ testTypes = (
     ('unit', 'unit'),
     ('shell', 'shell'),
     ('file', 'file'),
-    ('external', 'external'),)
+    ('external', 'external'),
+    ('script', 'script'),)
 
 testCase_status_types = (
     (0, 'Passed'),
@@ -1108,21 +1109,15 @@ class TestCase(BaseModel):
   exposed = models.BooleanField(default=False, help_text=(
       "If True and type is not 'external', this test will be run when a student submits, and the results shown to the student"))
   lastSolutionRun = models.IntegerField(default=3, choices=testCase_status_types)
+  
+  rubricItem = models.ForeignKey(RubricComment, null=True, blank=True, on_delete=models.SET_NULL, help_text=("The related rubric comment. If set, failure applies this rubric item."))
 
-  ################# Only relevant to I/O Tests ########################################
-  function = models.TextField(blank=True, help_text=("The function name to test"))
-  fileName = models.TextField(blank=True, help_text=("The file name to test"))
-  outputIsFile = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if the output is the name of a file to be compared to."))
-  expectedOutput = models.TextField(blank=True, help_text=("The expected output of the test"))
-  input = models.TextField(blank=True, help_text=("The input of the test"))
-  checkReturn = models.BooleanField(default=True, help_text=(
-      "A boolean field. 'True' if the output should be compared to the return of the function. False if it should be compared to std out."))
-  isFlexible = models.BooleanField(default=False, help_text=("Flexible mode for output checking."))
-  outputIsRegexp = models.BooleanField(default=False, help_text=("Is expected output specified in the form of a regexp?"))
-  expectPlot = models.BooleanField(default=False, help_text=("If True, the test will only pass if a plot is generated."))
-  dataSet = models.ForeignKey("AssignmentDataSet", null=True, blank=True, on_delete=models.SET_NULL, help_text=("The dataset to mount for this test."))
+  ################# Script / Notebook / Robust Framework Fields ########################
+  # Field for custom test scripts (type='script')
+  testCode = models.TextField(blank=True, help_text=("The custom test script code."))
   targetCellId = models.CharField(max_length=64, blank=True, null=True, help_text=("The ID of the notebook cell to target for execution."))
+  dataSet = models.ForeignKey("AssignmentDataSet", null=True, blank=True, on_delete=models.SET_NULL, help_text=("The dataset to mount for this test."))
+  fileName = models.TextField(blank=True, help_text=("The file name to test"))
 
   course = property(lambda self: self.testCategory.course)
 

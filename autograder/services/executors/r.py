@@ -251,7 +251,7 @@ class RNotebookExecutor(NotebookExecutor):
             
         return False
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         """Get the R notebook template with cells substituted."""
         template = super()._get_code_template()
         if not template:
@@ -266,4 +266,18 @@ class RNotebookExecutor(NotebookExecutor):
             )
 
         template = template.replace('{cells_b64}', code)
+        
+        # Inject test code if provided
+        test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('utf-8') if test_code else ""
+        template = template.replace('{test_code_b64}', test_code_b64)
         return template
+    
+    def _get_execution_command(self, template: str) -> List[str]:
+        # R needs the template written to a file first
+        template_b64 = base64.b64encode(template.encode('utf-8')).decode('utf-8')
+        cmd_str = f"echo '{template_b64}' | base64 -d > /tmp/notebook.R && Rscript /tmp/notebook.R"
+        return ["sh", "-c", cmd_str]
+    
+    def _needs_network(self, packages_to_install: List[str]) -> bool:
+        # R always needs network for base64enc/jsonlite packages
+        return True

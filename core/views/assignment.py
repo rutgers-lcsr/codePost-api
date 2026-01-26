@@ -796,6 +796,128 @@ class AssignmentViewSet(ListProtectedViewSet):
     return Response(serializer.data)
 
   @action(detail=True, methods=["POST"])
+  def generateTest(self, request, pk=None):
+    """
+    Generate an AI-powered test script for a file in this assignment.
+    
+    Request body:
+    - target_filename: str (required) - Name of the file to test (e.g., 'main.py')
+    - context_file_id: int (optional) - ID of an AssignmentFile to use as context (Solution/Starter)
+    - context_file_name: str (optional) - Name of an AssignmentFile (if ID not provided)
+    - language: str (optional) - Target language (python, java, etc.)
+    """
+    from asgiref.sync import async_to_sync
+    from core.services.ai_service import AIService
+    
+    user = self.request.user
+    assignment = self.get_object()
+    course = assignment.course
+    
+    # Check permissions
+    if not isCourseAdmin(user, course) and not isSuperGrader(user, course):
+        return returnForbidden()
+        
+    # Check AI configuration
+    if not course.ai_provider or not course.ai_api_key or course.ai_disabled:
+        return Response(
+            {'error': 'AI is not configured/enabled for this course.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    target_filename = request.data.get('target_filename')
+    context_file_id = request.data.get('context_file_id')
+    context_file_name = request.data.get('context_file_name') # Alternative lookup
+    language = request.data.get('language', 'python')
+    
+    if not target_filename:
+        return Response({'error': 'target_filename is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+    # Fetch context file
+    context_content = ""
+    context_name = "Assignment Context"
+    
+    if context_file_id:
+        try:
+            af = AssignmentFile.objects.get(id=context_file_id, assignment=assignment)
+            context_content = af.data
+            context_name = af.name
+        except AssignmentFile.DoesNotExist:
+             return Response({'error': 'Context file not found'}, status=status.HTTP_404_NOT_FOUND)
+    elif context_file_name:
+         af = AssignmentFile.objects.filter(assignment=assignment, name=context_file_name).first()
+         if af:
+             context_content = af.data
+             context_name = af.name
+             
+    # Notebook Language Detection
+    # If target is a notebook, we need to know the kernel language to provide correct examples
+    # Target Code Extraction & Language Detection
+    target_code = None
+    
+    if target_filename:
+        try:
+            # Try to find the target file (Solution/Starter)
+            target_file = AssignmentFile.objects.filter(assignment=assignment, name=target_filename).first()
+            
+            if target_file and target_file.data:
+                if target_filename.endswith('.ipynb'):
+                     # Notebook: Extract code from cells
+                     try:
+                        import json
+                        nb_data = json.loads(target_file.data)
+                        
+                        # Detect language from kernel
+                        kernelspec = nb_data.get('metadata', {}).get('kernelspec', {})
+                        kernel_lang = kernelspec.get('language', '').lower()
+                        if kernel_lang:
+                            if 'python' in kernel_lang: language = 'python'
+                            elif 'r' == kernel_lang: language = 'r'
+                            elif 'javascript' in kernel_lang or 'node' in kernel_lang: language = 'node'
+                            elif 'php' in kernel_lang: language = 'php'
+                            elif 'ruby' in kernel_lang: language = 'ruby'
+                            elif 'c++' in kernel_lang or 'cpp' in kernel_lang: language = 'cpp'
+                            else: language = kernel_lang 
+                            
+                        # Extract code
+                        code_cells = []
+                        cells = nb_data.get('cells', [])
+                        for cell in cells:
+                            if cell.get('cell_type') == 'code':
+                                source = cell.get('source', '')
+                                if isinstance(source, list):
+                                    source = ''.join(source)
+                                code_cells.append(source)
+                        target_code = "\n\n".join(code_cells)
+                     except Exception as e:
+                        logger.warning(f"Failed to parse notebook: {e}")
+                else:
+                    # Regular File: Use content directly
+                    target_code = target_file.data
+                    
+        except Exception as e:
+            logger.warning(f"Failed to extract target code: {e}")
+
+    service = AIService(course, assignment)
+    try:
+        # Generate script
+        result = async_to_sync(service.generate_test_script)(
+            context_file_content=context_content, 
+            context_filename=context_name,
+            target_filename=target_filename,
+            target_code=target_code,
+            language=language
+        )
+        
+        if result.success:
+            return Response({'script': result.text})
+        else:
+            return Response({'error': result.error}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"AI Generation failed: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+  @action(detail=True, methods=["POST"])
   def clone(self, request, pk=None):
     """
     Clone an assignment to a course

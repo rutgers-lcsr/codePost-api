@@ -7,8 +7,8 @@ class TestCaseSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = TestCase
-    fields = ('id', 'testCategory', 'sortKey', 'description', 'type', 'pointsFail', 'pointsPass', 'text', 'modified', 'function', 'fileName',
-              'outputIsFile', 'expectedOutput', 'input', 'checkReturn', 'exposed', 'instances', 'explanation', 'lastSolutionRun', 'isFlexible', 'outputIsRegexp', 'expectPlot', 'dataSet')
+    fields = ('id', 'testCategory', 'sortKey', 'description', 'type', 'pointsFail', 'pointsPass', 'text', 'modified', 'fileName',
+              'exposed', 'instances', 'explanation', 'lastSolutionRun', 'dataSet', 'testCode', 'targetCellId', 'rubricItem')
     POST_permissions_fields = ('testCategory',)
     read_only_fields = ('modified', 'instances',)
     extra_kwargs = {"text": {"trim_whitespace": False}, "description": {

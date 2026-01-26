@@ -128,6 +128,7 @@ class ExecutionResult:
         execution_time: float = 0.0,
         output_data: Optional[Dict[str, Any]] = None,
         system_logs: Optional[List[str]] = None,
+        tests: Optional[List[Dict[str, Any]]] = None,
     ):
         self.success = success
         self.stdout = stdout
@@ -136,6 +137,7 @@ class ExecutionResult:
         self.execution_time = execution_time
         self.output_data = output_data or {}
         self.system_logs = system_logs or []
+        self.tests = tests or []
     
     @classmethod
     def error(cls, message: str) :
@@ -203,6 +205,7 @@ class ExecutionResult:
             "execution_time": self.execution_time,
             "output_data": self.output_data,
             "system_logs": self.system_logs,
+            "tests": self.tests,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -234,6 +237,41 @@ class Executor(abc.ABC):
     
     # Docker client (singleton)
     _docker_client: Optional[DockerClient] = None
+
+    @classmethod
+    def parse_test_results(cls, stdout: str, stderr: str) -> Tuple[str, str, List[Dict[str, Any]]]:
+        """
+        Extract test results formatted as <<<TEST_RESULT_JSON_START>>>{...}<<<TEST_RESULT_JSON_END>>>
+        from stdout or stderr.
+        
+        Returns:
+            Tuple containing:
+            - Cleaned stdout (markers removed)
+            - Cleaned stderr (markers removed)
+            - List of parsed test results
+        """
+        test_results = []
+        # Non-greedy matching across lines
+        test_regex = re.compile(r'<<<TEST_RESULT_JSON_START>>>(.*?)<<<TEST_RESULT_JSON_END>>>', re.DOTALL)
+        
+        def replace_and_capture(match):
+            try:
+                json_str = match.group(1)
+                data = json.loads(json_str)
+                if isinstance(data, list):
+                    test_results.extend(data)
+                else:
+                    test_results.append(data)
+            except Exception as e:
+                logger.error(f"Failed to parse test result: {e}. Content: {json_str[:500]}")
+            return "" # Remove from output
+            
+        # Try to clean both streams
+        stdout_clean = test_regex.sub(replace_and_capture, stdout)
+        stderr_clean = test_regex.sub(replace_and_capture, stderr)
+        
+        return stdout_clean, stderr_clean, test_results
+
     
 
     NPM_CACHE_VOLUME_NAME = "codepost-npm-cache"
@@ -287,7 +325,7 @@ class Executor(abc.ABC):
         "python3": "python:3.12-slim",
         "javascript": "node:20-slim",
         "js": "node:20-slim",
-        "java": "openjdk:17-slim",
+        "java": "eclipse-temurin:17-jdk",
         "c": "gcc:latest",
         "cpp": "gcc:latest",
         "ruby": "ruby:3.2-slim",
@@ -794,6 +832,20 @@ class Executor(abc.ABC):
 
         # Input Data (Stdin)
         self.input_data = kwargs.get('input_data')
+        self.test_code = kwargs.get('test_code')
+        
+        # Example code: Overrides the target file's data for testing filled-out templates
+        example_code = kwargs.get('example_code')
+        if example_code:
+            # Create a mock file data with the example code
+            # This allows testing against custom code while keeping all other context
+            self.file = type('MockFile', (), {
+                'id': self.file.id,
+                'name': self.file.name,
+                'extension': self.file.extension,
+                'data': example_code,
+                'path': getattr(self.file, 'path', None),
+            })()
         
         additional_files = {}
 
@@ -1025,7 +1077,7 @@ class Executor(abc.ABC):
         return all_subclasses
     
     @classmethod
-    def factory(cls, file: File, image_name: Optional[str] = None) -> Optional['Executor']:
+    def factory(cls, file: File, image_name: Optional[str] = None, **kwargs) -> Optional['Executor']:
         """
         Factory method to get appropriate Executor subclass.
         
@@ -1037,7 +1089,7 @@ class Executor(abc.ABC):
             try:
                 result = subclass.is_executable(file_name=file.name, extension=file.extension, code=file.data)
                 if result:
-                    return subclass(file, image_name=image_name)
+                    return subclass(file, image_name=image_name, **kwargs)
             except:
                 # Skip subclasses that can't be instantiated or have broken is_executable
                 logger.exception("Failed to instantiate subclass")
@@ -1134,7 +1186,8 @@ class NotebookExecutor(Executor):
                 stderr=results_json.get("stderr", "") or stderr,
                 err=results_json.get("error"),
                 execution_time=results_json.get("execution_time", 0.0),
-                output_data=results_json.get("output_data", {})
+                output_data=results_json.get("output_data", {}),
+                tests=results_json.get("tests", [])
             )
             
         except json.JSONDecodeError:
@@ -1159,6 +1212,15 @@ class NotebookExecutor(Executor):
         Default uses EXECUTION_COMMAND class attribute + template as argument.
         """
         return self.EXECUTION_COMMAND + [template]
+    
+    def _needs_network(self, packages_to_install: List[str]) -> bool:
+        """
+        Determine if the container needs network access.
+        
+        Override in subclasses if needed (e.g., R always needs network for base packages).
+        Default returns True if there are packages to install.
+        """
+        return len(packages_to_install) > 0
 
     def execute(self) -> ExecutionResult:
         """
@@ -1189,11 +1251,12 @@ class NotebookExecutor(Executor):
         packages_to_install = self._detect_imports(nb)
         cells_b64 = self.prepare_notebook(nb, format="base64")
         
-        template = self._get_code_template(cells_b64, packages_to_install)
+        self.log(f"DEBUG: test_code length: {len(self.test_code or '')}")
+        template = self._get_code_template(cells_b64, packages_to_install, self.test_code or "")
         if not template:
             return ExecutionResult.error("Failed to get code template")
 
-        needs_network = len(packages_to_install) > 0
+        needs_network = self._needs_network(packages_to_install)
         
         base_command = self._get_execution_command(template)
         command = self._wrap_command_with_pre_script(base_command)
@@ -1251,7 +1314,19 @@ class NotebookExecutor(Executor):
             # Parse results from output
             self.log(f"Parsing execution results from stdout...")
             
+            # Parse standardized test results (e.g. from Java/C++ test runners injected into notebook)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            
             execution_result = self.extract_json_result(stdout, stderr)
+            
+            # Attach parsed tests if any found
+            if test_results:
+                execution_result.tests = test_results
+                # If we parsed tests successfully but failed to extract standard results (missing markers),
+                # we should consider this a success for testing purposes, as the harness might not populate output_data.
+                if execution_result.err and "missing markers" in execution_result.err:
+                    execution_result.err = None
+                    execution_result.success = True
             
             # Templates now output proper nbformat v4 format with cell_type
             # Just validate we got cells and return
@@ -1262,6 +1337,10 @@ class NotebookExecutor(Executor):
                 return execution_result
                 
             elif execution_result.err:
+                execution_result.system_logs = self.executor_logs
+                return execution_result
+            elif execution_result.tests:
+                # If we have tests, we can return the result even if output_data/cells are missing
                 execution_result.system_logs = self.executor_logs
                 return execution_result
             else:

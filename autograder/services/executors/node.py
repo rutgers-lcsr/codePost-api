@@ -166,9 +166,18 @@ class NodeNotebookExecutor(NotebookExecutor):
              pass
         return False
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()
         if not template:
             return None
         template = template.replace('{cells_b64}', code)
+        # Inject test code if provided
+        test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('utf-8') if test_code else ""
+        template = template.replace('{test_code_b64}', test_code_b64)
         return template
+    
+    def _get_execution_command(self, template: str) -> List[str]:
+        # Node needs the template written to a file first
+        template_b64 = base64.b64encode(template.encode('utf-8')).decode('utf-8')
+        cmd_str = f"echo '{template_b64}' | base64 -d > /tmp/notebook.js && node /tmp/notebook.js"
+        return ["sh", "-c", cmd_str]

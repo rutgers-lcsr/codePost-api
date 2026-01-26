@@ -85,18 +85,20 @@ class TestService:
 
             # 2. Get Execution Result (Cached or Fresh)
             # Hybrid Logic: If test case has input or specific dataset, run ephemeral execution.
-            if test_case.input or test_case.dataSet:
+            # 2. Get Execution Result (Cached or Fresh)
+            # Hybrid Logic: If test case has dataset, run ephemeral execution.
+            if test_case.dataSet:
                 execution_result = TestService._run_ephemeral_execution(target_file, test_case, user_id)
             else:
                 execution_result = TestService._get_or_run_execution(target_file, user_id)
             
             # 3. Verify Result
-            if test_case.type in ['io', 'io_cli']:
-                 verification = TestService.verify_io_test(test_case, execution_result)
-            elif test_case.type == 'unit':
+            if test_case.type == 'unit':
                  verification = TestService.verify_unit_test(test_case, execution_result)
+            elif test_case.type == 'script':
+                 verification = TestService.verify_script_test(test_case, execution_result)
             else:
-                return {"success": False, "error": f"Unsupported test type: {test_case.type}"}
+                return {"success": False, "error": f"Unsupported or Deprecated test type: {test_case.type}"}
 
             # 4. Save SubmissionTest Result
             # We use update_or_create to avoid duplicates for the same run
@@ -110,6 +112,9 @@ class TestService:
                     # "execution_time": execution_result.execution_time # Pending model update
                 }
             )
+
+            # 5. Apply Rubric Outcomes (Sync)
+            TestService._sync_rubric_outcome(submission, test_case, submission_test.passed, target_file)
 
             return {
                 "success": True,
@@ -126,6 +131,53 @@ class TestService:
                 "success": False, 
                 "error": str(e)
             }
+
+    @staticmethod
+    def _sync_rubric_outcome(submission: Submission, test_case: TestCase, passed: bool, target_file: File):
+        """
+        Syncs the test result with Rubric Comments.
+        If test fails -> Ensure Rubric Comment is applied (Create Comment).
+        If test passes -> Ensure Rubric Comment is NOT applied (Delete Comment).
+        """
+        if not test_case.rubricItem:
+            return
+
+        from core.models import Comment
+
+        # Find existing comments on this file linked to this rubric item
+        # We assume one comment per rubric item per file is sufficient.
+        existing_comments = Comment.objects.filter(
+            file=target_file,
+            rubricComment=test_case.rubricItem
+        )
+
+        if passed:
+            # If test passed, remove the deduction (comment)
+            if existing_comments.exists():
+                existing_comments.delete()
+        else:
+            # If test failed, ensure deduction exists
+            if not existing_comments.exists():
+                # Create a new comment
+                # Author: First admin of the course (Fallback)
+                author = submission.assignment.course.courseAdmins.first()
+                if not author:
+                     # Fallback if no admins? Rare.
+                     # Maybe allow null (if I changed model) or find a system user.
+                     # For now, log warning and skip?
+                     logger.warning(f"No admin found for course {submission.assignment.course.id}. Cannot create rubric comment.")
+                     return
+
+                Comment.objects.create(
+                    file=target_file,
+                    rubricComment=test_case.rubricItem,
+                    text=test_case.rubricItem.text, # Pre-fill text
+                    author=author,
+                    startLine=1,
+                    endLine=1,
+                    startChar=0,
+                    endChar=0
+                )
 
     @staticmethod
     def _get_target_file(submission: Submission, test_case: TestCase) -> Optional[File]:
@@ -217,8 +269,9 @@ class TestService:
         executor = ExecutorClass(
             file, 
             datasets=datasets, 
-            input_data=test_case.input,
-            target_cell_id= getattr(test_case, 'targetCellId', None)
+            input_data=None, # Legacy input field removed
+            target_cell_id= getattr(test_case, 'targetCellId', None),
+            test_code= test_case.testCode if test_case.type == 'script' else ""
         )
         result = executor.execute()
         
@@ -229,88 +282,11 @@ class TestService:
             "output_data": result.output_data,
             "execution_time": result.execution_time,
             "cached": False, 
-            "error": result.err
+            "error": result.err,
+            "tests": getattr(result, 'tests', [])
         }
 
-    @staticmethod
-    def verify_io_test(test_case: TestCase, execution_result: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Verifies I/O test criteria.
-        """
-        # 1. Output content check
-        # For Notebooks, 'stdout' in execution_result relies on the template aggregating it.
-        # Verified: notebook_template.py aggregates cells into 'stdout'.
-        
-        actual_output = execution_result.get('stdout', '')
-        
-        # Determine strictness
-        is_flexible = test_case.isFlexible
-        is_regexp = test_case.outputIsRegexp
-        expected = test_case.expectedOutput or ""
 
-        passed = False
-        logs = actual_output # Default logs is the output
-        
-        if is_regexp:
-            try:
-                # Regex search
-                if re.search(expected, actual_output, re.MULTILINE | re.DOTALL):
-                    passed = True
-            except re.error as e:
-                return {
-                    "passed": False,
-                    "logs": f"Invalid Regular Expression in Test Case: {str(e)}",
-                    "isError": True
-                }
-        else:
-            # Exact Match (or Flexible)
-            clean_actual = actual_output.strip() if is_flexible else actual_output
-            clean_expected = expected.strip() if is_flexible else expected
-            
-            if clean_actual == clean_expected:
-                passed = True
-                
-        # 2. Check Input (Not really 'verify', but we assume input was injected via STDIN if supported)
-        # Note: Executors support STDIN injection, but current test_case.input is for that.
-        # If we re-run, we need to pass input. But here we are using CACHED results.
-        # CRITICAL TODO: If test_case has INPUT, we cannot reuse a generic "no-input" cached run.
-        # We must detect if the cached run used the SAME input.
-        # For now, we assume no-input or ignore this constraint until we add Input Hashing to Cache.
-        
-        # 3. Plot Verification
-        if test_case.expectPlot:
-             # Check for images in output_data
-             output_data = execution_result.get('output_data', {})
-             # Notebooks put images in 'cells', standard scripts put in 'images' key?
-             # Standard executors often put images in output_data['images'] or similar?
-             # Let's check: Executor base checks for images?
-             # R script template puts it in output.
-             # We need a unified way to check "has images".
-             
-             has_images = False
-             
-             # Check 'cells' for display_data
-             if 'cells' in output_data:
-                 for cell in output_data['cells']:
-                     for output in cell.get('outputs', []):
-                         if output.get('output_type') == 'display_data':
-                             has_images = True
-                             break
-            
-             # Check 'images' list (if used by some executors)
-             if 'images' in output_data and output_data['images']:
-                 has_images = True
-                 
-             if not has_images:
-                 passed = False
-                 logs += "\n[Test Error] Expected a plot, but none was generated."
-
-
-        return {
-            "passed": passed,
-            "logs": logs,
-            "isError": execution_result.get('error') is not None
-        }
 
     @staticmethod
     def verify_unit_test(test_case: TestCase, execution_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -336,4 +312,55 @@ class TestService:
             "passed": passed,
             "logs": logs,
             "isError": is_error
+        }
+    @staticmethod
+    def verify_script_test(test_case: TestCase, execution_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Verifies Custom Script Tests.
+        Parses the JSON results returned by the test framework (e.g. from Tester class).
+        """
+        tests = execution_result.get('tests', [])
+        
+        # Combine logs
+        stdout = execution_result.get('stdout', '')
+        stderr = execution_result.get('stderr', '')
+        # Only parse tests if we have them
+        
+        if not tests:
+            # Maybe the script failed to run or produced no output
+            passed = False
+            logs = f"{stdout}\n{stderr}".strip()
+            if not logs:
+                logs = "[Error] Test script produced no output and no test results found."
+            
+            return {
+                "passed": False,
+                "logs": logs,
+                "isError": execution_result.get('error') is not None
+            }
+            
+        # Aggregate results
+        # If ANY test failed, the whole TestCase fails (strict mode for now)
+        all_passed = all(t.get('passed', False) for t in tests)
+        
+        # Build aggregated logs
+        log_parts = []
+        for t in tests:
+            status = "✓" if t.get('passed') else "✗"
+            name = t.get('name', 'Test')
+            score = f"{t.get('score', 0)}/{t.get('max_score', 0)}"
+            log_parts.append(f"{status} {name}: {score}")
+            if t.get('output'):
+                log_parts.append(f"   Output: {t.get('output')}")
+            if t.get('error'):
+                 log_parts.append(f"   Error: {t.get('error')}")
+        
+        # Append system logs if error existed
+        if execution_result.get('error'):
+             log_parts.append(f"\nSystem Error: {execution_result.get('error')}")
+             
+        return {
+            "passed": all_passed,
+            "logs": "\n".join(log_parts),
+            "isError": execution_result.get('error') is not None
         }

@@ -28,10 +28,17 @@ template_log(paste("/root/shared exists: ", dir_exists("/root/shared")))
 if (dir_exists("/work")) {
    setwd("/work")
    template_log(paste("Working directory set to: ", getwd()))
-}
-else {
+} else {
    template_log("/work directory does not exist.")
-   q(1)
+   q(save="no", status=1)
+}
+
+# Install required packages if not present
+required_pkgs <- c("base64enc", "jsonlite")
+new_pkgs <- required_pkgs[!(required_pkgs %in% installed.packages()[,"Package"])]
+if(length(new_pkgs)) {
+    template_log(paste("Installing required packages:", paste(new_pkgs, collapse = ", ")))
+    install.packages(new_pkgs, repos = "https://cloud.r-project.org")
 }
 
 library(base64enc)
@@ -46,8 +53,7 @@ if (length(packages_to_install) > 0) {
    for (pkg in packages_to_install) {
        message(paste0("CODEPOST_AUTO_INSTALL_SUCCESS: ", pkg))
    }
-}
-else {
+} else {
    template_log("No packages to install.")
 }
 
@@ -71,17 +77,21 @@ if (length(packages_to_install) > 0) {
 flush.console()
 
 # decode cells
-decoded <- base64decode('{cells_b64}')
+decoded_raw <- base64decode('{cells_b64}')
+decoded <- rawToChar(decoded_raw)
 
-# parse cells
-notebook_json <- fromJSON(decoded)
+# parse cells - use simplifyVector=FALSE to get proper list structure
+notebook_json <- fromJSON(decoded, simplifyVector = FALSE)
 
-# check if cells are valid
-if (!is.list(notebook_json) || !all(sapply(notebook_json, function(x) is.list(x) && "cell_type" %in% names(x)))) {
-   template_log("Invalid cells.")
-   q(1)
+# check if cells are valid - use 'type' key as that's what prepare_notebook uses
+if (!is.list(notebook_json)) {
+    template_log("notebook_json is not a list")
+    q(save="no", status=1)
 }
 results <- list()
+
+# Use global environment for cell execution (like Jupyter R kernels do)
+cell_env <- globalenv()
 
 # check if cells are too many
 if (length(notebook_json) > MAX_CELLS) {
@@ -94,9 +104,6 @@ if (length(notebook_json) > MAX_CELLS) {
     NBS_OUTPUT_LIMIT <- 10000  # Max characters in output 10kb
     execution_count <- 0
     
-    # Environment for executing cells (shared namespace like Jupyter)
-    cell_env <- new.env(parent = globalenv())
-    
     for (cell in notebook_json) {
         if (cell$type == "markdown") {
             results <- c(results, list(list(
@@ -106,7 +113,12 @@ if (length(notebook_json) > MAX_CELLS) {
         }
         if (cell$type == "code") {
             execution_count <- execution_count + 1
-            cell_source <- cell$source
+            # Handle source as array or string
+            cell_source <- if (is.list(cell$source) || is.character(cell$source) && length(cell$source) > 1) {
+                paste(unlist(cell$source), collapse = "")
+            } else {
+                cell$source
+            }
             
             outputs <- list()
             success <- TRUE
@@ -119,6 +131,27 @@ if (length(notebook_json) > MAX_CELLS) {
             # Create a temp file for potential plot output
             plot_file <- tempfile(fileext = ".png")
             
+            # Parse and eval the code BEFORE any output capture
+            # R's sink() interferes with eval() when capturing output
+            parsed <- tryCatch({
+                parse(text = cell_source)
+            }, error = function(e) {
+                success <<- FALSE
+                error_msg <<- conditionMessage(e)
+                NULL
+            })
+            
+            if (!is.null(parsed) && length(parsed) > 0) {
+                for (expr in parsed) {
+                    tryCatch({
+                        eval(expr, envir = globalenv())
+                    }, error = function(e) {
+                        success <<- FALSE
+                        error_msg <<- conditionMessage(e)
+                    })
+                }
+            }
+            
             tryCatch({
                 # Open graphics device to capture plots
                 png(plot_file, width = 800, height = 600, res = 100)
@@ -127,38 +160,22 @@ if (length(notebook_json) > MAX_CELLS) {
                 sink(stdout_file, type = "output")
                 sink(stderr_file, type = "message")
                 
-                # Parse and evaluate the code
-                # Split by newlines and evaluate each expression
-                parsed <- tryCatch({
-                    parse(text = cell_source)
-                }, error = function(e) {
-                    success <<- FALSE
-                    error_msg <<- conditionMessage(e)
-                    NULL
-                })
-                
+                # Parse and evaluate the code - already done above, just need output
                 if (!is.null(parsed) && length(parsed) > 0) {
                     last_value <- NULL
+                    # Directly evaluate the parsed code in global environment
                     for (i in seq_along(parsed)) {
                         expr <- parsed[[i]]
-                        last_value <- eval(expr, envir = cell_env)
-                        
-                        # For the last expression, print if it's not invisible
-                        if (i == length(parsed)) {
-                            # Check if result should be displayed
-                            if (!is.null(last_value)) {
-                                # Use print for data frames, tibbles, etc.
-                                if (inherits(last_value, c("data.frame", "tbl", "tbl_df"))) {
-                                    print(last_value)
-                                } else if (is.vector(last_value) || is.matrix(last_value) || is.array(last_value)) {
-                                    print(last_value)
-                                } else if (!is.function(last_value) && !is.environment(last_value)) {
-                                    print(last_value)
-                                }
-                            }
-                        }
+                        last_value <- tryCatch({
+                            eval(expr)
+                        }, error = function(e) {
+                            success <<- FALSE
+                            error_msg <<- conditionMessage(e)
+                            NULL
+                        })
                     }
                 }
+                
                 
             }, error = function(e) {
                 success <<- FALSE
@@ -270,6 +287,64 @@ if (length(notebook_json) > MAX_CELLS) {
 end_time <- Sys.time()
 execution_time <- as.numeric(difftime(end_time, start_time, units = "secs"))
 
+# ============= Tester Framework =============
+test_results <- list()
+
+run_test <- function(name, points, description, fn = NULL) {
+    if (is.function(description)) {
+        fn <- description
+        description <- NULL
+    }
+
+    result <- list(
+        name = name,
+        max_score = points,
+        description = description,
+        score = 0,
+        passed = FALSE,
+        status = "failed",
+        error = ""
+    )
+    
+    tryCatch({
+        # Re-assign fn's environment to cell_env so it can access notebook functions
+        environment(fn) <- cell_env
+        fn()
+        result$passed <- TRUE
+        result$score <- points
+        result$status <- "passed"
+    }, error = function(e) {
+        result$error <<- conditionMessage(e)
+    })
+    
+    test_results <<- c(test_results, list(result))
+}
+
+output_test_results <- function() {
+    cat('<<<TEST_RESULT_JSON_START>>>')
+    cat(toJSON(test_results, auto_unbox = TRUE))
+    cat('<<<TEST_RESULT_JSON_END>>>')
+}
+# ============================================
+
+# Execute test code if provided
+test_code_b64 <- '{test_code_b64}'
+if (nchar(test_code_b64) > 0) {
+    tryCatch({
+        test_code <- rawToChar(base64decode(test_code_b64))
+        if (nchar(trimws(test_code)) > 0) {
+            eval(parse(text = test_code), envir = cell_env)
+        }
+    }, error = function(e) {
+        run_test("Test Script Execution", 0, function() {
+            stop(paste("Failed to run test script:", conditionMessage(e)))
+        })
+    })
+}
+
+# Output test results
+output_test_results()
+
 final_result <- list(
     success = TRUE, # If we got here without crashing, we consider it a success at the notebook level
     stdout = "",
@@ -284,6 +359,5 @@ final_result <- list(
 cat('<<<RESULTS_START>>>\n')
 cat(toJSON(final_result, auto_unbox = TRUE, null = "null"))
 cat('\n<<<RESULTS_END>>>\n')
-
 
 

@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 @shared_task
-def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: bool = False):
+def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: bool = False, test_code: str = None, example_code: str = None):
     try:
         file_obj = File.objects.get(pk=file_id)
         user = User.objects.get(pk=user_id)
@@ -17,7 +17,7 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
             if cached:
                 return cached.get_cached_formated_response(file_obj)
 
-        executor = Executor.factory(file_obj)
+        executor = Executor.factory(file_obj, test_code=test_code, example_code=example_code)
         if not executor:
             return {"error": f"No executor found for file: {file_obj.name}"}
         

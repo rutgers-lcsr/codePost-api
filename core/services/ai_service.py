@@ -202,6 +202,151 @@ Context:
                 error=error_msg
             )
     
+    LANGUAGE_EXAMPLES = {
+        "python": """@test("Test Name", points=10)
+def test_function():
+    assert func() == expected""",
+        "java": """@Test(name="Test Name", points=10)
+public void testFunction() {
+    assertEquals(expected, func());
+}""",
+        "cpp": """TEST("Test Name", 10) {
+    ASSERT_EQ(expected, func());
+}""",
+        "c": """TEST("Test Name", 10) {
+    // Uses GoogleTest-style macros via wrapper
+    ASSERT_EQ(expected, func());
+}""",
+        "javascript": """test("Test Name", 10, function() {
+    if (func() !== expected) {
+        throw new Error("Expected " + expected);
+    }
+});""",
+        "node": """test("Test Name", 10, function() {
+    if (func() !== expected) {
+        throw new Error("Expected " + expected);
+    }
+});""",
+        "php": """Tester::test("Test Name", 10.0, function() {
+    if (func() !== expected) {
+        throw new Exception("Expected " + expected);
+    }
+});""",
+        "r": """run_test("Test Name", 10.0, function() {
+    if (func() != expected) {
+        stop("Expected " + expected)
+    }
+})""",
+        "ruby": """run_test("Test Name", 10) do
+    result = func()
+    raise "Expected #{expected}" unless result == expected
+end"""
+    }
+
+    TEST_GENERATION_PROMPT = """You are an expert autograder for a Computer Science course.
+Your task is to generate a robust test script for a student submission file: {target_filename}.
+The test script should verify the correctness of the student's code based on the provided context.
+
+CRITICAL RULES:
+1. You MUST use the exact testing harness pattern provided in the example below.
+2. Do NOT import ANY external testing libraries (like unittest, pytest, RSpec, JUnit, etc.).
+3. Do NOT define your own `TestCase` classes or custom runner logic. Use the provided top-level functions or macros ONLY.
+4. Do NOT attempt to parse, read, or import the student submission file (e.g., do not parse JSON or use nbformat/json libraries).
+5. ASSUME all student functions and classes are ALREADY LOADED and available in the global scope. Call them directly.
+6. If the example uses `@test`, use `@test`. If it uses `Tester::test`, use `Tester::test`.
+7. Return ONLY the code for the test script. No markdown formatting, no explanations.
+
+Context:
+- Context File (Solution/Spec): {context_filename}
+{context_content}
+
+Target File to Test: {target_filename}
+Language: {language}
+
+Language-Specific Test Harness Example ({language}):
+{language_example}
+
+Based on the context (logic to test) and the example harness above, generate the test script.
+"""
+
+    async def generate_test_script(
+        self,
+        context_file_content: str,
+        context_filename: str,
+        target_filename: str,
+        language: str = "python"
+    ) -> GenerationResult:
+        """
+        Generate a test script using the configured AI provider.
+        
+        Args:
+            context_file_content: Content of the solution/spec file.
+            context_filename: Name of the solution/spec file.
+            target_filename: Name of the student file to test.
+            language: Target language.
+            
+        Returns:
+            GenerationResult with generated script.
+        """
+        if not self.is_configured:
+            return GenerationResult(
+                text="",
+                success=False,
+                error="AI is not configured for this course"
+            )
+            
+        try:
+            # Select appropriate example or fallback to python
+            lang_key = language.lower()
+            if lang_key not in self.LANGUAGE_EXAMPLES:
+                # Try to map common aliases
+                if lang_key in ['py']: lang_key = 'python'
+                elif lang_key in ['js', 'node']: lang_key = 'javascript'
+                elif lang_key in ['c++']: lang_key = 'cpp'
+            
+            example = self.LANGUAGE_EXAMPLES.get(lang_key, self.LANGUAGE_EXAMPLES['python'])
+
+            system_prompt = self.TEST_GENERATION_PROMPT.format(
+                context_filename=context_filename,
+                context_content=context_file_content,
+                target_filename=target_filename,
+                language=language,
+                language_example=example
+            )
+            
+            user_prompt = f"Generate a {language} test script for {target_filename}."
+            
+            # Call the appropriate provider
+            if self.provider == 'gemini':
+                text = await self._call_gemini(system_prompt, user_prompt)
+            elif self.provider == 'openai':
+                text = await self._call_openai(system_prompt, user_prompt)
+            elif self.provider == 'ollama':
+                text = await self._call_ollama(system_prompt, user_prompt)
+            else:
+                text = await self._call_portkey(system_prompt, user_prompt)
+                
+            # Strip markdown code blocks if present
+            text = text.strip()
+            if text.startswith("```"):
+                lines = text.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                text = "\n".join(lines)
+                
+            return GenerationResult(text=text, success=True)
+            
+        except Exception as e:
+            error_msg = self._parse_error(e)
+            logger.error(f"AI test generation failed: {e}", exc_info=True)
+            return GenerationResult(
+                text="",
+                success=False,
+                error=error_msg
+            )
+
     def _parse_error(self, e: Exception) -> str:
         """Parse exception into user-friendly error message."""
         error_str = str(e).lower()

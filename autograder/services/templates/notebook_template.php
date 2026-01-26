@@ -1,6 +1,7 @@
 <?php
 
 $CELLS_B64 = "{cells_b64}";
+$TEST_CODE_B64 = "{test_code_b64}";
 
 $cells_json = base64_decode($CELLS_B64);
 $cells = json_decode($cells_json, true);
@@ -9,6 +10,50 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     echo "Invalid JSON";
     exit(1);
 }
+
+// ============= Tester Framework =============
+class Tester {
+    private static $results = [];
+    
+    public static function test(string $name, float $points, $description, $fn = null): void {
+        if (is_callable($description)) {
+            $fn = $description;
+            $description = null;
+        }
+
+        $result = [
+            "name" => $name,
+            "max_score" => $points,
+            "description" => $description,
+            "score" => 0.0,
+            "passed" => false,
+            "status" => "failed",
+            "error" => ""
+        ];
+        
+        try {
+            $fn();
+            $result["passed"] = true;
+            $result["score"] = $points;
+            $result["status"] = "passed";
+        } catch (Throwable $e) {
+            $result["error"] = $e->getMessage();
+        }
+        
+        self::$results[] = $result;
+    }
+    
+    public static function getResults(): array {
+        return self::$results;
+    }
+    
+    public static function outputResults(): void {
+        echo "<<<TEST_RESULT_JSON_START>>>";
+        echo json_encode(self::$results);
+        echo "<<<TEST_RESULT_JSON_END>>>";
+    }
+}
+// ============================================
 
 $results = [];
 $execution_count = 0;
@@ -30,18 +75,12 @@ foreach ($cells as $cell) {
         $start_err = error_get_last();
         
         try {
-            // Remove opening <?php tag if present as eval doesn't like it usually, 
-            // but users might include it. 
-            // Actually eval in PHP executes code as PHP without tags except if ?\> is used.
-            // But typical PHP notebook cells are just code.
-            // Handling "return" for last value is tricky in PHP eval.
-            
-            // Allow variable sharing: eval runs in current scope.
-            // But strict types etc might affect it.
-            
-            $result_val = eval($source);
+            // Strip PHP opening/closing tags for eval
+            $clean_source = preg_replace('/<\?php\s*/', '', $source);
+            $clean_source = preg_replace('/<\?\s*/', '', $clean_source);
+            $clean_source = preg_replace('/\?>\s*/', '', $clean_source);
+            $result_val = eval($clean_source);
             if ($result_val === false && ($err = error_get_last()) && $err !== $start_err) {
-                 // Eval returned false and error occurred
                  throw new Exception($err['message']);
             }
         } catch (Throwable $e) {
@@ -51,10 +90,6 @@ foreach ($cells as $cell) {
         }
         
         $stdout_str = ob_get_clean();
-        
-        // PHP stderr is hard to capture cleanly separated from stdout in CLI usually goes to display
-        // unless config log_errors?
-        // For simplicity, treat captured output as stdout.
         
         if (!empty($stdout_str)) {
              $outputs[] = [
@@ -81,6 +116,23 @@ foreach ($cells as $cell) {
         ];
     }
 }
+
+// Execute test code if provided
+if (!empty($TEST_CODE_B64)) {
+    $test_code = base64_decode($TEST_CODE_B64);
+    if ($test_code !== false && !empty(trim($test_code))) {
+        try {
+            eval($test_code);
+        } catch (Throwable $e) {
+            Tester::test("Test Script Execution", 0, function() use ($e) {
+                throw new Exception("Failed to run test script: " . $e->getMessage());
+            });
+        }
+    }
+}
+
+// Output test results
+Tester::outputResults();
 
 $final_result = [
   "success" => true,

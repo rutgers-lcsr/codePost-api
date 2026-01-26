@@ -132,9 +132,25 @@ class RubyNotebookExecutor(NotebookExecutor):
              pass
         return False
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()
         if not template:
             return None
         template = template.replace('{cells_b64}', code)
+        
+        # Inject test code
+        if test_code:
+            test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('ascii')
+            template = template.replace('{test_code_b64}', test_code_b64)
+        else:
+            template = template.replace('{test_code_b64}', '')
+        
         return template
+    
+    def _get_execution_command(self, template: str) -> List[str]:
+        """Write template to file inside container and execute with Ruby interpreter."""
+        # Base64 encode and write inside container, same pattern as Node.js
+        template_b64 = base64.b64encode(template.encode('utf-8')).decode('utf-8')
+        cmd_str = f"echo '{template_b64}' | base64 -d > /tmp/notebook.rb && ruby /tmp/notebook.rb"
+        return ["sh", "-c", cmd_str]
+

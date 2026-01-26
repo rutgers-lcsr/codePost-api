@@ -3,6 +3,7 @@ const vm = require("vm");
 
 // Placeholder for base64 encoded cells
 const cellsB64 = "{cells_b64}";
+const testCodeB64 = "{test_code_b64}";
 
 // Decode cells
 const cellsJson = Buffer.from(cellsB64, "base64").toString("utf-8");
@@ -13,6 +14,43 @@ try {
     console.error("Failed to parse cells JSON");
     process.exit(1);
 }
+
+// ============= Tester Framework =============
+const testResults = [];
+
+function test(name, points, description, fn) {
+    if (typeof description === 'function') {
+        fn = description;
+        description = null;
+    }
+    const result = {
+        name: name,
+        max_score: points,
+        description: description,
+        score: 0,
+        passed: false,
+        status: "failed",
+        error: ""
+    };
+
+    try {
+        fn();
+        result.passed = true;
+        result.score = points;
+        result.status = "passed";
+    } catch (e) {
+        result.error = e.message || String(e);
+    }
+
+    testResults.push(result);
+}
+
+function outputTestResults() {
+    console.log("<<<TEST_RESULT_JSON_START>>>");
+    console.log(JSON.stringify(testResults));
+    console.log("<<<TEST_RESULT_JSON_END>>>");
+}
+// ============================================
 
 const results = [];
 const context = vm.createContext({
@@ -32,6 +70,7 @@ const context = vm.createContext({
     require: require,
     process: process,
     Buffer: Buffer,
+    test: test, // Expose test function to VM context
 });
 
 let currentStdout = null;
@@ -92,8 +131,6 @@ async function run() {
                     traceback: errorVal.stack ? errorVal.stack.split("\n") : [],
                 });
             } else if (resultValue !== undefined) {
-                // Simulate execute_result if needed, but usually console.log is enough for JS.
-                // Jupyter JS kernels usually output the last expression
                 outputs.push({
                     output_type: "execute_result",
                     execution_count: executionCount,
@@ -113,11 +150,28 @@ async function run() {
         }
     }
 
+    // Execute test code if provided
+    if (testCodeB64 && testCodeB64.length > 0) {
+        try {
+            const testCode = Buffer.from(testCodeB64, "base64").toString("utf-8");
+            if (testCode.trim().length > 0) {
+                vm.runInContext(testCode, context);
+            }
+        } catch (e) {
+            test("Test Script Execution", 0, () => {
+                throw new Error("Failed to run test script: " + (e.message || e));
+            });
+        }
+    }
+
+    // Output test results
+    outputTestResults();
+
     const finalResult = {
         success: true,
         stdout: "",
         stderr: "",
-        execution_time: 0, // Calculated by runner
+        execution_time: 0,
         output_data: {
             cells: results,
             notebook: "",

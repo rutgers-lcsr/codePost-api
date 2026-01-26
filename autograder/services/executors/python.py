@@ -59,7 +59,7 @@ class PythonExecutor(Executor):
         # Fallback if handler not available or not working
         return []
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()
         if not template:
             return None
@@ -69,6 +69,7 @@ class PythonExecutor(Executor):
             template = template.replace("packages_to_install = []", f"packages_to_install = {repr(packages_to_install)}")
         
         template = template.replace("#{FILLER_CODE}", code)
+        template = template.replace("#{TEST_CODE}", test_code)
         return template
 
     def execute(self) -> ExecutionResult:
@@ -89,7 +90,7 @@ class PythonExecutor(Executor):
         packages_to_install = self._detect_imports(code)
 
         # Get code template
-        template = self._get_code_template(code, packages_to_install)
+        template = self._get_code_template(code, packages_to_install, self.test_code or "")
         if not template:
             return ExecutionResult.error("Failed to get code template")
 
@@ -171,6 +172,10 @@ class PythonExecutor(Executor):
             
             stdout = img_regex.sub(replace_and_capture, stdout)
             
+            # Parse Test Results using base class method
+            # This handles both stderr (where tests are usually printed) and stdout
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            
             output_data = {}
             if images:
                 output_data['image/png'] = images[-1] # Backward compat
@@ -201,7 +206,8 @@ class PythonExecutor(Executor):
                 err=None if success else f"Non-zero exit code: {result.get('StatusCode', 1)}",
                 execution_time=execution_time,
                 output_data=output_data,
-                system_logs=full_system_logs
+                system_logs=full_system_logs,
+                tests=test_results
             )
 
             return result
@@ -269,7 +275,7 @@ class PythonNotebookExecutor(NotebookExecutor):
         # Fallback for now if needed, but redundant with Handlers
         return []
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         """Get the Python notebook template with cells and packages substituted."""
         template = super()._get_code_template() # Corrected: Base Executor takes no args
         if not template:
@@ -281,4 +287,5 @@ class PythonNotebookExecutor(NotebookExecutor):
             template = template.replace("packages_to_install = []", f"packages_to_install = {repr(packages_to_install)}")
 
         template = template.replace('{cells_b64}', code)
+        template = template.replace("#{TEST_CODE}", test_code)
         return template
