@@ -828,6 +828,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     context_file_id = request.data.get('context_file_id')
     context_file_name = request.data.get('context_file_name') # Alternative lookup
     language = request.data.get('language', 'python')
+    rubric_text = request.data.get('rubric_text', '')
     
     if not target_filename:
         return Response({'error': 'target_filename is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -850,7 +851,7 @@ class AssignmentViewSet(ListProtectedViewSet):
              context_name = af.name
              
     # Notebook Language Detection
-    # If target is a notebook, we need to know the kernel language to provide correct examples
+    #If target is a notebook, we need to know the kernel language to provide correct examples
     # Target Code Extraction & Language Detection
     target_code = None
     
@@ -905,7 +906,8 @@ class AssignmentViewSet(ListProtectedViewSet):
             context_filename=context_name,
             target_filename=target_filename,
             target_code=target_code,
-            language=language
+            language=language,
+            rubric_text=rubric_text
         )
         
         if result.success:

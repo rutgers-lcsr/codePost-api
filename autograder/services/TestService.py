@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import TestCase, Submission, SubmissionTest, File, CachedExecutionResult
-from autograder.services.executors import get_executor_class, ExecutionResult
+from autograder.services.executors import get_executor_class, ExecutionResult, Executor
 
 logger = logging.getLogger(__name__)
 
@@ -16,54 +16,264 @@ class TestService:
     """
 
     @staticmethod
+    @staticmethod
     def run_suite(submission_id: int, test_case_ids: Optional[List[int]] = None, user_id: str = None) -> List[Dict[str, Any]]:
         """
         Runs a suite of tests for a submission.
-        
-        Args:
-            submission_id: ID of the submission to run tests for.
-            test_case_ids: Optional list of specific test case IDs to run. 
-                          If None, runs all active tests for the assignment.
-            user_id: ID of the user triggering the run (for tracking/logging).
-            
-        Returns:
-            List of result dictionaries (same format as run_test output).
+        Optimized to group tests by Category and run each category script only once.
         """
         results = []
         try:
             submission = Submission.objects.get(id=submission_id)
             assignment = submission.assignment
-            
+
+            # 1. Identify relevant TestCategories
             if test_case_ids:
-                test_cases = TestCase.objects.filter(id__in=test_case_ids)
+                # specific tests requested
+                target_tests = TestCase.objects.filter(id__in=test_case_ids).select_related('testCategory')
             else:
-                # Run all active tests for the assignment's category
-                # Assuming tests are linked via TestCategory -> Assignment
-                # Legacy logic: assignment.testCategory_set.all().testCase_set.all()
-                test_cases = TestCase.objects.filter(testCategory__assignment=assignment)
-                
-            logger.info(f"Running suite of {test_cases.count()} tests for submission {submission_id}")
+                # all tests for assignment
+                target_tests = TestCase.objects.filter(testCategory__assignment=assignment).select_related('testCategory')
             
-            # Optimization: 
-            # We could group tests by target file to bulk-run or pre-cache the "No Input" run.
-            # But run_test() already handles caching fairly well.
-            # Let's trust run_test() for now and optimize if needed.
+            if not target_tests.exists():
+                return []
+
+            logger.info(f"Running suite of {target_tests.count()} tests for submission {submission_id}")
+
+            # 2. Ingestion Phase (Pre-calculated results)
+            TestService.ingest_test_results(submission)
+
+            # 3. Group by Category
+            category_map = {} # category_id -> list of Reference TestCase objects
+            for test in target_tests:
+                if test.testCategory_id not in category_map:
+                    category_map[test.testCategory_id] = {
+                        'category': test.testCategory,
+                        'tests': []
+                    }
+                category_map[test.testCategory_id]['tests'].append(test)
+
+            # 4. Execute per Category
+            all_results = []
             
-            for test_case in test_cases:
-                # We reuse run_test logic to ensure consistency
-                result = TestService.run_test(test_case.id, submission.id, user_id)
+            for cat_id, data in category_map.items():
+                category = data['category']
+                category_tests = data['tests'] # Tests we explicitly want results for
                 
-                # Append metadata needed for the frontend/legacy response format if necessary
-                result['testCaseId'] = test_case.id
-                result['testCaseDescription'] = test_case.description
-                results.append(result)
-                
-            return results
-            
+                # Check if this category uses a script (modern) or individual tests (legacy/unit)
+                # If parsed tests exist, it implies a script.
+                if category.testScript:
+                    # Run ONCE for the category
+                    # We pick the first test as a "representative" to trigger the run, 
+                    # but we really just need the category context.
+                    # However, _run_ephemeral_execution currently takes a test_case.
+                    # We should probably pass one test_case to satisfy the signature, 
+                    # and rely on the Executor to run the WHOLE script (which it does).
+                    
+                    # Smart Representative Selection:
+                    # Find the most common target file to avoid outliers (e.g. one test targeting wrong file)
+                    # changing the executor type for the whole category.
+                    from collections import Counter
+                    
+                    # We need to resolve target file for each test to check distinctness
+                if category_tests:
+                    logger.info(f"DEBUG: Category '{category_tests[0].testCategory.name}' Expected Tests: {[t.functionName for t in category_tests]}")
+                    
+                    # Optimization: Check test.fileName first (explicit target).
+                    
+                    target_counts = Counter()
+                    # Determine target file
+                    most_common_fname = None
+                    category = category_tests[0].testCategory # Assuming category_tests is not empty here
+
+                    if category.targetFileName:
+                        most_common_fname = category.targetFileName
+                    else:
+                        # Fallback to a generic name if no files in assignment
+                        assignment_files = list(submission.assignment.files.all())
+                        if assignment_files:
+                            most_common_fname = assignment_files[0].name
+                        else:
+                            most_common_fname = "python.py" 
+
+                    # Find a representative test case
+                    representative_test = category_tests[0]
+                    
+                    # Manual file lookup to ensure we respect most_common_fname override
+                    target_file_obj = None
+                    submission_files = list(submission.files.all())
+                    if most_common_fname:
+                        target_file_obj = next((f for f in submission_files if f.name == most_common_fname), None)
+                    
+                    if not target_file_obj:
+                         # Fallback to test case logic if not found (or if explicit target is missing from submission)
+                         target_file_obj = TestService._get_target_file(submission, representative_test)
+
+                    # Run execution
+                    exec_result_dict = TestService._run_ephemeral_execution(
+                        target_file_obj, # Use manual lookup
+                        representative_test,
+                        user_id
+                    )
+                    
+                    # 5. Process Results
+                    # The executor returns a list of individual test results in 'tests' key
+                    # Format: [{name: 'test_foo', passed: True, score: 5, ...}, ...]
+                    raw_test_results = exec_result_dict.get('tests', [])
+                    
+                    # Map raw results to DB TestCases
+                    # We want to match by functionName
+                    
+                    # Create a map of functionName -> TestCase for this category
+                    # Get ALL tests for this category to maximize coverage, even if not requested?
+                    # Yes, might as well update all if we have the data.
+                    all_category_tests = category.testCases.all()
+                    db_test_map = {t.functionName: t for t in all_category_tests}
+                    
+                    processed_ids = set()
+                    
+
+                    # Handle missing tests logic with Auto-Sync
+                    stdout_log = exec_result_dict.get('stdout', '')
+                    stderr_log = exec_result_dict.get('stderr', '')
+                    combined_log = (stdout_log + "\n" + stderr_log).strip()
+                    if len(combined_log) > 1000:
+                        combined_log = combined_log[:1000] + "... (truncated)"
+
+                    # 5a. Determine Sync Eligibility
+                    script_success = exec_result_dict.get('success', False)
+                    script_crashed = False
+                    # Check for synthetic crash test
+                    for r in raw_test_results:
+                        if r.get('name') == "Test Script Execution" and r.get('status') == 'error':
+                            script_crashed = True
+                            break
+                    
+                    should_sync = script_success and not script_crashed
+                    
+                    # 5b. Process Results & Create New Tests
+                    for raw_res in raw_test_results:
+                        func_name = raw_res.get('name') 
+                        if not func_name: continue
+
+                        # Robust Matching Logic
+                        test_case = db_test_map.get(func_name)
+                        
+                        if not test_case:
+                             # Try description match
+                             test_case = next((t for t in all_category_tests if t.description == func_name), None)
+                        
+                        if not test_case:
+                             # Try normalized match
+                             def normalize(s): return s.lower().replace('_', '').replace(' ', '')
+                             norm_func = normalize(func_name)
+                             test_case = next((t for t in all_category_tests if normalize(t.functionName) == norm_func or normalize(t.description) == norm_func), None)
+
+                        if not test_case:
+                            # Still no match -> Create New Test (if syncing)
+                            if should_sync:
+                                try:
+                                    logger.info(f"Auto-creating new test case '{func_name}' for category '{category.name}'")
+                                    test_case = TestCase.objects.create(
+                                        testCategory=category,
+                                        functionName=func_name,
+                                        description=raw_res.get('description', func_name),
+                                        pointsPass=raw_res.get('max_score', 1.0),
+                                        type='script', # Assume script type
+
+                                    )
+                                    # Add to tracking
+                                    all_category_tests = list(all_category_tests) # Cast to list if queryset
+                                    all_category_tests.append(test_case)
+                                    processed_ids.add(test_case.id)
+                                except Exception as e:
+                                    logger.error(f"Failed to auto-create test case {func_name}: {e}")
+                                    continue
+                            else:
+                                continue
+                        
+                        processed_ids.add(test_case.id)
+                        
+                        # Save result
+                        submission_test = TestService._save_test_result(
+                            submission, 
+                            test_case, 
+                            raw_res.get('passed', False),
+                            raw_res.get('score', 0),
+                            raw_res.get('error') or raw_res.get('output', ''), # logs
+                            raw_res.get('status', 'failed') == 'error', # isError
+                            raw_res.get('max_score', test_case.pointsPass),
+                            [raw_res] # results list
+                        )
+                        
+                        # Add to return list if it was requested OR if it's new
+                        if test_case in category_tests or test_case.id not in [t.id for t in category_tests]:
+                            result_data = {
+                                "success": True,
+                                "passed": submission_test.passed,
+                                "logs": submission_test.logs,
+                                "isError": submission_test.isError,
+                                "testCaseId": test_case.id,
+                                "testCaseDescription": test_case.description,
+                                "output_data": exec_result_dict.get('output_data', {})
+                            }
+                            all_results.append(result_data)
+
+                    # 5c. Delete Stale Tests
+                    if should_sync:
+                        for test in all_category_tests:
+                            if test.id not in processed_ids:
+                                logger.info(f"Auto-deleting stale test case '{test.functionName}' (id={test.id}) for category '{category.name}'")
+                                test.delete()
+                                # Do NOT report error for deleted test
+                    
+                    else:
+                        # REPORT MISSING IF NOT SYNCING (or if crash prevented sync)
+                        for test in category_tests:
+                            if test.id not in processed_ids:
+                                 # It was requested but we didn't get a result
+                                 error_msg = f"Test did not execute or name mismatch.\nExpected: {test.functionName} ({test.description})\n"
+                                 
+                                 if raw_test_results:
+                                     # Show available results
+                                     available_names = [r.get('name') for r in raw_test_results]
+                                     error_msg += f"Available Results: {', '.join(available_names)}\n"
+                                 else:
+                                     error_msg += "No test results returned by script.\n"
+
+                                 if combined_log:
+                                     error_msg += f"\nCategory Execution Logs:\n{combined_log}"
+
+                                 # Save error result to DB so frontend sees it
+                                 TestService._save_test_result(
+                                     submission,
+                                     test,
+                                     False, 
+                                     0, 
+                                     error_msg, 
+                                     True, 
+                                     test.pointsPass
+                                 )
+
+                                 all_results.append({
+                                     "success": False,
+                                     "error": error_msg,
+                                     "testCaseId": test.id,
+                                     "testCaseDescription": test.description
+                                 })
+
+                else:
+                    # Legacy or non-script tests: Run individually
+                    for test in category_tests:
+                        result = TestService.run_test(test.id, submission.id, user_id)
+                        result['testCaseId'] = test.id
+                        result['testCaseDescription'] = test.description
+                        all_results.append(result)
+
+            return all_results
+
         except Exception as e:
             logger.exception(f"Error running test suite for submission {submission_id}")
-            # Identify if we should throw or return partial results
-            # For now, return what we have? Or empty to signal catastrophe?
             return [{"success": False, "error": str(e)}]
 
     @staticmethod
@@ -78,16 +288,19 @@ class TestService:
             # 1. Identify Target File
             target_file = TestService._get_target_file(submission, test_case)
             if not target_file:
-                return {
-                    "success": False,
-                    "error": f"No suitable file found for test case targeting '{test_case.fileName}'"
-                }
+                 return {
+                     "success": False,
+                     "error": f"No suitable file found for test case in category '{test_case.testCategory.name}'"
+                 }
 
             # 2. Get Execution Result (Cached or Fresh)
             # Hybrid Logic: If test case has input or specific dataset, run ephemeral execution.
             # 2. Get Execution Result (Cached or Fresh)
-            # Hybrid Logic: If test case has dataset, run ephemeral execution.
-            if test_case.dataSet:
+            # Hybrid Logic: If test case has dataset OR is a script test (injects code), run ephemeral execution.
+            # Script tests depend on the injected testCode, so they cannot use the generic file cache.
+            # Hybrid Logic: If test case is a script test (injects code) or uses category resources, run ephemeral execution.
+            # Script tests depend on the injected testCode, so they cannot use the generic file cache.
+            if test_case.type == 'script' or (hasattr(test_case, 'testCategory') and test_case.testCategory.resources.exists()):
                 execution_result = TestService._run_ephemeral_execution(target_file, test_case, user_id)
             else:
                 execution_result = TestService._get_or_run_execution(target_file, user_id)
@@ -109,7 +322,9 @@ class TestService:
                     "passed": verification['passed'],
                     "logs": verification['logs'],
                     "isError": verification.get('isError', False),
-                    # "execution_time": execution_result.execution_time # Pending model update
+                    "score": verification.get('score', 0),
+                    "maxScore": verification.get('maxScore', 0),
+                    "results": verification.get('results', []),
                 }
             )
 
@@ -131,6 +346,69 @@ class TestService:
                 "success": False, 
                 "error": str(e)
             }
+
+    @staticmethod
+    def ingest_test_results(submission: Submission):
+        """
+        Scans submission directory for _test_<Category>.txt files and ingests results.
+        Expected format: CSV/JSON mapping functionName -> result.
+        """
+        # This would require accessing the file system or cached execution results that produced these files.
+        # Since we are in the API, we might need to rely on the Executor having captured these files 
+        # as output_data or look up the File objects if they were uploaded.
+        
+        # Strategy: Look for SubmissionFile objects matching the pattern
+        # This supports the "uploaded by instructor/student" use case.
+        # For "generated by script", the script execution itself should ideally parse and return the results,
+        # OR the script generates a file that we then read.
+        
+        import re
+        files = submission.files.all()
+        for f in files:
+            # Pattern: _test_<CategoryName>.txt
+            match = re.match(r'_test_(.+)\.txt', f.name, re.IGNORECASE)
+            if match:
+                category_name = match.group(1)
+                try:
+                    category = submission.assignment.testCategories.get(name__iexact=category_name)
+                    TestService._parse_and_save_test_file(f, category, submission)
+                except Exception as e:
+                    logger.warning(f"Failed to ingest test file {f.name}: {e}")
+
+    @staticmethod
+    def _parse_and_save_test_file(file: File, category: 'TestCategory', submission: Submission):
+         """Parses a _test.txt file and updates/creates submission tests."""
+         # Assume CSV for now: functionName, passed(0/1), score, message
+         # Or JSON.
+         content = file.data
+         # Simple CSV parser
+         lines = content.splitlines()
+         for line in lines:
+             parts = [p.strip() for p in line.split(',')]
+             if len(parts) >= 2:
+                 func_name = parts[0]
+                 passed_raw = parts[1]
+                 
+                 # Resolve TestCase
+                 try:
+                     test_case = category.testCases.get(functionName=func_name)
+                 except TestCase.DoesNotExist:
+                     continue
+                 
+                 passed = passed_raw.lower() in ['true', '1', 'pass']
+                 message = parts[3] if len(parts) > 3 else ""
+                 score = float(parts[2]) if len(parts) > 2 and parts[2] else (test_case.pointsPass if passed else test_case.pointsFail)
+                 
+                 # Save result
+                 SubmissionTest.objects.update_or_create(
+                     submission=submission,
+                     testCase=test_case,
+                     defaults={
+                         'passed': passed,
+                         'logs': message,
+                         'score': score
+                     }
+                 )
 
     @staticmethod
     def _sync_rubric_outcome(submission: Submission, test_case: TestCase, passed: bool, target_file: File):
@@ -186,10 +464,11 @@ class TestService:
         """
         files = submission.files.all()
         
-        # If explicit fileName is provided, look for it
-        if test_case.fileName:
-            for f in files:
-                if f.name == test_case.fileName:
+        # If Category defines a specific target file, use it
+        if hasattr(test_case, 'testCategory') and test_case.testCategory.targetFileName:
+             cat_target = test_case.testCategory.targetFileName
+             for f in files:
+                if f.name == cat_target:
                     return f
         
         # Heuristic: Find first executable file (based on extension)
@@ -220,11 +499,11 @@ class TestService:
             }
 
         # Not Cached: Run Executor
-        ExecutorClass = get_executor_class(file.name)
-        if not ExecutorClass:
+        # Use Factory to get instantiated executor
+        executor = Executor.factory(file)
+        if not executor:
              raise ValueError(f"No executor found for file type: {file.name}")
              
-        executor = ExecutorClass(file)
         result = executor.execute() # Synchronous execution
         
         # Save to Cache
@@ -255,24 +534,66 @@ class TestService:
         Runs an ephemeral execution for a specific test case (with specific input/dataset).
         Does NOT save to the global cache (to avoid polluting it with test-specific runs).
         """
-        ExecutorClass = get_executor_class(file.name)
-        if not ExecutorClass:
-             raise ValueError(f"No executor found for file type: {file.name}")
-             
         # Prepare datasets
         datasets = []
-        if test_case.dataSet:
-             datasets.append(test_case.dataSet)
+
+        # Prepare resources (File and DataSet aliasing)
+        resources = []
+        if hasattr(test_case, 'testCategory'):
+            # Fetch all resources linked to this category
+            # Each resource has a target_path and either a file or a dataset
+            category_resources = test_case.testCategory.resources.all()
+            for res in category_resources:
+                resource_entry = {
+                    'target_path': res.target_path
+                }
+                if res.file:
+                    resource_entry['type'] = 'file'
+                    resource_entry['content'] = res.file.data
+                elif res.dataset:
+                    resource_entry['type'] = 'dataset'
+                    resource_entry['obj'] = res.dataset # Executor will handle mounting/linking
+                
+                resources.append(resource_entry)
+
+        # Prepare Test Code with Timeouts
+        raw_test_code = test_case.testCategory.testScript if hasattr(test_case, 'testCategory') and test_case.testCategory.testScript else test_case.testCode
         
-        # So passing [test_case.dataSet] overrides the default "all active".
-        # This is desired for specific tests.
-        executor = ExecutorClass(
+        # Inject timeouts
+        import json
+        test_timeouts = {}
+        if hasattr(test_case, 'testCategory') and test_case.testCategory:
+            # We use .values() to efficiently fetch just what we need
+            # Note: We iterate via all objects manager to avoid prefetch complexities not being present
+            for t in test_case.testCategory.testCases.values('functionName', 'timeout'):
+                if t['functionName'] and t['timeout'] != 30:
+                    test_timeouts[t['functionName']] = t['timeout']
+        
+        injected_code = raw_test_code + f"\n\nCODEPOST_TEST_TIMEOUTS = {json.dumps(test_timeouts)}\n"
+        
+        # DEBUG: Log the code to backend
+        logger.info(f"DEBUG_INJECTED_CODE_START\n{injected_code}\nDEBUG_INJECTED_CODE_END")
+
+        if not injected_code.strip() or not raw_test_code.strip():
+             return {
+                 "success": False,
+                 "error": "Test Script is empty. Please open the Script Editor and click 'Generate (AI)' or write a script."
+             }
+
+        # Use Factory to get instantiated executor with context
+        executor = Executor.factory(
             file, 
-            datasets=datasets, 
-            input_data=None, # Legacy input field removed
+            datasets=datasets, # Legacy dataset field (maybe deprecated?)
+            input_data=None, 
             target_cell_id= getattr(test_case, 'targetCellId', None),
-            test_code= test_case.testCode if test_case.type == 'script' else ""
+            test_code=injected_code,
+            test_function= test_case.functionName, 
+            resources=resources # Pass new resources list
         )
+        
+        if not executor:
+             raise ValueError(f"No executor found for file type: {file.name}")
+        
         result = executor.execute()
         
         return {
@@ -336,12 +657,18 @@ class TestService:
             return {
                 "passed": False,
                 "logs": logs,
-                "isError": execution_result.get('error') is not None
+                "isError": execution_result.get('error') is not None,
+                "score": 0,
+                "maxScore": 0
             }
             
         # Aggregate results
         # If ANY test failed, the whole TestCase fails (strict mode for now)
         all_passed = all(t.get('passed', False) for t in tests)
+        
+        # Aggregate scores from all subtests
+        total_score = sum(float(t.get('score', 0)) for t in tests)
+        total_max_score = sum(float(t.get('max_score', 0)) for t in tests)
         
         # Build aggregated logs
         log_parts = []
@@ -350,6 +677,8 @@ class TestService:
             name = t.get('name', 'Test')
             score = f"{t.get('score', 0)}/{t.get('max_score', 0)}"
             log_parts.append(f"{status} {name}: {score}")
+            if t.get('description'):
+                log_parts.append(f"   Description: {t.get('description')}")
             if t.get('output'):
                 log_parts.append(f"   Output: {t.get('output')}")
             if t.get('error'):
@@ -362,5 +691,36 @@ class TestService:
         return {
             "passed": all_passed,
             "logs": "\n".join(log_parts),
-            "isError": execution_result.get('error') is not None
+            "isError": execution_result.get('error') is not None,
+            "score": total_score,
+            "maxScore": total_max_score,
+            "stdout": execution_result.get('stdout'),
+            "stderr": execution_result.get('stderr'),
+            "results": tests
         }
+
+    @staticmethod
+    def _save_test_result(submission: Submission, test_case: TestCase, passed: bool, score: float, logs: str, is_error: bool, max_score: float, results: List[Dict[str, Any]] = []) -> SubmissionTest:
+        """
+        Helper to save/update a SubmissionTest result and sync rubric outcomes.
+        """
+        # Save SubmissionTest Result
+        submission_test, created = SubmissionTest.objects.update_or_create(
+            submission=submission,
+            testCase=test_case,
+            defaults={
+                "passed": passed,
+                "logs": logs,
+                "isError": is_error,
+                "score": score,
+                "maxScore": max_score,
+                "results": results,
+            }
+        )
+        
+        # Sync Rubric
+        target_file = TestService._get_target_file(submission, test_case)
+        if target_file:
+             TestService._sync_rubric_outcome(submission, test_case, passed, target_file)
+             
+        return submission_test

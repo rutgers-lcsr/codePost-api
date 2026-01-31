@@ -15,6 +15,7 @@ import contextlib
 import base64
 import typing
 from typing import List, Dict, Any, Optional, Callable, Union
+import signal
 
 # Set environment for pip
 os.environ['PIP_ROOT_USER_ACTION'] = 'ignore'
@@ -139,6 +140,7 @@ class TestResult:
         self.score = 0.0
         self.passed = False
         self.error: Optional[str] = None
+        self.message: Optional[str] = None
         self.output: str = ""
         self.status: str = "failed" # passed, failed, error
 
@@ -150,6 +152,7 @@ class TestResult:
             "score": self.score,
             "passed": self.passed,
             "error": self.error,
+            "message": self.message,
             "output": self.output,
             "status": self.status
         }
@@ -160,11 +163,23 @@ class TestCase:
     Base class for defining tests.
     Users can use the @test decorator or manually create instances.
     """
-    def __init__(self, func: Callable, name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None):
+    def __init__(self, func: Callable, name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
         self.func = func
         self.name = name or func.__name__
         self.points = points
         self.description = description
+        
+        # Determine timeout
+        # 1. Check for global override (from DB/UI)
+        global_timeouts = globals().get('CODEPOST_TEST_TIMEOUTS', {})
+        
+        if self.name in global_timeouts:
+            self.timeout = global_timeouts[self.name]
+        elif timeout is not None:
+             self.timeout = timeout
+        else:
+             self.timeout = 30 # Default 30s
+
         
     def run(self) -> TestResult:
         result = TestResult(self.name, self.points, self.description)
@@ -177,12 +192,45 @@ class TestCase:
             with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
                 # Execute the test function
                 # The test function should raise AssertionError or Exception on failure
-                # It can accept optional arguments if needed, but for now we assume 0-arg or specific text-context
-                self.func()
+                # It can return a number for partial credit
+                
+                # Setup timeout handler
+                def handler(signum, frame):
+                    raise TimeoutError(f"Test timed out after {self.timeout} seconds")
+                
+                signal.signal(signal.SIGALRM, handler)
+                signal.alarm(self.timeout)
+                
+                try:
+                    return_value = self.func()
+                finally:
+                    signal.alarm(0)
+
             
-            result.passed = True
-            result.score = self.points
-            result.status = "passed"
+            # Check if return value is a number (partial credit)
+            if isinstance(return_value, (int, float)):
+                # Clamp score to [0, max_score]
+                result.score = max(0, min(return_value, self.points))
+                result.passed = result.score == self.points
+                result.status = "passed" if result.passed else "partial"
+            elif isinstance(return_value, (tuple, list)) and len(return_value) >= 2:
+                # Handle [score, message]
+                score_val = return_value[0]
+                msg_val = str(return_value[1])
+                
+                if isinstance(score_val, (int, float)):
+                    result.score = max(0, min(float(score_val), self.points))
+                    result.passed = result.score == self.points
+                    result.status = "passed" if result.passed else "partial"
+                
+                if msg_val:
+                    result.message = msg_val
+            else:
+                # No return value or non-numeric = full credit
+                result.passed = True
+                result.score = self.points
+                result.status = "passed"
+            
             result.output = stdout_capture.getvalue()
             
         except AssertionError as e:
@@ -191,12 +239,21 @@ class TestCase:
             result.status = "failed"
             result.error = str(e)
             result.output = stdout_capture.getvalue()
+            result.output = stdout_capture.getvalue()
+        except TimeoutError as e:
+            result.passed = False
+            result.score = 0
+            result.status = "error"
+            result.error = str(e)
+            result.output = stdout_capture.getvalue()
+            result.message = "Test timed out"
         except Exception as e:
             result.passed = False
             result.score = 0
             result.status = "error"
             result.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
             result.output = stdout_capture.getvalue()
+
             
         return result
 
@@ -223,12 +280,13 @@ class TestRunner:
             sys.stderr.flush()
 
 # Public Decorator
-def test(name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None):
+def test(name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
     def decorator(func):
-        test_case = TestCase(func, name=name, points=points, description=description)
+        test_case = TestCase(func, name=name, points=points, description=description, timeout=timeout)
         TestRunner.get_instance().add_test(test_case)
         return func
     return decorator
+
 
 # Helper assertions
 def assert_plots_generated(count: int = 1):
@@ -269,6 +327,7 @@ try:
     # Inject instructor tests here
     test_code = """#{TEST_CODE}"""
     if test_code.strip():
+        print(f"SCRIPT_DEBUG: {test_code[:500]}", file=sys.stderr)
         exec(test_code, globals())
 except Exception as e:
     print(f"Test Script Error:\n{traceback.format_exc()}", file=sys.stderr)

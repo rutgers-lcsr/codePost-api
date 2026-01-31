@@ -7,8 +7,8 @@ class TestCaseSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = TestCase
-    fields = ('id', 'testCategory', 'sortKey', 'description', 'type', 'pointsFail', 'pointsPass', 'text', 'modified', 'fileName',
-              'exposed', 'instances', 'explanation', 'lastSolutionRun', 'dataSet', 'testCode', 'targetCellId', 'rubricItem')
+    fields = ('id', 'testCategory', 'sortKey', 'description', 'type', 'pointsFail', 'pointsPass', 'text', 'modified',
+              'exposed', 'instances', 'explanation', 'lastSolutionRun', 'testCode', 'targetCellId', 'rubricItem', 'functionName', 'timeout')
     POST_permissions_fields = ('testCategory',)
     read_only_fields = ('modified', 'instances',)
     extra_kwargs = {"text": {"trim_whitespace": False}, "description": {
@@ -19,6 +19,6 @@ class TestCaseStudentSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = TestCase
-    fields = ('id', 'testCategory', 'sortKey', 'description', 'pointsFail', 'pointsPass', 'explanation', 'exposed')
+    fields = ('id', 'testCategory', 'sortKey', 'description', 'pointsFail', 'pointsPass', 'explanation', 'exposed', 'rubricItem')
     POST_permissions_fields = ('testCategory',)
     extra_kwargs = {"description": {"trim_whitespace": False}, "explanation": {"trim_whitespace": False}}

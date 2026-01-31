@@ -25,9 +25,9 @@ class RunTestView(APIView):
         test_id = request.data.get('testId')
         submission_id = request.data.get('submissionId')
 
-        if not test_id or not submission_id:
+        if not submission_id:
             return Response(
-                {"error": "Missing testId or submissionId"}, 
+                {"error": "Missing submissionId"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -53,10 +53,16 @@ class RunTestView(APIView):
         except Submission.DoesNotExist:
              return Response({"error": "Submission not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Run Test
-        result = TestService.run_test(test_id, submission_id, user_id=request.user.id)
-        
-        if result['success']:
-            return Response(result)
+        # Run Test(s)
+        if test_id:
+            # Run single test
+            result = TestService.run_test(test_id, submission_id, user_id=request.user.id)
+            if result['success']:
+                return Response(result)
+            else:
+                return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         else:
-            return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            # Run all tests (suite)
+            results = TestService.run_suite(submission_id, user_id=request.user.id)
+            # We return 200 even if some tests failed, as long as the execution framework didn't crash
+            return Response(results)

@@ -16,6 +16,7 @@ import base64
 import typing
 import ast
 from typing import List, Dict, Any, Optional, Callable, Union
+import signal
 
 # Set environment for pip
 os.environ['PIP_ROOT_USER_ACTION'] = 'ignore'
@@ -105,12 +106,14 @@ print("", file=sys.stderr)
 _CAPTURED_PLOTS: List[str] = []
 
 class TestResult:
-    def __init__(self, name: str, max_score: float = 1.0):
+    def __init__(self, name: str, max_score: float = 1.0, description: Optional[str] = None):
         self.name = name
         self.max_score = max_score
+        self.description = description
         self.score = 0.0
         self.passed = False
         self.error: Optional[str] = None
+        self.message: Optional[str] = None
         self.output: str = ""
         self.status: str = "failed" # passed, failed, error
 
@@ -118,31 +121,84 @@ class TestResult:
         return {
             "name": self.name,
             "max_score": self.max_score,
+            "description": self.description,
             "score": self.score,
             "passed": self.passed,
             "error": self.error,
+            "message": self.message,
             "output": self.output,
             "status": self.status
         }
+    
+    def to_json(self) -> str:
+        """Output result with JSON markers for frontend parsing."""
+        data = self.to_dict()
+        return f"<<<TEST_RESULT_JSON_START>>>{json.dumps(data)}<<<TEST_RESULT_JSON_END>>>"
 
 class TestCase:
-    def __init__(self, func: Callable, name: Optional[str] = None, points: float = 1.0):
+    def __init__(self, func: Callable, name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
         self.func = func
         self.name = name or func.__name__
         self.points = points
+        self.description = description
         
+        # Determine timeout
+        global_timeouts = globals().get('CODEPOST_TEST_TIMEOUTS', {})
+        # If not in globals, check the namespace where code was executed
+        if not global_timeouts and 'namespace' in globals():
+             global_timeouts = globals()['namespace'].get('CODEPOST_TEST_TIMEOUTS', {})
+             
+        if self.name in global_timeouts:
+            self.timeout = global_timeouts[self.name]
+        elif timeout is not None:
+             self.timeout = timeout
+        else:
+             self.timeout = 30 # Default 30s
+
     def run(self) -> TestResult:
-        result = TestResult(self.name, self.points)
+        result = TestResult(self.name, self.points, self.description)
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
         
         try:
             with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
-                self.func()
+                # Setup timeout handler
+                def handler(signum, frame):
+                    raise TimeoutError(f"Test timed out after {self.timeout} seconds")
+                
+                signal.signal(signal.SIGALRM, handler)
+                signal.alarm(self.timeout)
+                
+                try:
+                    return_value = self.func()
+                finally:
+                    signal.alarm(0)
+
             
-            result.passed = True
-            result.score = self.points
-            result.status = "passed"
+            # Check if return value is a number (partial credit)
+            if isinstance(return_value, (int, float)):
+                # Clamp score to [0, max_score]
+                result.score = max(0, min(return_value, self.points))
+                result.passed = result.score == self.points
+                result.status = "passed" if result.passed else "partial"
+            elif isinstance(return_value, (tuple, list)) and len(return_value) >= 2:
+                # Handle [score, message]
+                score_val = return_value[0]
+                msg_val = str(return_value[1])
+                
+                if isinstance(score_val, (int, float)):
+                    result.score = max(0, min(score_val, self.points))
+                    result.passed = result.score == self.points
+                    result.status = "passed" if result.passed else "partial"
+                
+                if msg_val:
+                    result.message = msg_val
+            else:
+                # No return value or non-numeric = full credit
+                result.passed = True
+                result.score = self.points
+                result.status = "passed"
+            
             result.output = stdout_capture.getvalue()
             
         except AssertionError as e:
@@ -157,6 +213,14 @@ class TestCase:
             result.status = "error"
             result.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
             result.output = stdout_capture.getvalue()
+        except TimeoutError as e:
+            result.passed = False
+            result.score = 0
+            result.status = "error"
+            result.error = str(e)
+            result.message = "Test timed out"
+            result.output = stdout_capture.getvalue()
+
             
         return result
 
@@ -180,14 +244,18 @@ class TestRunner:
         for test in self.tests:
             result = test.run()
             self.results.append(result)
+            # Output JSON markers for frontend to parse (like template.py)
+            print(result.to_json(), file=sys.stderr)
+            sys.stderr.flush()
         return [r.to_dict() for r in self.results]
 
-def test(name: Optional[str] = None, points: float = 1.0):
+def test(name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
     def decorator(func):
-        test_case = TestCase(func, name=name, points=points)
+        test_case = TestCase(func, name=name, points=points, description=description, timeout=timeout)
         TestRunner.get_instance().add_test(test_case)
         return func
     return decorator
+
 
 def assert_plots_generated(count: int = 1):
     if len(_CAPTURED_PLOTS) < count:
@@ -329,9 +397,14 @@ else:
 # ==========================================
 test_results = []
 try:
-    test_code = """#{TEST_CODE}"""
+    test_code_b64 = "{test_code_b64}"
+    test_code = ""
+    if test_code_b64:
+        test_code = base64.b64decode(test_code_b64).decode('utf-8')
+
     if test_code.strip():
         template_log("Running injected test script...", "INFO")
+        template_log(f"SCRIPT_DEBUG: {test_code[:500]}", "DEBUG")
         # Execute test code in the SAME namespace as the notebook cells
         exec(test_code, namespace)
         

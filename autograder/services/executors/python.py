@@ -1,3 +1,9 @@
+"""
+Python executor for running Python code in a Docker container.
+
+The following includes Python and Python Notebook executors.
+"""
+
 import os
 import ast
 import re
@@ -287,5 +293,10 @@ class PythonNotebookExecutor(NotebookExecutor):
             template = template.replace("packages_to_install = []", f"packages_to_install = {repr(packages_to_install)}")
 
         template = template.replace('{cells_b64}', code)
-        template = template.replace("#{TEST_CODE}", test_code)
+        
+        # Base64 encode test code
+        import base64
+        test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('utf-8')
+        template = template.replace("{test_code_b64}", test_code_b64)
+        
         return template

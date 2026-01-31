@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 class NotebookHandler(BaseFileHandler):
     """
     Handles Jupyter Notebooks (.ipynb).
+
+    Notebooks are in nbformat version 4.
     Acts as a dispatcher to specific language handlers based on kernel metadata.
     """
     
@@ -95,6 +97,9 @@ class NotebookHandler(BaseFileHandler):
         return delegate_instance.get_requirements()
 
     def _extract_code(self, data: Dict) -> str:
+        """
+        Extracts code from all code cells in the notebook.
+        """
         code_cells = []
         if 'cells' in data:
             for cell in data['cells']:
@@ -108,6 +113,9 @@ class NotebookHandler(BaseFileHandler):
 
     @staticmethod
     def inject_cell_ids(content: str) -> str:
+        """
+        Injects cell IDs into the notebook. for autograding and comments
+        """
         try:
             nb = json.loads(content)
             if 'cells' in nb and isinstance(nb['cells'], list):

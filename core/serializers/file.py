@@ -82,7 +82,7 @@ class AssignmentFileSerializer(ModelSerializerWithPOSTCheck):
 
     class Meta:
         model = AssignmentFile
-        fields = ('name', 'data', 'extension', 'assignment', 'id', 'path', 'required', 'description', 'created', 'modified')
+        fields = ('name', 'data', 'extension', 'assignment', 'id', 'path', 'required', 'description', 'created', 'modified', 'hidden')
         read_only_fields = ('created', 'modified')
         POST_permissions_fields = ('assignment',)
         extra_kwargs = {
@@ -104,7 +104,7 @@ class AssignmentFilePublicSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AssignmentFile
-        fields = ('id', 'name', 'extension', 'required', 'description', 'created', 'modified', 'assignment', 'path')
+        fields = ('id', 'name', 'extension', 'required', 'description', 'created', 'modified', 'assignment', 'path', 'hidden')
         read_only_fields = fields
 
 

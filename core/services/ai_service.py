@@ -203,43 +203,196 @@ Context:
             )
     
     LANGUAGE_EXAMPLES = {
-        "python": """@test("Test Name", points=10)
+        "python": """@test("Test Name", points=10, description="Test Description")
 def test_function():
-    assert func() == expected""",
-        "java": """@Test(name="Test Name", points=10)
+    assert func() == expected
+@test("Test partial", points=10, description="Test Description")
+def test_partial():
+    # This is a partial test
+    score = 0
+    if func() == expected:
+        score = 10
+    return score
+
+@test("Test Explaination", points=10, description="Test Description")
+def test_explaination():
+    # This is a test that returns a score and an explanation
+    score = 0
+    if func() == expected:
+        score = 10
+    return score, "This is a test that returns a score and an explanation"
+""",
+        "java": """@Test(name="Test Name", points=10, description="Test Description")
 public void testFunction() {
     assertEquals(expected, func());
+}
+@Test(name="Test partial", points=10, description="Test Description")
+public void testPartial() {
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+}
+
+@Test(name="Test Explaination", points=10, description="Test Description")
+public void testExplaination() {
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
 }""",
-        "cpp": """TEST("Test Name", 10) {
+        "cpp": """TEST("Test Name", 10, "Test Description") {
     ASSERT_EQ(expected, func());
+}
+TEST("Test partial", 10, "Test Description") {
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+}
+
+TEST("Test Explaination", 10, "Test Description") {
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
 }""",
-        "c": """TEST("Test Name", 10) {
+        "c": """TEST("Test Name", 10, "Test Description") {
     // Uses GoogleTest-style macros via wrapper
     ASSERT_EQ(expected, func());
+}
+TEST("Test partial", 10, "Test Description") {
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+}
+
+TEST("Test Explaination", 10, "Test Description") {
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
 }""",
-        "javascript": """test("Test Name", 10, function() {
+        "javascript": """test("Test Name", 10, "Test Description", function() {
     if (func() !== expected) {
         throw new Error("Expected " + expected);
     }
-});""",
-        "node": """test("Test Name", 10, function() {
+});
+test("Test partial", 10, "Test Description", function() {
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+});
+test("Test Explaination", 10, "Test Description", function() {
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
+});
+
+""",
+        "node": """test("Test Name", 10, "Test Description", function() {
     if (func() !== expected) {
         throw new Error("Expected " + expected);
     }
-});""",
-        "php": """Tester::test("Test Name", 10.0, function() {
+});
+test("Test partial", 10, "Test Description", function() {
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+});
+test("Test Explaination", 10, "Test Description", function() {
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
+});
+""",
+        "php": """Tester::test("Test Name", 10.0, "Test Description", function() {
     if (func() !== expected) {
         throw new Exception("Expected " + expected);
     }
-});""",
-        "r": """run_test("Test Name", 10.0, function() {
+});
+Tester::test("Test partial", 10.0, "Test Description", function() {
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+});
+Tester::test("Test Explaination", 10.0, "Test Description", function() {
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
+});
+""",
+        "r": """run_test("Test Name", 10.0, "Test Description", function() {
     if (func() != expected) {
         stop("Expected " + expected)
     }
-})""",
-        "ruby": """run_test("Test Name", 10) do
+})
+run_test("Test partial", 10.0, "Test Description", function() {
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+});
+run_test("Test Explaination", 10.0, "Test Description", function() {
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
+});""",
+        "ruby": """run_test("Test Name", 10, "Test Description") do
     result = func()
     raise "Expected #{expected}" unless result == expected
+end
+run_test("Test partial", 10, "Test Description") do
+    // This is a partial test
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return score;
+end
+run_test("Test Explaination", 10, "Test Description") do
+    // This is a test that returns a score and an explanation
+    int score = 0;
+    if (func() == expected) {
+        score = 10;
+    }
+    return [score, "This is a test that returns a score and an explanation"];
 end"""
     }
 
@@ -261,6 +414,9 @@ Context:
 {context_content}
 
 Target File to Test: {target_filename}
+Target Content:
+{target_code}
+
 Language: {language}
 
 Language-Specific Test Harness Example ({language}):
@@ -274,7 +430,9 @@ Based on the context (logic to test) and the example harness above, generate the
         context_file_content: str,
         context_filename: str,
         target_filename: str,
-        language: str = "python"
+        target_code: str = "",
+        language: str = "python",
+        rubric_text: str = ""
     ) -> GenerationResult:
         """
         Generate a test script using the configured AI provider.
@@ -283,6 +441,7 @@ Based on the context (logic to test) and the example harness above, generate the
             context_file_content: Content of the solution/spec file.
             context_filename: Name of the solution/spec file.
             target_filename: Name of the student file to test.
+            target_code: Content of the target file (optional).
             language: Target language.
             
         Returns:
@@ -306,13 +465,31 @@ Based on the context (logic to test) and the example harness above, generate the
             
             example = self.LANGUAGE_EXAMPLES.get(lang_key, self.LANGUAGE_EXAMPLES['python'])
 
+            # Ensure target_code is never None
+            safe_target_code = target_code if target_code else "(No content available)"
+            
+            # Format rubric section
+            rubric_section = ""
+            if rubric_text:
+                rubric_section = f"Rubric Criterion (Test Goal):\n{rubric_text}\n"
+
             system_prompt = self.TEST_GENERATION_PROMPT.format(
                 context_filename=context_filename,
                 context_content=context_file_content,
                 target_filename=target_filename,
+                target_code=safe_target_code,
                 language=language,
                 language_example=example
             )
+            
+            if rubric_section:
+                 # Inject rubric section into prompt context area (hack since strict format used above)
+                 # Better to append it to context or update template. 
+                 # Let's modify template instead in a separate edit, or append to system_prompt.
+                 # Since system_prompt is the strict template, let's prepend it to user_prompt or modify template.
+                 # Actually, let's append it to system_prompt as "Additional Context"
+                 system_prompt += f"\n\n{rubric_section}"
+
             
             user_prompt = f"Generate a {language} test script for {target_filename}."
             

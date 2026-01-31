@@ -1,0 +1,197 @@
+import os
+import sys
+import tempfile
+import shutil
+import io
+
+# Assume the following libraries are installed in the test environment
+# as the student's notebook implies their usage.
+# Their global presence after notebook execution is checked,
+# and they are imported locally in tests for robustness when needed for type checks.
+# import sklearn
+# import matplotlib.pyplot as plt
+# import pandas as pd
+
+# Define some dummy data for shared/included files
+DUMMY_CSV_CONTENT = "col1,col2\n1,a\n2,b\n3,c"
+DUMMY_INCLUDED_FILE_CONTENT = "This is content from included_file.txt."
+
+# Test harness functions will be provided by the autograder.
+# @test("Test Name", points=10)
+# def test_function():
+#     assert func() == expected
+
+# --- Test Definitions ---
+
+@test("Test 1: os.environ is a mapping", points=5)
+def test_os_environ_type():
+    # Verify os.environ is available and has the correct type after notebook execution
+    assert isinstance(os.environ, os._Environ), "os.environ should be an os._Environ object."
+
+@test("Test 2: os.environ() raises TypeError", points=10)
+def test_os_environ_call_failure():
+    # This specifically tests the line 'os.environ()' which is expected to fail.
+    # We re-execute it within the test to verify the exception.
+    try:
+        os.environ()
+        assert False, "Calling os.environ() should raise a TypeError."
+    except TypeError:
+        assert True # Expected failure
+    except Exception as e:
+        assert False, f"Calling os.environ() should raise TypeError, but raised {type(e).__name__}."
+
+@test("Test 3: sklearn imported and __version__ available", points=5)
+def test_sklearn_import_and_version():
+    # Assuming sklearn is imported globally after notebook execution
+    import sklearn # Local re-import for robustness in case global state is tricky
+    assert 'sklearn' in sys.modules, "sklearn module should be imported."
+    assert hasattr(sklearn, '__version__'), "sklearn should have a __version__ attribute."
+    assert isinstance(sklearn.__version__, str), "sklearn.__version__ should be a string."
+
+@test("Test 4: `data` list defined", points=5)
+def test_data_list_definition():
+    # This tests for the variable `data` defined in the notebook
+    # data = [1, 2, 3, 4, 5]
+    # Assuming `data` is available in global scope after notebook execution
+    assert 'data' in globals(), "`data` list should be defined in global scope."
+    assert globals()['data'] == [1, 2, 3, 4, 5], "`data` list should contain [1, 2, 3, 4, 5]."
+
+@test("Test 5: matplotlib.pyplot imported as plt", points=5)
+def test_matplotlib_import():
+    # Assuming matplotlib.pyplot is imported globally as plt
+    import matplotlib.pyplot as plt # Local re-import for robustness
+    assert 'plt' in globals() or 'matplotlib.pyplot' in sys.modules, "matplotlib.pyplot should be imported as plt."
+    assert hasattr(plt, 'plot'), "plt object should have a 'plot' method (from matplotlib.pyplot)."
+
+@test("Test 6: pandas DataFrame 'numbers_df' created", points=10)
+def test_pandas_dataframe_creation():
+    # Assuming pandas and numbers_df are available globally
+    import pandas as pd # Local re-import for robustness
+    assert 'pd' in globals() or 'pandas' in sys.modules, "pandas should be imported as pd."
+    assert 'numbers_df' in globals(), "`numbers_df` DataFrame should be defined."
+    numbers_df = globals()['numbers_df']
+    assert isinstance(numbers_df, pd.DataFrame), "`numbers_df` should be a pandas DataFrame."
+    assert numbers_df.shape == (10, 1), "`numbers_df` should have 10 rows and 1 column."
+    assert list(numbers_df.columns) == ['Number'], "`numbers_df` column name should be 'Number'."
+    assert numbers_df['Number'].tolist() == list(range(1, 11)), "`numbers_df` content is incorrect."
+
+@test("Test 7: File 'test_file.txt' can be created and listed", points=10)
+def test_file_creation_and_listing():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+            test_file_name = 'test_file.txt'
+            # Simulate the student's code: open('test_file.txt', 'w').write(...)
+            open(test_file_name, 'w').write('This is a test file.')
+            # Simulate print(os.listdir('.')) and check its effect
+            files_in_dir = os.listdir('.')
+            assert test_file_name in files_in_dir, f"'{test_file_name}' should be in directory listing after creation."
+        finally:
+            os.chdir(original_cwd) # Always change back
+            # tempfile.TemporaryDirectory cleans up automatically
+
+@test("Test 8: File 'test_file.txt' can be read", points=10)
+def test_file_reading():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+            test_file_name = 'test_file.txt'
+            expected_content = 'This is a test file for reading.'
+            # Create the file with content for the read test
+            with open(test_file_name, 'w') as f:
+                f.write(expected_content)
+
+            # Simulate the student's code: f = open('test_file.txt', 'r').read()
+            read_content = open(test_file_name, 'r').read()
+            assert read_content == expected_content, "Content of 'test_file.txt' does not match expected."
+        finally:
+            os.chdir(original_cwd)
+
+@test("Test 9: Reading non-existent file raises FileNotFoundError", points=10)
+def test_read_non_existent_file_failure():
+    # We re-execute the problematic line to ensure it raises the correct exception.
+    non_existent_file = 'non_existent_file.txt'
+    try:
+        # The .read() is important as the open() might succeed but read() fails for some streams.
+        # But for files, open() itself will raise FileNotFoundError.
+        open(non_existent_file, 'r').read()
+        assert False, f"Opening '{non_existent_file}' in read mode should raise FileNotFoundError."
+    except FileNotFoundError:
+        assert True # Expected failure
+    except Exception as e:
+        assert False, f"Opening '{non_existent_file}' should raise FileNotFoundError, but raised {type(e).__name__}."
+
+@test("Test 10: Reading 'included_file.txt' succeeds", points=10)
+def test_read_included_file():
+    # Create a dummy included_file.txt for the test
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+            included_file_name = 'included_file.txt'
+            with open(included_file_name, 'w') as f:
+                f.write(DUMMY_INCLUDED_FILE_CONTENT)
+
+            # Simulate student's code: f = open('included_file.txt', 'r').read()
+            read_content = open(included_file_name, 'r').read()
+            assert read_content == DUMMY_INCLUDED_FILE_CONTENT, "Content of 'included_file.txt' does not match."
+        finally:
+            os.chdir(original_cwd)
+
+@test("Test 11: Pandas reads 'data.csv' from shared directory via expanduser", points=15)
+def test_pandas_read_csv_shared():
+    import pandas as pd # Local re-import for robustness
+    
+    # Create a temporary home directory to control `os.path.expanduser`.
+    with tempfile.TemporaryDirectory() as tmp_home_dir:
+        original_home = os.environ.get('HOME')
+        os.environ['HOME'] = tmp_home_dir # Set HOME to our temp directory
+
+        shared_dir = os.path.join(tmp_home_dir, 'shared')
+        os.makedirs(shared_dir, exist_ok=True) # Create ~/shared
+        csv_path = os.path.join(shared_dir, 'data.csv')
+
+        try:
+            with open(csv_path, 'w') as f:
+                f.write(DUMMY_CSV_CONTENT)
+
+            # Simulate student's code: data = pd.read_csv(os.path.expanduser('~/shared/data.csv'))
+            # Re-execute this specific operation.
+            data_read = pd.read_csv(os.path.expanduser('~/shared/data.csv'))
+            
+            assert isinstance(data_read, pd.DataFrame), "Result of pd.read_csv should be a DataFrame."
+            assert not data_read.empty, "DataFrame read from CSV should not be empty."
+            assert list(data_read.columns) == ['col1', 'col2'], "CSV columns are incorrect."
+            assert data_read.shape == (3, 2), "DataFrame shape is incorrect."
+            assert data_read['col1'].tolist() == [1, 2, 3], "col1 content is incorrect."
+            assert data_read['col2'].tolist() == ['a', 'b', 'c'], "col2 content is incorrect."
+
+        finally:
+            # Restore original HOME environment variable
+            if original_home is not None:
+                os.environ['HOME'] = original_home
+            elif 'HOME' in os.environ: # If HOME was not set originally, remove our temporary setting
+                del os.environ['HOME']
+
+
+@test("Test 12: Writing to /root/.cache/pip fails with PermissionError or FileNotFoundError", points=10)
+def test_write_to_root_cache_fails():
+    # We re-execute the problematic line to ensure it raises the correct exception.
+    # The exact error depends on whether /root/.cache/pip exists and its permissions.
+    # Typically, /root is inaccessible, leading to PermissionError directly, or FileNotFoundError
+    # if intermediate directories cannot be created due to permissions.
+    target_path = '/root/.cache/pip/test_cache_file.txt'
+    try:
+        # This will attempt to open and write. If /root is restricted, it should fail.
+        open(target_path, 'w').write('This should fail.')
+        assert False, f"Writing to {target_path} should raise an error due to restricted access."
+    except (PermissionError, FileNotFoundError) as e:
+        # Either of these is an acceptable failure for attempting to write to /root.
+        # PermissionError: if the path exists but permissions deny write.
+        # FileNotFoundError: if an intermediate directory (like .cache/pip) cannot be created
+        # within /root due to lack of permissions for /root itself.
+        assert True, f"Expected PermissionError or FileNotFoundError, got {type(e).__name__}."
+    except Exception as e:
+        assert False, f"Writing to {target_path} should raise PermissionError or FileNotFoundError, but raised {type(e).__name__}."

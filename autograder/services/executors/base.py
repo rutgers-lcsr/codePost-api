@@ -21,10 +21,12 @@ import shutil
 import logging
 import tarfile
 import struct
-import ast
+import shutil
+import tarfile
+import threading
+from typing import List, Dict, Any, Optional, Tuple, Union, TypedDict, Literal
 import re
-import time
-from typing import Dict, List, Literal, Optional, Tuple, Any, TypedDict,Union
+import math
 from pathlib import Path
 from docker import DockerClient
 from codepost.settings import DEBUG
@@ -118,6 +120,7 @@ class Notebook(TypedDict):
 
 class ExecutionResult:
     """Result of a code execution"""
+
 
     def __init__(
         self,
@@ -529,7 +532,11 @@ class Executor(abc.ABC):
         # We use the provided temp_dir directly. No subdirectories.
         # This temp_dir is already created in the correct location (shared root or tmp) by the caller.
 
-        for dataset in self.datasets:
+        # Merge defaults and resources
+        # self.resource_datasets is initialized in __init__
+        all_datasets = (self.datasets or []) + (getattr(self, 'resource_datasets', []) or [])
+
+        for dataset in all_datasets:
             if not dataset.is_active or not dataset.file:
                 continue
             
@@ -571,8 +578,13 @@ class Executor(abc.ABC):
                     bind_source_path = staged_path
                 
                 
+                
                 # Get mount path in container
-                mount_path = dataset.mount_path or f'shared/{dataset.name}'
+                # Check for override from TestCategoryResource
+                if hasattr(dataset, 'custom_mount_path') and dataset.custom_mount_path:
+                    mount_path = dataset.custom_mount_path
+                else:
+                    mount_path = dataset.mount_path or f'shared/{dataset.name}'
                 
                 # If mount path ends with /, assume it's a directory and append filename
                 filename = os.path.basename(host_file_path)
@@ -715,6 +727,8 @@ class Executor(abc.ABC):
                 container.remove()
                 if self.datasets:
                     shutil.rmtree(temp_staging_dir, ignore_errors=True)
+        # 9. Return result
+            return result
         """
         
         pass
@@ -882,6 +896,47 @@ class Executor(abc.ABC):
                 if hasattr(other_file, 'data') and other_file.data:
                     additional_files[full_path] = other_file.data
         
+        # 3. Load Helper Files (Overrides) & Resources
+        # 'resources' is the new standard list of dicts: {'type': 'file'|'dataset', 'content': ..., 'obj': ..., 'target_path': ...}
+        # 'additional_files' is legacy/deprecated but supported for valid use cases
+        passed_additional_files = kwargs.get('additional_files')
+        if passed_additional_files:
+            # Can be a list of AssignmentFile objects or a dict (legacy)
+            if isinstance(passed_additional_files, list):
+                for helper_file in passed_additional_files:
+                    path = helper_file.path if helper_file.path else ""
+                    full_path = os.path.join(path, helper_file.name) if path else helper_file.name
+                    
+                    if hasattr(helper_file, 'data') and helper_file.data:
+                        additional_files[full_path] = helper_file.data
+            elif isinstance(passed_additional_files, dict):
+                 additional_files.update(passed_additional_files)
+
+        # Process new resources
+        self.resource_datasets = []
+        resources = kwargs.get('resources')
+        if resources:
+            for res in resources:
+                target_path = res.get('target_path')
+                if not target_path: continue
+                
+                if res.get('type') == 'file':
+                    content = res.get('content', '')
+                    additional_files[target_path] = content
+                
+                elif res.get('type') == 'dataset':
+                    # We need to mount this dataset at target_path
+                    # We'll store it in a separate list to be handled by _prepare_dataset_staging
+                    # But wait, _prepare_dataset_staging iterates self.datasets (AssignmentDataSet objects)
+                    # We should probably wrap this in a special object or extend logic
+                    dataset_obj = res.get('obj')
+                    if dataset_obj:
+                         # We attach the target overwrite to the object temporarily or wrap it?
+                         # Let's wrap it in a simple structure or duck-type it
+                         # We need it to behave like AssignmentDataSet but with a custom mount_path override
+                         dataset_obj.custom_mount_path = target_path
+                         self.resource_datasets.append(dataset_obj)
+
         self.additional_files = additional_files
         self.custom_image_name = kwargs.get('image_name')
         
