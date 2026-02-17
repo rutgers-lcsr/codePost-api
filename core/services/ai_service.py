@@ -19,6 +19,7 @@ Usage:
 """
 
 import logging
+import re
 from typing import Optional, Literal
 from dataclasses import dataclass
 from core.models import Course, Assignment, SubmissionFile
@@ -179,7 +180,7 @@ Context:
 
             system_prompt = self.get_system_prompt(context)
             user_prompt = self.build_user_prompt(context, system_prompt_template)
-            
+
             # Call the appropriate provider
             if self.provider == 'gemini':
                 logger.info(f"Calling Gemini with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
@@ -190,9 +191,9 @@ Context:
                 text = await self._call_ollama(system_prompt, user_prompt)
             else:
                 text = await self._call_portkey(system_prompt, user_prompt)
-                
+
             return GenerationResult(text=text, success=True)
-            
+
         except Exception as e:
             error_msg = self._parse_error(e)
             logger.error(f"AI generation failed: {e}", exc_info=True)
@@ -201,198 +202,135 @@ Context:
                 success=False,
                 error=error_msg
             )
-    
-    LANGUAGE_EXAMPLES = {
-        "python": """@test("Test Name", points=10, description="Test Description")
-def test_function():
-    assert func() == expected
-@test("Test partial", points=10, description="Test Description")
-def test_partial():
-    # This is a partial test
-    score = 0
-    if func() == expected:
-        score = 10
-    return score
 
-@test("Test Explaination", points=10, description="Test Description")
-def test_explaination():
-    # This is a test that returns a score and an explanation
-    score = 0
-    if func() == expected:
-        score = 10
-    return score, "This is a test that returns a score and an explanation"
+    LANGUAGE_EXAMPLES: dict[str, str] = {
+        "python": """@test("Test Name", points=10, description="Test Description")
+def test_name():
+    assert func() == expected
+
+@test("Test Partial", points=10, description="Partial credit example")
+def test_partial():
+    return 10 if func() == expected else 5
+
+@test("Test Explanation", points=10, description="Score + explanation")
+def test_explanation():
+    score = 10 if func() == expected else 0
+    return score, f"Computed score: {score}"
 """,
         "java": """@Test(name="Test Name", points=10, description="Test Description")
-public void testFunction() {
+public double testName() {
     assertEquals(expected, func());
-}
-@Test(name="Test partial", points=10, description="Test Description")
-public void testPartial() {
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return score;
+    return 10.0;
 }
 
-@Test(name="Test Explaination", points=10, description="Test Description")
-public void testExplaination() {
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
+@Test(name="Test Partial", points=10, description="Partial credit example")
+public double testPartial() {
+    return func() == expected ? 10.0 : 5.0;
+}
+
+@Test(name="Test Explanation", points=10, description="Score + explanation")
+public Object[] testExplanation() {
+    double score = (func() == expected) ? 10.0 : 0.0;
+    return new Object[] { score, "This test returns score and explanation" };
 }""",
-        "cpp": """TEST("Test Name", 10, "Test Description") {
-    ASSERT_EQ(expected, func());
+        "cpp": """TEST_DESC(TestName, 10, "Test Description") {
+    assertTrue(func() == expected, "Expected func() to equal expected");
 }
-TEST("Test partial", 10, "Test Description") {
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
+
+TEST_DESC(TestPartial, 10, "Partial credit example") {
+    double score = (func() == expected) ? 10.0 : 5.0;
     return score;
 }
 
-TEST("Test Explaination", 10, "Test Description") {
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
+TEST_DESC_TIMEOUT(TestExplanation, 10, "Score + explanation", 30) {
+    double score = (func() == expected) ? 10.0 : 0.0;
+    return return_score(score, "This test returns score and explanation");
 }""",
-        "c": """TEST("Test Name", 10, "Test Description") {
-    // Uses GoogleTest-style macros via wrapper
-    ASSERT_EQ(expected, func());
+        "c": """TEST_DESC(TestName, 10, "Test Description") {
+    assertTrue(func() == expected, "Expected func() to equal expected");
 }
-TEST("Test partial", 10, "Test Description") {
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
+
+TEST_DESC(TestPartial, 10, "Partial credit example") {
+    double score = (func() == expected) ? 10.0 : 5.0;
     return score;
 }
 
-TEST("Test Explaination", 10, "Test Description") {
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
+TEST_DESC_TIMEOUT(TestExplanation, 10, "Score + explanation", 30) {
+    double score = (func() == expected) ? 10.0 : 0.0;
+    return return_score(score, "This test returns score and explanation");
 }""",
         "javascript": """test("Test Name", 10, "Test Description", function() {
     if (func() !== expected) {
         throw new Error("Expected " + expected);
     }
 });
-test("Test partial", 10, "Test Description", function() {
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return score;
-});
-test("Test Explaination", 10, "Test Description", function() {
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
+
+test("Test Partial", 10, "Partial credit example", function() {
+    return func() === expected ? 10 : 5;
 });
 
+test("Test Explanation", 10, "Score + explanation", function() {
+    const score = func() === expected ? 10 : 0;
+    return [score, "This test returns score and explanation"];
+}, 30);
 """,
         "node": """test("Test Name", 10, "Test Description", function() {
     if (func() !== expected) {
         throw new Error("Expected " + expected);
     }
 });
-test("Test partial", 10, "Test Description", function() {
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return score;
+
+test("Test Partial", 10, "Partial credit example", function() {
+    return func() === expected ? 10 : 5;
 });
-test("Test Explaination", 10, "Test Description", function() {
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
-});
+
+test("Test Explanation", 10, "Score + explanation", function() {
+    const score = func() === expected ? 10 : 0;
+    return [score, "This test returns score and explanation"];
+}, 30);
 """,
         "php": """Tester::test("Test Name", 10.0, "Test Description", function() {
     if (func() !== expected) {
-        throw new Exception("Expected " + expected);
+        throw new Exception("Expected " . expected);
     }
 });
-Tester::test("Test partial", 10.0, "Test Description", function() {
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return score;
+
+Tester::test("Test Partial", 10.0, "Partial credit example", function() {
+    return (func() === expected) ? 10.0 : 5.0;
 });
-Tester::test("Test Explaination", 10.0, "Test Description", function() {
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
-});
+
+Tester::test("Test Explanation", 10.0, "Score + explanation", function() {
+    $score = (func() === expected) ? 10.0 : 0.0;
+    return [$score, "This test returns score and explanation"];
+}, 30);
 """,
-        "r": """run_test("Test Name", 10.0, "Test Description", function() {
+        "r": """run_test("Test Name", 10, "Test Description", function() {
     if (func() != expected) {
-        stop("Expected " + expected)
+        stop(paste("Expected", expected))
     }
 })
-run_test("Test partial", 10.0, "Test Description", function() {
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return score;
-});
-run_test("Test Explaination", 10.0, "Test Description", function() {
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
-});""",
+
+run_test("Test Partial", 10, "Partial credit example", function() {
+    return(ifelse(func() == expected, 10, 5))
+})
+
+run_test("Test Explanation", 10, "Score + explanation", function() {
+    score <- ifelse(func() == expected, 10, 0)
+    return(list(score, "This test returns score and explanation"))
+}, 30)
+""",
         "ruby": """run_test("Test Name", 10, "Test Description") do
     result = func()
     raise "Expected #{expected}" unless result == expected
 end
-run_test("Test partial", 10, "Test Description") do
-    // This is a partial test
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return score;
+
+run_test("Test Partial", 10, "Partial credit example") do
+    (func() == expected) ? 10 : 5
 end
-run_test("Test Explaination", 10, "Test Description") do
-    // This is a test that returns a score and an explanation
-    int score = 0;
-    if (func() == expected) {
-        score = 10;
-    }
-    return [score, "This is a test that returns a score and an explanation"];
+
+run_test("Test Explanation", 10, "Score + explanation", 30) do
+    score = (func() == expected) ? 10 : 0
+    [score, "This test returns score and explanation"]
 end"""
     }
 
@@ -406,8 +344,10 @@ CRITICAL RULES:
 3. Do NOT define your own `TestCase` classes or custom runner logic. Use the provided top-level functions or macros ONLY.
 4. Do NOT attempt to parse, read, or import the student submission file (e.g., do not parse JSON or use nbformat/json libraries).
 5. ASSUME all student functions and classes are ALREADY LOADED and available in the global scope. Call them directly.
-6. If the example uses `@test`, use `@test`. If it uses `Tester::test`, use `Tester::test`.
+6. If the example uses `@test`, use `@test`. If it uses `Tester::test`, use `Tester::test`. If it uses `run_test`, use `run_test`.
 7. Return ONLY the code for the test script. No markdown formatting, no explanations.
+8. For Java tests, methods annotated with @Test must NOT be void. Return a score (number) or an Object[] of [score, explanation].
+9. For Java in this environment: output ONLY `@Test` methods. Do NOT include `package` declarations, `import` statements, or wrapper classes (e.g., `class StudentTests` or `class TestRunner`).
 
 Context:
 - Context File (Solution/Spec): {context_filename}
@@ -425,6 +365,65 @@ Language-Specific Test Harness Example ({language}):
 Based on the context (logic to test) and the example harness above, generate the test script.
 """
 
+    def _extract_java_test_methods(self, text: str) -> list[str]:
+        """Extract @Test-annotated Java methods, preserving method bodies."""
+        methods: list[str] = []
+
+        for match in re.finditer(r'@Test\s*\([^)]*\)', text, flags=re.DOTALL):
+            start = match.start()
+            body_start = text.find('{', match.end())
+            if body_start == -1:
+                continue
+
+            depth = 0
+            end = -1
+            for i in range(body_start, len(text)):
+                ch = text[i]
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+
+            if end != -1:
+                methods.append(text[start:end + 1].strip())
+
+        return methods
+
+    def _normalize_generated_test_script(self, text: str, language: str) -> str:
+        """Normalize model output to match runtime harness expectations."""
+        normalized = text.strip()
+
+        # Strip markdown fences if present.
+        if normalized.startswith("```"):
+            lines = normalized.split('\n')
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            normalized = "\n".join(lines).strip()
+
+        # Java script harness (TestRunner.java) expects method bodies only.
+        if language == 'java':
+            methods = self._extract_java_test_methods(normalized)
+            if methods:
+                return "\n\n".join(methods)
+
+            # Fallback cleanup if extraction fails.
+            cleaned_lines = []
+            for line in normalized.splitlines():
+                stripped = line.strip()
+                if stripped.startswith('package '):
+                    continue
+                if stripped.startswith('import '):
+                    continue
+                cleaned_lines.append(line)
+            return "\n".join(cleaned_lines).strip()
+
+        return normalized
+
     async def generate_test_script(
         self,
         context_file_content: str,
@@ -436,16 +435,6 @@ Based on the context (logic to test) and the example harness above, generate the
     ) -> GenerationResult:
         """
         Generate a test script using the configured AI provider.
-        
-        Args:
-            context_file_content: Content of the solution/spec file.
-            context_filename: Name of the solution/spec file.
-            target_filename: Name of the student file to test.
-            target_code: Content of the target file (optional).
-            language: Target language.
-            
-        Returns:
-            GenerationResult with generated script.
         """
         if not self.is_configured:
             return GenerationResult(
@@ -453,21 +442,26 @@ Based on the context (logic to test) and the example harness above, generate the
                 success=False,
                 error="AI is not configured for this course"
             )
-            
+
         try:
             # Select appropriate example or fallback to python
             lang_key = language.lower()
             if lang_key not in self.LANGUAGE_EXAMPLES:
                 # Try to map common aliases
-                if lang_key in ['py']: lang_key = 'python'
-                elif lang_key in ['js', 'node']: lang_key = 'javascript'
-                elif lang_key in ['c++']: lang_key = 'cpp'
-            
+                if lang_key in ['py']:
+                    lang_key = 'python'
+                elif lang_key in ['js']:
+                    lang_key = 'javascript'
+                elif lang_key in ['nodejs']:
+                    lang_key = 'node'
+                elif lang_key in ['c++']:
+                    lang_key = 'cpp'
+
             example = self.LANGUAGE_EXAMPLES.get(lang_key, self.LANGUAGE_EXAMPLES['python'])
 
             # Ensure target_code is never None
             safe_target_code = target_code if target_code else "(No content available)"
-            
+
             # Format rubric section
             rubric_section = ""
             if rubric_text:
@@ -481,18 +475,12 @@ Based on the context (logic to test) and the example harness above, generate the
                 language=language,
                 language_example=example
             )
-            
-            if rubric_section:
-                 # Inject rubric section into prompt context area (hack since strict format used above)
-                 # Better to append it to context or update template. 
-                 # Let's modify template instead in a separate edit, or append to system_prompt.
-                 # Since system_prompt is the strict template, let's prepend it to user_prompt or modify template.
-                 # Actually, let's append it to system_prompt as "Additional Context"
-                 system_prompt += f"\n\n{rubric_section}"
 
-            
+            if rubric_section:
+                system_prompt += f"\n\n{rubric_section}"
+
             user_prompt = f"Generate a {language} test script for {target_filename}."
-            
+
             # Call the appropriate provider
             if self.provider == 'gemini':
                 text = await self._call_gemini(system_prompt, user_prompt)
@@ -502,19 +490,11 @@ Based on the context (logic to test) and the example harness above, generate the
                 text = await self._call_ollama(system_prompt, user_prompt)
             else:
                 text = await self._call_portkey(system_prompt, user_prompt)
-                
-            # Strip markdown code blocks if present
-            text = text.strip()
-            if text.startswith("```"):
-                lines = text.split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                text = "\n".join(lines)
-                
+
+            text = self._normalize_generated_test_script(text, lang_key)
+
             return GenerationResult(text=text, success=True)
-            
+
         except Exception as e:
             error_msg = self._parse_error(e)
             logger.error(f"AI test generation failed: {e}", exc_info=True)

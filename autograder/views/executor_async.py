@@ -1,4 +1,4 @@
-from rest_framework.views import APIView
+from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
@@ -17,7 +17,7 @@ from autograder.serializers.execution import (
 logger = logging.getLogger(__name__)
 
 
-class ExecuteFileAsyncView(APIView):
+class ExecuteFileAsyncView(GenericAPIView):
     """
     Async file execution endpoint.
     
@@ -26,23 +26,28 @@ class ExecuteFileAsyncView(APIView):
     - Students: Can only retrieve cached results (cache must exist)
     """
     permission_classes = [IsAuthenticated]
+    serializer_class = AsyncExecutionRequestSerializer
     
     @extend_schema(
         request=AsyncExecutionRequestSerializer,
         responses={200: AsyncTaskResponseSerializer}
     )
     def post(self, request):
-        file_id = request.data.get("file_id")
-        timeout = request.data.get("timeout", 30)
-        force_execute = request.data.get("force_execute", False)
-        test_code = request.data.get("test_code", None)
-        example_code = request.data.get("example_code", None)  # For testing against filled-out templates
-        
-        if not file_id:
-            return Response(
-                {"error": "file_id required"}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Validate through serializer (handles camelCase → snake_case mapping)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+
+        file_id = validated["file_id"]
+        timeout = validated.get("timeout", 30)
+        force_execute = validated.get("force_execute", False)
+        test_code = validated.get("test_code")
+        example_code = validated.get("example_code")
+        code_override = validated.get("code_override")
+
+        # If code_override is present, force execution (bypass cache)
+        if code_override:
+            force_execute = True
 
         try:
             file_obj, submission, _, _ = File.get_file_obj(file_id)
@@ -62,22 +67,31 @@ class ExecuteFileAsyncView(APIView):
         
         # Determine if user is staff of the submission or the assignment/course
         is_staff = False
+        assignment = None
         if submission:
             is_staff = isStaffOfSub(request.user, submission)
+            assignment = submission.assignment
         else:
             # For AssignmentFiles (Solution Code), check if user is course staff
             _, assignment, course = file_obj.get_file_info()
             if course:
                 is_staff = isCourseStaff(request.user, course)
         
+        # Check permission for code overrides (editing submissions)
+        if is_staff and code_override:
+            if not request.user.is_superuser and not isCourseAdmin(request.user, assignment.course):
+                if not assignment.gradersCanEditSubmissions:
+                    return returnForbidden()
+        
         # Students cannot force execute and must have cached result
         if not is_staff:
             # Since this is a student, setting force_execute to False will prevent them from 
             # triggering a new execution if the cached result does not exist.
             force_execute = False
-            # Students also cannot inject test code or example code
+            # Students also cannot inject test code, example code, or override content
             test_code = None
             example_code = None
+            code_override = None
             
             if not CachedExecutionResult.get_cached_result(file_obj):
                 return Response(
@@ -88,10 +102,12 @@ class ExecuteFileAsyncView(APIView):
         # Dispatch task
         task = run_file_task.delay(
             file_id, request.user.id, timeout, force_execute, 
-            test_code=test_code, example_code=example_code
+            test_code=test_code, example_code=example_code, code_override=code_override
         )
-        
-        return Response({
+
+        response_payload = {
             "task_id": task.id,
-            "status": "queued"
-        })
+            "status": "queued",
+        }
+        response_serializer = AsyncTaskResponseSerializer(instance=response_payload)
+        return Response(response_serializer.data)

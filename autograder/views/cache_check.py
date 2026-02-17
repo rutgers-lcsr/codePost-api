@@ -5,7 +5,7 @@ API endpoint to check if execution cache exists for a file
 import logging
 from django.http import JsonResponse
 from rest_framework import status
-from rest_framework.views import APIView
+from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema
@@ -29,7 +29,7 @@ class CacheCheckRateThrottle(UserRateThrottle):
     rate = '60/min'
 
 
-class CheckExecutionCache(APIView):
+class CheckExecutionCache(GenericAPIView):
     """
     Check if execution cache exists for a file
     
@@ -54,6 +54,7 @@ class CheckExecutionCache(APIView):
     
     permission_classes = [IsAuthenticated]
     throttle_classes = [CacheCheckRateThrottle]
+    serializer_class = CacheCheckResponseSerializer
     
     @extend_schema(
         responses={200: CacheCheckResponseSerializer}
@@ -121,7 +122,7 @@ class CheckExecutionCache(APIView):
             
             response_data = {
                 "has_cache": True,
-                "execution_time": cached_result.execution_time_seconds
+                "execution_time": cached_result.execution_time_seconds,
             }
             
             if show_details:
@@ -133,9 +134,9 @@ class CheckExecutionCache(APIView):
                 response_data["executed_at"] = None
                 response_data["executed_by"] = None
 
-            return JsonResponse(response_data)
+            resp_ser = CacheCheckResponseSerializer(instance=response_data)
+            return JsonResponse(resp_ser.data)
         else:
             logger.info(f"[CheckExecutionCache] No cache found for file {file_id}")
-            return JsonResponse({
-                "has_cache": False
-            })
+            resp_ser = CacheCheckResponseSerializer(instance={"has_cache": False})
+            return JsonResponse(resp_ser.data)

@@ -16,8 +16,18 @@ class TestService:
     """
 
     @staticmethod
+    def _sanitize_overrides(file_overrides: Optional[Dict[Any, str]]) -> Dict[int, str]:
+        """Ensure file_overrides keys are integers (Celery may serialize them as strings)"""
+        if not file_overrides:
+            return {}
+        try:
+            return {int(k): v for k, v in file_overrides.items()}
+        except (ValueError, TypeError):
+            return {}
+
     @staticmethod
-    def run_suite(submission_id: int, test_case_ids: Optional[List[int]] = None, user_id: str = None) -> List[Dict[str, Any]]:
+    def run_suite(submission_id: int, test_case_ids: Optional[List[int]] = None, user_id: str = None, file_overrides: Dict[int, str] = None) -> List[Dict[str, Any]]:
+        file_overrides = TestService._sanitize_overrides(file_overrides)
         """
         Runs a suite of tests for a submission.
         Optimized to group tests by Category and run each category script only once.
@@ -113,7 +123,9 @@ class TestService:
                     exec_result_dict = TestService._run_ephemeral_execution(
                         target_file_obj, # Use manual lookup
                         representative_test,
-                        user_id
+                        user_id,
+                        file_overrides=file_overrides,
+                        test_function=None # Disable filtering to run ALL tests
                     )
                     
                     # 5. Process Results
@@ -121,6 +133,10 @@ class TestService:
                     # Format: [{name: 'test_foo', passed: True, score: 5, ...}, ...]
                     raw_test_results = exec_result_dict.get('tests', [])
                     
+                    logger.info(f"DEBUG: run_suite received {len(raw_test_results)} results from executor.")
+                    for r in raw_test_results:
+                        logger.info(f"DEBUG: Result: {r.get('name')} - {r.get('status')}")
+
                     # Map raw results to DB TestCases
                     # We want to match by functionName
                     
@@ -160,6 +176,7 @@ class TestService:
                         test_case = db_test_map.get(func_name)
                         
                         if not test_case:
+                             logger.info(f"DEBUG: No exact match for '{func_name}'. Trying fuzzy match.")
                              # Try description match
                              test_case = next((t for t in all_category_tests if t.description == func_name), None)
                         
@@ -170,6 +187,7 @@ class TestService:
                              test_case = next((t for t in all_category_tests if normalize(t.functionName) == norm_func or normalize(t.description) == norm_func), None)
 
                         if not test_case:
+                            logger.info(f"DEBUG: Still no match for '{func_name}'. Should sync: {should_sync}")
                             # Still no match -> Create New Test (if syncing)
                             if should_sync:
                                 try:
@@ -192,6 +210,7 @@ class TestService:
                             else:
                                 continue
                         
+                        logger.info(f"DEBUG: Processing result for test '{test_case.functionName}' (ID: {test_case.id})")
                         processed_ids.add(test_case.id)
                         
                         # Save result
@@ -263,12 +282,22 @@ class TestService:
                                  })
 
                 else:
+                    logger.info(f"DEBUG: Category '{category.name}' has no testScript. Falling back to individual test execution.")
                     # Legacy or non-script tests: Run individually
                     for test in category_tests:
-                        result = TestService.run_test(test.id, submission.id, user_id)
-                        result['testCaseId'] = test.id
-                        result['testCaseDescription'] = test.description
-                        all_results.append(result)
+                        try:
+                            result = TestService.run_test(test.id, submission.id, user_id)
+                            result['testCaseId'] = test.id
+                            result['testCaseDescription'] = test.description
+                            all_results.append(result)
+                        except Exception as e:
+                            logger.exception(f"Error running individual test {test.id} in suite")
+                            all_results.append({
+                                "success": False,
+                                "error": str(e),
+                                "testCaseId": test.id,
+                                "testCaseDescription": test.description
+                            })
 
             return all_results
 
@@ -277,7 +306,8 @@ class TestService:
             return [{"success": False, "error": str(e)}]
 
     @staticmethod
-    def run_test(test_case_id: int, submission_id: int, user_id: str = None) -> Dict[str, Any]:
+    def run_test(test_case_id: int, submission_id: int, user_id: str = None, file_overrides: Dict[int, str] = None) -> Dict[str, Any]:
+        file_overrides = TestService._sanitize_overrides(file_overrides)
         """
         Orchestrates the running of a single test case against a submission.
         """
@@ -301,9 +331,14 @@ class TestService:
             # Hybrid Logic: If test case is a script test (injects code) or uses category resources, run ephemeral execution.
             # Script tests depend on the injected testCode, so they cannot use the generic file cache.
             if test_case.type == 'script' or (hasattr(test_case, 'testCategory') and test_case.testCategory.resources.exists()):
-                execution_result = TestService._run_ephemeral_execution(target_file, test_case, user_id)
+                 # Pass test_function to run ONLY this test
+                 execution_result = TestService._run_ephemeral_execution(target_file, test_case, user_id, file_overrides=file_overrides, test_function=test_case.functionName)
             else:
-                execution_result = TestService._get_or_run_execution(target_file, user_id)
+                # If we have overrides, we MUST force ephemeral execution even for unit tests
+                if file_overrides and target_file.id in file_overrides:
+                     execution_result = TestService._run_ephemeral_execution(target_file, test_case, user_id, file_overrides=file_overrides, test_function=test_case.functionName)
+                else:
+                    execution_result = TestService._get_or_run_execution(target_file, user_id)
             
             # 3. Verify Result
             if test_case.type == 'unit':
@@ -378,10 +413,64 @@ class TestService:
     @staticmethod
     def _parse_and_save_test_file(file: File, category: 'TestCategory', submission: Submission):
          """Parses a _test.txt file and updates/creates submission tests."""
-         # Assume CSV for now: functionName, passed(0/1), score, message
-         # Or JSON.
+         # content might be bytes or str depending on storage
          content = file.data
+         if isinstance(content, bytes):
+             try:
+                 content = content.decode('utf-8')
+             except UnicodeDecodeError:
+                 # Fallback to latin-1 if utf-8 fails, or ignore errors
+                 content = content.decode('utf-8', errors='replace')
+         
+         if not content:
+             return
+
+         import json
+         
+         # Try JSON first
+         try:
+             json_data = json.loads(content)
+             # Expected JSON format: { "functionName": { "passed": true, "score": 1.0, "message": "..." } }
+             # OR List: [ { "name": "functionName", "passed": true ... } ]
+             
+             items = []
+             if isinstance(json_data, dict):
+                 for k, v in json_data.items():
+                     if isinstance(v, dict):
+                         v['name'] = k
+                         items.append(v)
+             elif isinstance(json_data, list):
+                 items = json_data
+                 
+             for item in items:
+                 func_name = item.get('name')
+                 if not func_name:
+                     continue
+                     
+                 try:
+                     test_case = category.testCases.get(functionName=func_name)
+                 except TestCase.DoesNotExist:
+                     continue
+                 
+                 passed = bool(item.get('passed', False))
+                 score = float(item.get('score', test_case.pointsPass if passed else test_case.pointsFail))
+                 message = item.get('message') or item.get('logs') or ""
+                 
+                 SubmissionTest.objects.update_or_create(
+                     submission=submission,
+                     testCase=test_case,
+                     defaults={
+                         'passed': passed,
+                         'logs': message,
+                         'score': score
+                     }
+                 )
+             return
+         except json.JSONDecodeError:
+             pass # Fallback to CSV
+
          # Simple CSV parser
+         # Format: functionName, passed, score, message
          lines = content.splitlines()
          for line in lines:
              parts = [p.strip() for p in line.split(',')]
@@ -396,8 +485,15 @@ class TestService:
                      continue
                  
                  passed = passed_raw.lower() in ['true', '1', 'pass']
+                 
+                 score_val = test_case.pointsPass if passed else test_case.pointsFail
+                 if len(parts) > 2 and parts[2]:
+                     try:
+                         score_val = float(parts[2])
+                     except ValueError:
+                         pass
+                         
                  message = parts[3] if len(parts) > 3 else ""
-                 score = float(parts[2]) if len(parts) > 2 and parts[2] else (test_case.pointsPass if passed else test_case.pointsFail)
                  
                  # Save result
                  SubmissionTest.objects.update_or_create(
@@ -406,7 +502,7 @@ class TestService:
                      defaults={
                          'passed': passed,
                          'logs': message,
-                         'score': score
+                         'score': score_val
                      }
                  )
 
@@ -529,10 +625,14 @@ class TestService:
         }
 
     @staticmethod
-    def _run_ephemeral_execution(file: File, test_case: TestCase, user_id: str = None) -> Dict[str, Any]:
+    def _run_ephemeral_execution(file: File, test_case: TestCase, user_id: str = None, file_overrides: Dict[int, str] = None, test_function: str = "__DEFAULT__") -> Dict[str, Any]:
         """
         Runs an ephemeral execution for a specific test case (with specific input/dataset).
         Does NOT save to the global cache (to avoid polluting it with test-specific runs).
+        
+        test_function: If "__DEFAULT__", uses test_case.functionName. 
+                       If None, runs ALL tests (no filter).
+                       If string, runs that specific function.
         """
         # Prepare datasets
         datasets = []
@@ -549,7 +649,11 @@ class TestService:
                 }
                 if res.file:
                     resource_entry['type'] = 'file'
-                    resource_entry['content'] = res.file.data
+                    # Check for override
+                    if file_overrides and res.file.id in file_overrides:
+                         resource_entry['content'] = file_overrides[res.file.id]
+                    else:
+                         resource_entry['content'] = res.file.data
                 elif res.dataset:
                     resource_entry['type'] = 'dataset'
                     resource_entry['obj'] = res.dataset # Executor will handle mounting/linking
@@ -580,6 +684,34 @@ class TestService:
                  "error": "Test Script is empty. Please open the Script Editor and click 'Generate (AI)' or write a script."
              }
 
+        # Sanitize overrides (redundant safety)
+        file_overrides = TestService._sanitize_overrides(file_overrides)
+
+        # Check for override for the main file being executed
+        main_file_content = None
+        additional_files_overrides = {}
+
+        if file_overrides:
+            if file.id in file_overrides:
+                main_file_content = file_overrides[file.id]
+            
+            # Identify other overridden files
+            override_ids = [fid for fid in file_overrides.keys() if fid != file.id]
+            if override_ids:
+                 from core.models import File as FileModel
+                 override_files = FileModel.objects.filter(id__in=override_ids)
+                 for f in override_files:
+                     full_path = f.name
+                     if f.path:
+                         import os
+                         full_path = os.path.join(f.path, f.name)
+                     additional_files_overrides[full_path] = file_overrides[f.id]
+
+        # Determine regex filter
+        target_function = test_function
+        if target_function == "__DEFAULT__":
+             target_function = test_case.functionName
+
         # Use Factory to get instantiated executor with context
         executor = Executor.factory(
             file, 
@@ -587,8 +719,10 @@ class TestService:
             input_data=None, 
             target_cell_id= getattr(test_case, 'targetCellId', None),
             test_code=injected_code,
-            test_function= test_case.functionName, 
-            resources=resources # Pass new resources list
+            test_function= target_function, 
+            resources=resources, # Pass new resources list
+            content_override=main_file_content,
+            additional_files=additional_files_overrides
         )
         
         if not executor:
@@ -659,7 +793,8 @@ class TestService:
                 "logs": logs,
                 "isError": execution_result.get('error') is not None,
                 "score": 0,
-                "maxScore": 0
+                "maxScore": 0,
+                "results": []
             }
             
         # Aggregate results
@@ -671,26 +806,40 @@ class TestService:
         total_max_score = sum(float(t.get('max_score', 0)) for t in tests)
         
         # Build aggregated logs
-        log_parts = []
-        for t in tests:
-            status = "✓" if t.get('passed') else "✗"
-            name = t.get('name', 'Test')
-            score = f"{t.get('score', 0)}/{t.get('max_score', 0)}"
-            log_parts.append(f"{status} {name}: {score}")
-            if t.get('description'):
-                log_parts.append(f"   Description: {t.get('description')}")
-            if t.get('output'):
-                log_parts.append(f"   Output: {t.get('output')}")
-            if t.get('error'):
-                 log_parts.append(f"   Error: {t.get('error')}")
+        # The user requested JSON logs. Since 'tests' is already a list of dicts (JSON-compatible),
+        # and SubmissionTest.results is a JSONField, we can store the structured data there.
+        # However, SubmissionTest.logs is a TextField. We can store a JSON string representation 
+        # of the logs for flexibility, or keep the human-readable format.
+        # The user said: "I want the logs to be json that way they can be flexable."
         
-        # Append system logs if error existed
+        # We will store the full list of test results as a JSON string in 'logs'.
+        # This allows frontend to parse it if needed, while 'results' JSONField also holds it.
+        import json
+        try:
+            logs = json.dumps(tests, indent=2)
+        except Exception:
+             # Fallback to text if serialization fails
+             log_parts = []
+             for t in tests:
+                status = "✓" if t.get('passed') else "✗"
+                name = t.get('name', 'Test')
+                score = f"{t.get('score', 0)}/{t.get('max_score', 0)}"
+                log_parts.append(f"{status} {name}: {score}")
+                if t.get('description'):
+                    log_parts.append(f"   Description: {t.get('description')}")
+                if t.get('output'):
+                    log_parts.append(f"   Output: {t.get('output')}")
+                if t.get('error'):
+                     log_parts.append(f"   Error: {t.get('error')}")
+             logs = "\n".join(log_parts)
+        
+        # Append system error if exists
         if execution_result.get('error'):
-             log_parts.append(f"\nSystem Error: {execution_result.get('error')}")
+             logs += f"\n\nSystem Error: {execution_result.get('error')}"
              
         return {
             "passed": all_passed,
-            "logs": "\n".join(log_parts),
+            "logs": logs,
             "isError": execution_result.get('error') is not None,
             "score": total_score,
             "maxScore": total_max_score,

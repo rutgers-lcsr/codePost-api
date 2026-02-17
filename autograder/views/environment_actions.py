@@ -8,12 +8,21 @@ Provides API endpoints for:
 """
 import logging
 from django.http import JsonResponse
-from rest_framework import status, serializers as drf_serializers
+from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
+from drf_spectacular.utils import extend_schema
 from core.models import Environment
 from core.permissions.helpers import isCourseAdmin
+from autograder.serializers.environment_actions import (
+    EnvironmentRollbackRequestSerializer,
+    EnvironmentRollbackResponseSerializer,
+    EnvironmentCleanupRequestSerializer,
+    EnvironmentCleanupResponseSerializer,
+    EnvironmentConvertToManualRequestSerializer,
+    EnvironmentConvertToManualResponseSerializer,
+    EnvironmentStatusResponseSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +37,8 @@ class EnvironmentRollback(APIView):
     permission_classes = [IsAuthenticated]
     
     @extend_schema(
-        request=inline_serializer(
-            name='EnvironmentRollbackRequest',
-            fields={'version': drf_serializers.IntegerField(required=False)}
-        ),
-        responses={
-            200: inline_serializer(
-                name='EnvironmentRollbackResponse',
-                fields={
-                    'success': drf_serializers.BooleanField(),
-                    'message': drf_serializers.CharField(),
-                    'version': drf_serializers.IntegerField(),
-                }
-            ),
-        }
+        request=EnvironmentRollbackRequestSerializer,
+        responses={200: EnvironmentRollbackResponseSerializer}
     )
     def post(self, request, environment_id):
         # Permission check
@@ -67,11 +64,13 @@ class EnvironmentRollback(APIView):
         
         if success:
             logger.info(f"Admin {request.user} rolled back env {environment_id} to v{target_version}")
-            return JsonResponse({
+            data = {
                 "success": True,
                 "message": f"Rolled back to version {target_version}",
-                "version": target_version
-            })
+                "version": target_version,
+            }
+            resp_ser = EnvironmentRollbackResponseSerializer(instance=data)
+            return JsonResponse(resp_ser.data)
         else:
             return JsonResponse({"error": "Rollback failed"}, status=500)
 
@@ -86,20 +85,8 @@ class EnvironmentCleanup(APIView):
     permission_classes = [IsAuthenticated]
     
     @extend_schema(
-        request=inline_serializer(
-            name='EnvironmentCleanupRequest',
-            fields={'keep_count': drf_serializers.IntegerField(required=False, default=3)}
-        ),
-        responses={
-            200: inline_serializer(
-                name='EnvironmentCleanupResponse',
-                fields={
-                    'success': drf_serializers.BooleanField(),
-                    'deleted_count': drf_serializers.IntegerField(),
-                    'message': drf_serializers.CharField(),
-                }
-            ),
-        }
+        request=EnvironmentCleanupRequestSerializer,
+        responses={200: EnvironmentCleanupResponseSerializer}
     )
     def post(self, request, environment_id):
         try:
@@ -116,11 +103,13 @@ class EnvironmentCleanup(APIView):
         deleted = ImageManager.cleanup_old_images(environment_id, keep_count)
         
         logger.info(f"Admin {request.user} cleaned up {deleted} images for env {environment_id}")
-        return JsonResponse({
+        data = {
             "success": True,
             "deleted_count": deleted,
-            "message": f"Deleted {deleted} old image(s)"
-        })
+            "message": f"Deleted {deleted} old image(s)",
+        }
+        resp_ser = EnvironmentCleanupResponseSerializer(instance=data)
+        return JsonResponse(resp_ser.data)
 
 
 class EnvironmentConvertToManual(APIView):
@@ -133,19 +122,8 @@ class EnvironmentConvertToManual(APIView):
     permission_classes = [IsAuthenticated]
     
     @extend_schema(
-        request=inline_serializer(
-            name='EnvironmentConvertToManualRequest',
-            fields={'from_version': drf_serializers.IntegerField(required=False)}
-        ),
-        responses={
-            200: inline_serializer(
-                name='EnvironmentConvertToManualResponse',
-                fields={
-                    'success': drf_serializers.BooleanField(),
-                    'message': drf_serializers.CharField(),
-                }
-            ),
-        }
+        request=EnvironmentConvertToManualRequestSerializer,
+        responses={200: EnvironmentConvertToManualResponseSerializer}
     )
     def post(self, request, environment_id):
         try:
@@ -163,10 +141,12 @@ class EnvironmentConvertToManual(APIView):
         
         if success:
             logger.info(f"Admin {request.user} converted env {environment_id} to manual config")
-            return JsonResponse({
+            data = {
                 "success": True,
-                "message": "Environment converted to manual configuration"
-            })
+                "message": "Environment converted to manual configuration",
+            }
+            resp_ser = EnvironmentConvertToManualResponseSerializer(instance=data)
+            return JsonResponse(resp_ser.data)
         else:
             return JsonResponse({"error": "Conversion failed"}, status=500)
 
@@ -179,18 +159,7 @@ class EnvironmentStatus(APIView):
     """
     permission_classes = [IsAuthenticated]
     
-    @extend_schema(
-        responses={
-            200: inline_serializer(
-                name='EnvironmentStatusResponse',
-                fields={
-                    'environment_id': drf_serializers.IntegerField(),
-                    'current_version': drf_serializers.IntegerField(required=False),
-                    'history': drf_serializers.ListField(child=drf_serializers.DictField()),
-                }
-            ),
-        }
-    )
+    @extend_schema(responses={200: EnvironmentStatusResponseSerializer})
     def get(self, request, environment_id):
         try:
             env = Environment.objects.get(pk=environment_id)
@@ -202,6 +171,7 @@ class EnvironmentStatus(APIView):
         
         from autograder.services.image_manager import ImageManager
         status_data = ImageManager.get_current_status(environment_id)
-        
-        return JsonResponse(status_data)
+
+        resp_ser = EnvironmentStatusResponseSerializer(instance=status_data)
+        return JsonResponse(resp_ser.data)
 

@@ -290,8 +290,9 @@ execution_time <- as.numeric(difftime(end_time, start_time, units = "secs"))
 # ============= Tester Framework =============
 test_results <- list()
 
-run_test <- function(name, points, description, fn = NULL) {
+run_test <- function(name, points, description, fn = NULL, timeout = 30) {
     if (is.function(description)) {
+        timeout <- fn
         fn <- description
         description <- NULL
     }
@@ -300,23 +301,56 @@ run_test <- function(name, points, description, fn = NULL) {
         name = name,
         max_score = points,
         description = description,
+        message = "",
         score = 0,
         passed = FALSE,
         status = "failed",
         error = ""
     )
-    
+
     tryCatch({
         # Re-assign fn's environment to cell_env so it can access notebook functions
         environment(fn) <- cell_env
-        fn()
-        result$passed <- TRUE
-        result$score <- points
-        result$status <- "passed"
+        setTimeLimit(elapsed = timeout, transient = TRUE)
+        on.exit(setTimeLimit(elapsed = Inf, transient = TRUE), add = TRUE)
+
+        ret <- fn()
+        if (is.numeric(ret) && length(ret) >= 1) {
+            score <- as.numeric(ret[[1]])
+            result$score <- max(0, min(score, points))
+            result$passed <- result$score == points
+            result$status <- if (result$passed) "passed" else "partial"
+        } else if (is.list(ret) && length(ret) >= 2 && is.numeric(ret[[1]])) {
+            score <- as.numeric(ret[[1]])
+            result$score <- max(0, min(score, points))
+            result$message <- if (!is.null(ret[[2]])) as.character(ret[[2]]) else ""
+            result$passed <- result$score == points
+            result$status <- if (result$passed) "passed" else "partial"
+        } else if (is.list(ret) && !is.null(ret$score) && is.numeric(ret$score)) {
+            score <- as.numeric(ret$score)
+            result$score <- max(0, min(score, points))
+            result$message <- if (!is.null(ret$message)) as.character(ret$message) else ""
+            result$passed <- result$score == points
+            result$status <- if (result$passed) "passed" else "partial"
+        } else if (is.logical(ret) && length(ret) >= 1) {
+            result$passed <- as.logical(ret[[1]])
+            result$score <- if (result$passed) points else 0
+            result$status <- if (result$passed) "passed" else "failed"
+        } else if (is.character(ret) && length(ret) >= 1) {
+            result$message <- as.character(ret[[1]])
+            result$passed <- TRUE
+            result$score <- points
+            result$status <- "passed"
+        } else {
+            result$passed <- TRUE
+            result$score <- points
+            result$status <- "passed"
+        }
     }, error = function(e) {
         result$error <<- conditionMessage(e)
+        result$status <<- if (grepl("time limit|timed out|timeout", tolower(conditionMessage(e)))) "error" else "failed"
     })
-    
+
     test_results <<- c(test_results, list(result))
 }
 

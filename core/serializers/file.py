@@ -80,9 +80,11 @@ class AssignmentFileSerializer(ModelSerializerWithPOSTCheck):
     These are files that belong to assignments (templates, instructions, etc.).
     """
 
+    isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
+
     class Meta:
         model = AssignmentFile
-        fields = ('name', 'data', 'extension', 'assignment', 'id', 'path', 'required', 'description', 'created', 'modified', 'hidden')
+        fields = ('name', 'data', 'extension', 'assignment', 'id', 'path', 'required', 'description', 'created', 'modified', 'hidden', 'isTestResource')
         read_only_fields = ('created', 'modified')
         POST_permissions_fields = ('assignment',)
         extra_kwargs = {
@@ -94,6 +96,21 @@ class AssignmentFileSerializer(ModelSerializerWithPOSTCheck):
         if attrs.get('extension') == '.ipynb' and attrs.get('data'):
             attrs['data'] = NotebookHandler.inject_cell_ids(attrs['data'])
         return attrs
+
+
+class AssignmentFileSummarySerializer(ModelSerializerWithPOSTCheck):
+    """
+    Summary serializer for AssignmentFile objects.
+    Excludes 'data' to reduce payload size in list views.
+    """
+
+    isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
+
+    class Meta:
+        model = AssignmentFile
+        fields = ('name', 'extension', 'assignment', 'id', 'path', 'required', 'description', 'created', 'modified', 'hidden', 'isTestResource')
+        read_only_fields = ('created', 'modified')
+        POST_permissions_fields = ('assignment',)
 
 
 class AssignmentFilePublicSerializer(serializers.ModelSerializer):

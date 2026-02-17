@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Environment
 
@@ -27,6 +28,7 @@ class EnvironmentSerializer(ModelSerializerWithPOSTCheck):
   # Computed field for success rate
   successRate = serializers.SerializerMethodField()
   
+  @extend_schema_field(serializers.FloatField)
   def get_successRate(self, obj):
     if obj.total_runs > 0:
       return round((obj.successful_runs / obj.total_runs) * 100, 1)

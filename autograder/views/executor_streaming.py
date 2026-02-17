@@ -15,7 +15,7 @@ from typing import Generator, Optional
 
 from django.http import StreamingHttpResponse, JsonResponse
 from rest_framework import status
-from rest_framework.views import APIView
+from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema, OpenApiResponse
@@ -23,7 +23,7 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 from autograder.services.executors import  ExecutionResult, Executor
 from autograder.serializers.execution import FileExecutionRequestSerializer
 from core.models import File, Submission, SubmissionFile, AssignmentFile, CourseFile, Assignment, Course, User
-from core.permissions.helpers import isAuthenticated, isStaffOfSub, returnNotAuthorized, returnForbidden
+from core.permissions.helpers import isAuthenticated, isStaffOfSub, returnNotAuthorized, returnForbidden, isCourseAdmin
 from core.permissions.permissions import FileExecutionPermissions
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class StreamingExecutionRateThrottle(UserRateThrottle):
     rate = '30/min'
 
 
-class ExecuteFileStreaming(APIView):
+class ExecuteFileStreaming(GenericAPIView):
     """
     Execute a file (code or notebook) with streaming progress updates via SSE
     
@@ -71,6 +71,7 @@ class ExecuteFileStreaming(APIView):
     
     permission_classes = [IsAuthenticated]
     throttle_classes = [StreamingExecutionRateThrottle]
+    serializer_class = FileExecutionRequestSerializer
     
     @extend_schema(
         request=FileExecutionRequestSerializer,
@@ -81,16 +82,12 @@ class ExecuteFileStreaming(APIView):
     def post(self, request):
         """Handle streaming execution request"""
         
-        # Parse request data
-        data = request.data
-        file_id = data.get("file_id")
+        # Validate through serializer (handles camelCase → snake_case mapping)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
         
-        if not file_id:
-            return JsonResponse(
-                {"error": "file_id is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
+        file_id = validated["file_id"]
         
         # Check file permissions here instead of in the _execute_with_streaming method
         file_obj, submission, assignment, _ = File.get_file_obj(file_id)
@@ -107,7 +104,7 @@ class ExecuteFileStreaming(APIView):
         
         # Start streaming response
         response = StreamingHttpResponse(
-            self._execute_with_streaming(request, file_obj, submission, assignment, data),
+            self._execute_with_streaming(request, file_obj, submission, assignment, validated),
             content_type='text/event-stream'
         )
         response['Cache-Control'] = 'no-cache'
@@ -140,8 +137,25 @@ class ExecuteFileStreaming(APIView):
             # If user is a student and not a staff member, they cannot force execute
             if  submission and not isStaffOfSub(user, submission):
                 force_execute = False
+                test_code = None
+                code_override = None
             else:
                 force_execute = data.get("force_execute", False)
+                test_code = data.get("test_code")
+                code_override = data.get("code_override")
+                
+            if test_code or code_override:
+                force_execute = True
+
+                # Permission check for override
+                if not assignment:
+                     _, assignment, _ = file_obj.get_file_info()
+                
+                if assignment:
+                      if not user.is_superuser and not isCourseAdmin(user, assignment.course):
+                           if not assignment.gradersCanEditSubmissions:
+                                yield self._sse_message("error", {"error": "Permission denied: Graders cannot edit submissions for this assignment."})
+                                return
 
             logger.info(f"[ExecuteFileStreaming] Checking cache for file {file_obj.id}, force_execute={force_execute}")
             
@@ -179,7 +193,7 @@ class ExecuteFileStreaming(APIView):
             
             # Check if it's a notebook
             try:
-                executor = Executor.factory(file_obj)
+                executor = Executor.factory(file_obj, content_override=code_override, test_code=test_code)
                 if not executor:
                     yield self._sse_message("error", {
                         "error": f"No executor found for language: {file_name}"

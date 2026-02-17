@@ -8,37 +8,33 @@ Security: Uses Docker containers for sandboxing to provide strong isolation
 from the host system. Each execution runs in an isolated, disposable container.
 """
 
+import abc
+import base64
+import json
+import logging
+import os
+import re
+import shutil
+import struct
+import tarfile
+import tempfile
 import threading
+import time
 import warnings
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, TypedDict, Type, Union, cast
+
+import nbformat
+from docker import DockerClient
+
+from core.models import File, User
+
 # Suppress pkg_resources deprecation warning from coreapi
 warnings.filterwarnings('ignore', message='pkg_resources is deprecated', category=UserWarning)
-import base64
-import abc
-import tempfile
-import json
-import os
-import shutil
-import logging
-import tarfile
-import struct
-import shutil
-import tarfile
-import threading
-from typing import List, Dict, Any, Optional, Tuple, Union, TypedDict, Literal
-import re
-import math
-from pathlib import Path
-from docker import DockerClient
-from codepost.settings import DEBUG
-import nbformat
-from datetime import datetime
-
-
-from core.models import  File, User
 
 try:
     import docker
-    from docker.errors import DockerException, ImageNotFound, ContainerError, APIError
+    from docker.errors import ImageNotFound
     from requests.exceptions import ReadTimeout
     DOCKER_AVAILABLE = True
 except ImportError:
@@ -116,6 +112,22 @@ class Notebook(TypedDict):
     metadata: NotebookMetadata
     nbformat: int  # Should be 4
     nbformat_minor: int  # Typically 4 or 5
+
+
+class FileLike(Protocol):
+    """Protocol for file-like objects used by executors."""
+
+    id: int
+    name: str
+    extension: str
+    data: str
+    path: Optional[str]
+
+    def get_file_info(self):
+        ...
+
+    def get_course(self):
+        ...
 
 
 class ExecutionResult:
@@ -357,6 +369,31 @@ class Executor(abc.ABC):
     
     # Docker client (singleton)
     _docker_client: Optional[DockerClient] = None
+
+    @classmethod
+    def open_shell_session(
+        cls,
+        env,
+        include_datasets: bool,
+        include_assignment_files: bool,
+        timeout_seconds: int,
+        labels: Optional[Dict[str, str]] = None,
+        tmpfs_size: str = "size=512m,mode=1777",
+    ):
+        """
+        Start a shell session container.
+        Returns (executor, volumes, docker_env, staging_dir, container, socket).
+        """
+        from autograder.services.executors.shell import ShellExecutor
+
+        return ShellExecutor.open_shell_session(
+            env=env,
+            include_datasets=include_datasets,
+            include_assignment_files=include_assignment_files,
+            timeout_seconds=timeout_seconds,
+            labels=labels,
+            tmpfs_size=tmpfs_size,
+        )
     
     @classmethod
     def _demultiplex_logs(cls, logs_data: bytes) -> Tuple[str, str]:
@@ -508,13 +545,13 @@ class Executor(abc.ABC):
             )
             return container
         except Exception as e:
-            logger.error(f"Failed to create container: {e}")
+            self.log("Failed to start container: " + str(e))
             return None
 
     def _prepare_dataset_staging(
         self,
         temp_dir: str
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Dict[str, str]]:
         """
         Stage dataset files in the provided temporary directory for Docker mounting.
         """
@@ -581,8 +618,9 @@ class Executor(abc.ABC):
                 
                 # Get mount path in container
                 # Check for override from TestCategoryResource
-                if hasattr(dataset, 'custom_mount_path') and dataset.custom_mount_path:
-                    mount_path = dataset.custom_mount_path
+                custom_mount_path = getattr(dataset, 'custom_mount_path', None)
+                if isinstance(custom_mount_path, str) and custom_mount_path:
+                    mount_path = custom_mount_path
                 else:
                     mount_path = dataset.mount_path or f'shared/{dataset.name}'
                 
@@ -618,10 +656,10 @@ class Executor(abc.ABC):
 
                 volume_mounts[bind_source_path] = {'bind': container_path, 'mode': 'ro'}
                 
-                logger.info(f"[DatasetMount] Mounting '{bind_source_path}' -> '{container_path}' (Direct: {using_direct_mount})")
+                self.log(f"[DatasetMount] Mounting '{bind_source_path}' -> '{container_path}' (Direct: {using_direct_mount})",'info')
             
             except Exception as e:
-                logger.error(f"[DatasetMount] Failed to stage dataset '{dataset.name}': {e}")
+                self.log(f"[DatasetMount] Failed to stage dataset '{dataset.name}': {e}", "error")
                 continue
         
         return volume_mounts
@@ -826,9 +864,9 @@ class Executor(abc.ABC):
         """
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
     
-    def __init__(self, file:File, **kwargs):
+    def __init__(self, file: FileLike, **kwargs):
         """Initialize executor with file and context"""
-        self.file = file
+        self.file: FileLike = file
         submission, assignment, course = file.get_file_info()
 
 
@@ -847,19 +885,33 @@ class Executor(abc.ABC):
         # Input Data (Stdin)
         self.input_data = kwargs.get('input_data')
         self.test_code = kwargs.get('test_code')
+        self.test_function = kwargs.get('test_function')
         
         # Example code: Overrides the target file's data for testing filled-out templates
         example_code = kwargs.get('example_code')
-        if example_code:
+        content_override = kwargs.get('content_override')
+        
+        if content_override is not None:
+             # Content Override (Temporary Edits) takes precedence
+             self.file = cast(FileLike, type('MockFile', (), {
+                'id': self.file.id,
+                'name': self.file.name,
+                'extension': self.file.extension,
+                'data': content_override,
+                'path': getattr(self.file, 'path', None),
+                'get_file_info': self.file.get_file_info
+            })())
+        elif example_code:
             # Create a mock file data with the example code
             # This allows testing against custom code while keeping all other context
-            self.file = type('MockFile', (), {
+            self.file = cast(FileLike, type('MockFile', (), {
                 'id': self.file.id,
                 'name': self.file.name,
                 'extension': self.file.extension,
                 'data': example_code,
                 'path': getattr(self.file, 'path', None),
-            })()
+                'get_file_info': self.file.get_file_info
+            })())
         
         additional_files = {}
 
@@ -992,6 +1044,9 @@ class Executor(abc.ABC):
     # Building code execution script from template
     
     def __repr__(self):
+        
+        
+        
         return f"[{self.__class__.__name__}] [{self.image}] [{self.file.name}] [{self.LANGUAGE}]"
     
     def log(self, message: str, level: str = "info"):
@@ -999,7 +1054,24 @@ class Executor(abc.ABC):
         logger.log(getattr(logging, level.upper(), logging.INFO), log_msg)
         self.executor_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
     
-    def _get_code_template(self) -> Optional[str]:
+    @property
+    def logger(self):
+        """Provides a simple logger interface for templates to log messages with executor context"""  
+        logging_dict = {
+            'info': (lambda msg: self.log(msg, "info")),
+            'warning': (lambda msg: self.log(msg, "warning")),
+            'error': (lambda msg: self.log(msg, "error")),
+            'debug': (lambda msg: self.log(msg, "debug")),
+        }
+        return logging_dict
+        
+    
+    def _get_code_template(
+        self,
+        code: Optional[Union[str, List[Dict[str, Any]]]] = None,
+        imports: Optional[List[str]] = None,
+        test_code: Optional[str] = None,
+    ) -> Optional[str]:
         """Get code template for the executor"""
         template_file = self.TEMPLATE
         if not template_file:
@@ -1123,16 +1195,16 @@ class Executor(abc.ABC):
         pass
     
     @classmethod
-    def _get_all_subclasses(cls) -> List["Executor"]:
+    def _get_all_subclasses(cls) -> List[Type["Executor"]]:
         """Recursively get all subclasses (including grandchildren, etc.)"""
-        all_subclasses = []
+        all_subclasses: List[Type["Executor"]] = []
         for subclass in cls.__subclasses__():
             all_subclasses.append(subclass)
             all_subclasses.extend(subclass._get_all_subclasses())
         return all_subclasses
     
     @classmethod
-    def factory(cls, file: File, image_name: Optional[str] = None, **kwargs) -> Optional['Executor']:
+    def factory(cls, file: FileLike, image_name: Optional[str] = None, **kwargs) -> Optional["Executor"]:
         """
         Factory method to get appropriate Executor subclass.
         
@@ -1171,9 +1243,9 @@ class NotebookExecutor(Executor):
     - EXECUTION_COMMAND: List[str] - Command prefix (e.g., ['python', '-c'] or ['Rscript', '-e'])
     """
     
-    LANGUAGE: str = None
-    TEMPLATE: str = None
-    DOCKER_IMAGE: str = None
+    LANGUAGE: Optional[str] = None
+    TEMPLATE: Optional[str] = None
+    DOCKER_IMAGE: Optional[str] = None
     EXECUTABLE_EXTENSIONS: List[str] = []
     EXECUTION_COMMAND: List[str] = []  # e.g., ['python', '-c'] or ['Rscript', '-e']
 
@@ -1323,8 +1395,11 @@ class NotebookExecutor(Executor):
             volumes=volumes,
             needs_network=needs_network,
         )
-        if not container:
-            return ExecutionResult.error("Failed to create Docker container")
+        if not container or container is None:
+            result = ExecutionResult.error("Failed to create Docker container\nThis might be caused by missing container, or File and Dataset mounts being incorrect\nPlease check assignment setttings and environment setup and Try again!")
+            result.stderr = "\n".join(self.executor_logs)
+            return result
+
         
         self.add_additional_files(container)
         self.add_pre_script(container)  # Inject pre-script file if exists

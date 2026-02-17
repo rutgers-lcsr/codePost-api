@@ -28,8 +28,26 @@ from autograder.testUtils.buildHelpers import createDockerFile
 import requests
 import json
 
+from typing import Any, cast
+
 
 from autograder.services.builder import Builder
+
+from autograder.serializers.environment_actions import (
+    EnvironmentBuildRequestSerializer,
+    EnvironmentBuildResponseSerializer,
+    EnvironmentBuildStatusErrorSerializer,
+    EnvironmentBuildStatusResponseSerializer,
+    EnvironmentEjectResponseSerializer,
+    EnvironmentPreviewRequestSerializer,
+    EnvironmentRunAllRequestSerializer,
+    EnvironmentRunAllResponseSerializer,
+    EnvironmentRunRequestSerializer,
+    EnvironmentRunResponseSerializer,
+)
+
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
 
 class EnvironmentViewSet(ListProtectedViewSet):
     """
@@ -73,25 +91,36 @@ class EnvironmentViewSet(ListProtectedViewSet):
             serializer.save()
 
     #################################### Build ###############################################
+    @extend_schema(
+        request=EnvironmentBuildRequestSerializer,
+        responses={
+            200: EnvironmentBuildResponseSerializer,
+            500: OpenApiResponse(description="Async build dispatch failed"),
+        },
+    )
     @action(detail=True, methods=["PATCH"])
     def build(self, request, pk=None):
         environment = self.get_object()
+
+        req_ser = EnvironmentBuildRequestSerializer(data=request.data)
+        req_ser.is_valid(raise_exception=True)
+        vd = cast(dict[str, Any], req_ser.validated_data)
         
         # Update language if provided
-        if "language" in request.data:
-            environment.language = request.data["language"]
+        if "language" in vd:
+            environment.language = vd["language"]
         
         # Update other fields if provided (e.g. requirements, dockerfile)
-        if "requirements" in request.data:
-            environment.requirements = request.data["requirements"]
-        if "dockerfile" in request.data:
-            environment.dockerfile = request.data["dockerfile"]
-        if "dockerRunInstructions" in request.data:
-            environment.dockerRunInstructions = request.data["dockerRunInstructions"]
-        if "buildType" in request.data:
-            environment.build_type = request.data["buildType"]
-        if "autoDetect" in request.data:
-            environment.auto_detect = request.data["autoDetect"]
+        if "requirements" in vd:
+            environment.requirements = vd["requirements"]
+        if "dockerfile" in vd:
+            environment.dockerfile = vd["dockerfile"]
+        if "dockerRunInstructions" in vd:
+            environment.dockerRunInstructions = vd["dockerRunInstructions"]
+        if "buildType" in vd:
+            environment.buildType = vd["buildType"]
+        if "autoDetect" in vd:
+            environment.auto_detect = vd["autoDetect"]
             
         # Set status to building immediately so UI reflects it
         environment.build_status = 1
@@ -101,10 +130,22 @@ class EnvironmentViewSet(ListProtectedViewSet):
         # Run Builder asynchronously via Celery
         try:
             x = BuildEnvironment.delay(environment.id)
-            return Response({"task": x.task_id, "status": "queued"})
+            resp_ser = EnvironmentBuildResponseSerializer(
+                instance={"task": x.task_id, "status": "queued"}
+            )
+            return Response(resp_ser.data)
         except Exception as e:
-            return Response({"task": "async_failed", "error": str(e)}, status=500)
-
+            resp_ser = EnvironmentBuildResponseSerializer(
+                instance={"task": "async_failed", "error": str(e)}
+            )
+            return Response(resp_ser.data, status=500)
+    @extend_schema(
+        request=None,
+        responses={
+            200: EnvironmentBuildStatusResponseSerializer,
+            500: EnvironmentBuildStatusErrorSerializer,
+        },
+    )
     @action(detail=True, methods=["GET"])
     def build_status(self, request, pk=None):
         try:
@@ -128,23 +169,35 @@ class EnvironmentViewSet(ListProtectedViewSet):
                 "dockerfile": full_date_dockerfile or "",
                 "lastBuilt": environment.last_built
             }
-            return Response(data)
+            resp_ser = EnvironmentBuildStatusResponseSerializer(instance=data)
+            return Response(resp_ser.data)
         except Exception as e:
-            return Response({"error": str(e), "inProgress": False, "isSuccess": False, "logs": f"Error fetching status: {e}"}, status=500)
+            data = {
+                "error": str(e),
+                "inProgress": False,
+                "isSuccess": False,
+                "logs": f"Error fetching status: {e}",
+            }
+            resp_ser = EnvironmentBuildStatusErrorSerializer(instance=data)
+            return Response(resp_ser.data, status=500)
 
     #################################### Run ###############################################
+    @extend_schema(
+        request=EnvironmentRunAllRequestSerializer,
+        responses={
+            200: EnvironmentRunAllResponseSerializer,
+        },
+    )
     @action(detail=True, methods=["PATCH"])
     def runAll(self, request, pk=None):
         user = self.request.user
         environment = self.get_object()
         assignment = environment.assignment
         course = assignment.course
-        sendEmail = (
-            request.data["sendEmail"]
-            if "sendEmail" in request.data
-            and isinstance(request.data["sendEmail"], bool)
-            else False
-        )
+
+        req_ser = EnvironmentRunAllRequestSerializer(data=request.data)
+        req_ser.is_valid(raise_exception=True)
+        sendEmail = req_ser.validated_data.get("sendEmail", False)
 
         if not environment.language:
             raise serializers.ValidationError(
@@ -155,20 +208,33 @@ class EnvironmentViewSet(ListProtectedViewSet):
         environment.save()
 
         x = RunAll.delay(environment.id, str(request.user), sendEmail)
-        return Response({"task": x.task_id})
-
+        resp_ser = EnvironmentRunAllResponseSerializer(instance={"task": x.task_id})
+        return Response(resp_ser.data)
+    @extend_schema(
+        request=EnvironmentRunRequestSerializer,
+        responses={
+            200: EnvironmentRunResponseSerializer,
+            403: OpenApiResponse(description="Forbidden"),
+            401: OpenApiResponse(description="Not authorized"),
+            400: OpenApiResponse(description="Validation error"),
+        },
+    )
     @action(detail=True, methods=["PATCH"])
     def run(self, request, pk=None):
         user = self.request.user
         environment = Environment.objects.get(id=pk)
         assignment = environment.assignment
         course = assignment.course
-        submission = self.request.data.get("submission", None)
-        simulate = self.request.data.get("simulate", True)
+        req_ser = EnvironmentRunRequestSerializer(data=request.data)
+        req_ser.is_valid(raise_exception=True)
+        vd = cast(dict[str, Any], req_ser.validated_data)
+
+        submission = vd.get("submission", None)
+        simulate = vd.get("simulate", True)
         fileOverrides = None
         # an optional parameter for admins to pass in if they want tests to be run as a student
         # For students, this parameter does not apply: tests are always run in exposed only mode
-        exposedOnly = self.request.data.get("exposedOnly", False)
+        exposedOnly = vd.get("exposedOnly", False)
 
         if not isAuthenticated(user):
             return returnNotAuthorized()
@@ -193,9 +259,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
 
         # Check for file overrides. Here we don't check for the assignment setting for simplicity
         # There's no attack vector in allowing students to submit file overrides. They can't change their code
-        fileOverrides = self.request.data.get("files", None)
-        if fileOverrides != None:
-            fileOverrides = json.loads(fileOverrides)
+        fileOverrides = vd.get("files", None)
 
         if submission:
             # If simulate is on or there are file overrides, don't actually create submission tests
@@ -212,7 +276,8 @@ class EnvironmentViewSet(ListProtectedViewSet):
                     exposed_only=exposedOnly,
                     run_by_role="instructor",
                 )
-                return Response({"task": x.task_id})
+                resp_ser = EnvironmentRunResponseSerializer(instance={"task": x.task_id})
+                return Response(resp_ser.data)
             elif isStudentOfSub(user, submission):
                 # Check to see if test runs have been exceeded. If so, return a validation error
                 if (
@@ -233,7 +298,8 @@ class EnvironmentViewSet(ListProtectedViewSet):
                     fileOverrides=fileOverrides,
                     run_by_role="student",
                 )
-                return Response({"task": x.task_id})
+                resp_ser = EnvironmentRunResponseSerializer(instance={"task": x.task_id})
+                return Response(resp_ser.data)
 
         # Running on solution code
         x = Run.delay(
@@ -243,9 +309,11 @@ class EnvironmentViewSet(ListProtectedViewSet):
             pk=None,
             run_by_role="instructor",
         )
-        return Response({"task": x.task_id})
+        resp_ser = EnvironmentRunResponseSerializer(instance={"task": x.task_id})
+        return Response(resp_ser.data)
 
     #################################### Export ###############################################
+    @extend_schema(request=None, responses={200: OpenApiTypes.STR})
     @action(detail=True, methods=["GET"])
     def dockerfile(self, request, pk=None):
         user = self.request.user
@@ -259,7 +327,13 @@ class EnvironmentViewSet(ListProtectedViewSet):
             dependencies_file_content=environment.requirements,
         )
         return Response(dockerfile)
-
+    @extend_schema(
+        request=EnvironmentPreviewRequestSerializer,
+        responses={
+            200: OpenApiTypes.STR,
+            400: OpenApiResponse(description="Preview generation failed"),
+        },
+    )
     @action(detail=True, methods=["POST"])
     def preview(self, request, pk=None):
         """
@@ -268,20 +342,24 @@ class EnvironmentViewSet(ListProtectedViewSet):
         """
         try:
             environment = self.get_object()
+
+            req_ser = EnvironmentPreviewRequestSerializer(data=request.data)
+            req_ser.is_valid(raise_exception=True)
+            vd = cast(dict[str, Any], req_ser.validated_data)
             
             # Use provided data or fall back to current environment state
-            language = request.data.get("language", environment.language)
-            build_type = request.data.get("buildType", environment.buildType)
-            custom_dockerfile = request.data.get("dockerfile", environment.dockerfile)
+            language = vd.get("language", environment.language)
+            build_type = vd.get("buildType", environment.buildType)
+            custom_dockerfile = vd.get("dockerfile", environment.dockerfile)
             
             # dockerRunInstructions might be passed as a list of strings
             # or we might need to parse them if passed differently.
             # Assuming list of strings as per EnvironmentSerializer/frontend
-            docker_run_instructions = request.data.get("dockerRunInstructions", [])
+            docker_run_instructions = vd.get("dockerRunInstructions", [])
             if not isinstance(docker_run_instructions, list):
                 docker_run_instructions = []
                 
-            requirements_content = request.data.get("requirements", environment.requirements)
+            requirements_content = vd.get("requirements", environment.requirements)
 
             preview_content = createDockerFile(
                 language or "python-3.7",
@@ -296,7 +374,12 @@ class EnvironmentViewSet(ListProtectedViewSet):
             import traceback
             traceback.print_exc()
             return Response(str(e), status=400)
-
+    @extend_schema(
+        request=None,
+        responses={
+            200: EnvironmentEjectResponseSerializer,
+        },
+    )
     @action(detail=True, methods=["GET"])
     def eject(self, request, pk=None):
         """
@@ -431,9 +514,10 @@ if __name__ == "__main__":
 '''
 
         toRet = {
-            "Dockerfile": dockerfile,
-            "tests.json": json.dumps(tests_data, indent=2),
-            "run_tests.py": runner_script
+            "dockerfile": dockerfile,
+            "testsJson": json.dumps(tests_data, indent=2),
+            "runTestsPy": runner_script,
         }
 
-        return Response(toRet)
+        resp_ser = EnvironmentEjectResponseSerializer(instance=toRet)
+        return Response(resp_ser.data)

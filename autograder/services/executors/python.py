@@ -76,6 +76,7 @@ class PythonExecutor(Executor):
         
         template = template.replace("#{FILLER_CODE}", code)
         template = template.replace("#{TEST_CODE}", test_code)
+        template = template.replace("#{TARGET_TEST_FUNCTION}", self.test_function if self.test_function else "")
         return template
 
     def execute(self) -> ExecutionResult:
@@ -298,5 +299,6 @@ class PythonNotebookExecutor(NotebookExecutor):
         import base64
         test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('utf-8')
         template = template.replace("{test_code_b64}", test_code_b64)
+        template = template.replace("#{TARGET_TEST_FUNCTION}", self.test_function if self.test_function else "")
         
         return template

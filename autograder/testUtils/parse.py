@@ -1,3 +1,9 @@
+"""
+DEPRECATED: This module contains legacy parsing logic for autograder results.
+Modern testing infrastructure uses TestService and Executor classes which handle parsing directly.
+This file should be removed once all legacy specific-test-file logic is migrated.
+"""
+
 from autograder.testUtils.languageTemplates.bash import (
     BASH_TEST,
     BASH_TEST_GROUP,

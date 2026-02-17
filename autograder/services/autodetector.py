@@ -266,6 +266,7 @@ class Autodetector:
             if cat.testScript and cat.testScript.strip():
                 # We assume test scripts are Python for now as that's the primary script language
                 # Using .py extension ensures the Python handler picks it up
+                # TODO: Make sure the scripts have the right extension
                 all_files.append(ScriptDummyFile(f"test_script_{cat.id}.py", cat.testScript))
         
         active_files = []

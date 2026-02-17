@@ -62,6 +62,9 @@ class RedirectToAdminViewSet(ViewSet):
     """
     A simple ViewSet that redirects to the admin interface.
     """
+    # This is not a JSON API endpoint; exclude it from OpenAPI generation.
+    schema = None
+
     def list(self, request):
         from django.shortcuts import redirect
         return redirect('/admin/')

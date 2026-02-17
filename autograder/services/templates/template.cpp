@@ -4,6 +4,8 @@
 #include <sstream>
 #include <functional>
 #include <cmath>
+#include <future>
+#include <chrono>
 
 // --- JSON Serialization Helper ---
 std::string json_escape(const std::string& s) {
@@ -20,6 +22,7 @@ std::string json_escape(const std::string& s) {
 struct TestResult {
     std::string name;
     std::string description;
+    std::string message;
     double score;
     double max_score;
     bool passed;
@@ -32,6 +35,7 @@ struct TestResult {
         ss << "{"
            << "\"name\":" << json_escape(name) << ","
            << "\"description\":" << json_escape(description) << ","
+           << "\"message\":" << json_escape(message) << ","
            << "\"score\":" << score << ","
            << "\"max_score\":" << max_score << ","
            << "\"passed\":" << (passed ? "true" : "false") << ","
@@ -43,13 +47,95 @@ struct TestResult {
     }
 };
 
+const int DEFAULT_TIMEOUT_SECONDS = 30;
+
+struct PartialResult {
+    double score;
+    std::string message;
+};
+
+inline PartialResult return_score(double score, const std::string& message = "") {
+    return PartialResult{score, message};
+}
+
+template <typename T>
+struct is_pair : std::false_type {};
+
+template <typename A, typename B>
+struct is_pair<std::pair<A, B>> : std::true_type {};
+
+template <typename T>
+struct is_tuple : std::false_type {};
+
+template <typename... Args>
+struct is_tuple<std::tuple<Args...>> : std::true_type {};
+
+template <typename Func>
+std::function<void(TestResult&)> wrap_test(Func func) {
+    return [func](TestResult& res) {
+        using Ret = decltype(func());
+        if constexpr (std::is_void_v<Ret>) {
+            func();
+            res.passed = true;
+            res.score = res.max_score;
+            res.status = "passed";
+        } else if constexpr (std::is_arithmetic_v<Ret>) {
+            double score = static_cast<double>(func());
+            res.score = std::max(0.0, std::min(score, res.max_score));
+            res.passed = res.score == res.max_score;
+            res.status = res.passed ? "passed" : "partial";
+        } else if constexpr (std::is_same_v<Ret, PartialResult>) {
+            PartialResult pr = func();
+            res.score = std::max(0.0, std::min(pr.score, res.max_score));
+            res.message = pr.message;
+            res.passed = res.score == res.max_score;
+            res.status = res.passed ? "passed" : "partial";
+        } else if constexpr (is_pair<Ret>::value) {
+            auto pr = func();
+            if constexpr (std::is_arithmetic_v<decltype(pr.first)>) {
+                res.score = std::max(0.0, std::min(static_cast<double>(pr.first), res.max_score));
+                res.message = pr.second;
+                res.passed = res.score == res.max_score;
+                res.status = res.passed ? "passed" : "partial";
+            } else {
+                res.passed = true;
+                res.score = res.max_score;
+                res.status = "passed";
+            }
+        } else if constexpr (is_tuple<Ret>::value && std::tuple_size<Ret>::value >= 2) {
+            auto pr = func();
+            if constexpr (std::is_arithmetic_v<decltype(std::get<0>(pr))>) {
+                res.score = std::max(0.0, std::min(static_cast<double>(std::get<0>(pr)), res.max_score));
+                res.message = std::get<1>(pr);
+                res.passed = res.score == res.max_score;
+                res.status = res.passed ? "passed" : "partial";
+            } else {
+                res.passed = true;
+                res.score = res.max_score;
+                res.status = "passed";
+            }
+        } else if constexpr (std::is_convertible_v<Ret, std::string>) {
+            res.message = func();
+            res.passed = true;
+            res.score = res.max_score;
+            res.status = "passed";
+        } else {
+            func();
+            res.passed = true;
+            res.score = res.max_score;
+            res.status = "passed";
+        }
+    };
+}
+
 class TestRegistry {
 public:
     struct Test {
         std::string name;
         double points;
         std::string description;
-        std::function<void()> func;
+        int timeout;
+        std::function<void(TestResult&)> runner;
     };
     
     static TestRegistry& instance() {
@@ -57,8 +143,9 @@ public:
         return inst;
     }
     
-    void register_test(std::string name, double points, std::string description, std::function<void()> func) {
-        tests.push_back({name, points, description, func});
+    template <typename Func>
+    void register_test(std::string name, double points, std::string description, int timeout, Func func) {
+        tests.push_back({name, points, description, timeout, wrap_test(func)});
     }
     
     std::vector<Test> tests;
@@ -66,16 +153,23 @@ public:
 
 // Macro to register tests
 // TEST(TestName, Points) { ... }
-#define TEST(name, points) TEST_DESC(name, points, "")
+// TEST_TIMEOUT(TestName, Points, TimeoutSeconds) { ... }
+// TEST_DESC(TestName, Points, "Description") { ... }
+// TEST_DESC_TIMEOUT(TestName, Points, "Description", TimeoutSeconds) { ... }
+#define TEST(name, points) TEST_DESC_TIMEOUT(name, points, "", DEFAULT_TIMEOUT_SECONDS)
 
-#define TEST_DESC(name, points, description) \
-    void _test_func_##name(); \
+#define TEST_TIMEOUT(name, points, timeout) TEST_DESC_TIMEOUT(name, points, "", timeout)
+
+#define TEST_DESC(name, points, description) TEST_DESC_TIMEOUT(name, points, description, DEFAULT_TIMEOUT_SECONDS)
+
+#define TEST_DESC_TIMEOUT(name, points, description, timeout) \
+    auto _test_func_##name(); \
     struct _test_reg_##name { \
         _test_reg_##name() { \
-            TestRegistry::instance().register_test(#name, points, description, _test_func_##name); \
+            TestRegistry::instance().register_test(#name, points, description, timeout, _test_func_##name); \
         } \
     } _test_reg_inst_##name; \
-    void _test_func_##name()
+    auto _test_func_##name()
 
 // Assertion Helper
 void assertTrue(bool condition, const std::string& msg = "Assertion failed") {
@@ -97,6 +191,7 @@ int main(int argc, char** argv) {
         res.score = 0;
         res.passed = false;
         res.status = "failed";
+        res.message = "";
         
         // Capture stdout/stderr? 
         // Standard C++ cannot easily capture stdout buffer portably without platform specific or pipe logic.
@@ -107,10 +202,15 @@ int main(int argc, char** argv) {
         std::streambuf* old = std::cout.rdbuf(buffer.rdbuf());
         
         try {
-            test.func();
-            res.passed = true;
-            res.score = test.points;
-            res.status = "passed";
+            auto future = std::async(std::launch::async, [&test, &res]() {
+                test.runner(res);
+            });
+            if (future.wait_for(std::chrono::seconds(test.timeout)) == std::future_status::timeout) {
+                res.error = "Test timed out after " + std::to_string(test.timeout) + "s";
+                res.status = "error";
+            } else {
+                future.get();
+            }
         } catch (const std::exception& e) {
             res.error = e.what();
         } catch (...) {

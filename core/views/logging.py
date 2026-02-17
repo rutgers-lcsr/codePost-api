@@ -1,14 +1,21 @@
 import logging
-from rest_framework import status, serializers as drf_serializers
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.utils import extend_schema
 from django.conf import settings
 from core.auth import Authentications, type_of_auth
 from core.logging import logEvent
 from log.models import Event
 from codepost.settings import DEBUG
+
+from core.serializers.logging import (
+    LogErrorRequestSerializer,
+    LogHappinessRequestSerializer,
+    LogDumpRequestSerializer,
+    LogSuccessResponseSerializer,
+)
 
 import json
 
@@ -19,20 +26,8 @@ import json
 
 
 @extend_schema(
-    request=inline_serializer(
-        name='LogErrorRequest',
-        fields={
-            'error': drf_serializers.CharField(required=False),
-            'errorDetail': drf_serializers.CharField(required=False),
-            'url': drf_serializers.CharField(required=False),
-        }
-    ),
-    responses={
-        200: inline_serializer(
-            name='LogErrorResponse',
-            fields={'success': drf_serializers.BooleanField()}
-        ),
-    }
+    request=LogErrorRequestSerializer,
+    responses={200: LogSuccessResponseSerializer}
 )
 @api_view(['POST'])
 @permission_classes((IsAuthenticated,))
@@ -50,13 +45,11 @@ def logError(request):
       'errorDetail'] if 'errorDetail' in request.data else ''
   url = request.data['url'] if 'url' in request.data else ''
 
-  fullstory = "https://app.fullstory.com/ui/MFFNS/segments/everyone/people:search:((NOW%2FDAY-29DAY:NOW%2FDAY%2B1DAY):((UserEmail:==:%22{}%22)):():():():)/0".format(
-      user)
-
+ 
   loginas = "{}/loginAs?email={}".format(settings.CLIENT_URL, user)
 
   message = ":warning: User error ({user} | {url} | <{loginas}|Login>)\n>>>*{error}*\n{errorDetail}".format(
-      user=user, url=url, fullstory=fullstory, error=error, errorDetail=errorDetail, loginas=loginas)
+      user=user, url=url, error=error, errorDetail=errorDetail, loginas=loginas)
 
 
   try:
@@ -76,19 +69,8 @@ def logError(request):
 
 
 @extend_schema(
-    request=inline_serializer(
-        name='LogHappinessRequest',
-        fields={
-            'message': drf_serializers.CharField(required=False),
-            'url': drf_serializers.CharField(required=False),
-        }
-    ),
-    responses={
-        200: inline_serializer(
-            name='LogHappinessResponse',
-            fields={'success': drf_serializers.BooleanField()}
-        ),
-    }
+    request=LogHappinessRequestSerializer,
+    responses={200: LogSuccessResponseSerializer}
 )
 @api_view(['POST'])
 @permission_classes((IsAuthenticated,))
@@ -113,19 +95,8 @@ def logHappiness(request):
 
 
 @extend_schema(
-    request=inline_serializer(
-        name='LogDumpRequest',
-        fields={
-            'attachments': drf_serializers.ListField(child=drf_serializers.DictField(), required=False),
-            'courseID': drf_serializers.IntegerField(required=False),
-        }
-    ),
-    responses={
-        200: inline_serializer(
-            name='LogDumpResponse',
-            fields={'success': drf_serializers.BooleanField()}
-        ),
-    }
+    request=LogDumpRequestSerializer,
+    responses={200: LogSuccessResponseSerializer}
 )
 @api_view(['POST'])
 @permission_classes((IsAuthenticated,))

@@ -1,6 +1,7 @@
 require 'json'
 require 'base64'
 require 'stringio'
+require 'timeout'
 
 CELLS_B64 = "{cells_b64}"
 TEST_CODE_B64 = "{test_code_b64}"
@@ -113,11 +114,21 @@ $test_results = []
 # instance_eval will follow inheritance chain and find it? 
 # Actually, instance_eval sets self. calling run_test matches self.run_test.
 # Since run_test is private on Object, and self is an Object, it works.
-def run_test(name, points, description=nil, &block)
+def run_test(name, points, description=nil, timeout=30, &block)
+  if description.is_a?(Proc)
+    block = description
+    description = nil
+  end
+  if timeout.is_a?(Proc)
+    block = timeout
+    timeout = 30
+  end
+
   result = {
     "name" => name,
     "max_score" => points,
     "description" => description,
+    "message" => "",
     "score" => 0,
     "passed" => false,
     "status" => "failed",
@@ -125,14 +136,33 @@ def run_test(name, points, description=nil, &block)
   }
   
   begin
-    # Check arity of block to decide whether to pass something?
-    # No, just call it.
-    block.call
-    result["passed"] = true
-    result["score"] = points
-    result["status"] = "passed"
+    ret = nil
+    Timeout.timeout(timeout) do
+      ret = block.call
+    end
+
+    if ret.is_a?(Numeric)
+      result["score"] = [[ret, points].min, 0].max
+      result["passed"] = result["score"] == points
+      result["status"] = result["passed"] ? "passed" : "partial"
+    elsif ret.is_a?(Array) && ret.length >= 2 && ret[0].is_a?(Numeric)
+      result["score"] = [[ret[0], points].min, 0].max
+      result["message"] = ret[1].nil? ? "" : ret[1].to_s
+      result["passed"] = result["score"] == points
+      result["status"] = result["passed"] ? "passed" : "partial"
+    elsif ret.is_a?(String)
+      result["message"] = ret
+      result["passed"] = true
+      result["score"] = points
+      result["status"] = "passed"
+    else
+      result["passed"] = true
+      result["score"] = points
+      result["status"] = "passed"
+    end
   rescue Exception => e
     result["error"] = e.message
+    result["status"] = e.is_a?(Timeout::Error) ? "error" : "failed"
   end
   
   $test_results << result

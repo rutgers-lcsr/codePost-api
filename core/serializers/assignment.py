@@ -93,8 +93,8 @@ class AssignmentSerializer(AssignmentSerializerBase):
   class Meta(AssignmentSerializerBase.Meta):
     fields = AssignmentSerializerBase.Meta.fields + ('points', 'hideGrades', 'sortKey', 'anonymousGrading',
                                                      'hideGradersFromStudents', 'commentFeedback', 'additiveGrading', 'allowRegradeRequests', 'regradeInstructions',
-                                                     'regradeDeadline', 'forcedRubricMode', 'templateMode', 'collaborativeRubricMode',
-                                                     'testCategories', 'showFrequentlyUsedRubricComments', 'ai_system_prompt')
+                                                     'regradeDeadline', 'forcedRubricMode', 'templateMode', 'collaborativeRubricMode', 'gradersCanEditSubmissions',
+                                                     'testCategories', 'showFrequentlyUsedRubricComments', 'ai_system_prompt', 'runTestsOnSubmit', 'testsAffectGrade')
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + ('testCategories',)
 
 
@@ -149,20 +149,35 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
          'submissions_unclaimed_count', 'submissions_missing_count', 'stats_max', 'stats_min',
          'stats_mean')
 
+
+
+
   @extend_schema_field(serializers.IntegerField)
   def get_submissions_count(self, obj):
+    val = getattr(obj, 'submissions_count_anno', None)
+    if val is not None:
+      return val
     return obj.submissions.count()
 
   @extend_schema_field(serializers.IntegerField)
   def get_submissions_finalized_count(self, obj):
+    val = getattr(obj, 'submissions_finalized_count_anno', None)
+    if val is not None:
+      return val
     return obj.submissions.filter(isFinalized=True).count()
 
   @extend_schema_field(serializers.IntegerField)
   def get_submissions_inprogress_count(self, obj):
+    val = getattr(obj, 'submissions_inprogress_count_anno', None)
+    if val is not None:
+      return val
     return obj.submissions.filter(isFinalized=False).exclude(grader=None).count()
 
   @extend_schema_field(serializers.IntegerField)
   def get_submissions_unclaimed_count(self, obj):
+    val = getattr(obj, 'submissions_unclaimed_count_anno', None)
+    if val is not None:
+      return val
     return obj.submissions.filter(grader=None).count()
 
   @extend_schema_field(serializers.IntegerField)
@@ -174,27 +189,42 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
 
   @extend_schema_field(serializers.FloatField)
   def get_stats_max(self, obj):
+    val = getattr(obj, 'stats_max_anno', None)
+    if val is not None:
+      return val
     stats_max = obj.submissions.filter(isFinalized=True).aggregate(Max('grade'))['grade__max']
-
-    if stats_max:
-      return stats_max
-    else:
-      return 0
+    return stats_max or 0
 
   @extend_schema_field(serializers.FloatField)
   def get_stats_min(self, obj):
+    val = getattr(obj, 'stats_min_anno', None)
+    if val is not None:
+      return val
     stats_min = obj.submissions.filter(isFinalized=True).aggregate(Min('grade'))['grade__min']
-
-    if stats_min:
-      return stats_min
-    else:
-      return 0
+    return stats_min or 0
 
   @extend_schema_field(serializers.FloatField)
   def get_stats_mean(self, obj):
+    val = getattr(obj, 'stats_mean_anno', None)
+    if val is not None:
+      return val
     stats_mean = obj.submissions.filter(isFinalized=True).aggregate(Avg('grade'))['grade__avg']
-    if stats_mean:
-      return stats_mean
-    else:
-      return 0
+    return stats_mean or 0
 
+
+
+    return stats_mean or 0
+
+
+class AssignmentCloneSerializer(serializers.Serializer):
+  course = serializers.IntegerField(help_text="ID of the destination course")
+
+class AssignmentGenerateTestSerializer(serializers.Serializer):
+  targetFilename = serializers.CharField(source='target_filename', help_text="Name of the file to test (e.g., 'main.py')")
+  contextFileId = serializers.IntegerField(source='context_file_id', required=False, help_text="ID of an AssignmentFile to use as context")
+  contextFileName = serializers.CharField(source='context_file_name', required=False, help_text="Name of an AssignmentFile to use as context")
+  language = serializers.CharField(required=False, default='python', help_text="Target language")
+  rubricText = serializers.CharField(source='rubric_text', required=False, allow_blank=True, help_text="Rubric context for test generation")
+
+class AssignmentGenerateTestResponseSerializer(serializers.Serializer):
+  script = serializers.CharField(help_text="The generated test script")

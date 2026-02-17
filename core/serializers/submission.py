@@ -70,6 +70,7 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
 
     return super().update(instance, validated_data)
 
+  @extend_schema_field(serializers.DateTimeField)
   def get_dateEdited(self, obj):
     tz = pytz.timezone(obj.assignment.course.timezone)
     return obj.dateEdited.astimezone(tz)

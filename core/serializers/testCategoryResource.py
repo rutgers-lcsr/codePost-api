@@ -5,11 +5,12 @@ from core.serializers.file import AssignmentFileSerializer
 from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
 
 class TestCategoryResourceSerializer(ModelSerializerWithPOSTCheck):
-  # Nested read-only fields for detailed display
-  file_details = AssignmentFileSerializer(source='file', read_only=True)
-  dataset_details = AssignmentDataSetSerializer(source='dataset', read_only=True)
+    targetPath = serializers.CharField(source='target_path')
+    # Nested read-only fields for detailed display
+    fileDetails = AssignmentFileSerializer(source='file', read_only=True)
+    datasetDetails = AssignmentDataSetSerializer(source='dataset', read_only=True)
 
-  class Meta:
-    model = TestCategoryResource
-    fields = ('id', 'category', 'file', 'dataset', 'target_path', 'file_details', 'dataset_details')
+    class Meta:
+        model = TestCategoryResource
+        fields = ('id', 'category', 'file', 'dataset', 'targetPath', 'fileDetails', 'datasetDetails')
     POST_permissions_fields = ('category',)

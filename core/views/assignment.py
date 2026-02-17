@@ -4,7 +4,8 @@ from core.logging import logEvent
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
 from rest_framework.request import Request
-from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats
+from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats, AssignmentCloneSerializer, AssignmentGenerateTestSerializer, AssignmentGenerateTestResponseSerializer
+from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.serializers.rubricComment import RubricCommentSerializer
@@ -29,6 +30,16 @@ from rest_framework.decorators import action, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from core.pagination import DefaultPagination, LargeObjectsPagination
+from drf_spectacular.utils import extend_schema
+
+from core.serializers.actionResponses import (
+  AssignmentQueueLengthResponseSerializer,
+  AssignmentRubricResponseSerializer,
+  AssignmentStudentTestsResponseSerializer,
+  BeforeStudentUploadResponseSerializer,
+  AssignmentDownloadResponseSerializer,
+  AssignmentStudentUploadGetResponseSerializer,
+)
 
 
 from core.permissions.permissions import AssignmentPermissions, RubricCommentPermissions
@@ -37,9 +48,10 @@ from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff, isSuperGrader, canViewUnanonymizedSubmissions
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub
 
-from django.utils.timezone import now
+from django.utils import timezone
 
-from django.db.models import Q
+from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField
+from django.db.models.functions import Coalesce
 
 from core.utils import copy_assignment
 from core.handlers.late_submission_handler import LateSubmissionHandler
@@ -123,9 +135,24 @@ class AssignmentViewSet(ListProtectedViewSet):
     else:
       return AssignmentSerializer
 
+  def get_queryset(self):
+    queryset = Assignment.objects.all()
+    if self.action == 'retrieve':
+      queryset = queryset.annotate(
+          submissions_count_anno=Count('submissions', distinct=True),
+          submissions_finalized_count_anno=Count('submissions', filter=Q(submissions__isFinalized=True), distinct=True),
+          submissions_inprogress_count_anno=Count('submissions', filter=Q(submissions__isFinalized=False) & ~Q(submissions__grader=None), distinct=True),
+          submissions_unclaimed_count_anno=Count('submissions', filter=Q(submissions__grader=None), distinct=True),
+          stats_max_anno=Coalesce(Max('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
+          stats_min_anno=Coalesce(Min('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
+          stats_mean_anno=Coalesce(Avg('submissions__grade', filter=Q(submissions__isFinalized=True)), 0.0, output_field=FloatField())
+      )
+    return queryset
+
   # Extra functions
   #####################################################################################
 
+  @extend_schema(responses=CommentSerializer(many=True))
   @action(detail=True)
   def comments(self, request, pk=None):
     """
@@ -158,6 +185,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     return Response(serial.data)
 
+  @extend_schema(responses=AssignmentQueueLengthResponseSerializer)
   @action(detail=True)
   def queueLength(self, request, pk=None):
     """
@@ -234,6 +262,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     return Response(toRet)
 
   # Returns the serialized rubric for this assignment
+  @extend_schema(responses=AssignmentRubricResponseSerializer)
   @action(detail=True, permission_classes=((IsAuthenticated, RubricCommentPermissions)), methods=['GET'])
   def rubric(self, request, pk=None):
     """
@@ -261,6 +290,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     return Response(toRet)
 
+  @extend_schema(responses=SubmissionSerializer(many=True))
   @action(detail=True, methods=['GET'])
   def drawUnassigned(self, request, pk=None):
     """
@@ -329,6 +359,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 # Optional arguments: username, grader
 # If neither specified, returns full list of submissions for this assignment
+  @extend_schema(responses=SubmissionSerializer(many=True))
   @action(detail=True, pagination_class=DefaultPagination)
   def submissions(self, request, pk=None):
     """
@@ -448,6 +479,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     return Response(serializer.data)
 
+  @extend_schema(responses=SubmissionHistorySerializer(many=True))
   @action(detail=True, methods=['GET'], pagination_class=DefaultPagination)
   def submissionHistories(self, request: Request, pk=None):
     user = request.user
@@ -469,6 +501,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     serializer = SubmissionHistorySerializer(submissionHistories, many=True, context={'request:': request})
     return Response(serializer.data)
 
+  @extend_schema(responses=AssignmentStudentTestsResponseSerializer)
   @action(detail=True, methods=["GET"])
   def studentTests(self, request, pk=None):
     #  Only accessed by students
@@ -507,6 +540,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         'testCategories': category_serializer.data
     })
 
+  @extend_schema(responses=BeforeStudentUploadResponseSerializer)
   @action(detail=True, methods=["GET"])
   def beforeStudentUpload(self, request: Request, pk=None):
     """
@@ -557,6 +591,7 @@ class AssignmentViewSet(ListProtectedViewSet):
           "adjustedDaysLate": handler.calculated_days_late()
       }, status=status.HTTP_200_OK)
 
+  @extend_schema(responses=AssignmentDownloadResponseSerializer)
   @action(detail=True, methods=["GET"])
   def download(self, request: Request, pk=None):
     """
@@ -589,6 +624,8 @@ class AssignmentViewSet(ListProtectedViewSet):
     })
   
   # Upload assignment
+  @extend_schema(methods=["GET"], responses=AssignmentStudentUploadGetResponseSerializer)
+  @extend_schema(methods=["POST", "PATCH"], responses=StudentSubmissionSerializer)
   @action(detail=True, methods=["POST", "PATCH", "GET"])
   def studentUpload(self, request, pk=None):
     """
@@ -753,6 +790,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         }
         return Response(toRet)
 
+  @extend_schema(responses=SubmissionWithTestsSerializer(many=True))
   @action(detail=True, methods=["GET"], pagination_class=LargeObjectsPagination)
   def submissionTests(self, request, pk=None):
     """
@@ -780,6 +818,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     return Response(serializer.data)
 
 
+  @extend_schema(responses=AssignmentDataSetSerializer(many=True))
   @action(detail=True, methods=["GET"])
   def datasets(self, request, pk=None):
     """
@@ -795,6 +834,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     serializer = AssignmentDataSetSerializer(datasets, many=True, context={'request': request})
     return Response(serializer.data)
 
+  @extend_schema(request=AssignmentGenerateTestSerializer, responses={200: AssignmentGenerateTestResponseSerializer})
   @action(detail=True, methods=["POST"])
   def generateTest(self, request, pk=None):
     """
@@ -824,14 +864,16 @@ class AssignmentViewSet(ListProtectedViewSet):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    target_filename = request.data.get('target_filename')
-    context_file_id = request.data.get('context_file_id')
-    context_file_name = request.data.get('context_file_name') # Alternative lookup
-    language = request.data.get('language', 'python')
-    rubric_text = request.data.get('rubric_text', '')
-    
-    if not target_filename:
-        return Response({'error': 'target_filename is required'}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = AssignmentGenerateTestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    params = serializer.validated_data
+
+    target_filename = params.get('targetFilename') or params.get('target_filename')
+    context_file_id = params.get('contextFileId') or params.get('context_file_id')
+    context_file_name = params.get('contextFileName') or params.get('context_file_name')
+    # Default language logic is handled by serializer default, but check both keys
+    language = params.get('language', 'python')
+    rubric_text = params.get('rubricText') or params.get('rubric_text', '')
         
     # Fetch context file
     context_content = ""
@@ -879,16 +921,36 @@ class AssignmentViewSet(ListProtectedViewSet):
                             elif 'c++' in kernel_lang or 'cpp' in kernel_lang: language = 'cpp'
                             else: language = kernel_lang 
                             
-                        # Extract code
+                        # Extract code + markdown (markdown included as comments for AI context)
+                        def _comment_block(text: str, lang: str) -> str:
+                          if text is None:
+                            return ""
+                          # Normalize comment prefix by language
+                          lang_key = (lang or "").lower()
+                          if any(k in lang_key for k in ["java", "js", "ts", "c++", "cpp", "c#", "c/"]):
+                            prefix = "// "
+                          elif any(k in lang_key for k in ["python", "r", "ruby", "bash", "sh", "shell", "php", "node", "javascript", "typescript"]):
+                            prefix = "# "
+                          else:
+                            prefix = "// "
+                          lines = text.splitlines() or [""]
+                          return "\n".join(f"{prefix}{line}" for line in lines)
+
                         code_cells = []
                         cells = nb_data.get('cells', [])
                         for cell in cells:
-                            if cell.get('cell_type') == 'code':
-                                source = cell.get('source', '')
-                                if isinstance(source, list):
-                                    source = ''.join(source)
-                                code_cells.append(source)
-                        target_code = "\n\n".join(code_cells)
+                          cell_type = cell.get('cell_type')
+                          source = cell.get('source', '')
+                          if isinstance(source, list):
+                            source = ''.join(source)
+
+                          if cell_type == 'markdown':
+                            if source:
+                              code_cells.append(_comment_block(f"[Markdown]\n{source}", language))
+                          elif cell_type == 'code':
+                            code_cells.append(source)
+
+                        target_code = "\n\n".join([c for c in code_cells if c is not None])
                      except Exception as e:
                         logger.warning(f"Failed to parse notebook: {e}")
                 else:
@@ -919,6 +981,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         logger.error(f"AI Generation failed: {e}")
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+  @extend_schema(request=AssignmentCloneSerializer, responses=AssignmentSerializer)
   @action(detail=True, methods=["POST"])
   def clone(self, request, pk=None):
     """

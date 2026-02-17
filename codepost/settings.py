@@ -89,6 +89,13 @@ ADMINS = [
     ("LCSR Codepost Team", "mk1800@rutgers.edu"),
 ]
 
+# Internal shell relay (API -> worker)
+WORKER_SHELL_WS_URL = os.environ.get("WORKER_SHELL_WS_URL", "")
+WORKER_SHELL_SHARED_SECRET = os.environ.get("WORKER_SHELL_SHARED_SECRET", "")
+WORKER_SHELL_REDIS_URL = os.environ.get("WORKER_SHELL_REDIS_URL", "")
+WORKER_SHELL_FORCE_LOCAL = os.environ.get("WORKER_SHELL_FORCE_LOCAL", "FALSE").upper() == "TRUE"
+WORKER_SHELL_WORKER_ID = os.environ.get("WORKER_SHELL_WORKER_ID", HOSTNAME)
+
 API_HOST = urlparse(API_URL).netloc.split(':')[0]
 
 #################### Authentication And Host settings ##############################
@@ -367,6 +374,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "viewflow",
     "core",
     "autograder",
@@ -414,6 +422,13 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "codepost.wsgi.application"
+ASGI_APPLICATION = "codepost.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
 
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 

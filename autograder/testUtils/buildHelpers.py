@@ -89,4 +89,4 @@ def createDockerFile(
         if len(d_stripped) > 0 and not d_stripped.startswith('//') and d_stripped != '...':
             dependencyStr += "RUN {}\n".format(d)
 
-    return baseStr + dirStr + dependencyStr + customDockerFile + "\nUSER codepost\n"
+    return baseStr + dirStr + dependencyStr + customDockerFile + "\nWORKDIR /work\nUSER codepost\n"

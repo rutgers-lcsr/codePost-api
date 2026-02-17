@@ -7,10 +7,15 @@ from core.models import AssignmentDataSet
 class AssignmentDataSetSerializer(serializers.ModelSerializer):
     """Serializer for AssignmentDataSet model"""
     
-    # Read-only computed fields
-    file_url = serializers.SerializerMethodField()
-    file_size = serializers.SerializerMethodField()
-    file_name = serializers.SerializerMethodField()
+    # Read-only computed fields (camelCase)
+    fileUrl = serializers.SerializerMethodField()
+    fileSize = serializers.SerializerMethodField()
+    fileName = serializers.SerializerMethodField()
+
+    # camelCase aliases
+    mountPath = serializers.CharField(source='mount_path', required=False, allow_blank=True)
+    isActive = serializers.BooleanField(source='is_active', required=False)
+    isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
     
     class Meta:
         model = AssignmentDataSet
@@ -20,18 +25,28 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
             'name',
             'description',
             'file',
-            'file_url',
-            'file_size',
-            'file_name',
-            'mount_path',
-            'is_active',
+            'fileUrl',
+            'fileSize',
+            'fileName',
+            'mountPath',
+            'isActive',
             'created',
             'modified',
+            'hidden',
+            'isTestResource',
         ]
-        read_only_fields = ['id', 'created', 'modified', 'file_url', 'file_size', 'file_name']
+        read_only_fields = ['id', 'created', 'modified', 'fileUrl', 'fileSize', 'fileName', 'hidden']
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'mount_path' in data and 'mountPath' not in data:
+            data['mountPath'] = data['mount_path']
+        if 'is_active' in data and 'isActive' not in data:
+            data['isActive'] = data['is_active']
+        return super().to_internal_value(data)
     
     @extend_schema_field(serializers.URLField(allow_null=True))
-    def get_file_url(self, obj):
+    def get_fileUrl(self, obj):
         """Get the URL to download the dataset file"""
         if obj.file:
             request = self.context.get('request')
@@ -41,7 +56,7 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
         return None
     
     @extend_schema_field(serializers.IntegerField(allow_null=True))
-    def get_file_size(self, obj):
+    def get_fileSize(self, obj):
         """Get the size of the dataset file in bytes"""
         if obj.file:
             try:
@@ -51,7 +66,7 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
         return None
     
     @extend_schema_field(serializers.CharField(allow_null=True))
-    def get_file_name(self, obj):
+    def get_fileName(self, obj):
         """Get the original filename"""
         if obj.file:
             try:
@@ -63,6 +78,10 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
 
 class AssignmentDataSetCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating AssignmentDataSet"""
+
+    mountPath = serializers.CharField(source='mount_path', required=False, allow_blank=True)
+    isActive = serializers.BooleanField(source='is_active', required=False)
+    isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
     
     class Meta:
         model = AssignmentDataSet
@@ -71,9 +90,21 @@ class AssignmentDataSetCreateSerializer(serializers.ModelSerializer):
             'name',
             'description',
             'file',
-            'mount_path',
-            'is_active',
+            'mountPath',
+            'isActive',
+            'hidden',
+            'isTestResource',
         ]
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'mount_path' in data and 'mountPath' not in data:
+            data['mountPath'] = data['mount_path']
+        if 'is_active' in data and 'isActive' not in data:
+            data['isActive'] = data['is_active']
+        if 'is_test_resource' in data and 'isTestResource' not in data:
+            data['isTestResource'] = data['is_test_resource']
+        return super().to_internal_value(data)
     
     def validate_file(self, value):
         """Validate file size"""
@@ -89,12 +120,27 @@ class AssignmentDataSetCreateSerializer(serializers.ModelSerializer):
 
 class AssignmentDataSetUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating AssignmentDataSet (without file upload)"""
+
+    mountPath = serializers.CharField(source='mount_path', required=False, allow_blank=True)
+    isActive = serializers.BooleanField(source='is_active', required=False)
+    isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
     
     class Meta:
         model = AssignmentDataSet
         fields = [
             'name',
             'description',
-            'mount_path',
-            'is_active',
+            'mountPath',
+            'isActive',
+            'isTestResource',
         ]
+
+    def to_internal_value(self, data):
+        data = data.copy()
+        if 'mount_path' in data and 'mountPath' not in data:
+            data['mountPath'] = data['mount_path']
+        if 'is_active' in data and 'isActive' not in data:
+            data['isActive'] = data['is_active']
+        if 'is_test_resource' in data and 'isTestResource' not in data:
+            data['isTestResource'] = data['is_test_resource']
+        return super().to_internal_value(data)

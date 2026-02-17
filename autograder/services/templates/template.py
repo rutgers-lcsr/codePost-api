@@ -333,8 +333,28 @@ except Exception as e:
     print(f"Test Script Error:\n{traceback.format_exc()}", file=sys.stderr)
 
 
+# Filter tests if a specific test function is requested
+# Filter tests if a specific test function is requested
+target_test_function = """#{TARGET_TEST_FUNCTION}"""
+
+if target_test_function and target_test_function.strip() and not target_test_function.startswith("#{"):
+    target = target_test_function.strip()
+    # print(f"Filtering tests for function: {target}", file=sys.stderr)
+    filtered_tests = []
+    for t in TestRunner.get_instance().tests:
+        # Match against function name (primary) or test name (fallback)
+        if t.func.__name__ == target or t.name == target:
+            filtered_tests.append(t)
+    
+    TestRunner.get_instance().tests = filtered_tests
+
 # Run all registered tests
 if TestRunner.get_instance().tests:
-    print("\nRunning Tests...", file=sys.stdout)
+    test_names = [t.name for t in TestRunner.get_instance().tests]
+    print(f"\nRunning {len(test_names)} Tests: {', '.join(test_names)}", file=sys.stdout)
     TestRunner.get_instance().run_all()
+elif target_test_function and target_test_function.strip() and not target_test_function.startswith("#{"):
+    print(f"No tests matched the requested function: {target_test_function}", file=sys.stderr)
+else:
+    print(f"No tests registered to run. (Target: '{target_test_function}')", file=sys.stdout)
 

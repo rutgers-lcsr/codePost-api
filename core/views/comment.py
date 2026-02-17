@@ -146,7 +146,7 @@ class CommentViewSet(ListProtectedViewSet):
         course = file.submission.assignment.course
         assignment = file.submission.assignment
 
-        if not course.ai_provider or not course.ai_api_key or course.ai_disabled:
+        if not course.ai_provider or not course.ai_api_key or course.ai_disabled or course.ai_comments_disabled:
             return Response(
                 {'error': 'AI is not available. Please ask your instructor if you think this is a problem.'},
                 status=status.HTTP_400_BAD_REQUEST

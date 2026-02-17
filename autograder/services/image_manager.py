@@ -382,7 +382,7 @@ class ImageManager:
                 "current_version": env.current_build_version,
                 "image_name": env.image_name,
                 "build_status": env.build_status,
-                "last_built": env.last_built.isoformat() if env.last_built else None,
+                "last_built": env.last_built,
                 "successful_runs": env.successful_runs,
                 "total_runs": env.total_runs,
                 "success_rate": round(success_rate, 1),

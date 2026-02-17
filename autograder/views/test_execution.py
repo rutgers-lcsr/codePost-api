@@ -1,4 +1,4 @@
-from rest_framework.views import APIView
+from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -9,27 +9,28 @@ from autograder.serializers.execution import (
     TestExecutionResultSerializer,
 )
 from core.models import Submission, TestCase
+from autograder.tasks import run_test_task
 
-class RunTestView(APIView):
+class RunTestView(GenericAPIView):
     """
     API access to the Modern Testing Architecture.
     Runs a specific TestCase against a Submission.
     """
     permission_classes = [IsAuthenticated]
+    serializer_class = TestExecutionRequestSerializer
 
     @extend_schema(
         request=TestExecutionRequestSerializer,
         responses={200: TestExecutionResultSerializer}
     )
     def post(self, request):
-        test_id = request.data.get('testId')
-        submission_id = request.data.get('submissionId')
+        # Validate through serializer (handles camelCase → snake_case mapping)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
 
-        if not submission_id:
-            return Response(
-                {"error": "Missing submissionId"}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        test_id = validated.get('testId')
+        submission_id = validated['submissionId']
 
         # Validate Permissions (Basic check that user can access this submission)
         # TODO: Add robust permission checks (is Admin or Student owner)
@@ -53,16 +54,25 @@ class RunTestView(APIView):
         except Submission.DoesNotExist:
              return Response({"error": "Submission not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Run Test(s)
+        # Run Test(s) - file_overrides already normalized by serializer
+        file_overrides = validated.get('file_overrides')
+        
+        # Convert keys to int if they are strings (JSON dict keys are always strings)
+        if file_overrides:
+             try:
+                 file_overrides = {int(k): v for k, v in file_overrides.items()}
+             except ValueError:
+                 return Response({"error": "Invalid file_overrides keys, must be integer file IDs"}, status=status.HTTP_400_BAD_REQUEST)
+
         if test_id:
-            # Run single test
-            result = TestService.run_test(test_id, submission_id, user_id=request.user.id)
-            if result['success']:
-                return Response(result)
-            else:
-                return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            task = run_test_task.delay(submission_id, test_id=test_id, user_id=request.user.id, file_overrides=file_overrides)
         else:
-            # Run all tests (suite)
-            results = TestService.run_suite(submission_id, user_id=request.user.id)
-            # We return 200 even if some tests failed, as long as the execution framework didn't crash
-            return Response(results)
+            task = run_test_task.delay(submission_id, user_id=request.user.id, file_overrides=file_overrides)
+
+        from autograder.serializers.execution import AsyncTaskResponseSerializer
+        response_payload = {
+            "task_id": task.id,
+            "status": "queued",
+        }
+        response_serializer = AsyncTaskResponseSerializer(instance=response_payload)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)

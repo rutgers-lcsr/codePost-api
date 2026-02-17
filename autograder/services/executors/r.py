@@ -56,7 +56,7 @@ class RExecutor(Executor):
             packages.append(pkg)
         return list(set(packages))
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()
         if not template:
             return None
@@ -66,6 +66,7 @@ class RExecutor(Executor):
         # So we just inject code.
         
         template = template.replace("#{FILLER_CODE}", code)
+        template = template.replace("#{TEST_CODE}", test_code or "")
         return template
 
     def execute(self) -> ExecutionResult:
@@ -79,7 +80,7 @@ class RExecutor(Executor):
         code = self.file.data
         packages_to_install = self._detect_imports(code) 
         
-        template = self._get_code_template(code, packages_to_install)
+        template = self._get_code_template(code, packages_to_install, self.test_code or "")
         if not template:
             return ExecutionResult.error("Failed to get code template")
 

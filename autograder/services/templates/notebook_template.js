@@ -16,33 +16,82 @@ try {
 }
 
 // ============= Tester Framework =============
+const tests = [];
 const testResults = [];
 
-function test(name, points, description, fn) {
+function test(name, points, description, fn, timeout) {
     if (typeof description === 'function') {
+        timeout = fn;
         fn = description;
         description = null;
     }
+    if (typeof timeout === 'undefined' || timeout === null) {
+        timeout = 30;
+    }
+
+    tests.push({ name, points, description, fn, timeout });
+}
+
+async function runTestCase(testCase) {
     const result = {
-        name: name,
-        max_score: points,
-        description: description,
+        name: testCase.name,
+        max_score: testCase.points,
+        description: testCase.description,
+        message: "",
         score: 0,
         passed: false,
         status: "failed",
         error: ""
     };
 
+    const timeoutMs = Math.max(0, Number(testCase.timeout) || 30) * 1000;
+    const start = Date.now();
+
     try {
-        fn();
-        result.passed = true;
-        result.score = points;
-        result.status = "passed";
+        const maybePromise = testCase.fn();
+        const outcome = (maybePromise && typeof maybePromise.then === "function")
+            ? await Promise.race([
+                maybePromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error(`Test timed out after ${timeoutMs / 1000}s`)), timeoutMs))
+            ])
+            : maybePromise;
+
+        if (Array.isArray(outcome) && outcome.length >= 2 && typeof outcome[0] === "number") {
+            result.score = Math.max(0, Math.min(outcome[0], testCase.points));
+            result.message = outcome[1] != null ? String(outcome[1]) : "";
+            result.passed = result.score === testCase.points;
+            result.status = result.passed ? "passed" : "partial";
+        } else if (outcome && typeof outcome === "object" && typeof outcome.score === "number") {
+            result.score = Math.max(0, Math.min(outcome.score, testCase.points));
+            result.message = outcome.message != null ? String(outcome.message) : "";
+            result.passed = result.score === testCase.points;
+            result.status = result.passed ? "passed" : "partial";
+        } else if (typeof outcome === "number") {
+            result.score = Math.max(0, Math.min(outcome, testCase.points));
+            result.passed = result.score === testCase.points;
+            result.status = result.passed ? "passed" : "partial";
+        } else if (typeof outcome === "string") {
+            result.message = outcome;
+            result.passed = true;
+            result.score = testCase.points;
+            result.status = "passed";
+        } else {
+            result.passed = true;
+            result.score = testCase.points;
+            result.status = "passed";
+        }
     } catch (e) {
         result.error = e.message || String(e);
+        result.status = result.error && result.error.includes("timed out") ? "error" : "failed";
     }
 
     testResults.push(result);
+}
+
+async function runAllTests() {
+    for (const t of tests) {
+        await runTestCase(t);
+    }
 }
 
 function outputTestResults() {
@@ -164,6 +213,7 @@ async function run() {
         }
     }
 
+    await runAllTests();
     // Output test results
     outputTestResults();
 

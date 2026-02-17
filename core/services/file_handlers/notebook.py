@@ -6,6 +6,7 @@ from .base import BaseFileHandler
 from .python import PythonHandler
 from .node import NodeHandler
 from .other_langs import RHandler, RubyHandler
+from .java import JavaHandler
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class NotebookHandler(BaseFileHandler):
         'typescript': NodeHandler,
         'r': RHandler,
         'ruby': RubyHandler,
+        'java': JavaHandler,
     }
 
     def _parse_notebook(self) -> Dict:
@@ -47,7 +49,10 @@ class NotebookHandler(BaseFileHandler):
         lang = self._get_kernel_language(nb_data)
         if lang:
             # Normalize
-            if 'python' in lang: lang = 'python'
+            if 'python' in lang:
+                lang = 'python'
+            elif 'java' in lang or 'ijava' in lang:
+                lang = 'java'
             return self.KERNEL_HANDLER_MAP.get(lang)
         return None
 

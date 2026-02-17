@@ -2,22 +2,30 @@ openapi: 3.0.3
 info:
   title: codePost API
   version: 3.0.0
-  description: An API for administrators to mine course data and automate common tasks.
+  description: "\nAn API for administrators to mine course data and automate common
+    tasks.\n\n## Quick Start\n\n### Installation\n\n```bash\npip install git+https://github.com/rutgers-lcsr/codepost-python.git\n```\n\n###
+    Basic Usage\n\n```python\nimport codepost_api_client as codepost\n\n# Configure
+    the client\nconfig = codepost.Configuration(\n    host=\"https://codepost-api.cs.rutgers.edu\",\n
+    \   api_key={\"tokenAuth\": \"Token YOUR_API_KEY\"}\n)\n\n# Use the API\nwith
+    codepost.ApiClient(config) as client:\n    courses_api = codepost.CoursesApi(client)\n
+    \   assignments_api = codepost.AssignmentsApi(client)\n    \n    # 1. List all
+    courses\n    print(\"--- Courses ---\")\n    courses = courses_api.courses_list()\n
+    \   for course in courses:\n        print(f\"ID: {course.id} | {course.name} ({course.period})\")\n
+    \       \n    if courses:\n        my_course_id = courses[0].id\n        \n        #
+    2. List assignments for a course\n        # Note: Course object contains list
+    of assignment IDs\n        course_data = courses_api.courses_retrieve(my_course_id)\n
+    \       \n        print(f\"--- Assignments for Course {my_course_id} ---\")\n
+    \       for assignment_id in course_data.assignments:\n            # Fetch full
+    assignment details\n            assignment = assignments_api.assignments_retrieve(assignment_id)\n
+    \           print(f\"ID: {assignment.id} | {assignment.name}\")\n\n    # 3. Create
+    a new Course\n    new_course = codepost.Course(name=\"CS101\", period=\"Fall 2026\")\n
+    \   created_course = courses_api.courses_create(new_course)\n    print(f\"Created
+    Course: {created_course.id}\")\n\n    # 4. Create an Assignment\n    new_assignment
+    = codepost.Assignment(\n        name=\"Homework 1\", \n        course=created_course.id\n
+    \   )\n    created_assignment = assignments_api.assignments_create(new_assignment)\n```\n\nSee
+    the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for
+    more examples.\n"
 paths:
-  /admin/:
-    get:
-      operationId: admin_retrieve
-      description: A simple ViewSet that redirects to the admin interface.
-      tags:
-      - admin
-      security:
-      - tokenAuth: []
-      - jwtAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          description: No response body
   /assignmentDataSets/:
     get:
       operationId: assignmentDataSets_list
@@ -284,7 +292,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/AssignmentFile'
+                  $ref: '#/components/schemas/AssignmentFileSummary'
           description: ''
     post:
       operationId: assignmentFiles_create
@@ -840,7 +848,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/BeforeStudentUploadResponse'
           description: ''
   /assignments/{id}/clone/:
     post:
@@ -859,13 +867,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Assignment'
+              $ref: '#/components/schemas/AssignmentClone'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/Assignment'
+              $ref: '#/components/schemas/AssignmentClone'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Assignment'
+              $ref: '#/components/schemas/AssignmentClone'
         required: true
       security:
       - tokenAuth: []
@@ -881,7 +889,7 @@ paths:
           description: ''
   /assignments/{id}/comments/:
     get:
-      operationId: assignments_comments_retrieve
+      operationId: assignments_comments_list
       description: |-
         Grab all custom comments applied to submissions for this assignment, possibly filtered by
         author
@@ -907,11 +915,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
           description: ''
   /assignments/{id}/datasets/:
     get:
-      operationId: assignments_datasets_retrieve
+      operationId: assignments_datasets_list
       description: |-
         Return all datasets for this assignment
 
@@ -935,7 +945,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                type: array
+                items:
+                  $ref: '#/components/schemas/AssignmentDataSet'
           description: ''
   /assignments/{id}/download/:
     get:
@@ -960,11 +972,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/AssignmentDownloadResponse'
           description: ''
   /assignments/{id}/drawUnassigned/:
     get:
-      operationId: assignments_drawUnassigned_retrieve
+      operationId: assignments_drawUnassigned_list
       description: Get the next unassigned submission for this submission.
       parameters:
       - in: path
@@ -985,7 +997,53 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Submission'
+          description: ''
+  /assignments/{id}/generateTest/:
+    post:
+      operationId: assignments_generateTest_create
+      description: |-
+        Generate an AI-powered test script for a file in this assignment.
+
+        Request body:
+        - target_filename: str (required) - Name of the file to test (e.g., 'main.py')
+        - context_file_id: int (optional) - ID of an AssignmentFile to use as context (Solution/Starter)
+        - context_file_name: str (optional) - Name of an AssignmentFile (if ID not provided)
+        - language: str (optional) - Target language (python, java, etc.)
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentGenerateTest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AssignmentGenerateTest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AssignmentGenerateTest'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentGenerateTestResponse'
           description: ''
   /assignments/{id}/queueLength/:
     get:
@@ -1010,7 +1068,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/AssignmentQueueLengthResponse'
           description: ''
   /assignments/{id}/rubric/:
     get:
@@ -1035,7 +1093,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/AssignmentRubricResponse'
           description: ''
   /assignments/{id}/studentTests/:
     get:
@@ -1077,7 +1135,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/AssignmentStudentTestsResponse'
           description: ''
   /assignments/{id}/studentUpload/:
     get:
@@ -1106,7 +1164,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/AssignmentStudentUploadGetResponse'
           description: ''
     post:
       operationId: assignments_studentUpload_create
@@ -1146,7 +1204,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/StudentSubmission'
           description: ''
     patch:
       operationId: assignments_studentUpload_partial_update
@@ -1185,11 +1243,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/StudentSubmission'
           description: ''
   /assignments/{id}/submissionHistories/:
     get:
-      operationId: assignments_submissionHistories_retrieve
+      operationId: assignments_submissionHistories_list
       description: |-
         list:
         Return a list of all the assignments.
@@ -1215,6 +1273,18 @@ paths:
           type: integer
         description: A unique integer value identifying this assignment.
         required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
       tags:
       - assignments
       security:
@@ -1227,11 +1297,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/PaginatedSubmissionHistoryList'
           description: ''
   /assignments/{id}/submissionTests/:
     get:
-      operationId: assignments_submissionTests_retrieve
+      operationId: assignments_submissionTests_list
       description: |-
         Gets a paginated list of submission tests for an assignment.
         We use this for performance for large courses to fetch all submission tests.
@@ -1244,6 +1314,18 @@ paths:
           type: integer
         description: A unique integer value identifying this assignment.
         required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
       tags:
       - assignments
       security:
@@ -1256,11 +1338,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/PaginatedSubmissionWithTestsList'
           description: ''
   /assignments/{id}/submissions/:
     get:
-      operationId: assignments_submissions_retrieve
+      operationId: assignments_submissions_list
       description: Return a (optionally filtered) list of submissions whose parent
         is the requested assignment.
       parameters:
@@ -1270,6 +1352,18 @@ paths:
           type: integer
         description: A unique integer value identifying this assignment.
         required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
       tags:
       - assignments
       security:
@@ -1282,7 +1376,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assignment'
+                $ref: '#/components/schemas/PaginatedSubmissionList'
           description: ''
   /auth/sso/callback/{provider}/:
     get:
@@ -1693,13 +1787,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentBuildRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentBuildRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentBuildRequest'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -1710,8 +1804,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Environment'
+                $ref: '#/components/schemas/EnvironmentBuildResponse'
           description: ''
+        '500':
+          description: Async build dispatch failed
   /autograder/environments/{id}/build_status/:
     get:
       operationId: autograder_environments_build_status_retrieve
@@ -1737,7 +1833,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Environment'
+                $ref: '#/components/schemas/EnvironmentBuildStatusResponse'
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentBuildStatusError'
           description: ''
   /autograder/environments/{id}/dockerfile/:
     get:
@@ -1764,7 +1866,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Environment'
+                type: string
           description: ''
   /autograder/environments/{id}/eject/:
     get:
@@ -1791,7 +1893,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Environment'
+                $ref: '#/components/schemas/EnvironmentEjectResponse'
           description: ''
   /autograder/environments/{id}/preview/:
     post:
@@ -1812,14 +1914,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Environment'
+              $ref: '#/components/schemas/EnvironmentPreviewRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/Environment'
+              $ref: '#/components/schemas/EnvironmentPreviewRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/Environment'
-        required: true
+              $ref: '#/components/schemas/EnvironmentPreviewRequest'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -1830,8 +1931,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Environment'
+                type: string
           description: ''
+        '400':
+          description: Preview generation failed
   /autograder/environments/{id}/run/:
     patch:
       operationId: autograder_environments_run_partial_update
@@ -1851,13 +1954,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentRunRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentRunRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentRunRequest'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -1868,8 +1971,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Environment'
+                $ref: '#/components/schemas/EnvironmentRunResponse'
           description: ''
+        '403':
+          description: Forbidden
+        '401':
+          description: Not authorized
+        '400':
+          description: Validation error
   /autograder/environments/{id}/runAll/:
     patch:
       operationId: autograder_environments_runAll_partial_update
@@ -1889,13 +1998,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentRunAllRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentRunAllRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedEnvironment'
+              $ref: '#/components/schemas/PatchedEnvironmentRunAllRequest'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -1906,7 +2015,40 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Environment'
+                $ref: '#/components/schemas/EnvironmentRunAllResponse'
+          description: ''
+  /autograder/execute/code/:
+    post:
+      operationId: autograder_execute_code_create
+      description: |-
+        Execute a code snippet using the autograder executors.
+
+        DEPRECATED: Use async endpoints.
+      tags:
+      - autograder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodeExecutionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CodeExecutionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CodeExecutionRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
           description: ''
   /autograder/execute/file/:
     post:
@@ -1914,8 +2056,13 @@ paths:
       description: |-
         Execute a codePost file - use stream execution instead. This endpoint is used for testing file execution.
 
+        DEPRECATED: Use /autograder/async/execute/file/ instead.
+        This view executes synchronously, blocking the request thread. It should not be used in production
+        for long-running tasks.
+
         Permissions:
         - Codepost staff only: Superusers can execute any file
+        - Course Staff: Can execute with overrides if allowed by assignment
 
         Uses FilePermissions which delegates to appropriate permission class
         based on file type (SubmissionFile, AssignmentFile, CourseFile)
@@ -2030,6 +2177,89 @@ paths:
       responses:
         '200':
           description: Server-Sent Events stream with ExecutionResult data
+  /autograder/execute/notebook/:
+    post:
+      operationId: autograder_execute_notebook_create
+      description: |-
+        Execute a full notebook payload.
+
+        DEPRECATED: Use async endpoints.
+      tags:
+      - autograder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotebookExecutionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotebookExecutionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotebookExecutionRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+          description: ''
+  /autograder/execute/notebook-cell/:
+    post:
+      operationId: autograder_execute_notebook_cell_create
+      description: Execute a single notebook cell by wrapping it in a minimal notebook.
+      tags:
+      - autograder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotebookCellExecutionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NotebookCellExecutionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotebookCellExecutionRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResult'
+          description: ''
+  /autograder/shell/metrics/:
+    get:
+      operationId: autograder_shell_metrics_retrieve
+      description: |-
+        Staff-only shell relay metrics from Redis.
+        GET /autograder/shell/metrics/
+      tags:
+      - autograder
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShellMetricsResponse'
+          description: ''
   /autograder/tasks/{id}/:
     get:
       operationId: autograder_tasks_retrieve
@@ -3203,7 +3433,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseRoster'
           description: ''
   /courses/{id}/aiSettings/:
     get:
@@ -3233,7 +3463,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseAISettings'
           description: ''
     patch:
       operationId: courses_aiSettings_partial_update
@@ -3273,7 +3503,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseAISettings'
           description: ''
   /courses/{id}/changeInviteCode/:
     patch:
@@ -3326,7 +3556,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                type: string
           description: ''
   /courses/{id}/courseSettings/:
     get:
@@ -3368,7 +3598,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseSettings'
           description: ''
     patch:
       operationId: courses_courseSettings_partial_update
@@ -3420,7 +3650,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseSettings'
           description: ''
   /courses/{id}/deleteRubricCategory/:
     patch:
@@ -3469,12 +3699,8 @@ paths:
       - basicAuth: []
       - cookieAuth: []
       responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Course'
-          description: ''
+        '204':
+          description: No response body
   /courses/{id}/removeFromRoster/:
     patch:
       operationId: courses_removeFromRoster_partial_update
@@ -3514,7 +3740,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseRoster'
           description: ''
   /courses/{id}/roster/:
     get:
@@ -3544,7 +3770,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseRoster'
           description: ''
     patch:
       operationId: courses_roster_partial_update
@@ -3584,7 +3810,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseRoster'
           description: ''
   /courses/{id}/rosterMap/:
     get:
@@ -3626,7 +3852,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseRosterMap'
           description: ''
     patch:
       operationId: courses_rosterMap_partial_update
@@ -3661,13 +3887,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseRosterMap'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseRosterMap'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseRosterMap'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -3678,11 +3904,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseRosterMap'
           description: ''
   /courses/{id}/sections/:
     get:
-      operationId: courses_sections_retrieve
+      operationId: courses_sections_list
       description: |-
         Gets a paginated list of sections for a course.
         We use this for performance for large courses to fetch sections in bulk.
@@ -3695,6 +3921,18 @@ paths:
           type: integer
         description: A unique integer value identifying this course.
         required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
       tags:
       - courses
       security:
@@ -3707,7 +3945,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/PaginatedSectionList'
           description: ''
   /courses/{id}/studentCaptions/:
     get:
@@ -3749,7 +3987,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseStudentCaptions'
           description: ''
     patch:
       operationId: courses_studentCaptions_partial_update
@@ -3784,13 +4022,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseStudentCaptions'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseStudentCaptions'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseStudentCaptions'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -3801,7 +4039,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Course'
+                $ref: '#/components/schemas/CourseStudentCaptions'
           description: ''
   /dashboard/stats/:
     get:
@@ -4162,7 +4400,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LogDumpResponse'
+                $ref: '#/components/schemas/LogSuccessResponse'
           description: ''
   /logs/logError/:
     post:
@@ -4195,7 +4433,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LogErrorResponse'
+                $ref: '#/components/schemas/LogSuccessResponse'
           description: ''
   /logs/logHappiness/:
     post:
@@ -4225,7 +4463,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LogHappinessResponse'
+                $ref: '#/components/schemas/LogSuccessResponse'
           description: ''
   /organizations/:
     get:
@@ -4759,7 +4997,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JWTOTTResponse'
+                $ref: '#/components/schemas/JwtOttResponse'
           description: ''
   /ott/generate/:
     get:
@@ -6109,9 +6347,14 @@ paths:
           description: No response body
   /sections/{id}/submissions/:
     get:
-      operationId: sections_submissions_retrieve
+      operationId: sections_submissions_list
       description: Grab submissions corresponding to students in a section
       parameters:
+      - in: query
+        name: assignment
+        schema:
+          type: integer
+        required: true
       - in: path
         name: id
         schema:
@@ -6130,7 +6373,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Section'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Submission'
           description: ''
   /submissionFiles/:
     get:
@@ -7003,7 +7248,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                $ref: '#/components/schemas/SubmissionCheckPermissionResponse'
           description: ''
   /submissions/{id}/deleteRegrade/:
     patch:
@@ -7056,7 +7301,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                $ref: '#/components/schemas/StudentSubmission'
           description: ''
   /submissions/{id}/generatePartnerLink/:
     get:
@@ -7098,11 +7343,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                $ref: '#/components/schemas/SubmissionPartnerLinkResponse'
           description: ''
   /submissions/{id}/history/:
     get:
-      operationId: submissions_history_retrieve
+      operationId: submissions_history_list
       description: |-
         list:
         Return a list of all the submissions.
@@ -7140,7 +7385,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubmissionHistory'
           description: ''
     patch:
       operationId: submissions_history_partial_update
@@ -7192,7 +7439,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubmissionHistory'
           description: ''
   /submissions/{id}/notifyStudents/:
     post:
@@ -7246,7 +7495,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                type: string
           description: ''
   /submissions/{id}/removePartner/:
     get:
@@ -7288,11 +7537,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                type: string
           description: ''
   /submissions/{id}/submissionTests/:
     get:
-      operationId: submissions_submissionTests_retrieve
+      operationId: submissions_submissionTests_list
       description: |-
         list:
         Return a list of all the submissions.
@@ -7330,7 +7579,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubmissionTest'
           description: ''
   /submissions/{id}/submitRegrade/:
     patch:
@@ -7383,7 +7634,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                $ref: '#/components/schemas/StudentSubmission'
           description: ''
   /submissions/{id}/testResults/:
     get:
@@ -7425,7 +7676,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                $ref: '#/components/schemas/SubmissionTestResultsResponse'
           description: ''
   /submissions/{id}/validatePartnerLink/:
     get:
@@ -7455,6 +7706,11 @@ paths:
           type: integer
         description: A unique integer value identifying this submission.
         required: true
+      - in: query
+        name: token
+        schema:
+          type: string
+        required: true
       tags:
       - submissions
       security:
@@ -7467,7 +7723,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                type: string
           description: ''
   /submissions/{id}/validatePartnerLinkAndReturn/:
     get:
@@ -7497,6 +7753,11 @@ paths:
           type: integer
         description: A unique integer value identifying this submission.
         required: true
+      - in: query
+        name: token
+        schema:
+          type: string
+        required: true
       tags:
       - submissions
       security:
@@ -7509,7 +7770,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Submission'
+                $ref: '#/components/schemas/StudentSubmission'
           description: ''
   /subscribe/:
     post:
@@ -7543,6 +7804,15 @@ paths:
   /system/activity/:
     get:
       operationId: system_activity_retrieve
+      parameters:
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: pageSize
+        schema:
+          type: integer
       tags:
       - system
       security:
@@ -7875,14 +8145,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TestCase'
+              $ref: '#/components/schemas/TestCaseRunRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TestCase'
+              $ref: '#/components/schemas/TestCaseRunRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TestCase'
-        required: true
+              $ref: '#/components/schemas/TestCaseRunRequest'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -7893,7 +8162,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TestCase'
+                $ref: '#/components/schemas/TestCaseRunResponse'
           description: ''
   /testCategories/:
     get:
@@ -8162,6 +8431,303 @@ paths:
       responses:
         '204':
           description: No response body
+  /testCategories/preview-script/:
+    post:
+      operationId: testCategories_preview_script_create
+      description: Preview the tests that would be generated from a script.
+      tags:
+      - testCategories
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestCategory'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TestCategory'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TestCategory'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCategory'
+          description: ''
+  /testCategoryResources/:
+    get:
+      operationId: testCategoryResources_list
+      description: |-
+        list:
+        Return a list of all the testCategoryResources.
+
+        create:
+        Create a new testCategoryResource.
+
+        retrieve:
+        Return the given testCategoryResource.
+
+        update:
+        Update a testCategoryResource.
+
+        partial_update:
+        Update a testCategoryResource.
+
+        delete:
+        Delete a testCategoryResource.
+      tags:
+      - testCategoryResources
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TestCategoryResource'
+          description: ''
+    post:
+      operationId: testCategoryResources_create
+      description: |-
+        list:
+        Return a list of all the testCategoryResources.
+
+        create:
+        Create a new testCategoryResource.
+
+        retrieve:
+        Return the given testCategoryResource.
+
+        update:
+        Update a testCategoryResource.
+
+        partial_update:
+        Update a testCategoryResource.
+
+        delete:
+        Delete a testCategoryResource.
+      tags:
+      - testCategoryResources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestCategoryResource'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TestCategoryResource'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TestCategoryResource'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCategoryResource'
+          description: ''
+  /testCategoryResources/{id}/:
+    get:
+      operationId: testCategoryResources_retrieve
+      description: |-
+        list:
+        Return a list of all the testCategoryResources.
+
+        create:
+        Create a new testCategoryResource.
+
+        retrieve:
+        Return the given testCategoryResource.
+
+        update:
+        Update a testCategoryResource.
+
+        partial_update:
+        Update a testCategoryResource.
+
+        delete:
+        Delete a testCategoryResource.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this test category resource.
+        required: true
+      tags:
+      - testCategoryResources
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCategoryResource'
+          description: ''
+    put:
+      operationId: testCategoryResources_update
+      description: |-
+        list:
+        Return a list of all the testCategoryResources.
+
+        create:
+        Create a new testCategoryResource.
+
+        retrieve:
+        Return the given testCategoryResource.
+
+        update:
+        Update a testCategoryResource.
+
+        partial_update:
+        Update a testCategoryResource.
+
+        delete:
+        Delete a testCategoryResource.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this test category resource.
+        required: true
+      tags:
+      - testCategoryResources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestCategoryResource'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TestCategoryResource'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TestCategoryResource'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCategoryResource'
+          description: ''
+    patch:
+      operationId: testCategoryResources_partial_update
+      description: |-
+        list:
+        Return a list of all the testCategoryResources.
+
+        create:
+        Create a new testCategoryResource.
+
+        retrieve:
+        Return the given testCategoryResource.
+
+        update:
+        Update a testCategoryResource.
+
+        partial_update:
+        Update a testCategoryResource.
+
+        delete:
+        Delete a testCategoryResource.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this test category resource.
+        required: true
+      tags:
+      - testCategoryResources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTestCategoryResource'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTestCategoryResource'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTestCategoryResource'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCategoryResource'
+          description: ''
+    delete:
+      operationId: testCategoryResources_destroy
+      description: |-
+        list:
+        Return a list of all the testCategoryResources.
+
+        create:
+        Create a new testCategoryResource.
+
+        retrieve:
+        Return the given testCategoryResource.
+
+        update:
+        Update a testCategoryResource.
+
+        partial_update:
+        Update a testCategoryResource.
+
+        delete:
+        Delete a testCategoryResource.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this test category resource.
+        required: true
+      tags:
+      - testCategoryResources
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /tmp-script/:
     post:
       operationId: tmp_script_create
@@ -8177,7 +8743,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivateCIPResponse'
+                $ref: '#/components/schemas/ActivateCipResponse'
           description: ''
   /token-auth/:
     post:
@@ -8746,13 +9312,25 @@ paths:
           description: No response body
 components:
   schemas:
-    ActivateCIPResponse:
+    ActivateCipResponse:
       type: object
       properties:
         success:
           type: boolean
       required:
       - success
+    AiProviderEnum:
+      enum:
+      - gemini
+      - openai
+      - ollama
+      - custom
+      type: string
+      description: |-
+        * `gemini` - Google Gemini
+        * `openai` - OpenAI
+        * `ollama` - Ollama (Self-hosted)
+        * `custom` - Custom Provider
     Assignment:
       type: object
       description: Assignment Serializer from which all other Assignment Serializer
@@ -8913,6 +9491,10 @@ components:
           type: boolean
           description: A boolean field. If true, admins and graders can edit the assignment
             rubric inline in the code console.
+        gradersCanEditSubmissions:
+          type: boolean
+          description: A boolean field. If True, graders will be allowed to edit student
+            submissions (e.g. for testing fixes).
         testCategories:
           type: array
           items:
@@ -8926,6 +9508,14 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        runTestsOnSubmit:
+          type: boolean
+          description: If True, autograder tests will automatically run when a student
+            submits.
+        testsAffectGrade:
+          type: boolean
+          description: If True, the results of autograder tests will be included in
+            the submission grade calculation.
       required:
       - course
       - dataSets
@@ -8939,6 +9529,14 @@ components:
       - points
       - rubricCategories
       - testCategories
+    AssignmentClone:
+      type: object
+      properties:
+        course:
+          type: integer
+          description: ID of the destination course
+      required:
+      - course
     AssignmentDataSet:
       type: object
       description: Serializer for AssignmentDataSet model
@@ -8960,28 +9558,23 @@ components:
           type: string
           format: uri
           description: The data set file
-        file_url:
+        fileUrl:
           type: string
           format: uri
           nullable: true
           readOnly: true
-        file_size:
+        fileSize:
           type: integer
           nullable: true
           readOnly: true
-        file_name:
+        fileName:
           type: string
           nullable: true
           readOnly: true
-        mount_path:
+        mountPath:
           type: string
-          description: Path where dataset will be mounted in execution environment.
-            Can be an absolute path (e.g. '/etc/config.json') or a relative path (e.g.
-            'mnist'). Relative paths are mounted under '/shared'.
-          maxLength: 256
-        is_active:
+        isActive:
           type: boolean
-          description: If True, this dataset will be mounted during code execution.
         created:
           type: string
           format: date-time
@@ -8990,13 +9583,20 @@ components:
           type: string
           format: date-time
           readOnly: true
+        hidden:
+          type: boolean
+          readOnly: true
+          description: If True, this dataset will be hidden from students.
+        isTestResource:
+          type: boolean
       required:
       - assignment
       - created
       - file
-      - file_name
-      - file_size
-      - file_url
+      - fileName
+      - fileSize
+      - fileUrl
+      - hidden
       - id
       - modified
       - name
@@ -9018,15 +9618,15 @@ components:
           type: string
           format: uri
           description: The data set file
-        mount_path:
+        mountPath:
           type: string
-          description: Path where dataset will be mounted in execution environment.
-            Can be an absolute path (e.g. '/etc/config.json') or a relative path (e.g.
-            'mnist'). Relative paths are mounted under '/shared'.
-          maxLength: 256
-        is_active:
+        isActive:
           type: boolean
-          description: If True, this dataset will be mounted during code execution.
+        hidden:
+          type: boolean
+          description: If True, this dataset will be hidden from students.
+        isTestResource:
+          type: boolean
       required:
       - assignment
       - file
@@ -9042,17 +9642,24 @@ components:
         description:
           type: string
           description: Optional description of the data set.
-        mount_path:
+        mountPath:
           type: string
-          description: Path where dataset will be mounted in execution environment.
-            Can be an absolute path (e.g. '/etc/config.json') or a relative path (e.g.
-            'mnist'). Relative paths are mounted under '/shared'.
-          maxLength: 256
-        is_active:
+        isActive:
           type: boolean
-          description: If True, this dataset will be mounted during code execution.
+        isTestResource:
+          type: boolean
       required:
       - name
+    AssignmentDownloadResponse:
+      type: object
+      properties:
+        zip:
+          type: string
+        filename:
+          type: string
+      required:
+      - filename
+      - zip
     AssignmentFile:
       type: object
       description: |-
@@ -9097,6 +9704,12 @@ components:
           type: string
           format: date-time
           readOnly: true
+        hidden:
+          type: boolean
+          description: If True, this file will be hidden from students (but available
+            for tests/helpers).
+        isTestResource:
+          type: boolean
       required:
       - assignment
       - created
@@ -9104,6 +9717,151 @@ components:
       - id
       - modified
       - name
+    AssignmentFileSummary:
+      type: object
+      description: |-
+        Summary serializer for AssignmentFile objects.
+        Excludes 'data' to reduce payload size in list views.
+      properties:
+        name:
+          type: string
+          description: The name of the file.
+          maxLength: 250
+        extension:
+          type: string
+          description: The extension for the file (e.g. '.java' or '.py'
+          maxLength: 36
+        assignment:
+          type: integer
+          description: The related assignment_id.
+        id:
+          type: integer
+          readOnly: true
+        path:
+          type: string
+          nullable: true
+          description: Optional file path, delimited by slashes, to indicate a directory
+            structure.
+          maxLength: 500
+        required:
+          type: boolean
+          description: If student upload is enabled, a file with this name and extension
+            will be required.
+        description:
+          type: string
+          description: Optional description shown to students.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+        hidden:
+          type: boolean
+          description: If True, this file will be hidden from students (but available
+            for tests/helpers).
+        isTestResource:
+          type: boolean
+      required:
+      - assignment
+      - created
+      - extension
+      - id
+      - modified
+      - name
+    AssignmentGenerateTest:
+      type: object
+      properties:
+        targetFilename:
+          type: string
+          description: Name of the file to test (e.g., 'main.py')
+        contextFileId:
+          type: integer
+          description: ID of an AssignmentFile to use as context
+        contextFileName:
+          type: string
+          description: Name of an AssignmentFile to use as context
+        language:
+          type: string
+          default: python
+          description: Target language
+        rubricText:
+          type: string
+          description: Rubric context for test generation
+      required:
+      - targetFilename
+    AssignmentGenerateTestResponse:
+      type: object
+      properties:
+        script:
+          type: string
+          description: The generated test script
+      required:
+      - script
+    AssignmentQueueLengthResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        unclaimed:
+          type: integer
+        finalized:
+          type: integer
+        unfinalized:
+          type: integer
+      required:
+      - finalized
+      - id
+      - unclaimed
+      - unfinalized
+    AssignmentRubricResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        rubricCategories:
+          type: array
+          items:
+            $ref: '#/components/schemas/RubricCategory'
+        rubricComments:
+          type: array
+          items:
+            $ref: '#/components/schemas/RubricComment'
+      required:
+      - id
+      - rubricCategories
+      - rubricComments
+    AssignmentStudentTestsResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        testCases:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCaseStudent'
+        testCategories:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCategory'
+      required:
+      - id
+      - testCases
+      - testCategories
+    AssignmentStudentUploadGetResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionFileStudentUpload'
+      required:
+      - files
+      - id
     AsyncExecutionRequest:
       type: object
       description: Request serializer for async execution
@@ -9121,6 +9879,16 @@ components:
           type: boolean
           default: false
           description: If true, bypass cache and force new execution
+        test_code:
+          type: string
+          description: Optional test script to inject during execution
+        code_override:
+          type: string
+          description: Optional content override for the file (e.g., edited notebook
+            JSON)
+        example_code:
+          type: string
+          description: Optional example code to inject during execution
       required:
       - file_id
     AsyncTaskResponse:
@@ -9136,6 +9904,23 @@ components:
       required:
       - status
       - task_id
+    BeforeStudentUploadResponse:
+      type: object
+      properties:
+        daysLate:
+          type: integer
+        pointsOff:
+          type: number
+          format: double
+        lateDayCreditsAvailable:
+          type: integer
+        lateDayCreditsToUse:
+          type: integer
+        adjustedDaysLate:
+          type: integer
+      required:
+      - daysLate
+      - pointsOff
     BuildTypeEnum:
       enum:
       - default
@@ -9193,6 +9978,27 @@ components:
       required:
       - pending
       - status
+    CodeExecutionRequest:
+      type: object
+      description: Request serializer for code execution
+      properties:
+        code:
+          type: string
+          description: Code to execute
+        language:
+          type: string
+          description: Language for execution
+        timeout:
+          type: integer
+          maximum: 300
+          minimum: 1
+          default: 30
+        working_dir:
+          type: string
+          nullable: true
+      required:
+      - code
+      - language
     Comment:
       type: object
       properties:
@@ -9449,6 +10255,42 @@ components:
       - sections
       - studentCount
       - webhooks
+    CourseAISettings:
+      type: object
+      description: Serializer for course AI configuration. Admin-only access.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        aiProvider:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/AiProviderEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        aiApiKey:
+          type: string
+          writeOnly: true
+          nullable: true
+        aiBaseUrl:
+          type: string
+          nullable: true
+        aiModel:
+          type: string
+          nullable: true
+        aiDisabled:
+          type: boolean
+        aiCommentsDisabled:
+          type: boolean
+        aiEnabled:
+          type: boolean
+          readOnly: true
+        aiCommentsEnabled:
+          type: boolean
+          readOnly: true
+      required:
+      - aiCommentsEnabled
+      - aiEnabled
+      - id
     CourseFile:
       type: object
       description: |-
@@ -9493,6 +10335,162 @@ components:
       - id
       - modified
       - name
+    CourseRoster:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        organization:
+          type: integer
+          readOnly: true
+          description: The related organization_id
+        name:
+          type: string
+          readOnly: true
+          description: The name of the course.
+        period:
+          type: string
+          readOnly: true
+          description: A string describing the period (e.g. F2019, T32019, etc.
+        students:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        graders:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        superGraders:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        rubricEditors:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        courseAdmins:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        inactive_students:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        inactive_graders:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        inactive_courseAdmins:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
+        not_activated:
+          type: array
+          items:
+            type: string
+            format: email
+          readOnly: true
+      required:
+      - courseAdmins
+      - graders
+      - id
+      - inactive_courseAdmins
+      - inactive_graders
+      - inactive_students
+      - name
+      - not_activated
+      - organization
+      - period
+      - rubricEditors
+      - students
+      - superGraders
+    CourseRosterMap:
+      type: object
+      properties:
+        rosterMap:
+          type: object
+          additionalProperties:
+            type: string
+            nullable: true
+    CourseSettings:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        sendReleasedSubmissionsToBack:
+          type: boolean
+          description: A boolean field. If True, submissions that are claimed and
+            subsequently released will be added to the back of the grading queue.
+        showStudentsStatistics:
+          type: boolean
+          description: A boolean field. If True, students will be able to view basic
+            grade statistics for released assignments.
+        timezone:
+          type: string
+          description: Timezone in which course operates.
+          maxLength: 32
+        emailNewUsers:
+          type: boolean
+          description: A boolean field. If True, when emails are added to a course
+            roster that do not correspond to existing codePost users, those emails
+            will be sent an email notifying that they have been added to a course
+            and providing a link to register their (new) accounts.
+        anonymousGradingDefault:
+          type: boolean
+          description: A boolean field. If True, new assignments will have anonymous
+            grading mode enabled by default.
+        allowGradersToEditRubric:
+          type: boolean
+          description: A boolean field. If True, graders will be allowed to add and
+            update unlinked rubric comments.
+        archived:
+          type: boolean
+          description: If True, the course will not be editable.
+        lateDayCreditsAllowable:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: The number of Late Day Credits that each student gets at the
+            beginning of the term. Null if the course does not have students submit
+            directly to codePost.
+      required:
+      - id
+    CourseStudentCaptions:
+      type: object
+      properties:
+        studentCaptions:
+          type: object
+          additionalProperties:
+            type: string
+            nullable: true
     DashboardStats:
       type: object
       properties:
@@ -9661,7 +10659,8 @@ components:
           type: integer
           readOnly: true
         successRate:
-          type: string
+          type: number
+          format: double
           readOnly: true
       required:
       - assignment
@@ -9676,6 +10675,53 @@ components:
       - successRate
       - successfulRuns
       - totalRuns
+    EnvironmentBuildResponse:
+      type: object
+      properties:
+        task:
+          type: string
+        status:
+          type: string
+        error:
+          type: string
+      required:
+      - task
+    EnvironmentBuildStatusError:
+      type: object
+      properties:
+        error:
+          type: string
+        inProgress:
+          type: boolean
+        isSuccess:
+          type: boolean
+        logs:
+          type: string
+      required:
+      - error
+      - inProgress
+      - isSuccess
+      - logs
+    EnvironmentBuildStatusResponse:
+      type: object
+      properties:
+        inProgress:
+          type: boolean
+        isSuccess:
+          type: boolean
+        logs:
+          type: string
+        dockerfile:
+          type: string
+        lastBuilt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - dockerfile
+      - inProgress
+      - isSuccess
+      - logs
     EnvironmentCleanupRequest:
       type: object
       properties:
@@ -9710,6 +10756,34 @@ components:
       required:
       - message
       - success
+    EnvironmentEjectResponse:
+      type: object
+      properties:
+        dockerfile:
+          type: string
+        testsJson:
+          type: string
+        runTestsPy:
+          type: string
+      required:
+      - dockerfile
+      - runTestsPy
+      - testsJson
+    EnvironmentPreviewRequest:
+      type: object
+      properties:
+        language:
+          type: string
+        buildType:
+          type: string
+        dockerfile:
+          type: string
+        dockerRunInstructions:
+          type: array
+          items:
+            type: string
+        requirements:
+          type: string
     EnvironmentRollbackRequest:
       type: object
       properties:
@@ -9728,21 +10802,60 @@ components:
       - message
       - success
       - version
+    EnvironmentRunAllResponse:
+      type: object
+      properties:
+        task:
+          type: string
+      required:
+      - task
+    EnvironmentRunResponse:
+      type: object
+      properties:
+        task:
+          type: string
+      required:
+      - task
     EnvironmentStatusResponse:
       type: object
       properties:
         environment_id:
           type: integer
+        auto_detect:
+          type: boolean
         current_version:
           type: integer
-        history:
+        image_name:
+          type: string
+          nullable: true
+        build_status:
+          type: integer
+        last_built:
+          type: string
+          format: date-time
+          nullable: true
+        successful_runs:
+          type: integer
+        total_runs:
+          type: integer
+        success_rate:
+          type: number
+          format: double
+        convergence_pending:
+          type: boolean
+        pending_modules:
+          type: array
+          items:
+            type: string
+        version_history:
           type: array
           items:
             type: object
             additionalProperties: {}
+        history_count:
+          type: integer
       required:
       - environment_id
-      - history
     ExecutionResult:
       type: object
       description: |-
@@ -9776,6 +10889,12 @@ components:
           items:
             type: string
           description: System-level logs from the executor
+        tests:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          description: Structured test results (if present)
         timestamp:
           type: string
           format: date-time
@@ -9837,6 +10956,13 @@ components:
           type: boolean
           default: false
           description: If true, bypass cache and force new execution
+        test_code:
+          type: string
+          description: Optional test script to inject during execution
+        code_override:
+          type: string
+          description: Optional content override for the file (e.g., edited notebook
+            JSON)
       required:
       - file_id
     GenerateOTTRequest:
@@ -9876,7 +11002,7 @@ components:
       required:
       - password
       - username
-    JWTOTTResponse:
+    JwtOttResponse:
       type: object
       properties:
         token:
@@ -9940,13 +11066,6 @@ components:
             additionalProperties: {}
         courseID:
           type: integer
-    LogDumpResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-      required:
-      - success
     LogErrorRequest:
       type: object
       properties:
@@ -9956,13 +11075,6 @@ components:
           type: string
         url:
           type: string
-    LogErrorResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-      required:
-      - success
     LogHappinessRequest:
       type: object
       properties:
@@ -9970,13 +11082,53 @@ components:
           type: string
         url:
           type: string
-    LogHappinessResponse:
+    LogSuccessResponse:
       type: object
       properties:
         success:
           type: boolean
       required:
       - success
+    NotebookCellExecutionRequest:
+      type: object
+      description: Request serializer for executing a single notebook cell
+      properties:
+        cell_code:
+          type: string
+          description: Cell code to execute
+        cell_index:
+          type: integer
+          default: 0
+        timeout:
+          type: integer
+          maximum: 300
+          minimum: 1
+          default: 30
+        kernel_name:
+          type: string
+          default: python3
+      required:
+      - cell_code
+    NotebookExecutionRequest:
+      type: object
+      description: Request serializer for notebook execution
+      properties:
+        notebook_content:
+          type: string
+          description: Notebook JSON content
+        timeout:
+          type: integer
+          maximum: 300
+          minimum: 1
+          default: 60
+        kernel_name:
+          type: string
+          default: python3
+      required:
+      - notebook_content
+    NullEnum:
+      enum:
+      - null
     Organization:
       type: object
       properties:
@@ -10014,6 +11166,98 @@ components:
       - id
       - name
       - shortname
+    PaginatedSectionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Section'
+    PaginatedSubmissionHistoryList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionHistory'
+    PaginatedSubmissionList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Submission'
+    PaginatedSubmissionWithTestsList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionWithTests'
     PaginatedUserList:
       type: object
       required:
@@ -10197,6 +11441,10 @@ components:
           type: boolean
           description: A boolean field. If true, admins and graders can edit the assignment
             rubric inline in the code console.
+        gradersCanEditSubmissions:
+          type: boolean
+          description: A boolean field. If True, graders will be allowed to edit student
+            submissions (e.g. for testing fixes).
         testCategories:
           type: array
           items:
@@ -10210,6 +11458,14 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        runTestsOnSubmit:
+          type: boolean
+          description: If True, autograder tests will automatically run when a student
+            submits.
+        testsAffectGrade:
+          type: boolean
+          description: If True, the results of autograder tests will be included in
+            the submission grade calculation.
     PatchedAssignmentDataSetUpdate:
       type: object
       description: Serializer for updating AssignmentDataSet (without file upload)
@@ -10221,15 +11477,12 @@ components:
         description:
           type: string
           description: Optional description of the data set.
-        mount_path:
+        mountPath:
           type: string
-          description: Path where dataset will be mounted in execution environment.
-            Can be an absolute path (e.g. '/etc/config.json') or a relative path (e.g.
-            'mnist'). Relative paths are mounted under '/shared'.
-          maxLength: 256
-        is_active:
+        isActive:
           type: boolean
-          description: If True, this dataset will be mounted during code execution.
+        isTestResource:
+          type: boolean
     PatchedAssignmentFile:
       type: object
       description: |-
@@ -10274,6 +11527,12 @@ components:
           type: string
           format: date-time
           readOnly: true
+        hidden:
+          type: boolean
+          description: If True, this file will be hidden from students (but available
+            for tests/helpers).
+        isTestResource:
+          type: boolean
     PatchedComment:
       type: object
       properties:
@@ -10546,6 +11805,22 @@ components:
           type: string
           format: date-time
           readOnly: true
+    PatchedCourseRosterMap:
+      type: object
+      properties:
+        rosterMap:
+          type: object
+          additionalProperties:
+            type: string
+            nullable: true
+    PatchedCourseStudentCaptions:
+      type: object
+      properties:
+        studentCaptions:
+          type: object
+          additionalProperties:
+            type: string
+            nullable: true
     PatchedEnvironment:
       type: object
       properties:
@@ -10623,8 +11898,42 @@ components:
           type: integer
           readOnly: true
         successRate:
-          type: string
+          type: number
+          format: double
           readOnly: true
+    PatchedEnvironmentBuildRequest:
+      type: object
+      properties:
+        language:
+          type: string
+        requirements:
+          type: string
+        dockerfile:
+          type: string
+        dockerRunInstructions: {}
+        buildType:
+          type: string
+        autoDetect:
+          type: boolean
+    PatchedEnvironmentRunAllRequest:
+      type: object
+      properties:
+        sendEmail:
+          type: boolean
+          default: false
+    PatchedEnvironmentRunRequest:
+      type: object
+      properties:
+        submission:
+          type: integer
+          nullable: true
+        simulate:
+          type: boolean
+          default: true
+        exposedOnly:
+          type: boolean
+          default: false
+        files: {}
     PatchedFile:
       type: object
       description: Base serializer for File objects.
@@ -10825,6 +12134,7 @@ components:
             otherwise.
         dateEdited:
           type: string
+          format: date-time
           readOnly: true
         grade:
           type: number
@@ -10982,6 +12292,25 @@ components:
           type: boolean
           description: A boolean field. 'True' if the test resulted in an error. False
             otherwise.
+        score:
+          type: number
+          format: double
+          maximum: 100000
+          minimum: -100000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Aggregate score earned from all subtests.
+        maxScore:
+          type: number
+          format: double
+          maximum: 100000
+          minimum: -100000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Maximum possible score from all subtests.
+        results:
+          nullable: true
+          description: Structured test results (list of subtests).
     PatchedTestCase:
       type: object
       properties:
@@ -11026,26 +12355,6 @@ components:
           type: string
           format: date-time
           readOnly: true
-        function:
-          type: string
-          description: The function name to test
-        fileName:
-          type: string
-          description: The file name to test
-        outputIsFile:
-          type: boolean
-          description: A boolean field. 'True' if the output is the name of a file
-            to be compared to.
-        expectedOutput:
-          type: string
-          description: The expected output of the test
-        input:
-          type: string
-          description: The input of the test
-        checkReturn:
-          type: boolean
-          description: A boolean field. 'True' if the output should be compared to
-            the return of the function. False if it should be compared to std out.
         exposed:
           type: boolean
           description: If True and type is not 'external', this test will be run when
@@ -11063,19 +12372,30 @@ components:
           - $ref: '#/components/schemas/LastSolutionRunEnum'
           minimum: -9223372036854775808
           maximum: 9223372036854775807
-        isFlexible:
-          type: boolean
-          description: Flexible mode for output checking.
-        outputIsRegexp:
-          type: boolean
-          description: Is expected output specified in the form of a regexp?
-        expectPlot:
-          type: boolean
-          description: If True, the test will only pass if a plot is generated.
-        dataSet:
+        testCode:
+          type: string
+          description: The custom test script code.
+        targetCellId:
+          type: string
+          nullable: true
+          description: The ID of the notebook cell to target for execution.
+          maxLength: 64
+        rubricItem:
           type: integer
           nullable: true
-          description: The dataset to mount for this test.
+          description: The related rubric comment. If set, failure applies this rubric
+            item.
+        functionName:
+          type: string
+          nullable: true
+          description: The name of the function in the test script.
+          maxLength: 128
+        timeout:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Execution timeout in seconds for this test.
     PatchedTestCategory:
       type: object
       properties:
@@ -11094,6 +12414,60 @@ components:
         assignment:
           type: integer
           description: The related assignment__id.
+        testScript:
+          type: string
+          description: Python script containing @test decorated functions.
+        maxPoints:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Total points available for this category.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Integer to specify the order of display.
+        targetFileName:
+          type: string
+          nullable: true
+          description: The name of the file this test targets.
+          maxLength: 255
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCategoryResource'
+          readOnly: true
+    PatchedTestCategoryResource:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        category:
+          type: integer
+          description: The related test category.
+        file:
+          type: integer
+          nullable: true
+          description: The source file.
+        dataset:
+          type: integer
+          nullable: true
+          description: The source dataset.
+        targetPath:
+          type: string
+        fileDetails:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentFile'
+          readOnly: true
+        datasetDetails:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentDataSet'
+          readOnly: true
     PatchedUser:
       type: object
       properties:
@@ -11372,6 +12746,47 @@ components:
           type: boolean
       required:
       - isValid
+    ShellMetricsResponse:
+      type: object
+      description: Response serializer for shell metrics endpoint
+      properties:
+        activeCount:
+          type: integer
+        inCount:
+          type: integer
+        outCount:
+          type: integer
+        workerCount:
+          type: integer
+        workerIds:
+          type: array
+          items:
+            type: string
+        activeIds:
+          type: array
+          items:
+            type: string
+        redisUrl:
+          type: string
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShellMetricsSession'
+      required:
+      - activeCount
+      - inCount
+      - outCount
+      - workerCount
+    ShellMetricsSession:
+      type: object
+      description: Serializer for a single shell session metrics payload
+      properties:
+        sessionId:
+          type: string
+        lastActivity:
+          type: number
+          format: double
+          nullable: true
     StatusEnum:
       enum:
       - PENDING
@@ -11388,6 +12803,118 @@ components:
         * `FAILURE` - FAILURE
         * `RETRY` - RETRY
         * `REVOKED` - REVOKED
+    StudentSubmission:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          readOnly: true
+          description: The related assignment_id.
+        students:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+        isFinalized:
+          type: boolean
+          readOnly: true
+          description: A boolean field. 'True' if the submission is finalized. 'False'
+            otherwise.
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionFile'
+          readOnly: true
+        grade:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          readOnly: true
+          nullable: true
+          description: The grade for the submission. Null if not graded yet.
+        questionIsOpen:
+          type: boolean
+          readOnly: true
+          description: A boolean field. If true the submission has an open question.
+        questionIsRegrade:
+          type: boolean
+          readOnly: true
+          description: A boolean field. If 'True', the submission's question is a
+            regrade request.
+        questionText:
+          type: string
+          readOnly: true
+          description: The text of the question.
+        questionResponder:
+          type: string
+          format: email
+          title: Email address
+          nullable: true
+        questionResponse:
+          type: string
+          readOnly: true
+          description: The text of the question response.
+        questionDate:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: The date the request / question was submitted.
+        responseDate:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: The date the response was submitted.
+        dateUploaded:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: The date this submission was created. None if just created,
+            and files haven't been uploaded yet. Used for Celery tasks.
+        hasGrader:
+          type: boolean
+          readOnly: true
+        tests:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+        testRunsCompleted:
+          type: integer
+          readOnly: true
+          description: Number of times exposed tests have been run for a submission.
+            It only increments if the maxStudentTestRuns Environment setting is on.
+        lateDayCreditsUsed:
+          type: integer
+          readOnly: true
+          description: The number of Late Day Credits used by the Submission.
+      required:
+      - assignment
+      - dateUploaded
+      - files
+      - grade
+      - hasGrader
+      - id
+      - isFinalized
+      - lateDayCreditsUsed
+      - questionDate
+      - questionIsOpen
+      - questionIsRegrade
+      - questionResponse
+      - questionText
+      - responseDate
+      - students
+      - testRunsCompleted
+      - tests
     Submission:
       type: object
       properties:
@@ -11415,6 +12942,7 @@ components:
             otherwise.
         dateEdited:
           type: string
+          format: date-time
           readOnly: true
         grade:
           type: number
@@ -11503,6 +13031,19 @@ components:
       - students
       - testRunsCompleted
       - tests
+    SubmissionCheckPermissionResponse:
+      type: object
+      properties:
+        read:
+          type: boolean
+        write:
+          type: boolean
+        filesOnly:
+          type: boolean
+      required:
+      - filesOnly
+      - read
+      - write
     SubmissionFile:
       type: object
       description: |-
@@ -11558,6 +13099,76 @@ components:
       - modified
       - name
       - submission
+    SubmissionFileStudentUpload:
+      type: object
+      description: Simplified serializer for students uploading submission files.
+      properties:
+        name:
+          type: string
+          description: The name of the file.
+          maxLength: 250
+        data:
+          type: string
+          description: The data in a file. should be utf-8 encoded text.
+        extension:
+          type: string
+          description: The extension for the file (e.g. '.java' or '.py'
+          maxLength: 36
+        submission:
+          type: integer
+          description: The related submission_id.
+        id:
+          type: integer
+          readOnly: true
+        path:
+          type: string
+          nullable: true
+          description: Optional file path, delimited by slashes, to indicate a directory
+            structure.
+          maxLength: 500
+      required:
+      - extension
+      - id
+      - name
+      - submission
+    SubmissionHistory:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        student:
+          type: string
+          format: email
+          title: Email address
+        submission:
+          type: integer
+          readOnly: true
+          description: The related submission_id.
+        hasViewed:
+          type: boolean
+          description: A boolean field indicating whether the student has seen the
+            submission.
+        dateViewed:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+      required:
+      - dateViewed
+      - id
+      - student
+      - submission
+    SubmissionPartnerLinkResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        token:
+          type: string
+      required:
+      - id
+      - token
     SubmissionTest:
       type: object
       properties:
@@ -11592,6 +13203,25 @@ components:
           type: boolean
           description: A boolean field. 'True' if the test resulted in an error. False
             otherwise.
+        score:
+          type: number
+          format: double
+          maximum: 100000
+          minimum: -100000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Aggregate score earned from all subtests.
+        maxScore:
+          type: number
+          format: double
+          maximum: 100000
+          minimum: -100000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Maximum possible score from all subtests.
+        results:
+          nullable: true
+          description: Structured test results (list of subtests).
       required:
       - created
       - id
@@ -11601,6 +13231,31 @@ components:
       - submission
       - testCase
       - testCategory
+    SubmissionTestResultsResponse:
+      type: object
+      properties:
+        submissionTests:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionTest'
+        logs:
+          type: string
+      required:
+      - logs
+      - submissionTests
+    SubmissionWithTests:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        tests:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionTest'
+      required:
+      - id
+      - tests
     SubscribeToEmailListRequest:
       type: object
       properties:
@@ -11712,26 +13367,6 @@ components:
           type: string
           format: date-time
           readOnly: true
-        function:
-          type: string
-          description: The function name to test
-        fileName:
-          type: string
-          description: The file name to test
-        outputIsFile:
-          type: boolean
-          description: A boolean field. 'True' if the output is the name of a file
-            to be compared to.
-        expectedOutput:
-          type: string
-          description: The expected output of the test
-        input:
-          type: string
-          description: The input of the test
-        checkReturn:
-          type: boolean
-          description: A boolean field. 'True' if the output should be compared to
-            the return of the function. False if it should be compared to std out.
         exposed:
           type: boolean
           description: If True and type is not 'external', this test will be run when
@@ -11749,19 +13384,30 @@ components:
           - $ref: '#/components/schemas/LastSolutionRunEnum'
           minimum: -9223372036854775808
           maximum: 9223372036854775807
-        isFlexible:
-          type: boolean
-          description: Flexible mode for output checking.
-        outputIsRegexp:
-          type: boolean
-          description: Is expected output specified in the form of a regexp?
-        expectPlot:
-          type: boolean
-          description: If True, the test will only pass if a plot is generated.
-        dataSet:
+        testCode:
+          type: string
+          description: The custom test script code.
+        targetCellId:
+          type: string
+          nullable: true
+          description: The ID of the notebook cell to target for execution.
+          maxLength: 64
+        rubricItem:
           type: integer
           nullable: true
-          description: The dataset to mount for this test.
+          description: The related rubric comment. If set, failure applies this rubric
+            item.
+        functionName:
+          type: string
+          nullable: true
+          description: The name of the function in the test script.
+          maxLength: 128
+        timeout:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Execution timeout in seconds for this test.
       required:
       - description
       - id
@@ -11769,6 +13415,71 @@ components:
       - modified
       - testCategory
       - type
+    TestCaseRunRequest:
+      type: object
+      properties:
+        submission:
+          type: integer
+          nullable: true
+        files: {}
+    TestCaseRunResponse:
+      type: object
+      properties:
+        task:
+          type: string
+      required:
+      - task
+    TestCaseStudent:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        testCategory:
+          type: integer
+          description: The related testCategory__id.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Integer to specify the order of a Assignment's Tests.
+        description:
+          type: string
+          description: Test description.
+          maxLength: 48
+        pointsFail:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: The points assigned to a failed test.
+        pointsPass:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: The points assigned to a passed test.
+        explanation:
+          type: string
+          description: A description of what the test achieves
+        exposed:
+          type: boolean
+          description: If True and type is not 'external', this test will be run when
+            a student submits, and the results shown to the student
+        rubricItem:
+          type: integer
+          nullable: true
+          description: The related rubric comment. If set, failure applies this rubric
+            item.
+      required:
+      - description
+      - id
+      - testCategory
     TestCategory:
       type: object
       properties:
@@ -11787,24 +13498,90 @@ components:
         assignment:
           type: integer
           description: The related assignment__id.
+        testScript:
+          type: string
+          description: Python script containing @test decorated functions.
+        maxPoints:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Total points available for this category.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Integer to specify the order of display.
+        targetFileName:
+          type: string
+          nullable: true
+          description: The name of the file this test targets.
+          maxLength: 255
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCategoryResource'
+          readOnly: true
       required:
       - assignment
       - id
       - name
+      - resources
       - testCases
+    TestCategoryResource:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        category:
+          type: integer
+          description: The related test category.
+        file:
+          type: integer
+          nullable: true
+          description: The source file.
+        dataset:
+          type: integer
+          nullable: true
+          description: The source dataset.
+        targetPath:
+          type: string
+        fileDetails:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentFile'
+          readOnly: true
+        datasetDetails:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentDataSet'
+          readOnly: true
+      required:
+      - category
+      - datasetDetails
+      - fileDetails
+      - id
+      - targetPath
     TestExecutionRequest:
       type: object
       description: Request serializer for running tests
       properties:
         testId:
           type: integer
-          description: ID of the test case to run
+          nullable: true
+          description: ID of the test to run. If null, runs all tests.
         submissionId:
           type: integer
           description: ID of the submission to test
+        file_overrides:
+          type: object
+          additionalProperties:
+            type: string
+          description: Map of file ID to temporary content for ephemeral execution
       required:
       - submissionId
-      - testId
     TestExecutionResult:
       type: object
       description: Response for test execution
@@ -11813,9 +13590,7 @@ components:
           type: boolean
           description: Whether the test execution completed
         result:
-          type: object
-          additionalProperties: {}
-          description: Test result details
+          description: Test result details (object or list)
         error:
           type: string
           description: Error message if test failed
@@ -11844,6 +13619,7 @@ components:
       - shell
       - file
       - external
+      - script
       type: string
       description: |-
         * `io` - io
@@ -11852,6 +13628,7 @@ components:
         * `shell` - shell
         * `file` - file
         * `external` - external
+        * `script` - script
     User:
       type: object
       properties:

@@ -137,16 +137,17 @@ public class notebook_template {
             jshell.eval("import java.util.*;");
             jshell.eval("import java.lang.annotation.*;");
             jshell.eval("import java.lang.reflect.*;");
+            jshell.eval("import java.util.concurrent.*;");
 
             // Define Test Annotation
-            jshell.eval(
-                    "@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface Test { String name() default \"\"; double points() default 1.0; String description() default \"\"; }");
+                jshell.eval(
+                    "@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface Test { String name() default \"\"; double points() default 1.0; String description() default \"\"; int timeout() default 30; }");
 
             // Define TestResult Class
-            jshell.eval(
-                    "class TestResult { String name; String description; double score; double max_score; boolean passed; String status; String error; String output; "
-                            +
-                            "public TestResult(String n, double m, String d) { name=n; max_score=m; description=d; score=0; passed=false; status=\"failed\"; output=\"\"; } }");
+                jshell.eval(
+                    "class TestResult { String name; String description; String message; double score; double max_score; boolean passed; String status; String error; String output; "
+                        +
+                        "public TestResult(String n, double m, String d) { name=n; max_score=m; description=d; message=\"\"; score=0; passed=false; status=\"failed\"; output=\"\"; } }");
 
             // Define Assertions (polyfilled for simple use)
             jshell.eval("void assertTrue(boolean cond, String msg) { if (!cond) throw new RuntimeException(msg); }");
@@ -349,15 +350,47 @@ public class notebook_template {
                             "               Test _ann = _m.getAnnotation(Test.class); " +
                             "               TestResult _tr = new TestResult(_ann.name().isEmpty() ? _m.getName() : _ann.name(), _ann.points(), _ann.description()); "
                             +
+                            "               ExecutorService _exec = Executors.newSingleThreadExecutor(); " +
+                            "               Future<Object> _future = _exec.submit(() -> { " +
+                            "                   try { _m.setAccessible(true); return _m.invoke(_instance); } " +
+                            "                   catch (Throwable _ex) { throw new RuntimeException(_ex.getCause() != null ? _ex.getCause() : _ex); } " +
+                            "               }); " +
                             "               try { " +
-                            "                   _m.setAccessible(true); " +
-                            "                   _m.invoke(_instance); " +
-                            "                   _tr.passed = true; _tr.score = _tr.max_score; _tr.status = \"passed\"; "
+                            "                   Object _ret = _future.get(_ann.timeout(), TimeUnit.SECONDS); " +
+                            "                   if (_ret instanceof Number) { " +
+                            "                       double _score = ((Number) _ret).doubleValue(); " +
+                            "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
+                            "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
+                            +
+                            "                   } else if (_ret instanceof Object[] && ((Object[])_ret).length >= 2 && ((Object[])_ret)[0] instanceof Number) { " +
+                            "                       Object[] _arr = (Object[]) _ret; " +
+                            "                       double _score = ((Number) _arr[0]).doubleValue(); " +
+                            "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
+                            "                       _tr.message = _arr[1] != null ? _arr[1].toString() : \"\"; " +
+                            "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
+                            +
+                            "                   } else if (_ret instanceof List && ((List)_ret).size() >= 2 && ((List)_ret).get(0) instanceof Number) { " +
+                            "                       List _list = (List) _ret; " +
+                            "                       double _score = ((Number) _list.get(0)).doubleValue(); " +
+                            "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
+                            "                       _tr.message = _list.get(1) != null ? _list.get(1).toString() : \"\"; " +
+                            "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
+                            +
+                            "                   } else if (_ret instanceof String) { " +
+                            "                       _tr.message = _ret.toString(); _tr.passed = true; _tr.score = _tr.max_score; _tr.status = \"passed\"; "
+                            +
+                            "                   } else { " +
+                            "                       _tr.passed = true; _tr.score = _tr.max_score; _tr.status = \"passed\"; "
+                            +
+                            "                   } " +
+                            "               } catch (TimeoutException _te) { " +
+                            "                   _tr.error = \"Test timed out after \" + _ann.timeout() + \"s\"; _tr.status = \"error\"; _future.cancel(true); "
                             +
                             "               } catch (Throwable _t) { " +
                             "                   _tr.error = _t.getCause() != null ? _t.getCause().getMessage() : _t.getMessage(); "
                             +
-                            "               } _results.add(_tr); " +
+                            "               } finally { _exec.shutdownNow(); } " +
+                            "               _results.add(_tr); " +
                             "           } " +
                             "       } " +
                             "   } " +
@@ -366,6 +399,10 @@ public class notebook_template {
                             "       TestResult _r = _results.get(_i); " +
                             "       _sb.append(\"{\\\"name\\\":\\\"\" + _r.name + \"\\\",\"); " +
                             "       _sb.append(\"\\\"description\\\":\\\"\" + (_r.description==null?\"\":_r.description) + \"\\\",\"); "
+                            +
+                            "       String msg = _r.message==null ? \"\" : _r.message.replaceAll(\"[^a-zA-Z0-9 .,:;!?()_\\\\-=\\\\[\\\\]]\", \"?\"); "
+                            +
+                            "       _sb.append(\"\\\"message\\\":\\\"\" + msg + \"\\\",\"); "
                             +
                             "       _sb.append(\"\\\"score\\\":\" + _r.score + \",\"); " +
                             "       _sb.append(\"\\\"max_score\\\":\" + _r.max_score + \",\"); " +

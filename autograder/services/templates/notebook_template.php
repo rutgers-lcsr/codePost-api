@@ -15,16 +15,22 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 class Tester {
     private static $results = [];
     
-    public static function test(string $name, float $points, $description, $fn = null): void {
+    public static function test(string $name, float $points, $description, $fn = null, $timeout = 30): void {
         if (is_callable($description)) {
             $fn = $description;
             $description = null;
+            $timeout = 30;
+        }
+        if (is_callable($timeout)) {
+            $fn = $timeout;
+            $timeout = 30;
         }
 
         $result = [
             "name" => $name,
             "max_score" => $points,
             "description" => $description,
+            "message" => "",
             "score" => 0.0,
             "passed" => false,
             "status" => "failed",
@@ -32,12 +38,55 @@ class Tester {
         ];
         
         try {
-            $fn();
-            $result["passed"] = true;
-            $result["score"] = $points;
-            $result["status"] = "passed";
+            if (function_exists('pcntl_signal') && function_exists('pcntl_alarm')) {
+                pcntl_signal(SIGALRM, function() use ($timeout) {
+                    throw new Exception("Test timed out after {$timeout}s");
+                });
+                pcntl_alarm((int)$timeout);
+            }
+
+            $ret = $fn();
+
+            if (function_exists('pcntl_alarm')) {
+                pcntl_alarm(0);
+            }
+
+            if (is_numeric($ret)) {
+                $score = max(0, min(floatval($ret), $points));
+                $result["score"] = $score;
+                $result["passed"] = $score == $points;
+                $result["status"] = $result["passed"] ? "passed" : "partial";
+            } elseif (is_array($ret)) {
+                if (isset($ret['score']) && is_numeric($ret['score'])) {
+                    $score = max(0, min(floatval($ret['score']), $points));
+                    $result["score"] = $score;
+                    $result["message"] = isset($ret['message']) ? strval($ret['message']) : "";
+                    $result["passed"] = $score == $points;
+                    $result["status"] = $result["passed"] ? "passed" : "partial";
+                } elseif (count($ret) >= 2 && is_numeric($ret[0])) {
+                    $score = max(0, min(floatval($ret[0]), $points));
+                    $result["score"] = $score;
+                    $result["message"] = isset($ret[1]) ? strval($ret[1]) : "";
+                    $result["passed"] = $score == $points;
+                    $result["status"] = $result["passed"] ? "passed" : "partial";
+                } else {
+                    $result["passed"] = true;
+                    $result["score"] = $points;
+                    $result["status"] = "passed";
+                }
+            } elseif (is_string($ret)) {
+                $result["message"] = $ret;
+                $result["passed"] = true;
+                $result["score"] = $points;
+                $result["status"] = "passed";
+            } else {
+                $result["passed"] = true;
+                $result["score"] = $points;
+                $result["status"] = "passed";
+            }
         } catch (Throwable $e) {
             $result["error"] = $e->getMessage();
+            $result["status"] = stripos($result["error"], "timed out") !== false ? "error" : "failed";
         }
         
         self::$results[] = $result;

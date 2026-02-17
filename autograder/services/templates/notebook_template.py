@@ -195,6 +195,7 @@ class TestCase:
                     result.message = msg_val
             else:
                 # No return value or non-numeric = full credit
+                # assume assertions passed
                 result.passed = True
                 result.score = self.points
                 result.status = "passed"
@@ -207,12 +208,6 @@ class TestCase:
             result.status = "failed"
             result.error = str(e)
             result.output = stdout_capture.getvalue()
-        except Exception as e:
-            result.passed = False
-            result.score = 0
-            result.status = "error"
-            result.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
-            result.output = stdout_capture.getvalue()
         except TimeoutError as e:
             result.passed = False
             result.score = 0
@@ -220,6 +215,13 @@ class TestCase:
             result.error = str(e)
             result.message = "Test timed out"
             result.output = stdout_capture.getvalue()
+        except Exception as e:
+            result.passed = False
+            result.score = 0
+            result.status = "error"
+            result.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            result.output = stdout_capture.getvalue()
+
 
             
         return result
@@ -293,7 +295,8 @@ namespace = {
     'test': test,
     'assert_plots_generated': assert_plots_generated,
     'get_plots': get_plots,
-    '_CAPTURED_PLOTS': _CAPTURED_PLOTS
+    '_CAPTURED_PLOTS': _CAPTURED_PLOTS,
+    'codepost_cells': cells # Provide access to all cells if needed
 }
 
 results = []
@@ -396,6 +399,7 @@ else:
 # RUN TEST SCRIPT
 # ==========================================
 test_results = []
+
 try:
     test_code_b64 = "{test_code_b64}"
     test_code = ""
@@ -410,9 +414,24 @@ try:
         
         # Run tests if any were registered
         runner = TestRunner.get_instance()
+        
+        # Filter tests if a specific test function is requested
+        target_test_function = """#{TARGET_TEST_FUNCTION}"""
+        if target_test_function and target_test_function.strip() and not target_test_function.startswith("#{"):
+             target = target_test_function.strip()
+             # Filter based on function name or test name
+             runner.tests = [t for t in runner.tests if t.func.__name__ == target or t.name == target]
+
         if runner.tests:
+            # Run all registered tests
+            test_names = [t.name for t in runner.tests]
+            template_log(f"Running {len(test_names)} Tests: {', '.join(test_names)}", "INFO")
             test_results = runner.run_all()
             template_log(f"Executed {len(test_results)} tests", "INFO")
+        elif target_test_function and target_test_function.strip() and not target_test_function.startswith("#{"):
+            template_log(f"No tests matched the requested function: {target_test_function}", "WARNING")
+        else:
+            template_log(f"No tests registered to run. (Target: '{target_test_function}')", "INFO")
 except Exception as e:
     template_log(f"Test Script Error: {e}", "ERROR")
     # Add a synthetic error test result

@@ -312,7 +312,11 @@ class Course(BaseModel):
   )
   ai_disabled = models.BooleanField(
       default=False,
-      help_text="If True, AI comment generation is disabled even if configured"
+      help_text="If True, all AI features are disabled even if configured"
+  )
+  ai_comments_disabled = models.BooleanField(
+      default=False,
+      help_text="If True, AI comment generation is disabled even if AI is globally enabled"
   )
 
   class Meta:
@@ -433,6 +437,15 @@ class Assignment(BaseModel):
   allowLateUploads = models.BooleanField(default=False, help_text=(
       "A boolean field. If True and an uploadDueDate is set, students will still be able to submit after a deadline has passed."))
   lateDeductions = JSONField(default=[], help_text="An array of point deductions for each day late.")
+
+  gradersCanEditSubmissions = models.BooleanField(default=False, help_text=(
+      "A boolean field. If True, graders will be allowed to edit student submissions (e.g. for testing fixes)."))
+  
+  runTestsOnSubmit = models.BooleanField(default=True, help_text=(
+      "If True, autograder tests will automatically run when a student submits."))
+  
+  testsAffectGrade = models.BooleanField(default=True, help_text=(
+      "If True, the results of autograder tests will be included in the submission grade calculation."))
 
   # AI-powered comment generation
   ai_system_prompt = models.TextField(
@@ -688,7 +701,7 @@ class File(BaseModel):
   def __getattr__(self, name):
       # Delegate unknown attributes to the handler
       # Avoid recursion if handler is missing
-      if name in ['_handler', 'handler']:
+      if name in ['_handler', 'handler', 'code']:
           raise AttributeError(name)
           
       try:
@@ -697,10 +710,6 @@ class File(BaseModel):
           raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
   def save(self, *args, **kwargs):
-    # Check if trying to use deprecated 'code' field
-    if hasattr(self, 'code') and self.code:  # type: ignore[attr-defined]
-      raise Exception("File.code is deprecated. Use File.data instead.")
- 
     # Normalize newlines
     if '\\r\\n' in self.data:
       self.data = self.data.replace("\\r\\n", "\\n")
@@ -784,6 +793,11 @@ class AssignmentDataSet(BaseModel):
   hidden = models.BooleanField(
     default=False,
     help_text=("If True, this dataset will be hidden from students."))
+
+  # Whether this dataset is a test resource (linked to a TestCategory)
+  is_test_resource = models.BooleanField(
+      default=False,
+      help_text="If True, this dataset is used as a resource for a TestCategory.")
 
   course = property(lambda self: self.assignment.course)
   
@@ -886,8 +900,8 @@ class CachedExecutionResult(BaseModel):
     logger = logging.getLogger(__name__)
     logger.info(f"[CachedExecutionResult.get] Checking cache for file {file.id}")
     
-    # Get file content - File subclasses use 'data', some special files use 'code'
-    file_content = getattr(file, 'data', None) or getattr(file, 'code', '')
+    # Get file content - File subclasses use 'data'
+    file_content = getattr(file, 'data', None) or ''
     if not file_content:
       logger.warning(f"[CachedExecutionResult.get] File {file.id} has no content")
       return None
@@ -910,17 +924,51 @@ class CachedExecutionResult(BaseModel):
   
   def get_cached_formated_response(self,file:File):
     # Return in the same format as fresh execution
+    output_data = self.output_data
+    success = True
+    stdout = None
+    stderr = None
+    error = None
+    system_logs = None
+    tests = None
+    execution_time = self.execution_time_seconds
+
+    # If cached output_data looks like ExecutionResult.to_dict(), unwrap and promote fields
+    if isinstance(output_data, dict):
+      if any(key in output_data for key in ("stdout", "stderr", "error", "success", "output_data")):
+        success = output_data.get("success", True)
+        stdout = output_data.get("stdout")
+        stderr = output_data.get("stderr")
+        error = output_data.get("error")
+        system_logs = output_data.get("system_logs")
+        tests = output_data.get("tests")
+        if output_data.get("execution_time") is not None:
+          execution_time = output_data.get("execution_time")
+
+        # Prefer the inner output_data if present (matches fresh execution response shape)
+        if output_data.get("output_data") is not None:
+          output_data = output_data.get("output_data")
+
     response_data = {
-        "success": True,
-        "output_data": self.output_data,
+        "success": success,
+        "output_data": output_data,
         "file_id": file.id,
         "file_name": file.name,
-        "error": None,
-        "execution_time": self.execution_time_seconds,
+        "error": error,
+        "execution_time": execution_time,
         "cached": True,
         "executed_at": self.executed_at.isoformat(),
         "executed_by": self.executed_by.username if self.executed_by else None,
     }
+
+    if stdout is not None:
+      response_data["stdout"] = stdout
+    if stderr is not None:
+      response_data["stderr"] = stderr
+    if system_logs is not None:
+      response_data["system_logs"] = system_logs
+    if tests is not None:
+      response_data["tests"] = tests
     submission, assignment, course = file.get_file_info()
     if submission:
       response_data["submission_id"] = submission.id
@@ -952,8 +1000,8 @@ class CachedExecutionResult(BaseModel):
     logger = logging.getLogger(__name__)
     logger.info(f"[CachedExecutionResult.save] Attempting to save cache for file {file.id}")
     
-    # Get file content - File subclasses use 'data', some special files use 'code'
-    file_content = getattr(file, 'data', None) or getattr(file, 'code', '')
+    # Get file content - File subclasses use 'data'
+    file_content = getattr(file, 'data', None) or ''
     if not file_content:
       logger.warning(f"[CachedExecutionResult.save] File {file.id} has no content, skipping cache")
       return None
@@ -1002,6 +1050,11 @@ class AssignmentFile(File):
   hidden = models.BooleanField(
     default=False,
     help_text=("If True, this file will be hidden from students (but available for tests/helpers)."))
+  
+  # Whether this file is a test resource (linked to a TestCategory)
+  is_test_resource = models.BooleanField(
+      default=False,
+      help_text="If True, this file is used as a resource for a TestCategory.")
   isVisible = property(lambda self: self.assignment.isVisible)
 
   course = property(lambda self: self.assignment.course)
@@ -1323,6 +1376,12 @@ def getLatestSubmissionTests(submission):
 
 
 def calculate_grade(submission: Submission) -> Decimal:
+  if submission.pk is None:
+    if submission.assignment.additiveGrading:
+      return Decimal(0)
+    else:
+      return Decimal(submission.assignment.points)
+
   # key = category id (0 = no rubricComment), value = aggregate deductions
   deductions = {}
   deductions[0] = 0
@@ -1350,21 +1409,22 @@ def calculate_grade(submission: Submission) -> Decimal:
           deductions[key] = min(deductions[key], category.pointLimit)
 
   # Now account for points corresponding to tests
-  tests = getLatestSubmissionTests(submission)
   counter = Decimal(0)
-  for test in tests:
-    # Use proportional scoring if maxScore is set (new partial credit system)
-    if test.maxScore and test.maxScore > 0:
-      # Calculate ratio of score earned
-      ratio = Decimal(test.score) / Decimal(test.maxScore)
-      # Award proportional points (ratio * pointsPass)
-      counter += ratio * Decimal(test.testCase.pointsPass)
-    else:
-      # Fallback to binary pass/fail for legacy tests
-      if test.passed:
-        counter += Decimal(test.testCase.pointsPass)
+  if submission.assignment.testsAffectGrade:
+    tests = getLatestSubmissionTests(submission)
+    for test in tests:
+      # Use proportional scoring if maxScore is set (new partial credit system)
+      if test.maxScore and test.maxScore > 0:
+        # Calculate ratio of score earned
+        ratio = Decimal(test.score) / Decimal(test.maxScore)
+        # Award proportional points (ratio * pointsPass)
+        counter += ratio * Decimal(test.testCase.pointsPass)
       else:
-        counter += Decimal(test.testCase.pointsFail)
+        # Fallback to binary pass/fail for legacy tests
+        if test.passed:
+          counter += Decimal(test.testCase.pointsPass)
+        else:
+          counter += Decimal(test.testCase.pointsFail)
 
   # Reduce to deduction
   if submission.assignment.additiveGrading:
@@ -1426,6 +1486,15 @@ class TestCategoryResource(BaseModel):
       raise ValidationError("A TestCategoryResource must have either a file or a dataset.")
     if self.file and self.dataset:
       raise ValidationError("A TestCategoryResource cannot have both a file and a dataset.")
+
+    # Automatically tag the linked resource as a test resource
+    if self.file:
+      self.file.is_test_resource = True 
+      self.file.save()
+    if self.dataset:
+      self.dataset.is_test_resource = True
+      self.dataset.save()
+
     super(TestCategoryResource, self).save(*args, **kwargs)
 
   class Meta:
@@ -1538,10 +1607,10 @@ def updateRegradeResponse(sender, instance, **kwargs):
 class CommentTemplate(BaseModel):
   if TYPE_CHECKING:
     id: int
-    owner: User
-    assignment: Assignment
-    rubricComment: RubricComment | None
-    sourceComment: Comment | None
+    owner: models.ForeignKey[User, User]
+    assignment: models.ForeignKey[Assignment, Assignment]
+    rubricComment: Optional[models.ForeignKey[RubricComment, RubricComment]]
+    sourceComment: Optional[models.ForeignKey[Comment, Comment]]
 
   text = models.TextField(help_text=("The text of the template."))
   owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comment_templates", help_text=("The creator of the template."))

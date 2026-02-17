@@ -57,7 +57,7 @@ class NodeExecutor(Executor):
             
         return list(packages_to_install)
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()
         if not template:
             return None
@@ -69,6 +69,10 @@ class NodeExecutor(Executor):
         
         # Replace filler
         template = template.replace("// FILLER_CODE", code)
+
+        # Inject test code (base64) if provided
+        test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('utf-8') if test_code else ""
+        template = template.replace('{test_code_b64}', test_code_b64)
         return template
 
     def execute(self) -> ExecutionResult:
@@ -83,7 +87,7 @@ class NodeExecutor(Executor):
         imports = self._detect_imports(code)
         
         # Get code template
-        template = self._get_code_template(code, imports)
+        template = self._get_code_template(code, imports, self.test_code or "")
         if not template:
             return ExecutionResult.error("Failed to get code template")
 
@@ -124,9 +128,12 @@ class NodeExecutor(Executor):
                 stderr = parts[1]
                 if stderr.startswith("\n"): stderr = stderr[1:]
 
+            # Parse test results if present
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+
             execution_time = (datetime.now() - start_time).total_seconds()
             success = result.get('StatusCode', 1) == 0
-            
+
             # Merge logs
             full_system_logs = self.executor_logs
             if template_logs:
@@ -138,7 +145,8 @@ class NodeExecutor(Executor):
                 stderr=stderr,
                 err=None if success else f"Exit Code: {result.get('StatusCode')}",
                 execution_time=execution_time,
-                system_logs=full_system_logs
+                system_logs=full_system_logs,
+                tests=test_results
             )
         except Exception as e:
             container.kill()
