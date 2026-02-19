@@ -41,6 +41,8 @@ services:
             - WORKER_STAGING_ROOT=/staging
             - HOST_DATASET_ROOT=${HOST_DATASET_ROOT:-/mnt/datasets}
             - WORKER_DATASET_ROOT=/assignment_datasets
+            - WORKER_SHELL_REDIS_URL=redis://${DB_HOSTNAME}:6379
+            - WORKER_SHELL_SHARED_SECRET=${WORKER_SHELL_SHARED_SECRET}
         build:
             context: .
             target: api

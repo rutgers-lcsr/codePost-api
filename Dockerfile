@@ -16,7 +16,7 @@ RUN python manage.py collectstatic --no-input
 
 RUN chmod +x init.sh
 
-CMD ["/opt/app/init.sh", "gunicorn", "--workers=4", "--threads=16",  "codepost.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["/opt/app/init.sh", "gunicorn", "--workers=4", "--worker-class", "uvicorn.workers.UvicornWorker", "codepost.asgi:application", "--bind", "0.0.0.0:8000"]
 
 FROM python:3.12 AS worker
 

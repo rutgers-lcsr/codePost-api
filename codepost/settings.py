@@ -424,11 +424,26 @@ TEMPLATES = [
 WSGI_APPLICATION = "codepost.wsgi.application"
 ASGI_APPLICATION = "codepost.asgi.application"
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
+CHANNEL_LAYER_REDIS_URL = (
+    os.environ.get("WORKER_SHELL_REDIS_URL")
+    or os.environ.get("CELERY_BROKER_URL", "")
+)
+
+if CHANNEL_LAYER_REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [CHANNEL_LAYER_REDIS_URL],
+            },
+        }
     }
-}
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
 
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 

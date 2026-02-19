@@ -66,7 +66,7 @@ services:
             - HOST_DATASET_ROOT=${HOST_DATASET_ROOT:-/mnt/datasets} # TODO - check if the default here is correct
             - WORKER_DATASET_ROOT=/assignment_datasets
             - WORKER_SHELL_SHARED_SECRET=${WORKER_SHELL_SHARED_SECRET}
-            - WORKER_SHELL_REDIS_URL=${WORKER_SHELL_REDIS_URL}
+            - WORKER_SHELL_REDIS_URL=${WORKER_SHELL_REDIS_URL:-redis://${DB_HOSTNAME}:6379}
             - WORKER_SHELL_WORKER_ID=${WORKER_SHELL_WORKER_ID}
         build:
             context: .
