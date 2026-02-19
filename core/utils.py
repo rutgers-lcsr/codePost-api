@@ -205,23 +205,28 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
     environment = None
 
   if environment is not None:
-    Environment.objects.create(
+    # Use update_or_create because the AssignmentFile post_save signal may have
+    # already triggered AutoDetectEnvironment, which creates an Environment via
+    # get_or_create. A plain create() would fail with a UNIQUE constraint error.
+    Environment.objects.update_or_create(
       assignment=new_assignment,
-      language=environment.language,
-      buildType=environment.buildType,
-      dockerfile=environment.dockerfile,
-      dockerRunInstructions=environment.dockerRunInstructions,
-      compileText=environment.compileText,
-      allowNetworkAccess=environment.allowNetworkAccess,
-      maxStudentTestRuns=environment.maxStudentTestRuns,
-      maxExposedFailedTests=environment.maxExposedFailedTests,
+      defaults=dict(
+        language=environment.language,
+        buildType=environment.buildType,
+        dockerfile=environment.dockerfile,
+        dockerRunInstructions=environment.dockerRunInstructions,
+        compileText=environment.compileText,
+        allowNetworkAccess=environment.allowNetworkAccess,
+        maxStudentTestRuns=environment.maxStudentTestRuns,
+        maxExposedFailedTests=environment.maxExposedFailedTests,
 
-      # Custom environment fields
-      image_name=environment.image_name,  # Reuse image to avoid rebuild
-      build_status=environment.build_status,  # Keep status if we reuse image
-      requirements=environment.requirements,
-      env_vars=environment.env_vars,
-      auto_detect=environment.auto_detect
+        # Custom environment fields
+        image_name=environment.image_name,  # Reuse image to avoid rebuild
+        build_status=environment.build_status,  # Keep status if we reuse image
+        requirements=environment.requirements,
+        env_vars=environment.env_vars,
+        auto_detect=environment.auto_detect,
+      )
     )
 
   # Copy DataSets
