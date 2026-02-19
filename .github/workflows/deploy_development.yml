@@ -88,6 +88,8 @@ jobs:
               run: |
                   docker compose build
                   docker compose up -d --remove-orphans
+                  # Restart the nginx container due to 502 Bad Gateway errors
+                  docker restart codepost-entry
 
             - name: Remove docker artifacts
               run: |
