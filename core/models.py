@@ -802,6 +802,10 @@ class AssignmentDataSet(BaseModel):
   course = property(lambda self: self.assignment.course)
   
   def save(self, *args, **kwargs):
+    # Test resources should never be student-visible.
+    if self.is_test_resource:
+      self.hidden = True
+
     # Set default mount_path if not provided
     if not self.mount_path and self.name:
       # Sanitize name for filesystem use - keep dots for file extensions
@@ -1058,6 +1062,12 @@ class AssignmentFile(File):
   isVisible = property(lambda self: self.assignment.isVisible)
 
   course = property(lambda self: self.assignment.course)
+
+  def save(self, *args, **kwargs):
+    # Test resources should never be student-visible.
+    if self.is_test_resource:
+      self.hidden = True
+    return super(AssignmentFile, self).save(*args, **kwargs)
 
 
 class CourseFile(File):

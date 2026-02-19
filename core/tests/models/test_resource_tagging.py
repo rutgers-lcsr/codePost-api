@@ -48,6 +48,7 @@ def test_resource_creation_tags_file():
     file = AssignmentFileFactory(assignment=category.assignment)
     
     assert not file.is_test_resource
+    assert not file.hidden
     
     TestCategoryResource.objects.create(
         category=category,
@@ -57,6 +58,7 @@ def test_resource_creation_tags_file():
     
     file.refresh_from_db()
     assert file.is_test_resource
+    assert file.hidden
 
 @pytest.mark.django_db
 def test_resource_creation_tags_dataset():
@@ -64,6 +66,7 @@ def test_resource_creation_tags_dataset():
     dataset = AssignmentDataSetFactory(assignment=category.assignment)
     
     assert not dataset.is_test_resource
+    assert not dataset.hidden
     
     TestCategoryResource.objects.create(
         category=category,
@@ -73,3 +76,4 @@ def test_resource_creation_tags_dataset():
     
     dataset.refresh_from_db()
     assert dataset.is_test_resource
+    assert dataset.hidden

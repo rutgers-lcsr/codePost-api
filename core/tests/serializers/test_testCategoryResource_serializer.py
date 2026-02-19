@@ -109,3 +109,4 @@ def test_create_dataset_with_is_test_resource_field():
     dataset = serializer.save()
     
     assert dataset.is_test_resource is True
+    assert dataset.hidden is True
