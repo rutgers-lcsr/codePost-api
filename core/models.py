@@ -710,11 +710,17 @@ class File(BaseModel):
           raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
   def save(self, *args, **kwargs):
-    # Normalize newlines
-    if '\\r\\n' in self.data:
-      self.data = self.data.replace("\\r\\n", "\\n")
+    # Check if trying to use deprecated 'code' field
+    if hasattr(self, 'code') and self.code:  # type: ignore[attr-defined]
+      raise Exception("File.code is deprecated. Use File.data instead.")
+ 
+    # Normalize newlines, but only for text files
+    BINARY_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
+    if not any(self.extension.lower().endswith(ext) for ext in BINARY_EXTENSIONS):
+        if '\\r\\n' in self.data:
+            self.data = self.data.replace("\\r\\n", "\\n")
     
-    # Ensure utf-8 encoding
+    # Ensure utf-8 encoding (base64 is ascii safe)
     self.data = self.data.encode('utf-8').decode('utf-8')
     self.hash = hashlib.sha256(self.data.encode('utf-8')).hexdigest()
     
@@ -724,9 +730,7 @@ class File(BaseModel):
       if match:
         self.extension = match.group(1)
       else:
-        # Try to use handler logic? No, handler needs extension usually.
-        # But we could potentially use content sniffing in handler.
-        # For now keeping existing logic but maybe allowing handler to refine?
+        # extension is required for text files
         raise ValidationError("File extension could not be inferred from file name. Please provide an extension.")
       
     
