@@ -561,6 +561,10 @@ CELERY_DEFAULT_QUEUE = "prod-celery"
 #     # "webhooks.tasks.DeliverHook": {"queue": "prod-celery-webhooks"},
 # }
 
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "priority_steps": list(range(10)),
+}
+
 DJANGO_CELERY_RESULTS_TASK_ID_MAX_LENGTH = 191
 CELERY_ACCEPT_CONTENT = ["application/json"]
 CELERY_RESULT_SERIALIZER = "json"

@@ -4,6 +4,7 @@ Python executor for running Python code in a Docker container.
 The following includes Python and Python Notebook executors.
 """
 
+import base64
 import os
 import ast
 import re
@@ -11,13 +12,88 @@ from datetime import datetime
 import tempfile
 import shutil
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 import nbformat
+from requests.exceptions import ReadTimeout
 
 from .base import Executor, NotebookExecutor, ExecutionResult
 
 logger = logging.getLogger(__name__)
 import json
+
+
+def _collect_local_python_modules(file_obj: Any, additional_files: dict[str, str]) -> set[str]:
+    """
+    Collect module/package names that are available from submission/assignment files.
+
+    This lets us avoid attempting `pip install` for local modules (e.g. `math_utils.py`).
+    """
+    local_modules: set[str] = set()
+
+    candidate_paths: List[str] = []
+
+    main_name = getattr(file_obj, "name", None)
+    main_path = getattr(file_obj, "path", None)
+    if isinstance(main_name, str) and main_name:
+        if isinstance(main_path, str) and main_path:
+            candidate_paths.append(os.path.join(main_path, main_name))
+        else:
+            candidate_paths.append(main_name)
+
+    candidate_paths.extend(additional_files.keys())
+
+    for rel_path in candidate_paths:
+        if not isinstance(rel_path, str) or not rel_path or rel_path.startswith("/"):
+            # Absolute paths are usually system files and not importable user modules.
+            continue
+
+        normalized = rel_path.replace("\\", "/")
+        parts = [p for p in normalized.split("/") if p]
+        if not parts:
+            continue
+
+        filename = parts[-1]
+        if filename.endswith(".py"):
+            module_name = filename[:-3]
+            if module_name and module_name != "__init__":
+                local_modules.add(module_name)
+
+        # Track top-level package directory so imports like `from lib.x import y`
+        # do not trigger `pip install lib`.
+        if len(parts) > 1:
+            local_modules.add(parts[0])
+
+        # If file is package initializer, include package folder name.
+        if filename == "__init__.py" and len(parts) > 1:
+            local_modules.add(parts[-2])
+
+    return {m for m in local_modules if m}
+
+
+def _filter_local_requirements(requirements_text: Optional[str], local_modules: set[str]) -> List[str]:
+    """Filter out empty and local-module requirements while preserving order."""
+    if not requirements_text:
+        return []
+
+    filtered: List[str] = []
+    seen: set[str] = set()
+
+    for raw_req in requirements_text.split("\n"):
+        req = raw_req.strip()
+        if not req:
+            continue
+
+        # Keep only simple package token for matching local modules.
+        # Handles lightweight forms like `package==1.2.3` if ever present.
+        req_name = re.split(r"[<>=!~\[]", req, 1)[0].strip()
+        if req_name in local_modules:
+            continue
+
+        if req not in seen:
+            seen.add(req)
+            filtered.append(req)
+
+    return filtered
 
 
 class PythonExecutor(Executor):
@@ -57,10 +133,19 @@ class PythonExecutor(Executor):
     
     def _detect_imports(self, code) -> List[str]:
         # Refactored to use File Handler logic
-        if hasattr(self.file, 'handler'):
-            reqs = self.file.handler.get_requirements()
+        file_obj = cast(Any, self.file)
+        if hasattr(file_obj, 'handler'):
+            reqs = file_obj.handler.get_requirements()
             if reqs:
-                return reqs.split('\n')
+                local_modules = _collect_local_python_modules(self.file, self.additional_files)
+                filtered = _filter_local_requirements(reqs, local_modules)
+                removed = sorted(set(reqs.split('\n')) - set(filtered))
+                if removed:
+                    self.log(
+                        f"Filtered local python modules from auto-install: {', '.join([r for r in removed if r])}",
+                        "debug",
+                    )
+                return filtered
         
         # Fallback if handler not available or not working
         return []
@@ -73,10 +158,20 @@ class PythonExecutor(Executor):
         if template and packages_to_install:
             # Modify the template to include package installation
             template = template.replace("packages_to_install = []", f"packages_to_install = {repr(packages_to_install)}")
-        
-        template = template.replace("#{FILLER_CODE}", code)
-        template = template.replace("#{TEST_CODE}", test_code)
+
+        code_base64 = base64.b64encode(code.encode("utf-8")).decode("utf-8")
+        test_code_base64 = base64.b64encode(test_code.encode("utf-8")).decode("utf-8")
+
+        rel_path = self.file.name or "student.py"
+        file_path = getattr(self.file, "path", None)
+        if isinstance(file_path, str) and file_path:
+            rel_path = os.path.join(file_path, rel_path)
+        student_file_path = os.path.join("/work", rel_path).replace("\\", "/")
+
+        template = template.replace("#{FILLER_CODE}", code_base64)
+        template = template.replace("#{TEST_CODE}", test_code_base64)
         template = template.replace("#{TARGET_TEST_FUNCTION}", self.test_function if self.test_function else "")
+        template = template.replace("#{STUDENT_FILE_PATH}", student_file_path)
         return template
 
     def execute(self) -> ExecutionResult:
@@ -170,6 +265,20 @@ class PythonExecutor(Executor):
 
             # Parse plots (like R executor)
             import re
+
+            # Move template-prefixed messages from stderr into template logs so
+            # student-facing stderr only contains student/test errors.
+            template_line_regex = re.compile(r'^\[CODEPOST_TEMPLATE\]\[[A-Z]+\]\s.*(?:\r?\n)?', re.MULTILINE)
+            template_line_matches = template_line_regex.findall(stderr)
+            if template_line_matches:
+                extracted_template_logs = "".join(template_line_matches).strip()
+                if extracted_template_logs:
+                    if template_logs:
+                        template_logs = f"{template_logs.rstrip()}\n{extracted_template_logs}"
+                    else:
+                        template_logs = extracted_template_logs
+                stderr = template_line_regex.sub("", stderr).lstrip("\r\n")
+
             img_regex = re.compile(r'<<<CODEPOST_PLOT:(.*?)>>>', re.DOTALL)
             images = []
             
@@ -202,9 +311,9 @@ class PythonExecutor(Executor):
                 stderr = "ERROR: Output truncated due to large output size\n" + stderr[:self.MAX_OUTPUT_SIZE] + "\n...[truncated stderr over limit]..."
 
             # Merge template logs into system_logs
-            full_system_logs = self.executor_logs
+            full_system_logs = list(self.executor_logs)
             if template_logs:
-                full_system_logs += "\n--- Template Logs ---\n" + template_logs
+                full_system_logs.append("--- Template Logs ---\n" + template_logs)
 
             result = ExecutionResult(
                 success=success,
@@ -255,15 +364,20 @@ class PythonNotebookExecutor(NotebookExecutor):
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
 
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
+            return False
+
         try:
-            kernel_name = cls.get_kernel_name(code)
-            # Check if it's a Python kernel
-            if kernel_name and not kernel_name.lower().startswith('python'):
+            # Strictly match Python notebooks when metadata is available.
+            if cls.notebook_matches_language(code, ['python', 'python3', 'py']):
+                return True
+            detected_language = cls.detect_notebook_language(code)
+            if detected_language and detected_language != 'python':
                 return False
-        except:
-            pass  # If we can't get kernel name, check extension only
-            
-        if extension is not None and extension.lower() in cls.EXECUTABLE_EXTENSIONS:
+        except Exception:
+            pass  # If we can't infer metadata, keep extension fallback for backwards compatibility
+
+        if extension.lower() in cls.EXECUTABLE_EXTENSIONS:
             return True
 
         return False
@@ -273,11 +387,16 @@ class PythonNotebookExecutor(NotebookExecutor):
         Detect imported packages from all notebook cells.
         Refactored to use File Handler logic.
         """
-        if hasattr(self.file, 'handler'):
-            reqs = self.file.handler.get_requirements()
+        file_obj = cast(Any, self.file)
+        if hasattr(file_obj, 'handler'):
+            reqs = file_obj.handler.get_requirements()
             if reqs:
-                self.log(f"Detected packages to install via Handler: {reqs}", "debug")
-                return reqs.split('\n')
+                local_modules = _collect_local_python_modules(self.file, self.additional_files)
+                filtered = _filter_local_requirements(reqs, local_modules)
+                self.log(f"Detected packages via Handler: {reqs}", "debug")
+                if filtered != reqs.split('\n'):
+                    self.log(f"Filtered install packages: {filtered}", "debug")
+                return filtered
 
         # Fallback for now if needed, but redundant with Handlers
         return []

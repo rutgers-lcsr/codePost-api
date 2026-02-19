@@ -124,138 +124,179 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   original_assignment = Assignment.objects.get(id=assignment.id)
 
   course_assignments = Assignment.objects.filter(course=destination_course.id).values_list('name', flat=True)
-  
+
   # Only add "(copy N)" suffix if there's a name collision in the destination course
   new_name = new_assignment.name
   if new_name in course_assignments:
     count = 1
     new_name = f"{new_assignment.name} (copy {count})"
-    
+
     # Prevent copying the same assignment into the same course more than 10 times
     while new_name in course_assignments and count < 10:
-        count += 1
-        new_name = f"{new_assignment.name} (copy {count})"
+      count += 1
+      new_name = f"{new_assignment.name} (copy {count})"
 
     if count == 10:
-        return None
+      return None
 
   # copy assignment
   new_assignment.id = None  # type: ignore[assignment]
   new_assignment.pk = None
   new_assignment.name = new_name
   new_assignment.course_id = destination_course.id  # type: ignore[attr-defined]
-  
+
   # Reset student-facing settings for safety when cloning to a new course
   new_assignment.isReleased = False
   new_assignment.isVisible = False
   new_assignment.feedbackReleased = False
   new_assignment.liveFeedbackMode = False
-  
+
   # Reset dates
   new_assignment.uploadDueDate = None
   new_assignment.regradeDeadline = None
-  
+
   # Reset stats
   new_assignment.mean = None
   new_assignment.median = None
-  
+
   # Copy AI settings
   new_assignment.ai_system_prompt = original_assignment.ai_system_prompt
 
   new_assignment.save()
 
   # copy assignment files (template files)
-  from core.models import AssignmentFile
+  from core.models import AssignmentFile, AssignmentDataSet, TestCase as AssignmentTestCase, TestCategoryResource
+  from django.core.files.base import ContentFile
+
+  assignment_file_map = {}
   for assignmentFile in original_assignment.files.all():
-      # Create new file with same data
-      AssignmentFile.objects.create(
-          assignment=new_assignment,
-          name=assignmentFile.name,
-          data=assignmentFile.data,
-          extension=assignmentFile.extension,
-          path=assignmentFile.path,
-          required=assignmentFile.required,
-          description=assignmentFile.description
-      )
+    # Create new file with same data
+    new_file = AssignmentFile.objects.create(
+      assignment=new_assignment,
+      name=assignmentFile.name,
+      data=assignmentFile.data,
+      extension=assignmentFile.extension,
+      path=assignmentFile.path,
+      required=assignmentFile.required,
+      description=assignmentFile.description,
+      hidden=assignmentFile.hidden,
+      is_test_resource=assignmentFile.is_test_resource,
+    )
+    assignment_file_map[assignmentFile.id] = new_file
 
   # copy rubric
   for rubricCategory in original_assignment.rubricCategories.all():
-      original_rubricCategory = RubricCategory.objects.get(id=rubricCategory.id)
-      new_rubricCategory = RubricCategory.objects.create(
-          assignment=new_assignment,
-          name=rubricCategory.name,
-          pointLimit=rubricCategory.pointLimit,
-          helpText=rubricCategory.helpText,
-          sortKey=rubricCategory.sortKey
-      )
-      for rubricComment in original_rubricCategory.rubricComments.all():
-          rubricComment.pk = None
-          rubricComment.category = new_rubricCategory
-          rubricComment.save()
-
-  # copy tests
-  for testCategory in original_assignment.testCategories.all():
-      original_testCategory = TestCategory.objects.get(id=testCategory.id)
-      new_testCategory = TestCategory.objects.create(
-          assignment=new_assignment,
-          name=testCategory.name
-      )
-      for testCase in original_testCategory.testCases.all():
-          testCase.pk = None
-          testCase.testCategory = new_testCategory
-          testCase.save()
+    original_rubricCategory = RubricCategory.objects.get(id=rubricCategory.id)
+    new_rubricCategory = RubricCategory.objects.create(
+      assignment=new_assignment,
+      name=rubricCategory.name,
+      pointLimit=rubricCategory.pointLimit,
+      helpText=rubricCategory.helpText,
+      sortKey=rubricCategory.sortKey
+    )
+    for rubricComment in original_rubricCategory.rubricComments.all():
+      rubricComment.pk = None
+      rubricComment.category = new_rubricCategory
+      rubricComment.save()
 
   try:
-      environment = original_assignment.environment
+    environment = original_assignment.environment
   except ObjectDoesNotExist:
-      environment = None
+    environment = None
 
   if environment is not None:
-      original_environment = Environment.objects.get(id=environment.id)
-      # Clone environment with all fields
-      new_environment = Environment.objects.create(
-          assignment=new_assignment,
-          language=environment.language,
-          buildType=environment.buildType,
-          dockerfile=environment.dockerfile,
-          dockerRunInstructions=environment.dockerRunInstructions,
-          compileText=environment.compileText,
-          allowNetworkAccess=environment.allowNetworkAccess,
-          maxStudentTestRuns=environment.maxStudentTestRuns,
-          maxExposedFailedTests=environment.maxExposedFailedTests,
-          
-          # Custom environment fields
-          image_name=environment.image_name, # Reuse image to avoid rebuild
-          build_status=environment.build_status, # Keep status if we reuse image
-          requirements=environment.requirements,
-          env_vars=environment.env_vars,
-          auto_detect=environment.auto_detect
-      )
-  
+    Environment.objects.create(
+      assignment=new_assignment,
+      language=environment.language,
+      buildType=environment.buildType,
+      dockerfile=environment.dockerfile,
+      dockerRunInstructions=environment.dockerRunInstructions,
+      compileText=environment.compileText,
+      allowNetworkAccess=environment.allowNetworkAccess,
+      maxStudentTestRuns=environment.maxStudentTestRuns,
+      maxExposedFailedTests=environment.maxExposedFailedTests,
+
+      # Custom environment fields
+      image_name=environment.image_name,  # Reuse image to avoid rebuild
+      build_status=environment.build_status,  # Keep status if we reuse image
+      requirements=environment.requirements,
+      env_vars=environment.env_vars,
+      auto_detect=environment.auto_detect
+    )
+
   # Copy DataSets
-  from core.models import AssignmentDataSet
-  from django.core.files.base import ContentFile
-  
+  dataset_map = {}
   for dataset in original_assignment.dataSets.all():
-      # We must duplicate the file content so the new dataset has its own file
-      if dataset.file:
-          new_dataset = AssignmentDataSet(
-              assignment=new_assignment,
-              name=dataset.name,
-              description=dataset.description,
-              mount_path=dataset.mount_path,
-              is_active=dataset.is_active
-          )
-          # Read original file and save to new dataset
-          # This creates a new physical file in storage
-          try:
-            with dataset.file.open('rb') as f:
-                new_dataset.file.save(dataset.file.name, ContentFile(f.read()), save=False)
-            new_dataset.save()
-          except Exception as e:
-              logger.error(f"Failed to clone dataset {dataset.id}: {e}")
+    # We must duplicate the file content so the new dataset has its own file
+    if dataset.file:
+      new_dataset = AssignmentDataSet(
+        assignment=new_assignment,
+        name=dataset.name,
+        description=dataset.description,
+        mount_path=dataset.mount_path,
+        is_active=dataset.is_active,
+        hidden=dataset.hidden,
+        is_test_resource=dataset.is_test_resource,
+      )
+      # Read original file and save to new dataset
+      # This creates a new physical file in storage
+      try:
+        with dataset.file.open('rb') as f:
+          new_dataset.file.save(dataset.file.name, ContentFile(f.read()), save=False)
+        new_dataset.save()
+        dataset_map[dataset.id] = new_dataset
+      except Exception as e:
+        logger.error(f"Failed to clone dataset {dataset.id}: {e}")
 
+  # copy tests (including test scripts and linked resources)
+  for testCategory in original_assignment.testCategories.all():
+    original_testCategory = TestCategory.objects.get(id=testCategory.id)
+    new_testCategory = TestCategory.objects.create(
+      assignment=new_assignment,
+      name=testCategory.name,
+      testScript=testCategory.testScript,
+      maxPoints=testCategory.maxPoints,
+      sortKey=testCategory.sortKey,
+      targetFileName=testCategory.targetFileName,
+    )
 
+    for testCase in original_testCategory.testCases.all():
+      AssignmentTestCase.objects.create(
+        testCategory=new_testCategory,
+        sortKey=testCase.sortKey,
+        description=testCase.description,
+        type=testCase.type,
+        pointsFail=testCase.pointsFail,
+        pointsPass=testCase.pointsPass,
+        text=testCase.text,
+        explanation=testCase.explanation,
+        exposed=testCase.exposed,
+        lastSolutionRun=testCase.lastSolutionRun,
+        rubricItem=testCase.rubricItem,
+        functionName=testCase.functionName,
+        testCode=testCase.testCode,
+        targetCellId=testCase.targetCellId,
+        timeout=testCase.timeout,
+      )
+
+    for resource in original_testCategory.resources.all():
+      cloned_file = assignment_file_map.get(resource.file_id) if resource.file_id else None
+      cloned_dataset = dataset_map.get(resource.dataset_id) if resource.dataset_id else None
+
+      if not cloned_file and not cloned_dataset:
+        logger.warning(
+          "Skipping clone of test resource %s for category %s because source file/dataset was not cloned",
+          resource.id,
+          original_testCategory.id,
+        )
+        continue
+
+      TestCategoryResource.objects.create(
+        category=new_testCategory,
+        file=cloned_file,
+        dataset=cloned_dataset,
+        target_path=resource.target_path,
+      )
 
   return new_assignment
 

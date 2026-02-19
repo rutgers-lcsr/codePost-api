@@ -5,6 +5,7 @@ from operator import is_
 import os
 from socket import timeout
 import threading
+import time
 from celery import shared_task
 import requests
 from enum import Enum
@@ -64,7 +65,7 @@ def add(x, y):
 
 from autograder.services.builder import Builder
 
-@app.task
+@app.task(priority=0)
 def AutoDetectEnvironment(assignment_id):
     """
     Celery task to run auto-detection on assignment files.
@@ -75,7 +76,7 @@ def AutoDetectEnvironment(assignment_id):
     except Exception as e:
         logger.error(f"[AutoDetect] Task failed for assignment {assignment_id}: {e}")
 
-@app.task
+@app.task(priority=0)
 def BuildEnvironment(environmentID, rerun_submission_ids: list[int] = None):
     """
     Builds the Docker environment for a given Environment ID.
@@ -365,7 +366,7 @@ class RunType(str, Enum):
     TestCase = "TESTCASE"
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=600,soft_time_limit=550)
 def RunSubmission(self, submissionID: int):
     """
     This celery task runs all executable files in a submission to cache execution results.

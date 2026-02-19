@@ -35,6 +35,8 @@ services:
             - ${HOST_DATASET_ROOT:-/mnt/datasets}:/assignment_datasets
             - /tmp/codepost-staging:/staging
             - /var/run/docker.sock:/var/run/docker.sock
+        labels:
+            - "autoheal=true"
         restart: always
         healthcheck:
             test: ["CMD", "celery", "--app", "autograder", "status"]
@@ -80,6 +82,19 @@ services:
             options:
                 max-size: "10m"
                 max-file: "3"
+
+    codepost-worker-autoheal:
+        image: willfarrell/autoheal:latest
+        container_name: codepost-worker-autoheal
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+        restart: always
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
 networks:
     default:
         name: codepost-network

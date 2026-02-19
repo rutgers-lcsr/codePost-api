@@ -41,7 +41,8 @@ class DatasetCascadeTest(TestCase):
 
     def test_dataset_deletion_sets_null_on_test_case(self):
         """
-        Verify that deleting an AssignmentDataSet sets the dataSet field to None on linked TestCase.
+        Verify that deleting an AssignmentDataSet does not delete TestCase records.
+        Dataset linkage now occurs through TestCategoryResource, not TestCase.dataSet.
         """
         # Create a dataset
         dataset = AssignmentDataSet.objects.create(
@@ -55,21 +56,28 @@ class DatasetCascadeTest(TestCase):
             name="Test Category 2"
         )
         
-        # Create a test case linking to the dataset
+        # Create a test case in the category
         test_case = AssignmentTestCase.objects.create(
             testCategory=category,
             description="Test Case 1",
             type="io",
-            dataSet=dataset
+            pointsPass=1,
+            pointsFail=0,
         )
-        
-        self.assertEqual(test_case.dataSet, dataset)
+
+        # Link dataset via TestCategoryResource (new model relationship)
+        resource = TestCategoryResource.objects.create(
+            category=category,
+            dataset=dataset,
+            target_path="input_2.csv"
+        )
         
         # Delete the dataset
         dataset.delete()
         
         # Reload test case
         test_case.refresh_from_db()
-        
-        # Check if dataSet is None
-        self.assertIsNone(test_case.dataSet)
+
+        # TestCase should remain; resource should be deleted via cascade from dataset
+        self.assertTrue(AssignmentTestCase.objects.filter(id=test_case.id).exists())
+        self.assertFalse(TestCategoryResource.objects.filter(id=resource.id).exists())

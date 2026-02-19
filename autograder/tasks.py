@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-@shared_task
+@shared_task(time_limit=300, soft_time_limit=250)  # Set time limits for the task
 def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: bool = False, test_code: str = None, example_code: str = None, code_override: str = None):
     try:
         file_obj = File.objects.get(pk=file_id)
@@ -47,7 +47,7 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
         logger.error(f"Task failed: {e}", exc_info=True)
         return {"error": str(e), "success": False}
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=550)  # Set time limits for the task
 def run_test_task(submission_id: int, test_id: int = None, user_id: int = None, file_overrides: dict = None):
     try:
         from autograder.services.TestService import TestService

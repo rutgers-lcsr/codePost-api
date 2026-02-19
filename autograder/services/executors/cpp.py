@@ -148,13 +148,10 @@ class CPPNotebookExecutor(NotebookExecutor):
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
 
-        try:
-            kernel_name = cls.get_kernel_name(code)
-            if kernel_name and ('c++' in kernel_name.lower() or 'cpp' in kernel_name.lower() or 'cling' in kernel_name.lower()):
-                 return True
-        except:
-             pass
-        return False
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
+            return False
+
+        return cls.notebook_matches_language(code, ['cpp', 'c++', 'c/c++', 'cling', 'xeus-cling'])
         
     def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()

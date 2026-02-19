@@ -140,14 +140,14 @@ public class notebook_template {
             jshell.eval("import java.util.concurrent.*;");
 
             // Define Test Annotation
-                jshell.eval(
+            jshell.eval(
                     "@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface Test { String name() default \"\"; double points() default 1.0; String description() default \"\"; int timeout() default 30; }");
 
             // Define TestResult Class
-                jshell.eval(
+            jshell.eval(
                     "class TestResult { String name; String description; String message; double score; double max_score; boolean passed; String status; String error; String output; "
-                        +
-                        "public TestResult(String n, double m, String d) { name=n; max_score=m; description=d; message=\"\"; score=0; passed=false; status=\"failed\"; output=\"\"; } }");
+                            +
+                            "public TestResult(String n, double m, String d) { name=n; max_score=m; description=d; message=\"\"; score=0; passed=false; status=\"failed\"; output=\"\"; } }");
 
             // Define Assertions (polyfilled for simple use)
             jshell.eval("void assertTrue(boolean cond, String msg) { if (!cond) throw new RuntimeException(msg); }");
@@ -183,29 +183,13 @@ public class notebook_template {
                     }
 
                     try {
-                        // Execute the code
-                        List<SnippetEvent> events = jshell.eval(cellSource);
-
                         StringBuilder evalResult = new StringBuilder();
-                        for (SnippetEvent event : events) {
-                            if (event.status() == Status.VALID) {
-                                String value = event.value();
-                                if (value != null && !value.isEmpty() && !"null".equals(value)) {
-                                    evalResult.append(value).append("\n");
-                                }
-                            } else if (event.status() == Status.REJECTED) {
-                                success = false;
-                                jshell.diagnostics(event.snippet()).forEach(diag -> {
-                                    psErr.println(diag.getMessage(Locale.getDefault()));
-                                });
-                            }
+                        boolean[] successRef = new boolean[] { success };
+                        String[] errorMsgRef = new String[] { errorMsg };
 
-                            if (event.exception() != null) {
-                                success = false;
-                                event.exception().printStackTrace(psErr);
-                                errorMsg = event.exception().getMessage();
-                            }
-                        }
+                        evaluateCellSource(jshell, cellSource, psErr, evalResult, successRef, errorMsgRef);
+                        success = successRef[0];
+                        errorMsg = errorMsgRef[0];
 
                         // Append expression values to output
                         if (evalResult.length() > 0) {
@@ -353,7 +337,8 @@ public class notebook_template {
                             "               ExecutorService _exec = Executors.newSingleThreadExecutor(); " +
                             "               Future<Object> _future = _exec.submit(() -> { " +
                             "                   try { _m.setAccessible(true); return _m.invoke(_instance); } " +
-                            "                   catch (Throwable _ex) { throw new RuntimeException(_ex.getCause() != null ? _ex.getCause() : _ex); } " +
+                            "                   catch (Throwable _ex) { throw new RuntimeException(_ex.getCause() != null ? _ex.getCause() : _ex); } "
+                            +
                             "               }); " +
                             "               try { " +
                             "                   Object _ret = _future.get(_ann.timeout(), TimeUnit.SECONDS); " +
@@ -362,18 +347,21 @@ public class notebook_template {
                             "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
                             "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
                             +
-                            "                   } else if (_ret instanceof Object[] && ((Object[])_ret).length >= 2 && ((Object[])_ret)[0] instanceof Number) { " +
+                            "                   } else if (_ret instanceof Object[] && ((Object[])_ret).length >= 2 && ((Object[])_ret)[0] instanceof Number) { "
+                            +
                             "                       Object[] _arr = (Object[]) _ret; " +
                             "                       double _score = ((Number) _arr[0]).doubleValue(); " +
                             "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
                             "                       _tr.message = _arr[1] != null ? _arr[1].toString() : \"\"; " +
                             "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
                             +
-                            "                   } else if (_ret instanceof List && ((List)_ret).size() >= 2 && ((List)_ret).get(0) instanceof Number) { " +
+                            "                   } else if (_ret instanceof List && ((List)_ret).size() >= 2 && ((List)_ret).get(0) instanceof Number) { "
+                            +
                             "                       List _list = (List) _ret; " +
                             "                       double _score = ((Number) _list.get(0)).doubleValue(); " +
                             "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
-                            "                       _tr.message = _list.get(1) != null ? _list.get(1).toString() : \"\"; " +
+                            "                       _tr.message = _list.get(1) != null ? _list.get(1).toString() : \"\"; "
+                            +
                             "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
                             +
                             "                   } else if (_ret instanceof String) { " +
@@ -514,8 +502,74 @@ public class notebook_template {
         }
     }
 
+    private static void evaluateCellSource(
+            JShell jshell,
+            String cellSource,
+            PrintStream psErr,
+            StringBuilder evalResult,
+            boolean[] successRef,
+            String[] errorMsgRef) {
+        SourceCodeAnalysis sourceCodeAnalysis = jshell.sourceCodeAnalysis();
+        String remaining = cellSource == null ? "" : cellSource;
+        int guard = 0;
+
+        while (remaining != null && !remaining.trim().isEmpty()) {
+            if (guard++ > 2000) {
+                successRef[0] = false;
+                psErr.println("Cell execution aborted: too many snippets in one cell.");
+                return;
+            }
+
+            SourceCodeAnalysis.CompletionInfo completion = sourceCodeAnalysis.analyzeCompletion(remaining);
+            String snippet = completion.source();
+            String nextRemaining = completion.remaining();
+
+            // Fallback for parser edge-cases where JShell cannot split further.
+            if (snippet == null || snippet.trim().isEmpty()) {
+                snippet = remaining;
+                nextRemaining = "";
+            }
+
+            List<SnippetEvent> events = jshell.eval(snippet);
+            processSnippetEvents(jshell, events, psErr, evalResult, successRef, errorMsgRef);
+
+            if (nextRemaining == null || nextRemaining.equals(remaining)) {
+                break;
+            }
+
+            remaining = nextRemaining;
+        }
+    }
+
+    private static void processSnippetEvents(
+            JShell jshell,
+            List<SnippetEvent> events,
+            PrintStream psErr,
+            StringBuilder evalResult,
+            boolean[] successRef,
+            String[] errorMsgRef) {
+        for (SnippetEvent event : events) {
+            if (event.status() == Status.VALID) {
+                String value = event.value();
+                if (value != null && !value.isEmpty() && !"null".equals(value)) {
+                    evalResult.append(value).append("\n");
+                }
+            } else if (event.status() == Status.REJECTED) {
+                successRef[0] = false;
+                jshell.diagnostics(event.snippet()).forEach(diag -> {
+                    psErr.println(diag.getMessage(Locale.getDefault()));
+                });
+            }
+
+            if (event.exception() != null) {
+                successRef[0] = false;
+                event.exception().printStackTrace(psErr);
+                errorMsgRef[0] = event.exception().getMessage();
+            }
+        }
+    }
+
     // Simple JSON array parser (handles nested objects)
-    @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> parseJsonArray(String json) {
         try {
             json = json.trim();

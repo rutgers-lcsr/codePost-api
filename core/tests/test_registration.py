@@ -73,7 +73,7 @@ class TestRegistration(APITestCase):
     payload = {'email': 'user2@princeton.edu', 'organization': 'princeton'}
     response = self.client.post(
         '/registration/validateNewAdminUser/', payload)
-    self.assertEqual(response.data['action_id'], '1.2.2.1')
+    self.assertEqual(response.data['action_id'], '1.2.2')
 
   def test_case_1222(self):
     user3 = User.objects.create(
@@ -89,28 +89,28 @@ class TestRegistration(APITestCase):
     payload = {'email': 'user3@princeton.edu', 'organization': 'princeton'}
     response = self.client.post(
         '/registration/validateNewAdminUser/', payload)
-    self.assertEqual(response.data['action_id'], '1.2.2.2')
+    self.assertEqual(response.data['action_id'], '1.2.2')
 
   def test_case_2121(self):
     payload = {'email': 'newadmin@princeton.edu', 'organization': 'princeton'}
     response = self.client.post(
         '/registration/validateNewAdminUser/', payload)
-    self.assertEqual(response.data['action_id'], '2.1.2.1')
+    self.assertEqual(response.data['action_id'], '2.1.2')
 
   def test_case_2122(self):
     payload = {'email': 'newadmin@princeton.com', 'organization': 'princeton'}
     response = self.client.post(
         '/registration/validateNewAdminUser/', payload)
-    self.assertEqual(response.data['action_id'], '2.1.2.2')
+    self.assertEqual(response.data['action_id'], '2.1.2')
 
   def test_case_2221(self):
     payload = {'email': 'newadmin@acu.edu', 'organization': 'acu'}
     response = self.client.post(
         '/registration/validateNewAdminUser/', payload)
-    self.assertEqual(response.data['action_id'], '2.2.2.1')
+    self.assertEqual(response.data['action_id'], '2.2.2')
 
   def test_case_2222(self):
     payload = {'email': 'random@gmail.com', 'organization': 'acu'}
     response = self.client.post(
         '/registration/validateNewAdminUser/', payload)
-    self.assertEqual(response.data['action_id'], '2.2.2.2')
+    self.assertEqual(response.data['action_id'], '2.2.2')

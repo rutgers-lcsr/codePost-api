@@ -158,7 +158,7 @@ class NodeNotebookExecutor(NotebookExecutor):
     LANGUAGE = "node"
     TEMPLATE = "notebook_template.js"
     DOCKER_IMAGE = "node:20-slim"
-    EXECUTABLE_EXTENSIONS = [".js"]
+    EXECUTABLE_EXTENSIONS = [".ipynb"]
     EXECUTION_COMMAND = ["node"]
     BUILD_CACHE_DIRECTORIES = ['/tmp/npm-cache']
     
@@ -166,13 +166,11 @@ class NodeNotebookExecutor(NotebookExecutor):
     def is_executable(cls, file_name: Optional[str] = None, extension: Optional[str] = None, code: Optional[str] = None) -> bool:
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
-        try:
-            kernel_name = cls.get_kernel_name(code)
-            if kernel_name and ('node' in kernel_name.lower() or 'javascript' in kernel_name.lower() or 'js' in kernel_name.lower()):
-                 return True
-        except:
-             pass
-        return False
+
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
+            return False
+
+        return cls.notebook_matches_language(code, ['javascript', 'js', 'node', 'nodejs', 'typescript', 'ts'])
 
     def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()

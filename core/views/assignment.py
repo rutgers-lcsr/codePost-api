@@ -564,7 +564,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     if not isStudent(user, course) or not assignment.allowStudentUpload:
       return returnForbidden()
 
-    submission = Submission(assignment=assignment, dateUploaded=now())
+    submission = Submission(assignment=assignment, dateUploaded=timezone.now())
 
     # FIXME: This will not check for partner submissions
     # We can't just have the POST body contain partner ids, for the same information
@@ -650,13 +650,13 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 
       # Began late submission check
-      if assignment.uploadDueDate and now() > assignment.uploadDueDate:
+      if assignment.uploadDueDate and timezone.now() > assignment.uploadDueDate:
         if not assignment.allowLateUploads:
           raise serializers.ValidationError("Late submissions are not allowed for this assignment.")
         
         # Calculate maxLateDate
         maxLateDate = assignment.uploadDueDate + timedelta(days=assignment.maxLateDays)
-        if now() > maxLateDate:
+        if timezone.now() > maxLateDate:
           raise serializers.ValidationError("The maximum late submission period has passed for this assignment.")
         
       # Ended late submission check
@@ -734,7 +734,7 @@ class AssignmentViewSet(ListProtectedViewSet):
                                    'extension'], path=f['path'] if f['path'] else None)
 
       # Update submission date once files have been uploaded, triggers auto-execution celery task
-      submission.dateUploaded = now()
+      submission.dateUploaded = timezone.now()
 
       if assignment.liveFeedbackMode:
         submission.isFinalized = False

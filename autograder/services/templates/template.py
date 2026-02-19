@@ -26,7 +26,7 @@ os.environ['MPLBACKEND'] = 'Agg'  # For matplotlib headless
 
 def template_log(message: str, level:str) -> None:
     # Write to stderr with a prefix/format that can be tracked if needed, 
-    print(f"[{level}] {message}", file=sys.stderr)
+    print(f"[CODEPOST_TEMPLATE][{level}] {message}", file=sys.stderr)
 
 # Packages to install
 packages_to_install = []
@@ -308,15 +308,44 @@ def get_plots() -> List[str]:
 # although often we want the student code to define functions that the tests call.
 # If the student code is a script that runs immediately, we let it run.
 
+_EXEC_GLOBALS = globals()
+_EXEC_GLOBALS.setdefault("__name__", "__main__")
+_EXEC_GLOBALS.setdefault("__package__", None)
+_EXEC_GLOBALS.setdefault("__spec__", None)
+_EXEC_GLOBALS.setdefault("__cached__", None)
+
+STUDENT_PSEUDO_FILE = "#{STUDENT_FILE_PATH}"
+if not STUDENT_PSEUDO_FILE or STUDENT_PSEUDO_FILE.startswith("#{"):
+    STUDENT_PSEUDO_FILE = "/work/student.py"
+
+
+def _exec_with_pseudo_file(source_code: str, pseudo_file: str) -> None:
+    """Execute code with a temporary __file__ for script compatibility."""
+    _sentinel = object()
+    previous_file = _EXEC_GLOBALS.get("__file__", _sentinel)
+    _EXEC_GLOBALS["__file__"] = pseudo_file
+    try:
+        compiled = compile(source_code, pseudo_file, "exec")
+        exec(compiled, _EXEC_GLOBALS)
+    finally:
+        if previous_file is _sentinel:
+            _EXEC_GLOBALS.pop("__file__", None)
+        else:
+            _EXEC_GLOBALS["__file__"] = previous_file
+
 print("<<<RESULT>>>", file=sys.stderr) # Marker for legacy log separation
 
 try:
     # Inject student code here
     # We use exec() to run the student code in the current global scope
     # This allows the test functions (defined below) to access student functions
+    # we assume the filler code will be base64 encoded for safety
     
-    student_code = """#{FILLER_CODE}"""
-    exec(student_code, globals())
+    student_code_b64 = """#{FILLER_CODE}"""
+
+    student_code = base64.b64decode(student_code_b64).decode("utf-8")
+
+    _exec_with_pseudo_file(student_code, STUDENT_PSEUDO_FILE)
     
 except Exception as e:
     # If the student code crashes at top-level, we print the error
@@ -325,10 +354,12 @@ except Exception as e:
 
 try:
     # Inject instructor tests here
-    test_code = """#{TEST_CODE}"""
+    test_code_b64 = """#{TEST_CODE}"""
+    test_code = base64.b64decode(test_code_b64).decode("utf-8")
+
     if test_code.strip():
         print(f"SCRIPT_DEBUG: {test_code[:500]}", file=sys.stderr)
-        exec(test_code, globals())
+        _exec_with_pseudo_file(test_code, "/work/test_script.py")
 except Exception as e:
     print(f"Test Script Error:\n{traceback.format_exc()}", file=sys.stderr)
 
@@ -351,10 +382,10 @@ if target_test_function and target_test_function.strip() and not target_test_fun
 # Run all registered tests
 if TestRunner.get_instance().tests:
     test_names = [t.name for t in TestRunner.get_instance().tests]
-    print(f"\nRunning {len(test_names)} Tests: {', '.join(test_names)}", file=sys.stdout)
+    template_log(f"Running {len(test_names)} tests: {', '.join(test_names)}", "INFO")
     TestRunner.get_instance().run_all()
 elif target_test_function and target_test_function.strip() and not target_test_function.startswith("#{"):
-    print(f"No tests matched the requested function: {target_test_function}", file=sys.stderr)
+    template_log(f"No tests matched the requested function: {target_test_function}", "WARNING")
 else:
-    print(f"No tests registered to run. (Target: '{target_test_function}')", file=sys.stdout)
+    template_log(f"No tests registered to run. (Target: '{target_test_function}')", "INFO")
 

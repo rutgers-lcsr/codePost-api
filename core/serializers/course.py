@@ -128,6 +128,8 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
             source_course = Course.objects.get(id=clone_from_id)
             # Permission check: User must be admin of source course to clone its settings (esp. API keys)
             if isCourseStaff(courseAdmin, source_course) or courseAdmin.is_superuser:
+                from core.utils import copy_assignment
+
                 # Copy AI Settings
                 obj.ai_provider = source_course.ai_provider
                 obj.ai_api_key = source_course.ai_api_key  # Secure copy of encrypted key
@@ -145,6 +147,17 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
                 obj.minComments = source_course.minComments
                 obj.noUnfinalize = source_course.noUnfinalize
                 obj.lateDayCreditsAllowable = source_course.lateDayCreditsAllowable
+
+                # Copy assignments into the new course
+                for source_assignment in source_course.assignments.all().order_by('sortKey', 'id'):
+                    copied_assignment = copy_assignment(source_assignment, obj)
+                    if copied_assignment is None:
+                        logger.warning(
+                            "Failed to clone assignment %s while cloning course %s into course %s",
+                            source_assignment.id,
+                            source_course.id,
+                            obj.id,
+                        )
                 
             else:
                  logger.warning(f"User {courseAdmin.email} tried to clone course {clone_from_id} without permission")

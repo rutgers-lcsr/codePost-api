@@ -127,6 +127,9 @@ if (length(notebook_json) > MAX_CELLS) {
             # Capture stdout
             stdout_file <- tempfile(fileext = ".txt")
             stderr_file <- tempfile(fileext = ".txt")
+            stderr_con <- NULL
+            output_sink_active <- FALSE
+            message_sink_active <- FALSE
             
             # Create a temp file for potential plot output
             plot_file <- tempfile(fileext = ".png")
@@ -158,39 +161,53 @@ if (length(notebook_json) > MAX_CELLS) {
                 
                 # Capture stdout and stderr
                 sink(stdout_file, type = "output")
-                sink(stderr_file, type = "message")
+                output_sink_active <- TRUE
+                stderr_con <- file(stderr_file, open = "wt")
+                sink(stderr_con, type = "message")
+                message_sink_active <- TRUE
                 
-                # Parse and evaluate the code - already done above, just need output
-                if (!is.null(parsed) && length(parsed) > 0) {
-                    last_value <- NULL
-                    # Directly evaluate the parsed code in global environment
-                    for (i in seq_along(parsed)) {
-                        expr <- parsed[[i]]
-                        last_value <- tryCatch({
-                            eval(expr)
-                        }, error = function(e) {
-                            success <<- FALSE
-                            error_msg <<- conditionMessage(e)
-                            NULL
-                        })
+                withCallingHandlers({
+                    # Parse and evaluate the code - already done above, just need output
+                    if (!is.null(parsed) && length(parsed) > 0) {
+                        last_value <- NULL
+                        # Directly evaluate the parsed code in global environment
+                        for (i in seq_along(parsed)) {
+                            expr <- parsed[[i]]
+                            last_value <- tryCatch({
+                                eval(expr)
+                            }, error = function(e) {
+                                success <<- FALSE
+                                error_msg <<- conditionMessage(e)
+                                NULL
+                            })
+                        }
                     }
-                }
+                }, warning = function(w) {
+                    warning_con <- if (!is.null(stderr_con) && isOpen(stderr_con)) stderr_con else stderr()
+                    cat(paste("Warning:", conditionMessage(w), "\n"), file = warning_con)
+                    invokeRestart("muffleWarning")
+                })
                 
                 
             }, error = function(e) {
                 success <<- FALSE
                 error_msg <<- conditionMessage(e)
-            }, warning = function(w) {
-                # Capture warnings but continue
-                cat(paste("Warning:", conditionMessage(w), "\n"), file = stderr_file, append = TRUE)
-                invokeRestart("muffleWarning")
             }, finally = {
                 # Close sinks
-                sink(type = "message")
-                sink(type = "output")
+                if (message_sink_active) {
+                    try(sink(type = "message"), silent = TRUE)
+                }
+                if (!is.null(stderr_con) && isOpen(stderr_con)) {
+                    close(stderr_con)
+                }
+                if (output_sink_active) {
+                    try(sink(type = "output"), silent = TRUE)
+                }
                 
                 # Close graphics device
-                dev.off()
+                if (length(dev.list()) > 0) {
+                    dev.off()
+                }
             })
             
             # Read captured stdout

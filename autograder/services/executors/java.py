@@ -1,6 +1,8 @@
 import os
 import logging
 import base64
+import re
+import shlex
 from datetime import datetime
 from typing import List, Optional
 import tempfile
@@ -27,6 +29,29 @@ class JavaExecutor(Executor):
     def _detect_imports(self, code: str) -> List[str]:
         return []
 
+    def _extract_package_name(self, code: str) -> Optional[str]:
+        match = re.search(r"^\s*package\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*;", code, flags=re.MULTILINE)
+        return match.group(1) if match else None
+
+    def _get_source_relative_path(self, filename: str, code: str) -> str:
+        """
+        Resolve where the main source file should be written inside /work.
+
+        Priority:
+        1) explicit file.path from DB (preserve uploaded relative structure)
+        2) package declaration-derived path when file.path is absent
+        3) filename in working directory
+        """
+        if getattr(self.file, "path", None):
+            return os.path.join(self.file.path, filename)
+
+        package_name = self._extract_package_name(code)
+        if package_name:
+            package_path = package_name.replace(".", "/")
+            return os.path.join(package_path, filename)
+
+        return filename
+
     def _get_code_template(self, test_code: str = "") -> Optional[str]:
         """Get the Java template and inject test code."""
         # We manually load the template here because base.py _get_code_template assumes substitutions
@@ -50,7 +75,11 @@ class JavaExecutor(Executor):
         filename = self.file.name or "Main.java"
         if not filename.endswith(".java"):
             filename += ".java"
+
+        source_relative_path = self._get_source_relative_path(filename, code)
+        package_name = self._extract_package_name(code)
         classname = os.path.splitext(filename)[0]
+        run_classname = f"{package_name}.{classname}" if package_name else classname
         
         client = self._get_docker_client()
         if not client:
@@ -69,6 +98,25 @@ class JavaExecutor(Executor):
         
         # Prepare Command
         code_b64 = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+        source_relative_path_q = shlex.quote(source_relative_path)
+
+        # Normalize package-declared Java sources into package paths so javac can
+        # resolve cross-file references (e.g., Main.java -> Helper.java) even when
+        # files were uploaded at the workspace root.
+        normalize_sources_cmd = (
+            "for f in $(find . -type f -name '*.java'); do "
+            "pkg=$(sed -n \"s/^[[:space:]]*package[[:space:]]\\+\\([A-Za-z_][A-Za-z0-9_\\.]*\\)[[:space:]]*;.*/\\1/p\" \"$f\" | head -n 1); "
+            "if [ -n \"$pkg\" ]; then "
+            "pkg_path=$(printf '%s' \"$pkg\" | tr '.' '/'); "
+            "target=./$pkg_path/$(basename \"$f\"); "
+            "if [ \"$f\" != \"$target\" ]; then "
+            "mkdir -p \"$(dirname \"$target\")\" && mv \"$f\" \"$target\"; "
+            "fi; "
+            "fi; "
+            "done"
+        )
+
+        compile_all_cmd = "javac -d . $(find . -type f -name '*.java')"
         
         if self.test_code:
             # --- Testing Mode ---
@@ -83,14 +131,22 @@ class JavaExecutor(Executor):
             # NOTE: Student code must be public or compatible.
             
             cmd_str = (
-                f"echo '{code_b64}' | base64 -d > {filename} && "
+                f"mkdir -p $(dirname {source_relative_path_q}) && "
+                f"echo '{code_b64}' | base64 -d > {source_relative_path_q} && "
                 f"echo '{template_b64}' | base64 -d > TestRunner.java && "
-                f"javac {filename} TestRunner.java && "
-                f"java TestRunner"
+                f"{normalize_sources_cmd} && "
+                f"{compile_all_cmd} && "
+                f"java -ea TestRunner"
             )
         else:
             # --- Standard Execution Mode ---
-            cmd_str = f"echo '{code_b64}' | base64 -d > {filename} && javac {filename} && java {classname}"
+            cmd_str = (
+                f"mkdir -p $(dirname {source_relative_path_q}) && "
+                f"echo '{code_b64}' | base64 -d > {source_relative_path_q} && "
+                f"{normalize_sources_cmd} && "
+                f"{compile_all_cmd} && "
+                f"java -ea -cp . {shlex.quote(run_classname)}"
+            )
             
         command = ["sh", "-c", cmd_str]
         
@@ -157,16 +213,10 @@ class JavaNotebookExecutor(NotebookExecutor):
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
 
-        try:
-            kernel_name = cls.get_kernel_name(code)
-            # Check if it's a Java kernel
-            if kernel_name and 'java' in kernel_name.lower():
-                if extension is not None and extension.lower() in cls.EXECUTABLE_EXTENSIONS:
-                    return True
-        except:
-            pass
-            
-        return False
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
+            return False
+
+        return cls.notebook_matches_language(code, ['java', 'ijava'])
 
     def _get_execution_command(self, template: str) -> List[str]:
         """

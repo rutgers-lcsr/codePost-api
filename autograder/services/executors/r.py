@@ -107,7 +107,7 @@ class RExecutor(Executor):
         # Since _get_code_template injects code, we can pass "" for code, assuming template.r has no #{FILLER_CODE} anymore.
         # But wait, _get_code_template calls replace("#{FILLER_CODE}", code).
         # We cleaned template.r, so replace will just do nothing.
-        template_content = self._get_code_template("", packages_to_install) 
+        template_content = self._get_code_template("", packages_to_install, self.test_code or "") 
         if not template_content:
              return ExecutionResult.error("Failed to get code template")
 
@@ -167,7 +167,7 @@ class RExecutor(Executor):
             # Parse plots
             import re
             # Use DOTALL to match newlines inside the base64 string
-            img_regex = re.compile(r'<<<CODEPOST_PLOT:(.*?)>>>', re.DOTALL)
+            img_regex = re.compile(r'<<<CODEPOST_PLOT:\s*(.*?)\s*>>>', re.DOTALL)
             images = []
             
             def replace_and_capture(match):
@@ -176,6 +176,9 @@ class RExecutor(Executor):
                 return "" # Remove from stdout
             
             stdout = img_regex.sub(replace_and_capture, stdout)
+
+            # Parse standardized test markers from stdout/stderr and remove them from output.
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
             
             output_data = {}
             if images:
@@ -196,7 +199,8 @@ class RExecutor(Executor):
                 err=None if success else f"Exit Code: {result.get('StatusCode')}",
                 execution_time=execution_time,
                 output_data=output_data,
-                system_logs=""
+                system_logs="",
+                tests=test_results,
             )
 
         except Exception as e:
@@ -238,19 +242,10 @@ class RNotebookExecutor(NotebookExecutor):
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
 
-        if code is None:
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
             return False
 
-        try:
-            kernel_name = cls.get_kernel_name(code)
-            # Check if it's an R kernel (ir, R, r)
-            if kernel_name and kernel_name.lower() in ['ir', 'r']:
-                if extension is not None and extension.lower() in cls.EXECUTABLE_EXTENSIONS:
-                    return True
-        except:
-            pass
-            
-        return False
+        return cls.notebook_matches_language(code, ['r', 'ir'])
 
     def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         """Get the R notebook template with cells substituted."""

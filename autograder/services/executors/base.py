@@ -915,6 +915,13 @@ class Executor(abc.ABC):
         
         additional_files = {}
 
+        # Normalize the target file path used for execution so we can avoid
+        # injecting helper/starter files that collide with it.
+        if getattr(file, 'path', None):
+            target_full_path = os.path.join(file.path, file.name)
+        else:
+            target_full_path = file.name
+
         # 1. Load Assignment Files (Starter Code / Config / Data)
         # These are shared across all submissions for this assignment.
         if assignment:
@@ -926,6 +933,12 @@ class Executor(abc.ABC):
                     full_path = os.path.join(assignment_file.path, assignment_file.name)
                 else:
                     full_path = assignment_file.name
+
+                # Important: when executing a SubmissionFile, assignment starter files
+                # can share the same relative path/name (e.g., Main.java). If injected,
+                # they may overwrite the target file inside the container.
+                if full_path == target_full_path:
+                    continue
                 
                 if hasattr(assignment_file, 'data') and assignment_file.data:
                     additional_files[full_path] = assignment_file.data
@@ -1249,16 +1262,135 @@ class NotebookExecutor(Executor):
     EXECUTABLE_EXTENSIONS: List[str] = []
     EXECUTION_COMMAND: List[str] = []  # e.g., ['python', '-c'] or ['Rscript', '-e']
 
+    NOTEBOOK_LANGUAGE_ALIASES: Dict[str, List[str]] = {
+        "python": ["python", "python3", "py"],
+        "java": ["java", "ijava"],
+        "javascript": ["javascript", "js", "node", "nodejs", "ts", "typescript"],
+        "r": ["r", "ir"],
+        "cpp": ["c++", "cpp", "c/c++", "cling", "xeus-cling"],
+        "php": ["php"],
+        "ruby": ["ruby", "iruby"],
+    }
+
+    @classmethod
+    def _canonicalize_notebook_language(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+
+        token = str(value).strip().lower()
+        if not token:
+            return None
+
+        for canonical, aliases in cls.NOTEBOOK_LANGUAGE_ALIASES.items():
+            if token == canonical:
+                return canonical
+            if token in aliases:
+                return canonical
+
+        if "python" in token:
+            return "python"
+        if token in {"node", "nodejs"} or "javascript" in token:
+            return "javascript"
+        if "java" in token:
+            return "java"
+        if token in {"ir", "r"}:
+            return "r"
+        if "cling" in token or "c++" in token or "cpp" in token:
+            return "cpp"
+        if "php" in token:
+            return "php"
+        if "ruby" in token:
+            return "ruby"
+
+        return None
+
+    @classmethod
+    def detect_notebook_language(cls, code: Optional[str]) -> Optional[str]:
+        """
+        Infer notebook language from multiple metadata locations.
+
+        Supports kernelspec/language_info and cell-level metadata fallbacks.
+        Returns canonical language token (python/java/javascript/r/cpp/php/ruby)
+        or None when it cannot infer safely.
+        """
+        if not code:
+            return None
+
+        notebook_obj: Dict[str, Any]
+        try:
+            nb = nbformat.reads(code, as_version=4)
+            notebook_obj = dict(nb)
+        except Exception:
+            try:
+                notebook_obj = json.loads(code)
+            except Exception:
+                return None
+
+        metadata = notebook_obj.get("metadata") or {}
+        kernelspec = metadata.get("kernelspec") or {}
+        language_info = metadata.get("language_info") or {}
+
+        candidates: List[Optional[str]] = [
+            kernelspec.get("name"),
+            kernelspec.get("language"),
+            kernelspec.get("display_name"),
+            language_info.get("name"),
+            language_info.get("pygments_lexer"),
+            language_info.get("codemirror_mode") if isinstance(language_info.get("codemirror_mode"), str) else None,
+        ]
+
+        cells = notebook_obj.get("cells") or []
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+
+            cell_meta = cell.get("metadata") or {}
+            vscode = cell_meta.get("vscode") or {}
+            candidates.extend(
+                [
+                    cell_meta.get("language"),
+                    vscode.get("languageId") if isinstance(vscode, dict) else None,
+                ]
+            )
+
+        for candidate in candidates:
+            canonical = cls._canonicalize_notebook_language(candidate if isinstance(candidate, str) else None)
+            if canonical:
+                return canonical
+
+        return None
+
+    @classmethod
+    def notebook_matches_language(cls, code: Optional[str], expected: List[str]) -> bool:
+        detected = cls.detect_notebook_language(code)
+        if not detected:
+            return False
+
+        expected_canonical = {
+            cls._canonicalize_notebook_language(item) for item in expected if cls._canonicalize_notebook_language(item)
+        }
+        return detected in expected_canonical
+
     @classmethod
     def get_kernel_name(cls, code: str) -> str:
         """
         Get the kernel name from the notebook code
         """
         import nbformat
-        
+
         nb = nbformat.reads(code, as_version=4)
-        kernel_name = nb['metadata']['kernelspec']['name']
-        return kernel_name 
+        metadata = nb.get('metadata', {})
+        kernelspec = metadata.get('kernelspec', {})
+        language_info = metadata.get('language_info', {})
+        kernel_name = kernelspec.get('name') or language_info.get('name')
+        if kernel_name:
+            return str(kernel_name)
+
+        detected = cls.detect_notebook_language(code)
+        if detected:
+            return detected
+
+        raise KeyError("Unable to determine notebook kernel/language metadata")
     
 
     @classmethod
