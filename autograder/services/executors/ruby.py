@@ -124,17 +124,31 @@ class RubyNotebookExecutor(NotebookExecutor):
     def is_executable(cls, file_name: Optional[str] = None, extension: Optional[str] = None, code: Optional[str] = None) -> bool:
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
-        try:
-            kernel_name = cls.get_kernel_name(code)
-            if kernel_name and 'ruby' in kernel_name.lower():
-                 return True
-        except:
-             pass
-        return False
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
+            return False
+
+        return cls.notebook_matches_language(code, ['ruby', 'iruby'])
+
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()
         if not template:
             return None
         template = template.replace('{cells_b64}', code)
+        
+        # Inject test code
+        if test_code:
+            test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('ascii')
+            template = template.replace('{test_code_b64}', test_code_b64)
+        else:
+            template = template.replace('{test_code_b64}', '')
+        
         return template
+    
+    def _get_execution_command(self, template: str) -> List[str]:
+        """Write template to file inside container and execute with Ruby interpreter."""
+        # Base64 encode and write inside container, same pattern as Node.js
+        template_b64 = base64.b64encode(template.encode('utf-8')).decode('utf-8')
+        cmd_str = f"echo '{template_b64}' | base64 -d > /tmp/notebook.rb && ruby /tmp/notebook.rb"
+        return ["sh", "-c", cmd_str]
+

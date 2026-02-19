@@ -8,35 +8,33 @@ Security: Uses Docker containers for sandboxing to provide strong isolation
 from the host system. Each execution runs in an isolated, disposable container.
 """
 
+import abc
+import base64
+import json
+import logging
+import os
+import re
+import shutil
+import struct
+import tarfile
+import tempfile
 import threading
+import time
 import warnings
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, TypedDict, Type, Union, cast
+
+import nbformat
+from docker import DockerClient
+
+from core.models import File, User
+
 # Suppress pkg_resources deprecation warning from coreapi
 warnings.filterwarnings('ignore', message='pkg_resources is deprecated', category=UserWarning)
-import base64
-import abc
-import tempfile
-import json
-import os
-import shutil
-import logging
-import tarfile
-import struct
-import ast
-import re
-import time
-from typing import Dict, List, Literal, Optional, Tuple, Any, TypedDict,Union
-from pathlib import Path
-from docker import DockerClient
-from codepost.settings import DEBUG
-import nbformat
-from datetime import datetime
-
-
-from core.models import  File, User
 
 try:
     import docker
-    from docker.errors import DockerException, ImageNotFound, ContainerError, APIError
+    from docker.errors import ImageNotFound
     from requests.exceptions import ReadTimeout
     DOCKER_AVAILABLE = True
 except ImportError:
@@ -116,8 +114,25 @@ class Notebook(TypedDict):
     nbformat_minor: int  # Typically 4 or 5
 
 
+class FileLike(Protocol):
+    """Protocol for file-like objects used by executors."""
+
+    id: int
+    name: str
+    extension: str
+    data: str
+    path: Optional[str]
+
+    def get_file_info(self):
+        ...
+
+    def get_course(self):
+        ...
+
+
 class ExecutionResult:
     """Result of a code execution"""
+
 
     def __init__(
         self,
@@ -128,6 +143,7 @@ class ExecutionResult:
         execution_time: float = 0.0,
         output_data: Optional[Dict[str, Any]] = None,
         system_logs: Optional[List[str]] = None,
+        tests: Optional[List[Dict[str, Any]]] = None,
     ):
         self.success = success
         self.stdout = stdout
@@ -136,6 +152,7 @@ class ExecutionResult:
         self.execution_time = execution_time
         self.output_data = output_data or {}
         self.system_logs = system_logs or []
+        self.tests = tests or []
     
     @classmethod
     def error(cls, message: str) :
@@ -203,6 +220,7 @@ class ExecutionResult:
             "execution_time": self.execution_time,
             "output_data": self.output_data,
             "system_logs": self.system_logs,
+            "tests": self.tests,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -234,6 +252,41 @@ class Executor(abc.ABC):
     
     # Docker client (singleton)
     _docker_client: Optional[DockerClient] = None
+
+    @classmethod
+    def parse_test_results(cls, stdout: str, stderr: str) -> Tuple[str, str, List[Dict[str, Any]]]:
+        """
+        Extract test results formatted as <<<TEST_RESULT_JSON_START>>>{...}<<<TEST_RESULT_JSON_END>>>
+        from stdout or stderr.
+        
+        Returns:
+            Tuple containing:
+            - Cleaned stdout (markers removed)
+            - Cleaned stderr (markers removed)
+            - List of parsed test results
+        """
+        test_results = []
+        # Non-greedy matching across lines
+        test_regex = re.compile(r'<<<TEST_RESULT_JSON_START>>>(.*?)<<<TEST_RESULT_JSON_END>>>', re.DOTALL)
+        
+        def replace_and_capture(match):
+            try:
+                json_str = match.group(1)
+                data = json.loads(json_str)
+                if isinstance(data, list):
+                    test_results.extend(data)
+                else:
+                    test_results.append(data)
+            except Exception as e:
+                logger.error(f"Failed to parse test result: {e}. Content: {json_str[:500]}")
+            return "" # Remove from output
+            
+        # Try to clean both streams
+        stdout_clean = test_regex.sub(replace_and_capture, stdout)
+        stderr_clean = test_regex.sub(replace_and_capture, stderr)
+        
+        return stdout_clean, stderr_clean, test_results
+
     
 
     NPM_CACHE_VOLUME_NAME = "codepost-npm-cache"
@@ -287,7 +340,7 @@ class Executor(abc.ABC):
         "python3": "python:3.12-slim",
         "javascript": "node:20-slim",
         "js": "node:20-slim",
-        "java": "openjdk:17-slim",
+        "java": "eclipse-temurin:17-jdk",
         "c": "gcc:latest",
         "cpp": "gcc:latest",
         "ruby": "ruby:3.2-slim",
@@ -316,6 +369,31 @@ class Executor(abc.ABC):
     
     # Docker client (singleton)
     _docker_client: Optional[DockerClient] = None
+
+    @classmethod
+    def open_shell_session(
+        cls,
+        env,
+        include_datasets: bool,
+        include_assignment_files: bool,
+        timeout_seconds: int,
+        labels: Optional[Dict[str, str]] = None,
+        tmpfs_size: str = "size=512m,mode=1777",
+    ):
+        """
+        Start a shell session container.
+        Returns (executor, volumes, docker_env, staging_dir, container, socket).
+        """
+        from autograder.services.executors.shell import ShellExecutor
+
+        return ShellExecutor.open_shell_session(
+            env=env,
+            include_datasets=include_datasets,
+            include_assignment_files=include_assignment_files,
+            timeout_seconds=timeout_seconds,
+            labels=labels,
+            tmpfs_size=tmpfs_size,
+        )
     
     @classmethod
     def _demultiplex_logs(cls, logs_data: bytes) -> Tuple[str, str]:
@@ -467,13 +545,13 @@ class Executor(abc.ABC):
             )
             return container
         except Exception as e:
-            logger.error(f"Failed to create container: {e}")
+            self.log("Failed to start container: " + str(e))
             return None
 
     def _prepare_dataset_staging(
         self,
         temp_dir: str
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Dict[str, str]]:
         """
         Stage dataset files in the provided temporary directory for Docker mounting.
         """
@@ -491,7 +569,11 @@ class Executor(abc.ABC):
         # We use the provided temp_dir directly. No subdirectories.
         # This temp_dir is already created in the correct location (shared root or tmp) by the caller.
 
-        for dataset in self.datasets:
+        # Merge defaults and resources
+        # self.resource_datasets is initialized in __init__
+        all_datasets = (self.datasets or []) + (getattr(self, 'resource_datasets', []) or [])
+
+        for dataset in all_datasets:
             if not dataset.is_active or not dataset.file:
                 continue
             
@@ -533,8 +615,14 @@ class Executor(abc.ABC):
                     bind_source_path = staged_path
                 
                 
+                
                 # Get mount path in container
-                mount_path = dataset.mount_path or f'shared/{dataset.name}'
+                # Check for override from TestCategoryResource
+                custom_mount_path = getattr(dataset, 'custom_mount_path', None)
+                if isinstance(custom_mount_path, str) and custom_mount_path:
+                    mount_path = custom_mount_path
+                else:
+                    mount_path = dataset.mount_path or f'shared/{dataset.name}'
                 
                 # If mount path ends with /, assume it's a directory and append filename
                 filename = os.path.basename(host_file_path)
@@ -568,10 +656,10 @@ class Executor(abc.ABC):
 
                 volume_mounts[bind_source_path] = {'bind': container_path, 'mode': 'ro'}
                 
-                logger.info(f"[DatasetMount] Mounting '{bind_source_path}' -> '{container_path}' (Direct: {using_direct_mount})")
+                self.log(f"[DatasetMount] Mounting '{bind_source_path}' -> '{container_path}' (Direct: {using_direct_mount})",'info')
             
             except Exception as e:
-                logger.error(f"[DatasetMount] Failed to stage dataset '{dataset.name}': {e}")
+                self.log(f"[DatasetMount] Failed to stage dataset '{dataset.name}': {e}", "error")
                 continue
         
         return volume_mounts
@@ -677,6 +765,8 @@ class Executor(abc.ABC):
                 container.remove()
                 if self.datasets:
                     shutil.rmtree(temp_staging_dir, ignore_errors=True)
+        # 9. Return result
+            return result
         """
         
         pass
@@ -774,9 +864,9 @@ class Executor(abc.ABC):
         """
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
     
-    def __init__(self, file:File, **kwargs):
+    def __init__(self, file: FileLike, **kwargs):
         """Initialize executor with file and context"""
-        self.file = file
+        self.file: FileLike = file
         submission, assignment, course = file.get_file_info()
 
 
@@ -794,8 +884,43 @@ class Executor(abc.ABC):
 
         # Input Data (Stdin)
         self.input_data = kwargs.get('input_data')
+        self.test_code = kwargs.get('test_code')
+        self.test_function = kwargs.get('test_function')
+        
+        # Example code: Overrides the target file's data for testing filled-out templates
+        example_code = kwargs.get('example_code')
+        content_override = kwargs.get('content_override')
+        
+        if content_override is not None:
+             # Content Override (Temporary Edits) takes precedence
+             self.file = cast(FileLike, type('MockFile', (), {
+                'id': self.file.id,
+                'name': self.file.name,
+                'extension': self.file.extension,
+                'data': content_override,
+                'path': getattr(self.file, 'path', None),
+                'get_file_info': self.file.get_file_info
+            })())
+        elif example_code:
+            # Create a mock file data with the example code
+            # This allows testing against custom code while keeping all other context
+            self.file = cast(FileLike, type('MockFile', (), {
+                'id': self.file.id,
+                'name': self.file.name,
+                'extension': self.file.extension,
+                'data': example_code,
+                'path': getattr(self.file, 'path', None),
+                'get_file_info': self.file.get_file_info
+            })())
         
         additional_files = {}
+
+        # Normalize the target file path used for execution so we can avoid
+        # injecting helper/starter files that collide with it.
+        if getattr(file, 'path', None):
+            target_full_path = os.path.join(file.path, file.name)
+        else:
+            target_full_path = file.name
 
         # 1. Load Assignment Files (Starter Code / Config / Data)
         # These are shared across all submissions for this assignment.
@@ -808,6 +933,12 @@ class Executor(abc.ABC):
                     full_path = os.path.join(assignment_file.path, assignment_file.name)
                 else:
                     full_path = assignment_file.name
+
+                # Important: when executing a SubmissionFile, assignment starter files
+                # can share the same relative path/name (e.g., Main.java). If injected,
+                # they may overwrite the target file inside the container.
+                if full_path == target_full_path:
+                    continue
                 
                 if hasattr(assignment_file, 'data') and assignment_file.data:
                     additional_files[full_path] = assignment_file.data
@@ -830,6 +961,47 @@ class Executor(abc.ABC):
                 if hasattr(other_file, 'data') and other_file.data:
                     additional_files[full_path] = other_file.data
         
+        # 3. Load Helper Files (Overrides) & Resources
+        # 'resources' is the new standard list of dicts: {'type': 'file'|'dataset', 'content': ..., 'obj': ..., 'target_path': ...}
+        # 'additional_files' is legacy/deprecated but supported for valid use cases
+        passed_additional_files = kwargs.get('additional_files')
+        if passed_additional_files:
+            # Can be a list of AssignmentFile objects or a dict (legacy)
+            if isinstance(passed_additional_files, list):
+                for helper_file in passed_additional_files:
+                    path = helper_file.path if helper_file.path else ""
+                    full_path = os.path.join(path, helper_file.name) if path else helper_file.name
+                    
+                    if hasattr(helper_file, 'data') and helper_file.data:
+                        additional_files[full_path] = helper_file.data
+            elif isinstance(passed_additional_files, dict):
+                 additional_files.update(passed_additional_files)
+
+        # Process new resources
+        self.resource_datasets = []
+        resources = kwargs.get('resources')
+        if resources:
+            for res in resources:
+                target_path = res.get('target_path')
+                if not target_path: continue
+                
+                if res.get('type') == 'file':
+                    content = res.get('content', '')
+                    additional_files[target_path] = content
+                
+                elif res.get('type') == 'dataset':
+                    # We need to mount this dataset at target_path
+                    # We'll store it in a separate list to be handled by _prepare_dataset_staging
+                    # But wait, _prepare_dataset_staging iterates self.datasets (AssignmentDataSet objects)
+                    # We should probably wrap this in a special object or extend logic
+                    dataset_obj = res.get('obj')
+                    if dataset_obj:
+                         # We attach the target overwrite to the object temporarily or wrap it?
+                         # Let's wrap it in a simple structure or duck-type it
+                         # We need it to behave like AssignmentDataSet but with a custom mount_path override
+                         dataset_obj.custom_mount_path = target_path
+                         self.resource_datasets.append(dataset_obj)
+
         self.additional_files = additional_files
         self.custom_image_name = kwargs.get('image_name')
         
@@ -885,6 +1057,9 @@ class Executor(abc.ABC):
     # Building code execution script from template
     
     def __repr__(self):
+        
+        
+        
         return f"[{self.__class__.__name__}] [{self.image}] [{self.file.name}] [{self.LANGUAGE}]"
     
     def log(self, message: str, level: str = "info"):
@@ -892,7 +1067,24 @@ class Executor(abc.ABC):
         logger.log(getattr(logging, level.upper(), logging.INFO), log_msg)
         self.executor_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
     
-    def _get_code_template(self) -> Optional[str]:
+    @property
+    def logger(self):
+        """Provides a simple logger interface for templates to log messages with executor context"""  
+        logging_dict = {
+            'info': (lambda msg: self.log(msg, "info")),
+            'warning': (lambda msg: self.log(msg, "warning")),
+            'error': (lambda msg: self.log(msg, "error")),
+            'debug': (lambda msg: self.log(msg, "debug")),
+        }
+        return logging_dict
+        
+    
+    def _get_code_template(
+        self,
+        code: Optional[Union[str, List[Dict[str, Any]]]] = None,
+        imports: Optional[List[str]] = None,
+        test_code: Optional[str] = None,
+    ) -> Optional[str]:
         """Get code template for the executor"""
         template_file = self.TEMPLATE
         if not template_file:
@@ -1016,16 +1208,16 @@ class Executor(abc.ABC):
         pass
     
     @classmethod
-    def _get_all_subclasses(cls) -> List["Executor"]:
+    def _get_all_subclasses(cls) -> List[Type["Executor"]]:
         """Recursively get all subclasses (including grandchildren, etc.)"""
-        all_subclasses = []
+        all_subclasses: List[Type["Executor"]] = []
         for subclass in cls.__subclasses__():
             all_subclasses.append(subclass)
             all_subclasses.extend(subclass._get_all_subclasses())
         return all_subclasses
     
     @classmethod
-    def factory(cls, file: File, image_name: Optional[str] = None) -> Optional['Executor']:
+    def factory(cls, file: FileLike, image_name: Optional[str] = None, **kwargs) -> Optional["Executor"]:
         """
         Factory method to get appropriate Executor subclass.
         
@@ -1037,7 +1229,7 @@ class Executor(abc.ABC):
             try:
                 result = subclass.is_executable(file_name=file.name, extension=file.extension, code=file.data)
                 if result:
-                    return subclass(file, image_name=image_name)
+                    return subclass(file, image_name=image_name, **kwargs)
             except:
                 # Skip subclasses that can't be instantiated or have broken is_executable
                 logger.exception("Failed to instantiate subclass")
@@ -1064,11 +1256,120 @@ class NotebookExecutor(Executor):
     - EXECUTION_COMMAND: List[str] - Command prefix (e.g., ['python', '-c'] or ['Rscript', '-e'])
     """
     
-    LANGUAGE: str = None
-    TEMPLATE: str = None
-    DOCKER_IMAGE: str = None
+    LANGUAGE: Optional[str] = None
+    TEMPLATE: Optional[str] = None
+    DOCKER_IMAGE: Optional[str] = None
     EXECUTABLE_EXTENSIONS: List[str] = []
     EXECUTION_COMMAND: List[str] = []  # e.g., ['python', '-c'] or ['Rscript', '-e']
+
+    NOTEBOOK_LANGUAGE_ALIASES: Dict[str, List[str]] = {
+        "python": ["python", "python3", "py"],
+        "java": ["java", "ijava"],
+        "javascript": ["javascript", "js", "node", "nodejs", "ts", "typescript"],
+        "r": ["r", "ir"],
+        "cpp": ["c++", "cpp", "c/c++", "cling", "xeus-cling"],
+        "php": ["php"],
+        "ruby": ["ruby", "iruby"],
+    }
+
+    @classmethod
+    def _canonicalize_notebook_language(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+
+        token = str(value).strip().lower()
+        if not token:
+            return None
+
+        for canonical, aliases in cls.NOTEBOOK_LANGUAGE_ALIASES.items():
+            if token == canonical:
+                return canonical
+            if token in aliases:
+                return canonical
+
+        if "python" in token:
+            return "python"
+        if token in {"node", "nodejs"} or "javascript" in token:
+            return "javascript"
+        if "java" in token:
+            return "java"
+        if token in {"ir", "r"}:
+            return "r"
+        if "cling" in token or "c++" in token or "cpp" in token:
+            return "cpp"
+        if "php" in token:
+            return "php"
+        if "ruby" in token:
+            return "ruby"
+
+        return None
+
+    @classmethod
+    def detect_notebook_language(cls, code: Optional[str]) -> Optional[str]:
+        """
+        Infer notebook language from multiple metadata locations.
+
+        Supports kernelspec/language_info and cell-level metadata fallbacks.
+        Returns canonical language token (python/java/javascript/r/cpp/php/ruby)
+        or None when it cannot infer safely.
+        """
+        if not code:
+            return None
+
+        notebook_obj: Dict[str, Any]
+        try:
+            nb = nbformat.reads(code, as_version=4)
+            notebook_obj = dict(nb)
+        except Exception:
+            try:
+                notebook_obj = json.loads(code)
+            except Exception:
+                return None
+
+        metadata = notebook_obj.get("metadata") or {}
+        kernelspec = metadata.get("kernelspec") or {}
+        language_info = metadata.get("language_info") or {}
+
+        candidates: List[Optional[str]] = [
+            kernelspec.get("name"),
+            kernelspec.get("language"),
+            kernelspec.get("display_name"),
+            language_info.get("name"),
+            language_info.get("pygments_lexer"),
+            language_info.get("codemirror_mode") if isinstance(language_info.get("codemirror_mode"), str) else None,
+        ]
+
+        cells = notebook_obj.get("cells") or []
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+
+            cell_meta = cell.get("metadata") or {}
+            vscode = cell_meta.get("vscode") or {}
+            candidates.extend(
+                [
+                    cell_meta.get("language"),
+                    vscode.get("languageId") if isinstance(vscode, dict) else None,
+                ]
+            )
+
+        for candidate in candidates:
+            canonical = cls._canonicalize_notebook_language(candidate if isinstance(candidate, str) else None)
+            if canonical:
+                return canonical
+
+        return None
+
+    @classmethod
+    def notebook_matches_language(cls, code: Optional[str], expected: List[str]) -> bool:
+        detected = cls.detect_notebook_language(code)
+        if not detected:
+            return False
+
+        expected_canonical = {
+            cls._canonicalize_notebook_language(item) for item in expected if cls._canonicalize_notebook_language(item)
+        }
+        return detected in expected_canonical
 
     @classmethod
     def get_kernel_name(cls, code: str) -> str:
@@ -1076,10 +1377,20 @@ class NotebookExecutor(Executor):
         Get the kernel name from the notebook code
         """
         import nbformat
-        
+
         nb = nbformat.reads(code, as_version=4)
-        kernel_name = nb['metadata']['kernelspec']['name']
-        return kernel_name 
+        metadata = nb.get('metadata', {})
+        kernelspec = metadata.get('kernelspec', {})
+        language_info = metadata.get('language_info', {})
+        kernel_name = kernelspec.get('name') or language_info.get('name')
+        if kernel_name:
+            return str(kernel_name)
+
+        detected = cls.detect_notebook_language(code)
+        if detected:
+            return detected
+
+        raise KeyError("Unable to determine notebook kernel/language metadata")
     
 
     @classmethod
@@ -1134,7 +1445,8 @@ class NotebookExecutor(Executor):
                 stderr=results_json.get("stderr", "") or stderr,
                 err=results_json.get("error"),
                 execution_time=results_json.get("execution_time", 0.0),
-                output_data=results_json.get("output_data", {})
+                output_data=results_json.get("output_data", {}),
+                tests=results_json.get("tests", [])
             )
             
         except json.JSONDecodeError:
@@ -1159,6 +1471,15 @@ class NotebookExecutor(Executor):
         Default uses EXECUTION_COMMAND class attribute + template as argument.
         """
         return self.EXECUTION_COMMAND + [template]
+    
+    def _needs_network(self, packages_to_install: List[str]) -> bool:
+        """
+        Determine if the container needs network access.
+        
+        Override in subclasses if needed (e.g., R always needs network for base packages).
+        Default returns True if there are packages to install.
+        """
+        return len(packages_to_install) > 0
 
     def execute(self) -> ExecutionResult:
         """
@@ -1189,11 +1510,12 @@ class NotebookExecutor(Executor):
         packages_to_install = self._detect_imports(nb)
         cells_b64 = self.prepare_notebook(nb, format="base64")
         
-        template = self._get_code_template(cells_b64, packages_to_install)
+        self.log(f"DEBUG: test_code length: {len(self.test_code or '')}")
+        template = self._get_code_template(cells_b64, packages_to_install, self.test_code or "")
         if not template:
             return ExecutionResult.error("Failed to get code template")
 
-        needs_network = len(packages_to_install) > 0
+        needs_network = self._needs_network(packages_to_install)
         
         base_command = self._get_execution_command(template)
         command = self._wrap_command_with_pre_script(base_command)
@@ -1205,8 +1527,11 @@ class NotebookExecutor(Executor):
             volumes=volumes,
             needs_network=needs_network,
         )
-        if not container:
-            return ExecutionResult.error("Failed to create Docker container")
+        if not container or container is None:
+            result = ExecutionResult.error("Failed to create Docker container\nThis might be caused by missing container, or File and Dataset mounts being incorrect\nPlease check assignment setttings and environment setup and Try again!")
+            result.stderr = "\n".join(self.executor_logs)
+            return result
+
         
         self.add_additional_files(container)
         self.add_pre_script(container)  # Inject pre-script file if exists
@@ -1251,7 +1576,19 @@ class NotebookExecutor(Executor):
             # Parse results from output
             self.log(f"Parsing execution results from stdout...")
             
+            # Parse standardized test results (e.g. from Java/C++ test runners injected into notebook)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            
             execution_result = self.extract_json_result(stdout, stderr)
+            
+            # Attach parsed tests if any found
+            if test_results:
+                execution_result.tests = test_results
+                # If we parsed tests successfully but failed to extract standard results (missing markers),
+                # we should consider this a success for testing purposes, as the harness might not populate output_data.
+                if execution_result.err and "missing markers" in execution_result.err:
+                    execution_result.err = None
+                    execution_result.success = True
             
             # Templates now output proper nbformat v4 format with cell_type
             # Just validate we got cells and return
@@ -1262,6 +1599,10 @@ class NotebookExecutor(Executor):
                 return execution_result
                 
             elif execution_result.err:
+                execution_result.system_logs = self.executor_logs
+                return execution_result
+            elif execution_result.tests:
+                # If we have tests, we can return the result even if output_data/cells are missing
                 execution_result.system_logs = self.executor_logs
                 return execution_result
             else:

@@ -1,6 +1,8 @@
 import os
 import logging
 import base64
+import re
+import shlex
 from datetime import datetime
 from typing import List, Optional
 import tempfile
@@ -13,8 +15,9 @@ logger = logging.getLogger(__name__)
 class JavaExecutor(Executor):
     LANGUAGE = "java-17"
     EXECUTABLE_EXTENSIONS = [".java"]
-    DOCKER_IMAGE = "openjdk:17-slim"
-    
+    DOCKER_IMAGE = "eclipse-temurin:17-jdk"
+    TEMPLATE = "template.java"
+
     @classmethod
     def is_executable(cls, file_name: Optional[str] = None, extension: Optional[str] = None, code: Optional[str] = None) -> bool:
         if file_name is not None:
@@ -26,6 +29,42 @@ class JavaExecutor(Executor):
     def _detect_imports(self, code: str) -> List[str]:
         return []
 
+    def _extract_package_name(self, code: str) -> Optional[str]:
+        match = re.search(r"^\s*package\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*;", code, flags=re.MULTILINE)
+        return match.group(1) if match else None
+
+    def _get_source_relative_path(self, filename: str, code: str) -> str:
+        """
+        Resolve where the main source file should be written inside /work.
+
+        Priority:
+        1) explicit file.path from DB (preserve uploaded relative structure)
+        2) package declaration-derived path when file.path is absent
+        3) filename in working directory
+        """
+        if getattr(self.file, "path", None):
+            return os.path.join(self.file.path, filename)
+
+        package_name = self._extract_package_name(code)
+        if package_name:
+            package_path = package_name.replace(".", "/")
+            return os.path.join(package_path, filename)
+
+        return filename
+
+    def _get_code_template(self, test_code: str = "") -> Optional[str]:
+        """Get the Java template and inject test code."""
+        # We manually load the template here because base.py _get_code_template assumes substitutions
+        template_file = self.TEMPLATE
+        template_path = os.path.join(os.path.dirname(__file__), "../templates", template_file)
+        try:
+            with open(template_path, 'r') as f:
+                template = f.read()
+            return template.replace("#{TEST_CODE}", test_code)
+        except Exception as e:
+            self.log(f"Failed to load template: {e}", "error")
+            return None
+
     def execute(self) -> ExecutionResult:
         start_time = datetime.now()
         
@@ -34,7 +73,13 @@ class JavaExecutor(Executor):
              
         code = self.file.data
         filename = self.file.name or "Main.java"
+        if not filename.endswith(".java"):
+            filename += ".java"
+
+        source_relative_path = self._get_source_relative_path(filename, code)
+        package_name = self._extract_package_name(code)
         classname = os.path.splitext(filename)[0]
+        run_classname = f"{package_name}.{classname}" if package_name else classname
         
         client = self._get_docker_client()
         if not client:
@@ -52,22 +97,59 @@ class JavaExecutor(Executor):
         docker_env = self._get_docker_environment()
         
         # Prepare Command
-        # Write code to file and run
         code_b64 = base64.b64encode(code.encode('utf-8')).decode('utf-8')
+        source_relative_path_q = shlex.quote(source_relative_path)
+
+        # Normalize package-declared Java sources into package paths so javac can
+        # resolve cross-file references (e.g., Main.java -> Helper.java) even when
+        # files were uploaded at the workspace root.
+        normalize_sources_cmd = (
+            "for f in $(find . -type f -name '*.java'); do "
+            "pkg=$(sed -n \"s/^[[:space:]]*package[[:space:]]\\+\\([A-Za-z_][A-Za-z0-9_\\.]*\\)[[:space:]]*;.*/\\1/p\" \"$f\" | head -n 1); "
+            "if [ -n \"$pkg\" ]; then "
+            "pkg_path=$(printf '%s' \"$pkg\" | tr '.' '/'); "
+            "target=./$pkg_path/$(basename \"$f\"); "
+            "if [ \"$f\" != \"$target\" ]; then "
+            "mkdir -p \"$(dirname \"$target\")\" && mv \"$f\" \"$target\"; "
+            "fi; "
+            "fi; "
+            "done"
+        )
+
+        compile_all_cmd = "javac -d . $(find . -type f -name '*.java')"
         
-        # cmd: echo <b64> | base64 -d > file.java && javac file.java && java classname
-        cmd_str = f"echo '{code_b64}' | base64 -d > {filename} && javac {filename} && java {classname}"
+        if self.test_code:
+            # --- Testing Mode ---
+            template = self._get_code_template(self.test_code)
+            if not template:
+                return ExecutionResult.error("Failed to load Java test template")
+                
+            template_b64 = base64.b64encode(template.encode('utf-8')).decode('utf-8')
+            
+            # Command: Write Student Code -> Write TestRunner -> Compile Both -> Run TestRunner
+            # We assume the student class is "Main" or whatever filename is, and TestRunner calls it.
+            # NOTE: Student code must be public or compatible.
+            
+            cmd_str = (
+                f"mkdir -p $(dirname {source_relative_path_q}) && "
+                f"echo '{code_b64}' | base64 -d > {source_relative_path_q} && "
+                f"echo '{template_b64}' | base64 -d > TestRunner.java && "
+                f"{normalize_sources_cmd} && "
+                f"{compile_all_cmd} && "
+                f"java -ea TestRunner"
+            )
+        else:
+            # --- Standard Execution Mode ---
+            cmd_str = (
+                f"mkdir -p $(dirname {source_relative_path_q}) && "
+                f"echo '{code_b64}' | base64 -d > {source_relative_path_q} && "
+                f"{normalize_sources_cmd} && "
+                f"{compile_all_cmd} && "
+                f"java -ea -cp . {shlex.quote(run_classname)}"
+            )
+            
         command = ["sh", "-c", cmd_str]
         
-        if self.pre_script:
-             # If pre-script exists, we wrap: .pre_script.sh && cmd
-             # But cmd is complex string.
-             # We can write .pre_script.sh, execute it, then execute our cmd.
-             # "sh -c '. ./.pre_script.sh && ...'"
-             pass 
-             # For simplicity, ignore pre_script wrapping for now or implement if strictly needed.
-             # PythonExecutor wraps it.
-             
         container = self.get_container(
             image_name=self.image,
             command=command,
@@ -87,6 +169,9 @@ class JavaExecutor(Executor):
             stdout = container.logs(stdout=True, stderr=False).decode('utf-8', errors='replace')
             stderr = container.logs(stdout=False, stderr=True).decode('utf-8', errors='replace')
             
+            # Parse Test Results (if any)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            
             execution_time = (datetime.now() - start_time).total_seconds()
             success = result.get('StatusCode', 1) == 0
             
@@ -95,7 +180,8 @@ class JavaExecutor(Executor):
                 stdout=stdout,
                 stderr=stderr,
                 err=None if success else f"Exit Code: {result.get('StatusCode')}",
-                execution_time=execution_time
+                execution_time=execution_time,
+                tests=test_results
             )
         except Exception as e:
             container.kill()
@@ -127,16 +213,10 @@ class JavaNotebookExecutor(NotebookExecutor):
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
 
-        try:
-            kernel_name = cls.get_kernel_name(code)
-            # Check if it's a Java kernel
-            if kernel_name and 'java' in kernel_name.lower():
-                if extension is not None and extension.lower() in cls.EXECUTABLE_EXTENSIONS:
-                    return True
-        except:
-            pass
-            
-        return False
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
+            return False
+
+        return cls.notebook_matches_language(code, ['java', 'ijava'])
 
     def _get_execution_command(self, template: str) -> List[str]:
         """
@@ -176,19 +256,31 @@ class JavaNotebookExecutor(NotebookExecutor):
         
         return ["sh", "-c", f"echo '{template_b64}' | base64 -d > NotebookRunner.java && javac NotebookRunner.java && java NotebookRunner"]
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         """Get the Java notebook template with cells substituted."""
-        template = super()._get_code_template()
-        if not template:
+        # We don't call super() because we want custom replacement for Java
+        # But we need the template content.
+        # Actually super()._get_code_template() loads self.TEMPLATE file.
+        template_file = self.TEMPLATE
+        if not template_file:
+             return None
+        
+        template_path = os.path.join(os.path.dirname(__file__), "../templates", template_file)
+        try:
+            with open(template_path, 'r') as f:
+                template = f.read()
+        except Exception as e:
+            self.log(f"Failed to load template: {e}", "error")
             return None
 
         template = template.replace('{cells_b64}', code)
+        template = template.replace('{test_code_b64}', base64.b64encode(test_code.encode('utf-8')).decode('utf-8') if test_code else "")
         
-        # Ensure class name matches `NotebookRunner` if I forced it above?
-        # Or replace `public class ...` with `public class NotebookRunner`?
-        # I'll replace `public class notebook_template` -> `public class NotebookRunner` just in case.
+        # Remove package declaration if present, since we run from root
+        template = template.replace("package autograder.services.templates;", "")
+        
+        # Ensure class name matches `NotebookRunner` if I forced it in command
         template = template.replace("public class notebook_template", "public class NotebookRunner")
-        # Also handle "class notebook_template"
         template = template.replace("class notebook_template", "class NotebookRunner")
         
         return template

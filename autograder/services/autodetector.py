@@ -252,6 +252,22 @@ class Autodetector:
             all_files.extend(list(submission.files.all()))
         
         all_files.extend(list(assignment.files.all()))
+
+        # Include Test Scripts in scanning
+        # This ensures libraries used in test scripts (e.g. pandas, numpy) are installed in the environment
+        class ScriptDummyFile:
+             def __init__(self, name, data):
+                 self.name = name
+                 self.extension = name.split('.')[-1]
+                 self.data = data
+                 self.path = ""
+
+        for cat in assignment.testCategories.all():
+            if cat.testScript and cat.testScript.strip():
+                # We assume test scripts are Python for now as that's the primary script language
+                # Using .py extension ensures the Python handler picks it up
+                # TODO: Make sure the scripts have the right extension
+                all_files.append(ScriptDummyFile(f"test_script_{cat.id}.py", cat.testScript))
         
         active_files = []
         local_modules = set()

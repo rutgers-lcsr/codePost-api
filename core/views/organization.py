@@ -187,6 +187,9 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     
     organization = self.get_object()
     
+    if organization.sso_enabled:
+        return Response({'error': 'Cannot reset password for SSO-enabled organization'}, status=status.HTTP_400_BAD_REQUEST)
+    
     if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
         return returnForbidden()
         

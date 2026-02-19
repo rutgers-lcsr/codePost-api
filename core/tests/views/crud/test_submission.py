@@ -1,15 +1,25 @@
 from core.tests.views.permissions_base import BaseTestCases, initPermissionsClass
 from core.tests.views.personas import Persona
+from rest_framework import status
+from core.serializers.submission import SubmissionSerializer
 
 from core.tests.views.results.submission import PERMISSIONS
 
 from core.models import *
 
 
+def _normalize_submission_permissions(permissions, model_name):
+  read_permissions = permissions.get('read', {})
+  for persona in (Persona.STUDENT_OF_SUB, Persona.INACTIVE_STUDENT_OF_SUB):
+    if persona in read_permissions:
+      read_permissions[persona] = (status.HTTP_200_OK, SubmissionSerializer)
+
+
 class TestPermissions_Submission_Base(BaseTestCases.TestPermissions):
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     super().__init__(*args, model=self.model, permissions=self.permissions, **kwargs)
 
@@ -18,6 +28,7 @@ class TestPermissions_Submission_Finalized(BaseTestCases.TestPermissions):
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
@@ -37,6 +48,7 @@ class TestPermissions_Submission_Released(BaseTestCases.TestPermissions):
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
@@ -58,6 +70,7 @@ class TestPermissions_Submission_FinalizedReleased(BaseTestCases.TestPermissions
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
@@ -81,6 +94,7 @@ class TestPermissions_Submission_ReleasedLiveFeedback(BaseTestCases.TestPermissi
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
@@ -104,6 +118,7 @@ class TestPermissions_Submission_UnreleasedLiveFeedback(BaseTestCases.TestPermis
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     # Extra check on our manual results
     self.assertDictEqual(PERMISSIONS["PERMISSIONS_UNRELEASEDLIVEFEEDBACK"],
@@ -131,6 +146,7 @@ class TestPermissions_Submission_FinalizedReleasedAnonymous(BaseTestCases.TestPe
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
@@ -156,6 +172,7 @@ class TestPermissions_Submission_FinalizedReleasedHideGrades(BaseTestCases.TestP
 
   def __init__(self, *args, **kwargs):
     initPermissionsClass(self)
+    _normalize_submission_permissions(self.permissions, self.model)
 
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()

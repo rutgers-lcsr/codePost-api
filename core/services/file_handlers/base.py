@@ -1,4 +1,5 @@
 import abc
+import stat
 from typing import Optional, Set, Any, TYPE_CHECKING
 import re
 
@@ -19,7 +20,7 @@ class BaseFileHandler(abc.ABC):
         """Safely retrieves file content."""
         # Handle both File models and potential dict usage if we expand later
         # For now, assuming File model
-        return getattr(self.file, 'data', None) or getattr(self.file, 'code', '') or ''
+        return getattr(self.file, 'data', None) or ''
 
     @abc.abstractmethod
     def get_language(self) -> str:
@@ -46,3 +47,10 @@ class BaseFileHandler(abc.ABC):
         Used by NotebookHandler to delegate scanning without creating dummy File objects.
         """
         return set()
+
+    @staticmethod
+    def infer(data:str)-> bool:
+        """
+        Infer if the code/data is of the type this handler can process. Used for cases where extension may not be reliable.
+        """
+        return False

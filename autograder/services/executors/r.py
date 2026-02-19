@@ -56,7 +56,7 @@ class RExecutor(Executor):
             packages.append(pkg)
         return list(set(packages))
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         template = super()._get_code_template()
         if not template:
             return None
@@ -66,6 +66,7 @@ class RExecutor(Executor):
         # So we just inject code.
         
         template = template.replace("#{FILLER_CODE}", code)
+        template = template.replace("#{TEST_CODE}", test_code or "")
         return template
 
     def execute(self) -> ExecutionResult:
@@ -79,7 +80,7 @@ class RExecutor(Executor):
         code = self.file.data
         packages_to_install = self._detect_imports(code) 
         
-        template = self._get_code_template(code, packages_to_install)
+        template = self._get_code_template(code, packages_to_install, self.test_code or "")
         if not template:
             return ExecutionResult.error("Failed to get code template")
 
@@ -106,7 +107,7 @@ class RExecutor(Executor):
         # Since _get_code_template injects code, we can pass "" for code, assuming template.r has no #{FILLER_CODE} anymore.
         # But wait, _get_code_template calls replace("#{FILLER_CODE}", code).
         # We cleaned template.r, so replace will just do nothing.
-        template_content = self._get_code_template("", packages_to_install) 
+        template_content = self._get_code_template("", packages_to_install, self.test_code or "") 
         if not template_content:
              return ExecutionResult.error("Failed to get code template")
 
@@ -166,7 +167,7 @@ class RExecutor(Executor):
             # Parse plots
             import re
             # Use DOTALL to match newlines inside the base64 string
-            img_regex = re.compile(r'<<<CODEPOST_PLOT:(.*?)>>>', re.DOTALL)
+            img_regex = re.compile(r'<<<CODEPOST_PLOT:\s*(.*?)\s*>>>', re.DOTALL)
             images = []
             
             def replace_and_capture(match):
@@ -175,6 +176,9 @@ class RExecutor(Executor):
                 return "" # Remove from stdout
             
             stdout = img_regex.sub(replace_and_capture, stdout)
+
+            # Parse standardized test markers from stdout/stderr and remove them from output.
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
             
             output_data = {}
             if images:
@@ -195,7 +199,8 @@ class RExecutor(Executor):
                 err=None if success else f"Exit Code: {result.get('StatusCode')}",
                 execution_time=execution_time,
                 output_data=output_data,
-                system_logs=""
+                system_logs="",
+                tests=test_results,
             )
 
         except Exception as e:
@@ -237,21 +242,12 @@ class RNotebookExecutor(NotebookExecutor):
         if file_name is not None:
             extension = os.path.splitext(file_name)[1]
 
-        if code is None:
+        if extension is None or extension.lower() not in cls.EXECUTABLE_EXTENSIONS:
             return False
 
-        try:
-            kernel_name = cls.get_kernel_name(code)
-            # Check if it's an R kernel (ir, R, r)
-            if kernel_name and kernel_name.lower() in ['ir', 'r']:
-                if extension is not None and extension.lower() in cls.EXECUTABLE_EXTENSIONS:
-                    return True
-        except:
-            pass
-            
-        return False
+        return cls.notebook_matches_language(code, ['r', 'ir'])
 
-    def _get_code_template(self, code: str, packages_to_install: List[str]) -> Optional[str]:
+    def _get_code_template(self, code: str, packages_to_install: List[str], test_code: str = "") -> Optional[str]:
         """Get the R notebook template with cells substituted."""
         template = super()._get_code_template()
         if not template:
@@ -266,4 +262,18 @@ class RNotebookExecutor(NotebookExecutor):
             )
 
         template = template.replace('{cells_b64}', code)
+        
+        # Inject test code if provided
+        test_code_b64 = base64.b64encode(test_code.encode('utf-8')).decode('utf-8') if test_code else ""
+        template = template.replace('{test_code_b64}', test_code_b64)
         return template
+    
+    def _get_execution_command(self, template: str) -> List[str]:
+        # R needs the template written to a file first
+        template_b64 = base64.b64encode(template.encode('utf-8')).decode('utf-8')
+        cmd_str = f"echo '{template_b64}' | base64 -d > /tmp/notebook.R && Rscript /tmp/notebook.R"
+        return ["sh", "-c", cmd_str]
+    
+    def _needs_network(self, packages_to_install: List[str]) -> bool:
+        # R always needs network for base64enc/jsonlite packages
+        return True

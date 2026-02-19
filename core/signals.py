@@ -52,8 +52,11 @@ def auto_execute_submission(sender, instance, created, **kwargs):
         )
         return
     
+    # Check assignment setting
+    if not instance.assignment.runTestsOnSubmit:
+        logger.debug(f"Auto-execution disabled for assignment {instance.assignment.id}. Skipping.")
+        return
 
-    
     try:
         # Import here to avoid circular imports
         from autograder.run import RunSubmission

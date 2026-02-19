@@ -2,28 +2,19 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework import serializers as drf_serializers
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from django.db import connection, DatabaseError
 from log.models import Event
 from django.core.paginator import Paginator
+
+from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer
 # Optional: import celery for status check, or just check queue?
 # For now, we will do a simple DB check. Celery check is harder without celery-result-backend query or flower.
 
 class SystemHealthView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
 
-    @extend_schema(
-        responses={
-            200: inline_serializer(
-                name='SystemHealthResponse',
-                fields={
-                    'database': drf_serializers.CharField(),
-                    'celery': drf_serializers.CharField(),
-                }
-            ),
-        }
-    )
+    @extend_schema(responses={200: SystemHealthResponseSerializer})
     def get(self, request):
         health = {
             "database": "Unknown",
@@ -58,17 +49,11 @@ class SystemActivityView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
 
     @extend_schema(
-        responses={
-            200: inline_serializer(
-                name='SystemActivityResponse',
-                fields={
-                    'results': drf_serializers.ListField(child=drf_serializers.DictField()),
-                    'total': drf_serializers.IntegerField(),
-                    'page': drf_serializers.IntegerField(),
-                    'pages': drf_serializers.IntegerField(),
-                }
-            ),
-        }
+        responses={200: SystemActivityResponseSerializer},
+        parameters=[
+            OpenApiParameter(name="page", required=False, type=int, location=OpenApiParameter.QUERY),
+            OpenApiParameter(name="pageSize", required=False, type=int, location=OpenApiParameter.QUERY),
+        ],
     )
     def get(self, request):
         # Fetch recent events

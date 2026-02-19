@@ -95,7 +95,7 @@ class TestPermissions_Submission_history(APITestCase):
     #############
 
     response = request_as('read', grader, endpoint, {})
-    self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     #############
 

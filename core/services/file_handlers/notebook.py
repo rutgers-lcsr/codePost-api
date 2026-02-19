@@ -6,12 +6,15 @@ from .base import BaseFileHandler
 from .python import PythonHandler
 from .node import NodeHandler
 from .other_langs import RHandler, RubyHandler
+from .java import JavaHandler
 
 logger = logging.getLogger(__name__)
 
 class NotebookHandler(BaseFileHandler):
     """
     Handles Jupyter Notebooks (.ipynb).
+
+    Notebooks are in nbformat version 4.
     Acts as a dispatcher to specific language handlers based on kernel metadata.
     """
     
@@ -24,6 +27,7 @@ class NotebookHandler(BaseFileHandler):
         'typescript': NodeHandler,
         'r': RHandler,
         'ruby': RubyHandler,
+        'java': JavaHandler,
     }
 
     def _parse_notebook(self) -> Dict:
@@ -45,7 +49,10 @@ class NotebookHandler(BaseFileHandler):
         lang = self._get_kernel_language(nb_data)
         if lang:
             # Normalize
-            if 'python' in lang: lang = 'python'
+            if 'python' in lang:
+                lang = 'python'
+            elif 'java' in lang or 'ijava' in lang:
+                lang = 'java'
             return self.KERNEL_HANDLER_MAP.get(lang)
         return None
 
@@ -95,6 +102,9 @@ class NotebookHandler(BaseFileHandler):
         return delegate_instance.get_requirements()
 
     def _extract_code(self, data: Dict) -> str:
+        """
+        Extracts code from all code cells in the notebook.
+        """
         code_cells = []
         if 'cells' in data:
             for cell in data['cells']:
@@ -108,6 +118,9 @@ class NotebookHandler(BaseFileHandler):
 
     @staticmethod
     def inject_cell_ids(content: str) -> str:
+        """
+        Injects cell IDs into the notebook. for autograding and comments
+        """
         try:
             nb = json.loads(content)
             if 'cells' in nb and isinstance(nb['cells'], list):

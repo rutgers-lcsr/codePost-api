@@ -1,4 +1,5 @@
 from django.contrib.auth.models import User
+from django.utils import timezone
 from core.models import *
 from core.tests.factories import *
 
@@ -93,7 +94,7 @@ def setUpBase(self):
               "submission": course.assignments.first().submissions.first().id,
               "name": "loops.java",
               "extension": ".java",
-              "code": "System.out.println(loops)"
+            "data": "System.out.println(loops)"
           },
           "update": {
               "name": "updated.java"
@@ -247,8 +248,14 @@ def setUpFile(self, name="hello.java", path="", submission=None, created=None):
     created = timezone.now()
   thisSubmission = setUpSubmission(self) if submission is None else submission
   code = "public static void main {\nSystem.out.println('Hello, World!')\n}"
-  file = File.objects.create(name=name, path=path, code=code, submission=thisSubmission,
-                             extension='java', created=created)
+  file = SubmissionFile.objects.create(
+      name=name,
+      path=path,
+      data=code,
+      submission=thisSubmission,
+      extension='.java',
+      created=created,
+  )
   return file
 
 

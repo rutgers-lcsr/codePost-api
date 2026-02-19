@@ -6,6 +6,14 @@ from core.serializers.submissionTest import SubmissionTestSerializer
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
+
+from core.serializers.actionResponses import (
+  SubmissionCheckPermissionResponseSerializer,
+  SubmissionTestResultsResponseSerializer,
+  SubmissionPartnerLinkResponseSerializer,
+)
 from rest_framework import status
 
 from core.views.template import ListProtectedViewSet
@@ -108,6 +116,7 @@ class SubmissionViewSet(ListProtectedViewSet):
         return SubmissionSerializer
 
 
+  @extend_schema(responses=SubmissionCheckPermissionResponseSerializer)
   @action(detail=True, methods=['get'])
   def checkPermission(self, request, pk=None):
     user = request.user
@@ -142,6 +151,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
 
 # Optional argument: student username
+  @extend_schema(responses=SubmissionHistorySerializer(many=True))
   @action(detail=True, methods=['GET', 'PATCH'])
   def history(self, request, pk=None):
     user = request.user
@@ -195,6 +205,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
 ################################# Regrade Functions ##########################################
 
+  @extend_schema(responses=StudentSubmissionSerializer)
   @action(detail=True, methods=['PATCH'])
   def submitRegrade(self, request, pk=None):
     user = request.user
@@ -231,6 +242,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     return Response(serializer.data)
 
+  @extend_schema(responses=StudentSubmissionSerializer)
   @action(detail=True, methods=['PATCH'])
   def deleteRegrade(self, request, pk=None):
     user = request.user
@@ -257,6 +269,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   #  DEPRACATED: Included here for backwards-compatibility
   #################################################################################
 
+  @extend_schema(responses=SubmissionTestSerializer(many=True))
   @action(detail=True, methods=["GET"])
   def submissionTests(self, request, pk=None):
     #  Only accessed by students
@@ -283,6 +296,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
   #################################################################################
 
+  @extend_schema(responses=SubmissionTestResultsResponseSerializer)
   @action(detail=True, methods=["GET"])
   def testResults(self, request, pk=None):
     #  Only accessed by students
@@ -331,6 +345,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
   #################################################################################
 
+  @extend_schema(responses=SubmissionPartnerLinkResponseSerializer)
   @action(detail=True, methods=["GET"])
   def generatePartnerLink(self, request, pk=None):
     user = request.user
@@ -353,6 +368,17 @@ class SubmissionViewSet(ListProtectedViewSet):
       'token': token,
     })
 
+  @extend_schema(
+    responses=OpenApiTypes.STR,
+    parameters=[
+      OpenApiParameter(
+        name="token",
+        type=OpenApiTypes.STR,
+        location=OpenApiParameter.QUERY,
+        required=True,
+      ),
+    ],
+  )
   @action(detail=True, methods=["GET"])
   def validatePartnerLink(self, request, pk=None):
     user = request.user
@@ -390,6 +416,17 @@ class SubmissionViewSet(ListProtectedViewSet):
     else:
         return returnInvalid()
 
+  @extend_schema(
+    responses=StudentSubmissionSerializer,
+    parameters=[
+      OpenApiParameter(
+        name="token",
+        type=OpenApiTypes.STR,
+        location=OpenApiParameter.QUERY,
+        required=True,
+      ),
+    ],
+  )
   @action(detail=True, methods=["GET"])
   def validatePartnerLinkAndReturn(self, request, pk=None):
     user = request.user
@@ -419,6 +456,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     else:
         return returnInvalid()
 
+  @extend_schema(responses=OpenApiTypes.STR)
   @action(detail=True, methods=["GET"])
   def removePartner(self, request, pk=None):
     user = request.user
@@ -431,6 +469,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     return Response('ok')
 
+  @extend_schema(responses=OpenApiTypes.STR)
   @action(detail=True, methods=["POST"])
   def notifyStudents(self, request, pk=None):
     user = request.user

@@ -1,8 +1,8 @@
 from django.http import HttpResponseRedirect, JsonResponse
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.permissions import AllowAny
-from rest_framework import serializers as drf_serializers
-from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiResponse
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from core.serializers.sso import CheckSSOAvailabilityResponseSerializer
 from django.conf import settings
 from core.models import Organization, User
 from core.utils import get_or_create_user
@@ -272,8 +272,10 @@ def sso_callback(request, provider):
         elif provider == 'GOOGLE':
             token_endpoint = "https://oauth2.googleapis.com/token"
         elif provider == 'OIDC':
-            discovery = sso_config.get('discovery_url')
+            discovery = sso_config.get('discovery_url') 
             try:
+                if not discovery:
+                    return error_redirect('Discovery URL missing')
                 resp = requests.get(discovery, timeout=5).json()
                 token_endpoint = resp.get('token_endpoint')
                 userinfo_endpoint = resp.get('userinfo_endpoint')
@@ -372,19 +374,7 @@ def sso_callback(request, provider):
     return HttpResponseRedirect(f"{frontend_url}/?token={token}")
 
 
-@extend_schema(
-    responses={
-        200: inline_serializer(
-            name='CheckSSOAvailabilityResponse',
-            fields={
-                'sso_enabled': drf_serializers.BooleanField(),
-                'provider': drf_serializers.CharField(required=False),
-                'org_id': drf_serializers.IntegerField(required=False),
-                'org_name': drf_serializers.CharField(required=False),
-            }
-        ),
-    }
-)
+@extend_schema(responses={200: CheckSSOAvailabilityResponseSerializer})
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def check_sso_availability(request):

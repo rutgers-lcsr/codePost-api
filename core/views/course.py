@@ -6,6 +6,8 @@ from core.serializers.course import (
     CourseRosterSerializer,
     CourseSettingsSerializer,
     CourseAISettingsSerializer,
+    CourseRosterMapSerializer,
+    CourseStudentCaptionsSerializer,
 )
 from core.serializers.section import SectionSerializer
 from core.serializers.user import UserSerializer
@@ -13,6 +15,8 @@ from core.views.template import SuperUserListProtectedViewSet
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import serializers
 from rest_framework import status
@@ -89,6 +93,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             ).data
         )
 
+    @extend_schema(responses=CourseSettingsSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
     def courseSettings(self, request, pk=None):
         user = request.user
@@ -114,6 +119,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         self.perform_update(serializer)
         return Response(serializer.data)
 
+    @extend_schema(responses=OpenApiTypes.STR)
     @action(detail=True, methods=["PATCH"])
     def changeInviteCode(self, request, pk=None):
         user = request.user
@@ -129,6 +135,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         return Response(course.inviteCode)
 
+    @extend_schema(responses=CourseAISettingsSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
     def aiSettings(self, request, pk=None):
         """
@@ -162,6 +169,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             self.perform_update(serializer)
             return Response(serializer.data)
 
+    @extend_schema(responses=CourseRosterSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
     def roster(self, request, pk=None):
         """
@@ -286,6 +294,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
             return Response(serializer.data)
 
+    @extend_schema(responses=CourseRosterSerializer)
     @action(detail=True, methods=["PATCH"])
     def addToRoster(self, request, pk=None):
         """
@@ -356,6 +365,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         serializer = CourseRosterSerializer(course, context={"request": request})
         return Response(serializer.data)
 
+    @extend_schema(responses=CourseRosterSerializer)
     @action(detail=True, methods=["PATCH"])
     def removeFromRoster(self, request, pk=None):
         """
@@ -407,6 +417,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         serializer = CourseRosterSerializer(course, context={"request": request})
         return Response(serializer.data)
 
+    @extend_schema(responses={204: None})
     @action(detail=True, methods=["patch"])
     def deleteRubricCategory(self, request, pk=None):
         user = request.user
@@ -430,6 +441,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         else:
             return Response(form.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_schema(request=CourseRosterMapSerializer, responses=CourseRosterMapSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
     def rosterMap(self, request, pk=None):
         user = request.user
@@ -441,13 +453,18 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnForbidden()
 
         if request.method == "GET":
-            return Response(course.rosterMap)
+            serializer = CourseRosterMapSerializer({"rosterMap": course.rosterMap})
+            return Response(serializer.data)
         else:
-            map = request.data.get("rosterMap", {})
+            serializer = CourseRosterMapSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            map = serializer.validated_data.get("rosterMap", {})
             course.rosterMap = map
             course.save()
-            return Response(course.rosterMap)
+            return Response(CourseRosterMapSerializer({"rosterMap": course.rosterMap}).data)
 
+    @extend_schema(request=CourseStudentCaptionsSerializer, responses=CourseStudentCaptionsSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
     def studentCaptions(self, request, pk=None):
         user = request.user
@@ -459,13 +476,18 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnForbidden()
 
         if request.method == "GET":
-            return Response(course.studentCaptions)
+            serializer = CourseStudentCaptionsSerializer({"studentCaptions": course.studentCaptions})
+            return Response(serializer.data)
         else:
-            new_captions = request.data.get("studentCaptions", {})
+            serializer = CourseStudentCaptionsSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            new_captions = serializer.validated_data.get("studentCaptions", {})
             course.studentCaptions = new_captions
             course.save()
-            return Response(course.studentCaptions)
+            return Response(CourseStudentCaptionsSerializer({"studentCaptions": course.studentCaptions}).data)
 
+    @extend_schema(responses=SectionSerializer(many=True))
     @action(detail=True, methods=["GET"], pagination_class=LargeObjectsPagination)
     def sections(self, request, pk=None):
         """

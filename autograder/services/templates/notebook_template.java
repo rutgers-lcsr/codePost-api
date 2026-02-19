@@ -92,6 +92,7 @@ public class notebook_template {
 
         // Decode cells from base64
         String cellsB64 = "{cells_b64}";
+        String testCodeB64 = "{test_code_b64}"; // New placeholder
         String cellsJson;
         try {
             byte[] decoded = Base64.getDecoder().decode(cellsB64);
@@ -121,11 +122,35 @@ public class notebook_template {
                     + "\n\nExecution stopped.");
             results.add(errorResult);
         } else {
-            // Create JShell instance for executing cells
+            // Create JShell instance with captured streams
+            ByteArrayOutputStream jshellOut = new ByteArrayOutputStream();
+            ByteArrayOutputStream jshellErr = new ByteArrayOutputStream();
+            PrintStream psOut = new PrintStream(jshellOut, true, StandardCharsets.UTF_8);
+            PrintStream psErr = new PrintStream(jshellErr, true, StandardCharsets.UTF_8);
+
             JShell jshell = JShell.builder()
-                    .out(new PrintStream(new ByteArrayOutputStream())) // We'll capture output ourselves
-                    .err(new PrintStream(new ByteArrayOutputStream()))
+                    .out(psOut)
+                    .err(psErr)
                     .build();
+
+            // --- Inject Test Framework (Annotations & Classes) ---
+            jshell.eval("import java.util.*;");
+            jshell.eval("import java.lang.annotation.*;");
+            jshell.eval("import java.lang.reflect.*;");
+            jshell.eval("import java.util.concurrent.*;");
+
+            // Define Test Annotation
+            jshell.eval(
+                    "@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface Test { String name() default \"\"; double points() default 1.0; String description() default \"\"; int timeout() default 30; }");
+
+            // Define TestResult Class
+            jshell.eval(
+                    "class TestResult { String name; String description; String message; double score; double max_score; boolean passed; String status; String error; String output; "
+                            +
+                            "public TestResult(String n, double m, String d) { name=n; max_score=m; description=d; message=\"\"; score=0; passed=false; status=\"failed\"; output=\"\"; } }");
+
+            // Define Assertions (polyfilled for simple use)
+            jshell.eval("void assertTrue(boolean cond, String msg) { if (!cond) throw new RuntimeException(msg); }");
 
             int executionCount = 0;
 
@@ -145,11 +170,9 @@ public class notebook_template {
                     boolean success = true;
                     String errorMsg = null;
 
-                    // Capture stdout and stderr
-                    ByteArrayOutputStream stdoutCapture = new ByteArrayOutputStream();
-                    ByteArrayOutputStream stderrCapture = new ByteArrayOutputStream();
-                    PrintStream originalOut = System.out;
-                    PrintStream originalErr = System.err;
+                    // Reset streams for this cell
+                    jshellOut.reset();
+                    jshellErr.reset();
 
                     // Temporary file for plot capture
                     File plotFile = null;
@@ -160,60 +183,27 @@ public class notebook_template {
                     }
 
                     try {
-                        System.setOut(new PrintStream(stdoutCapture, true, StandardCharsets.UTF_8));
-                        System.setErr(new PrintStream(stderrCapture, true, StandardCharsets.UTF_8));
-
-                        // Execute the code using JShell
-                        List<SnippetEvent> events = jshell.eval(cellSource);
-
                         StringBuilder evalResult = new StringBuilder();
-                        for (SnippetEvent event : events) {
-                            if (event.status() == Status.VALID) {
-                                // Check if there's a value to display
-                                String value = event.value();
-                                if (value != null && !value.isEmpty() && !"null".equals(value)) {
-                                    evalResult.append(value).append("\n");
-                                }
-                            } else if (event.status() == Status.REJECTED) {
-                                success = false;
-                                // Get diagnostics for the error
-                                jshell.diagnostics(event.snippet()).forEach(diag -> {
-                                    System.err.println(diag.getMessage(Locale.getDefault()));
-                                });
-                            }
+                        boolean[] successRef = new boolean[] { success };
+                        String[] errorMsgRef = new String[] { errorMsg };
 
-                            // Check for exceptions
-                            if (event.exception() != null) {
-                                success = false;
-                                StringWriter sw = new StringWriter();
-                                event.exception().printStackTrace(new PrintWriter(sw));
-                                errorMsg = event.exception().getMessage();
-                                System.err.println(sw.toString());
-                            }
-                        }
+                        evaluateCellSource(jshell, cellSource, psErr, evalResult, successRef, errorMsgRef);
+                        success = successRef[0];
+                        errorMsg = errorMsgRef[0];
 
-                        // Print any expression results
+                        // Append expression values to output
                         if (evalResult.length() > 0) {
-                            originalOut.print(evalResult.toString());
-                            stdoutCapture.write(evalResult.toString().getBytes(StandardCharsets.UTF_8));
+                            psOut.print(evalResult.toString());
                         }
 
                     } catch (Exception e) {
                         success = false;
                         errorMsg = e.getMessage();
-                        StringWriter sw = new StringWriter();
-                        e.printStackTrace(new PrintWriter(sw));
-                        try {
-                            stderrCapture.write(sw.toString().getBytes(StandardCharsets.UTF_8));
-                        } catch (IOException ignored) {
-                        }
-                    } finally {
-                        System.setOut(originalOut);
-                        System.setErr(originalErr);
+                        e.printStackTrace(psErr);
                     }
 
-                    String stdoutText = stdoutCapture.toString(StandardCharsets.UTF_8);
-                    String stderrText = stderrCapture.toString(StandardCharsets.UTF_8);
+                    String stdoutText = jshellOut.toString(StandardCharsets.UTF_8);
+                    String stderrText = jshellErr.toString(StandardCharsets.UTF_8);
 
                     // Check for plot output (if code generated a BufferedImage and saved it)
                     // This is a simplified check - real implementation would need to hook into
@@ -236,9 +226,8 @@ public class notebook_template {
                     }
 
                     // Clean up temp file
-                    if (plotFile != null) {
+                    if (plotFile != null)
                         plotFile.delete();
-                    }
 
                     // Truncate stdout if too long
                     if (stdoutText.length() > NBS_OUTPUT_LIMIT) {
@@ -292,6 +281,199 @@ public class notebook_template {
                 }
             }
 
+            // --- Run Test Code (if any) ---
+            templateLog("Checking test code injection...", "INFO");
+            templateLog("testCodeB64 value: "
+                    + (testCodeB64.length() > 50 ? testCodeB64.substring(0, 50) + "..." : testCodeB64), "INFO");
+            boolean condition = !testCodeB64.equals("{" + "test_code_b64" + "}") && !testCodeB64.isEmpty();
+            // templateLog("Injection Condition: " + condition, "INFO");
+
+            if (condition) {
+                templateLog("Test code found. Length: " + testCodeB64.length(), "INFO");
+                try {
+                    byte[] testDecoded = Base64.getDecoder().decode(testCodeB64);
+                    String testCode = new String(testDecoded, StandardCharsets.UTF_8);
+
+                    List<SnippetEvent> testEvents = jshell.eval(testCode);
+                    for (SnippetEvent e : testEvents) {
+                        if (e.status() == Status.REJECTED) {
+                            templateLog("Test definition failed: " + e.snippet().source(), "ERROR");
+                            jshell.diagnostics(e.snippet())
+                                    .forEach(d -> templateLog(d.getMessage(Locale.getDefault()), "ERROR"));
+                        }
+                    }
+
+                    // Dynamic Test Class Discovery
+                    StringBuilder _classChecks = new StringBuilder();
+                    jshell.snippets()
+                            .filter(s -> s.kind() == Snippet.Kind.TYPE_DECL && jshell.status(s) == Status.VALID)
+                            .map(s -> ((TypeDeclSnippet) s).name())
+                            .forEach(name -> {
+                                if (Arrays.asList("Tester", "Tests", "Main").contains(name)) {
+                                    _classChecks.append("try { Class<?> c = " + name + ".class; ");
+                                    _classChecks.append("_sb.append(\"Found: \" + c.getName() + \" \"); ");
+                                    _classChecks.append(
+                                            "if(_target==null) _target=c; } catch(Throwable t){ _sb.append(\"Err:\"+t+\" \"); } ");
+                                }
+                            });
+
+                    // 2. Run Test Logic
+                    jshell.eval("   java.util.function.Supplier<String> __runTests = () -> { " +
+                            "       StringBuilder _sb = new StringBuilder(); " +
+                            "       List<TestResult> _results = new ArrayList<>(); Class<?> _target = null; " +
+                            " " + _classChecks.toString() + " " +
+                            "   _sb.append(\"Target: \" + (_target==null?\"null\":_target.getName()) + \" \"); " +
+                            "   if (_target != null) { " +
+                            "       _sb.append(\"DEBUG: Target=\" + _target.getName() + \" Methods=\" + _target.getDeclaredMethods().length + \" \"); "
+                            +
+                            "       Object _instance = null; " +
+                            "       try { _instance = _target.getDeclaredConstructor().newInstance(); } catch(Throwable t) {} "
+                            +
+                            "       for (Method _m : _target.getDeclaredMethods()) { " +
+                            "           if (_m.isAnnotationPresent(Test.class)) { " +
+                            "               Test _ann = _m.getAnnotation(Test.class); " +
+                            "               TestResult _tr = new TestResult(_ann.name().isEmpty() ? _m.getName() : _ann.name(), _ann.points(), _ann.description()); "
+                            +
+                            "               ExecutorService _exec = Executors.newSingleThreadExecutor(); " +
+                            "               Future<Object> _future = _exec.submit(() -> { " +
+                            "                   try { _m.setAccessible(true); return _m.invoke(_instance); } " +
+                            "                   catch (Throwable _ex) { throw new RuntimeException(_ex.getCause() != null ? _ex.getCause() : _ex); } "
+                            +
+                            "               }); " +
+                            "               try { " +
+                            "                   Object _ret = _future.get(_ann.timeout(), TimeUnit.SECONDS); " +
+                            "                   if (_ret instanceof Number) { " +
+                            "                       double _score = ((Number) _ret).doubleValue(); " +
+                            "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
+                            "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
+                            +
+                            "                   } else if (_ret instanceof Object[] && ((Object[])_ret).length >= 2 && ((Object[])_ret)[0] instanceof Number) { "
+                            +
+                            "                       Object[] _arr = (Object[]) _ret; " +
+                            "                       double _score = ((Number) _arr[0]).doubleValue(); " +
+                            "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
+                            "                       _tr.message = _arr[1] != null ? _arr[1].toString() : \"\"; " +
+                            "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
+                            +
+                            "                   } else if (_ret instanceof List && ((List)_ret).size() >= 2 && ((List)_ret).get(0) instanceof Number) { "
+                            +
+                            "                       List _list = (List) _ret; " +
+                            "                       double _score = ((Number) _list.get(0)).doubleValue(); " +
+                            "                       _tr.score = Math.max(0, Math.min(_score, _tr.max_score)); " +
+                            "                       _tr.message = _list.get(1) != null ? _list.get(1).toString() : \"\"; "
+                            +
+                            "                       _tr.passed = _tr.score == _tr.max_score; _tr.status = _tr.passed ? \"passed\" : \"partial\"; "
+                            +
+                            "                   } else if (_ret instanceof String) { " +
+                            "                       _tr.message = _ret.toString(); _tr.passed = true; _tr.score = _tr.max_score; _tr.status = \"passed\"; "
+                            +
+                            "                   } else { " +
+                            "                       _tr.passed = true; _tr.score = _tr.max_score; _tr.status = \"passed\"; "
+                            +
+                            "                   } " +
+                            "               } catch (TimeoutException _te) { " +
+                            "                   _tr.error = \"Test timed out after \" + _ann.timeout() + \"s\"; _tr.status = \"error\"; _future.cancel(true); "
+                            +
+                            "               } catch (Throwable _t) { " +
+                            "                   _tr.error = _t.getCause() != null ? _t.getCause().getMessage() : _t.getMessage(); "
+                            +
+                            "               } finally { _exec.shutdownNow(); } " +
+                            "               _results.add(_tr); " +
+                            "           } " +
+                            "       } " +
+                            "   } " +
+                            "   _sb.append(\"<<<TEST_RESULT_JSON_START>>>[\"); " +
+                            "   for (int _i=0; _i<_results.size(); _i++) { " +
+                            "       TestResult _r = _results.get(_i); " +
+                            "       _sb.append(\"{\\\"name\\\":\\\"\" + _r.name + \"\\\",\"); " +
+                            "       _sb.append(\"\\\"description\\\":\\\"\" + (_r.description==null?\"\":_r.description) + \"\\\",\"); "
+                            +
+                            "       String msg = _r.message==null ? \"\" : _r.message.replaceAll(\"[^a-zA-Z0-9 .,:;!?()_\\\\-=\\\\[\\\\]]\", \"?\"); "
+                            +
+                            "       _sb.append(\"\\\"message\\\":\\\"\" + msg + \"\\\",\"); "
+                            +
+                            "       _sb.append(\"\\\"score\\\":\" + _r.score + \",\"); " +
+                            "       _sb.append(\"\\\"max_score\\\":\" + _r.max_score + \",\"); " +
+                            "       _sb.append(\"\\\"passed\\\":\" + _r.passed + \",\"); " +
+                            "       _sb.append(\"\\\"status\\\":\\\"\" + _r.status + \"\\\",\"); " +
+                            "       String err = _r.error==null ? \"\" : _r.error.replaceAll(\"[^a-zA-Z0-9 .,:;!?()_\\\\-=\\\\[\\\\]]\", \"?\"); "
+                            +
+                            "       _sb.append(\"\\\"error\\\":\\\"\" + err + \"\\\"}\"); " +
+                            "       if (_i < _results.size()-1) _sb.append(\",\"); " +
+                            "   } " +
+                            "   _sb.append(\"]<<<TEST_RESULT_JSON_END>>>\"); " +
+                            "       return _sb.toString(); " +
+                            "   }; ");
+
+                    // Reset captured stream for test output
+                    jshellOut.reset();
+
+                    List<SnippetEvent> execEvents = jshell.eval("__runTests.get()");
+                    String testSnippetValue = "";
+                    for (SnippetEvent e : execEvents) {
+                        if (e.status() == Status.VALID) {
+                            if (e.exception() != null) {
+                                templateLog("Test execution exception (VALID): " + e.exception().getMessage(), "ERROR");
+                                e.exception().printStackTrace(psErr);
+                            }
+                            if (e.value() != null) {
+                                templateLog("Snippet Event Value: " + e.value(), "INFO");
+                                testSnippetValue = e.value();
+                            }
+                        } else {
+                            if (e.status() == Status.REJECTED) {
+                                templateLog("Test execution snippet failed: " + e.snippet().source(), "ERROR");
+                                jshell.diagnostics(e.snippet())
+                                        .forEach(d -> templateLog(d.getMessage(Locale.getDefault()), "ERROR"));
+                            }
+                            if (e.exception() != null) {
+                                templateLog("Test execution exception: " + e.exception().getMessage(), "ERROR");
+                                e.exception().printStackTrace(psErr);
+                            }
+                        }
+                    }
+
+                    templateLog("Final snippet value: " + testSnippetValue, "INFO");
+
+                    if (testSnippetValue.startsWith("\"") && testSnippetValue.endsWith("\"")) {
+                        String unquoted = testSnippetValue.substring(1, testSnippetValue.length() - 1);
+                        StringBuilder sbUnescaped = new StringBuilder();
+                        for (int i = 0; i < unquoted.length(); i++) {
+                            char c = unquoted.charAt(i);
+                            if (c == '\\' && i + 1 < unquoted.length()) {
+                                char next = unquoted.charAt(i + 1);
+                                if (next == '\"') {
+                                    sbUnescaped.append('\"');
+                                    i++;
+                                } else if (next == '\\') {
+                                    sbUnescaped.append('\\');
+                                    i++;
+                                } else if (next == 'n') {
+                                    sbUnescaped.append('\n');
+                                    i++;
+                                } else if (next == 'r') {
+                                    sbUnescaped.append('\r');
+                                    i++;
+                                } else {
+                                    sbUnescaped.append(c);
+                                }
+                            } else {
+                                sbUnescaped.append(c);
+                            }
+                        }
+                        String finalOutput = sbUnescaped.toString();
+                        System.out.println(finalOutput);
+                    } else if (!testSnippetValue.isEmpty()) {
+                        System.out.println(testSnippetValue);
+                    } else {
+                        System.out.print(jshellOut.toString(StandardCharsets.UTF_8));
+                    }
+
+                } catch (Exception e) {
+                    templateLog("Failed to run notebook tests: " + e.getMessage(), "ERROR");
+                }
+            }
+
             // Close JShell
             jshell.close();
         }
@@ -320,8 +502,74 @@ public class notebook_template {
         }
     }
 
+    private static void evaluateCellSource(
+            JShell jshell,
+            String cellSource,
+            PrintStream psErr,
+            StringBuilder evalResult,
+            boolean[] successRef,
+            String[] errorMsgRef) {
+        SourceCodeAnalysis sourceCodeAnalysis = jshell.sourceCodeAnalysis();
+        String remaining = cellSource == null ? "" : cellSource;
+        int guard = 0;
+
+        while (remaining != null && !remaining.trim().isEmpty()) {
+            if (guard++ > 2000) {
+                successRef[0] = false;
+                psErr.println("Cell execution aborted: too many snippets in one cell.");
+                return;
+            }
+
+            SourceCodeAnalysis.CompletionInfo completion = sourceCodeAnalysis.analyzeCompletion(remaining);
+            String snippet = completion.source();
+            String nextRemaining = completion.remaining();
+
+            // Fallback for parser edge-cases where JShell cannot split further.
+            if (snippet == null || snippet.trim().isEmpty()) {
+                snippet = remaining;
+                nextRemaining = "";
+            }
+
+            List<SnippetEvent> events = jshell.eval(snippet);
+            processSnippetEvents(jshell, events, psErr, evalResult, successRef, errorMsgRef);
+
+            if (nextRemaining == null || nextRemaining.equals(remaining)) {
+                break;
+            }
+
+            remaining = nextRemaining;
+        }
+    }
+
+    private static void processSnippetEvents(
+            JShell jshell,
+            List<SnippetEvent> events,
+            PrintStream psErr,
+            StringBuilder evalResult,
+            boolean[] successRef,
+            String[] errorMsgRef) {
+        for (SnippetEvent event : events) {
+            if (event.status() == Status.VALID) {
+                String value = event.value();
+                if (value != null && !value.isEmpty() && !"null".equals(value)) {
+                    evalResult.append(value).append("\n");
+                }
+            } else if (event.status() == Status.REJECTED) {
+                successRef[0] = false;
+                jshell.diagnostics(event.snippet()).forEach(diag -> {
+                    psErr.println(diag.getMessage(Locale.getDefault()));
+                });
+            }
+
+            if (event.exception() != null) {
+                successRef[0] = false;
+                event.exception().printStackTrace(psErr);
+                errorMsgRef[0] = event.exception().getMessage();
+            }
+        }
+    }
+
     // Simple JSON array parser (handles nested objects)
-    @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> parseJsonArray(String json) {
         try {
             json = json.trim();

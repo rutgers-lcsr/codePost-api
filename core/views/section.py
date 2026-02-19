@@ -11,6 +11,7 @@ from core.permissions.helpers import returnNotAuthorized, returnForbidden, retur
 from rest_framework.response import Response
 
 from rest_framework.decorators import action, permission_classes
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 class SectionViewSet(ListProtectedViewSet):
   """
@@ -36,6 +37,12 @@ class SectionViewSet(ListProtectedViewSet):
   serializer_class = SectionSerializer
   permission_classes = (IsAuthenticated, SectionPermissions)
 
+  @extend_schema(
+      responses=SubmissionSerializer(many=True),
+      parameters=[
+          OpenApiParameter(name="assignment", required=True, type=int, location=OpenApiParameter.QUERY),
+      ],
+  )
   @action(detail=True, methods=["GET"])
   def submissions(self, request, pk=None):
     """

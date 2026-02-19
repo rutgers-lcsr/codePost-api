@@ -1,5 +1,5 @@
 from core.models import AssignmentFile
-from core.serializers.file import AssignmentFileSerializer
+from core.serializers.file import AssignmentFileSerializer, AssignmentFileSummarySerializer
 from core.views.template import ListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
 from core.permissions.permissions import FilePermissions
@@ -31,8 +31,12 @@ class AssignmentFileViewSet(ListProtectedViewSet):
     Delete an assignment file.
     """
     queryset = AssignmentFile.objects.all()
-    serializer_class = AssignmentFileSerializer
     permission_classes = (IsAuthenticated, FilePermissions)
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return AssignmentFileSummarySerializer
+        return AssignmentFileSerializer
 
     def perform_create(self, serializer):
         instance = serializer.save()

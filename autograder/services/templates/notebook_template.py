@@ -1,8 +1,5 @@
 # This is a template for running jupyter notebook code cells inside a Docker container.
-
 # To use this template replace the placeholder {cells_b64} with a base64-encoded JSON array of cells, And packages_to_install with a list of packages to install.
-
-
 
 # START OF PACKAGE INSTALLATION TEMPLATE
 import subprocess
@@ -10,6 +7,16 @@ import sys
 import os
 import time
 import site
+import json
+import inspect
+import traceback
+import io
+import contextlib
+import base64
+import typing
+import ast
+from typing import List, Dict, Any, Optional, Callable, Union
+import signal
 
 # Set environment for pip
 os.environ['PIP_ROOT_USER_ACTION'] = 'ignore'
@@ -22,8 +29,6 @@ MAX_CELLS = 500  # Maximum number of cells allowed to prevent abuse
 def template_log(message: str, level:str) -> None:
     print(f"[{level}] {message}", file=sys.stderr)
 
-
-
 # Packages to install
 packages_to_install = []
 
@@ -32,170 +37,275 @@ script_start_time = time.time()
 # Debug: Check if pip cache is mounted
 pip_cache_path = os.environ.get('PIP_CACHE_DIR', '/tmp/pip-cache')
 if os.path.exists(pip_cache_path):
-    template_log(f"Pip cache directory found at {pip_cache_path}", "DEBUG")
     try:
         cache_size = sum(os.path.getsize(os.path.join(dirpath, filename))
                         for dirpath, dirnames, filenames in os.walk(pip_cache_path)
                         for filename in filenames)
-        template_log(f"Current cache size: {cache_size / 1024 / 1024:.2f} MB", "DEBUG")
+        # template_log(f"Current cache size: {cache_size / 1024 / 1024:.2f} MB", "DEBUG")
     except Exception as e:
         template_log(f"Could not calculate cache size: {str(e)}", "DEBUG")
-else:
-    template_log(f"Pip cache directory NOT found - cache may not be working!", "WARNING")
-
-template_log(f"Checking {len(packages_to_install)} package(s): {', '.join(packages_to_install)}", "INFO")
 
 # Check which packages are already installed (from pre-built image or previous runs)
 import importlib.util
-already_installed = []
 needs_install = []
 for package in packages_to_install:
-    # Try to import the package to see if it's already available
     try:
         __import__(package)
-        already_installed.append(package)
     except ImportError:
         needs_install.append(package)
 
-if already_installed:
-    template_log(f"{len(already_installed)} package(s) already available: {', '.join(already_installed)}", "INFO")
-
-if not needs_install:
-    template_log("✓ All packages available, skipping installation", "INFO")
-
-# Install packages with progress feedback
 failed_packages = []
-for i, package in enumerate(needs_install, 1):
-    template_log(f"[{i}/{len(needs_install)}] Installing {package}...", "INFO")
-    start_time = time.time()
-    
-    try:
-        # Use pip's cache to speed up installations (cache is mounted at /root/.cache/pip)
-        # Run pip with verbose output to capture cache usage
-        result = subprocess.run(
-            [sys.executable, '-m', 'pip', 'install', '--user', '-v', "--only-binary", ":all:", package],
-            capture_output=True,
-            text=True
-        )
-        elapsed = time.time() - start_time
-        
-        # Check if pip used cache (look for cache-related messages)
-        used_cache = 'Using cached' in result.stdout or 'from cache' in result.stdout.lower()
-        cache_indicator = '(cached)' if used_cache else '(downloaded)'
-        
-        if result.returncode == 0:
-            template_log(f"[{i}/{len(needs_install)}] ✓ {package} installed {cache_indicator} ({elapsed:.1f}s)", "INFO")
-            print(f"CODEPOST_AUTO_INSTALL_SUCCESS: {package}", file=sys.stderr)
-        else:
-            raise subprocess.CalledProcessError(result.returncode, result.args)
-    except subprocess.CalledProcessError as e:
-        elapsed = time.time() - start_time
-        template_log(f"[{i}/{len(needs_install)}] ✗ {package} failed ({elapsed:.1f}s)", "ERROR")
-        failed_packages.append(package)
-    
-    sys.stderr.flush()
-
-# Summary
-if failed_packages:
-    template_log(f"Failed to install {len(failed_packages)} package(s): {', '.join(failed_packages)}", "ERROR")
-else:
-    template_log("✓ All packages installed successfully", "INFO")
-
-# Show final cache size
-if needs_install and os.path.exists(pip_cache_path):
-    try:
-        cache_size = sum(os.path.getsize(os.path.join(dirpath, filename))
-                        for dirpath, dirnames, filenames in os.walk(pip_cache_path)
-                        for filename in filenames)
-        template_log(f"Final cache size: {cache_size / 1024 / 1024:.2f} MB", "DEBUG")
-    except Exception:
-        pass
-
-# SECURITY: Make pip cache read-only after installation to prevent notebook code from tampering
-if needs_install and os.path.exists(pip_cache_path):
-    try:
-        import stat
-        # Remove write permissions for everyone on the cache directory
-        for root, dirs, files in os.walk(pip_cache_path):
-            # Make directories read-only and executable (for traversal)
-            for d in dirs:
-                dir_path = os.path.join(root, d)
-                os.chmod(dir_path, stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
-            # Make files read-only
-            for f in files:
-                file_path = os.path.join(root, f)
-                os.chmod(file_path, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
-        # Make the root cache directory read-only
-        os.chmod(pip_cache_path, stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
-        template_log("Pip cache locked (read-only) after installation", "SECURITY")
-    except Exception as e:
-        template_log(f"Could not lock pip cache: {str(e)}", "WARNING")
-
-sys.stderr.flush()
-
-# Refresh sys.path to include newly installed user site-packages
 if needs_install:
+    template_log(f"Installing {len(needs_install)} package(s): {', '.join(needs_install)}", "INFO")
+    
+    # Install packages with progress feedback
+    failed_packages = []
+    for i, package in enumerate(needs_install, 1):
+        template_log(f"[{i}/{len(needs_install)}] Installing {package}...", "INFO")
+        start_time = time.time()
+        
+        try:
+            result = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', '--user', '-v', "--only-binary", ":all:", package],
+                capture_output=True,
+                text=True
+            )
+            elapsed = time.time() - start_time
+            
+            if result.returncode == 0:
+                template_log(f"[{i}/{len(needs_install)}] ✓ {package} installed ({elapsed:.1f}s)", "INFO")
+                print(f"CODEPOST_AUTO_INSTALL_SUCCESS: {package}", file=sys.stderr)
+            else:
+                template_log(f"Pip output: {result.stdout}\n{result.stderr}", "DEBUG")
+                raise subprocess.CalledProcessError(result.returncode, result.args)
+        except subprocess.CalledProcessError as e:
+            elapsed = time.time() - start_time
+            template_log(f"[{i}/{len(needs_install)}] ✗ {package} failed ({elapsed:.1f}s)", "ERROR")
+            failed_packages.append(package)
+        
+        sys.stderr.flush()
+
+    # Refresh sys.path
     try:
         from importlib import reload
         reload(site)
-        # Also explicitly add the user site directory if not present
         if site.getusersitepackages() not in sys.path:
              site.addsitedir(site.getusersitepackages())
-        template_log(f"Refreshed sys.path with user site packages: {site.getusersitepackages()}", "DEBUG")
     except Exception as e:
         template_log(f"Failed to refresh sys.path: {e}", "WARNING")
 
 sys.stderr.flush()
-
-print("", file=sys.stderr)  # Blank line for readability
-
+print("", file=sys.stderr)
 
 # END OF PACKAGE INSTALLATION TEMPLATE
 
-import json
-import base64
-import ast
-import sys
-import io
-import os
+# ==========================================
+# TEST FRAMEWORK IMPLEMENTATION
+# ==========================================
+
+_CAPTURED_PLOTS: List[str] = []
+
+class TestResult:
+    def __init__(self, name: str, max_score: float = 1.0, description: Optional[str] = None):
+        self.name = name
+        self.max_score = max_score
+        self.description = description
+        self.score = 0.0
+        self.passed = False
+        self.error: Optional[str] = None
+        self.message: Optional[str] = None
+        self.output: str = ""
+        self.status: str = "failed" # passed, failed, error
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "max_score": self.max_score,
+            "description": self.description,
+            "score": self.score,
+            "passed": self.passed,
+            "error": self.error,
+            "message": self.message,
+            "output": self.output,
+            "status": self.status
+        }
+    
+    def to_json(self) -> str:
+        """Output result with JSON markers for frontend parsing."""
+        data = self.to_dict()
+        return f"<<<TEST_RESULT_JSON_START>>>{json.dumps(data)}<<<TEST_RESULT_JSON_END>>>"
+
+class TestCase:
+    def __init__(self, func: Callable, name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
+        self.func = func
+        self.name = name or func.__name__
+        self.points = points
+        self.description = description
+        
+        # Determine timeout
+        global_timeouts = globals().get('CODEPOST_TEST_TIMEOUTS', {})
+        # If not in globals, check the namespace where code was executed
+        if not global_timeouts and 'namespace' in globals():
+             global_timeouts = globals()['namespace'].get('CODEPOST_TEST_TIMEOUTS', {})
+             
+        if self.name in global_timeouts:
+            self.timeout = global_timeouts[self.name]
+        elif timeout is not None:
+             self.timeout = timeout
+        else:
+             self.timeout = 30 # Default 30s
+
+    def run(self) -> TestResult:
+        result = TestResult(self.name, self.points, self.description)
+        stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
+        
+        try:
+            with contextlib.redirect_stdout(stdout_capture), contextlib.redirect_stderr(stderr_capture):
+                # Setup timeout handler
+                def handler(signum, frame):
+                    raise TimeoutError(f"Test timed out after {self.timeout} seconds")
+                
+                signal.signal(signal.SIGALRM, handler)
+                signal.alarm(self.timeout)
+                
+                try:
+                    return_value = self.func()
+                finally:
+                    signal.alarm(0)
+
+            
+            # Check if return value is a number (partial credit)
+            if isinstance(return_value, (int, float)):
+                # Clamp score to [0, max_score]
+                result.score = max(0, min(return_value, self.points))
+                result.passed = result.score == self.points
+                result.status = "passed" if result.passed else "partial"
+            elif isinstance(return_value, (tuple, list)) and len(return_value) >= 2:
+                # Handle [score, message]
+                score_val = return_value[0]
+                msg_val = str(return_value[1])
+                
+                if isinstance(score_val, (int, float)):
+                    result.score = max(0, min(score_val, self.points))
+                    result.passed = result.score == self.points
+                    result.status = "passed" if result.passed else "partial"
+                
+                if msg_val:
+                    result.message = msg_val
+            else:
+                # No return value or non-numeric = full credit
+                # assume assertions passed
+                result.passed = True
+                result.score = self.points
+                result.status = "passed"
+            
+            result.output = stdout_capture.getvalue()
+            
+        except AssertionError as e:
+            result.passed = False
+            result.score = 0
+            result.status = "failed"
+            result.error = str(e)
+            result.output = stdout_capture.getvalue()
+        except TimeoutError as e:
+            result.passed = False
+            result.score = 0
+            result.status = "error"
+            result.error = str(e)
+            result.message = "Test timed out"
+            result.output = stdout_capture.getvalue()
+        except Exception as e:
+            result.passed = False
+            result.score = 0
+            result.status = "error"
+            result.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            result.output = stdout_capture.getvalue()
+
+
+            
+        return result
+
+class TestRunner:
+    _instance = None
+    
+    def __init__(self):
+        self.tests: List[TestCase] = []
+        self.results: List[TestResult] = []
+    
+    @classmethod
+    def get_instance(cls):
+        if not cls._instance:
+            cls._instance = TestRunner()
+        return cls._instance
+    
+    def add_test(self, test: TestCase):
+        self.tests.append(test)
+        
+    def run_all(self) -> List[Dict[str, Any]]:
+        for test in self.tests:
+            result = test.run()
+            self.results.append(result)
+            # Output JSON markers for frontend to parse (like template.py)
+            print(result.to_json(), file=sys.stderr)
+            sys.stderr.flush()
+        return [r.to_dict() for r in self.results]
+
+def test(name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
+    def decorator(func):
+        test_case = TestCase(func, name=name, points=points, description=description, timeout=timeout)
+        TestRunner.get_instance().add_test(test_case)
+        return func
+    return decorator
+
+
+def assert_plots_generated(count: int = 1):
+    if len(_CAPTURED_PLOTS) < count:
+        raise AssertionError(f"Expected {count} plots, but found {len(_CAPTURED_PLOTS)}")
+
+def get_plots() -> List[str]:
+    return _CAPTURED_PLOTS
+
+# ==========================================
+# END TEST FRAMEWORK
+# ==========================================
+
+
 from contextlib import redirect_stdout, redirect_stderr
 
-# Debug: Show initial working directory and mounted files
-template_log(f"Initial working directory: {os.getcwd()}", "DEBUG")
-template_log(f"/work exists: {os.path.exists('/work')}", "DEBUG")
-if os.path.exists('/work'):
-    template_log(f"Files in /work: {os.listdir('/work')}", "DEBUG")
-template_log(f"~/shared exists: {os.path.exists('/root/shared')}", "DEBUG")
-if os.path.exists('/root/shared'):
-    template_log(f"Files in ~/shared: {os.listdir('/root/shared')}", "DEBUG")   
-
-
-# Change to /work directory where assignment files are located
-# Datasets remain accessible at ~/shared/...
+# Change to /work directory
 if os.path.exists('/work'):
     os.chdir('/work')
     template_log(f"Changed working directory to /work", "DEBUG")
-    template_log(f"Changed to: {os.getcwd()}", "DEBUG")
 else:
     template_log(f"/work does not exist, staying in {os.getcwd()}", "DEBUG")
-
 
 # Decode cells
 cells_json = base64.b64decode('{cells_b64}').decode('utf-8')
 cells = json.loads(cells_json)
 
-# Results storage
+# Shared namespace for all cells
+# We inject the Test Framework into the namespace so test code can use it
+namespace = {
+    '__name__': '__main__', 
+    '__builtins__': __builtins__,
+    'TestResult': TestResult,
+    'TestCase': TestCase,
+    'TestRunner': TestRunner,
+    'test': test,
+    'assert_plots_generated': assert_plots_generated,
+    'get_plots': get_plots,
+    '_CAPTURED_PLOTS': _CAPTURED_PLOTS,
+    'codepost_cells': cells # Provide access to all cells if needed
+}
+
 results = []
-
-# Shared namespace for all cells (like Jupyter)
-namespace = {'__name__': '__main__', '__builtins__': __builtins__}
-
 
 if len(cells) > MAX_CELLS:
     template_log(f"Number of cells ({len(cells)}) exceeds maximum allowed ({MAX_CELLS})", "ERROR")
     results.append({
         'cell_type': 'markdown',
-        'source': f"**Error:** Number of cells ({len(cells)}) exceeds maximum allowed ({MAX_CELLS}). Execution aborted. Please reduces the number of cells and try again. Or contact support."
+        'source': f"**Error:** Number of cells ({len(cells)}) exceeds maximum allowed ({MAX_CELLS}). Execution aborted."
     })
 else:
     # Execute each code cell
@@ -208,130 +318,68 @@ else:
         })
         elif cell['type'] == 'code':
             cell_source = cell['source']
-            
-            # Capture stdout and stderr
             stdout_capture = io.StringIO()
             stderr_capture = io.StringIO()
-            
             outputs = []
             success = True
             error_msg = None
             
             try:
                 with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                    # Parse and execute with last-expression handling
                     try:
                         parsed = ast.parse(cell_source, mode='exec')
-                        
-                        # Check if last statement is an expression
                         if parsed.body and isinstance(parsed.body[-1], ast.Expr):
-                            # Execute all-but-last
                             setup_stmts = parsed.body[:-1]
                             last_expr = parsed.body[-1].value
-                            
                             if setup_stmts:
                                 setup = ast.Module(body=setup_stmts, type_ignores=[])
                                 exec(compile(setup, '<cell>', 'exec'), namespace)
-                            
-                            # Evaluate and display last expression
                             result = eval(compile(ast.Expression(body=last_expr), '<cell>', 'eval'), namespace)
                             if result is not None:
-                                # Smart display for different types
-                                result_type = type(result).__name__
-                                result_module = type(result).__module__
-                                
-                                # Check for pandas DataFrame/Series
-                                if 'pandas' in result_module and hasattr(result, 'to_string'):
-                                    print(result.to_string())
-                                # Check for numpy arrays
-                                elif 'numpy' in result_module and hasattr(result, '__array__'):
-                                    print(repr(result))
-                                # Default: use repr
-                                else:
-                                    print(repr(result))
+                                print(repr(result))
                         else:
-                            # Just execute normally
                             exec(cell_source, namespace)
-                    except SyntaxError as e:
-                        # If parsing fails, just execute
+                    except SyntaxError:
                         exec(cell_source, namespace)
             except Exception as e:
                 success = False
                 error_msg = str(e)
-                import traceback
                 stderr_capture.write(traceback.format_exc())
             
-            # Get captured output
             stdout_text = stdout_capture.getvalue()
             stderr_text = stderr_capture.getvalue()
             
-            # Check for matplotlib figures and capture them
+            # Capture matplotlib plots
             try:
                 if 'matplotlib' in sys.modules:
                     import matplotlib.pyplot as plt
-                    import base64
-                    from io import BytesIO
-                    
-                    # Get all figures
                     figs = [plt.figure(n) for n in plt.get_fignums()]
                     if len(figs) > 0:
                         for fig in figs:
-                            # Save figure to bytes
-                            buf = BytesIO()
+                            buf = io.BytesIO()
                             fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
                             buf.seek(0)
                             img_base64 = base64.b64encode(buf.read()).decode('utf-8')
                             buf.close()
                             
-                            # Add as display_data output
+                            # Add to notebook output
                             outputs.append({
                                 'output_type': 'display_data',
-                                'data': {
-                                    'image/png': img_base64
-                                },
+                                'data': {'image/png': img_base64},
                                 'metadata': {}
                             })
-                        
-                        # Close all figures to free memory
+                            
+                            # Add to Test Framework capture
+                            _CAPTURED_PLOTS.append(img_base64)
                         plt.close('all')
-            except Exception as e:
-                # If matplotlib capture fails, add error to stderr for debugging
-                stderr_capture.write(f"\\nMatplotlib capture error: {{str(e)}}\\n")
+            except Exception:
                 pass
             
-            NBS_OUTPUT_LIMIT = 10000  # Max characters in output 10kb, defined here so it cannot be changed by notebook code
-            # Build outputs list
             if stdout_text:
-                
-                # Truncate stdout if too long
-                if len(stdout_text) > NBS_OUTPUT_LIMIT:
-                    stdout_text = stdout_text[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR output truncated]\\n"
-
-                outputs.append({
-                    'output_type': 'stream',
-                    'name': 'stdout',
-                    'text': stdout_text
-                })
+                outputs.append({'output_type': 'stream', 'name': 'stdout', 'text': stdout_text})
             if stderr_text:
-                
-                # Truncate stderr if too long
-                if len(stderr_text) > NBS_OUTPUT_LIMIT:
-                    stderr_text = stderr_text[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR output truncated]\\n"
-                    
-                outputs.append({
-                    'output_type': 'stream',
-                    'name': 'stderr',
-                    'text': stderr_text
-                })
+                outputs.append({'output_type': 'stream', 'name': 'stderr', 'text': stderr_text})
             if not success:
-
-                # Truncate error message if too long
-                if error_msg and len(error_msg) > NBS_OUTPUT_LIMIT:
-                    error_msg = error_msg[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR message truncated]\\n"
-
-                if stderr_text and len(stderr_text) > NBS_OUTPUT_LIMIT:
-                    stderr_text = stderr_text[:NBS_OUTPUT_LIMIT] + "\\n...[ERROR message truncated]\\n"
-
                 outputs.append({
                     'output_type': 'error',
                     'ename': 'ExecutionError',
@@ -347,36 +395,70 @@ else:
                 'idx': cell_idx
             })
 
+# ==========================================
+# RUN TEST SCRIPT
+# ==========================================
+test_results = []
+
+try:
+    test_code_b64 = "{test_code_b64}"
+    test_code = ""
+    if test_code_b64:
+        test_code = base64.b64decode(test_code_b64).decode('utf-8')
+
+    if test_code.strip():
+        template_log("Running injected test script...", "INFO")
+        template_log(f"SCRIPT_DEBUG: {test_code[:500]}", "DEBUG")
+        # Execute test code in the SAME namespace as the notebook cells
+        exec(test_code, namespace)
+        
+        # Run tests if any were registered
+        runner = TestRunner.get_instance()
+        
+        # Filter tests if a specific test function is requested
+        target_test_function = """#{TARGET_TEST_FUNCTION}"""
+        if target_test_function and target_test_function.strip() and not target_test_function.startswith("#{"):
+             target = target_test_function.strip()
+             # Filter based on function name or test name
+             runner.tests = [t for t in runner.tests if t.func.__name__ == target or t.name == target]
+
+        if runner.tests:
+            # Run all registered tests
+            test_names = [t.name for t in runner.tests]
+            template_log(f"Running {len(test_names)} Tests: {', '.join(test_names)}", "INFO")
+            test_results = runner.run_all()
+            template_log(f"Executed {len(test_results)} tests", "INFO")
+        elif target_test_function and target_test_function.strip() and not target_test_function.startswith("#{"):
+            template_log(f"No tests matched the requested function: {target_test_function}", "WARNING")
+        else:
+            template_log(f"No tests registered to run. (Target: '{target_test_function}')", "INFO")
+except Exception as e:
+    template_log(f"Test Script Error: {e}", "ERROR")
+    # Add a synthetic error test result
+    test_results.append({
+        "name": "Test Script Execution",
+        "passed": False,
+        "score": 0,
+        "max_score": 0,
+        "error": f"Failed to run test script: {str(e)}\n{traceback.format_exc()}",
+        "status": "error"
+    })
+
 # Output results as JSON
 end_time = time.time()
 execution_time = end_time - script_start_time
 
-
-# Populate stdout and stderr from results allows us to give a better breakdown of each cell output in the view, Each cell will be _______cell <idx>______
-
-stdout_cells= ""
-stderr_cells =""
-
-for cell in results:
-    outputs = cell.get('outputs', [])
-    
-    for output in outputs:
-        if output['output_type'] == 'stream' and output['name'] == 'stdout':
-            stdout_cells += f"______cell {cell['idx']}______\n\n" + output['text'] + "\n"
-        elif output['output_type'] == 'stream' and output['name'] == 'stderr':
-            stderr_cells += f"______cell {cell['idx']}______\n\n" + output['text'] + "\n"
-
-# Create final output_data should look like a notebook but with populated cells
-
+# Construct final JSON
 final_result = {
     "success": len(failed_packages) == 0,
-    "stdout": stdout_cells, 
-    "stderr": stderr_cells, 
+    "stdout": "", 
+    "stderr": "", 
     "error": None,
     "execution_time": execution_time,
     "output_data": {
         "cells": results
-    }
+    },
+    "tests": test_results
 }
 
 print('<<<RESULTS_START>>>')

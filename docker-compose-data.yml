@@ -13,6 +13,8 @@ services:
             - FLOWER_BASIC_AUTH=${API_USER}:${API_PASSWORD}
         depends_on:
             - codepost-redis
+        labels:
+            - "autoheal=true"
         restart: unless-stopped
         healthcheck:
             test:
@@ -33,6 +35,8 @@ services:
         container_name: codepost-redis
         ports:
             - "6379:6379"
+        labels:
+            - "autoheal=true"
         healthcheck:
             test: ["CMD", "redis-cli", "ping"]
             interval: 10s
@@ -65,6 +69,8 @@ services:
             - --innodb_page_size=16k
             - --innodb_buffer_pool_size=10G
             - --innodb_log_file_size=256M
+        labels:
+            - "autoheal=true"
         healthcheck:
             test:
                 [
@@ -95,6 +101,8 @@ services:
             - "8080:8080"
         depends_on:
             - codepost-database
+        labels:
+            - "autoheal=true"
         restart: unless-stopped
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:8080/"]
@@ -106,6 +114,19 @@ services:
             options:
                 max-size: "10m"
                 max-file: "3"
+
+    codepost-data-autoheal:
+        image: willfarrell/autoheal:latest
+        container_name: codepost-data-autoheal
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+        restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
 networks:
     default:
         name: codepost-network

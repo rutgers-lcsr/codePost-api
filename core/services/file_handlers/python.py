@@ -75,3 +75,16 @@ class PythonHandler(BaseFileHandler):
             mapped_packages.add(package_name)
             
         return mapped_packages
+
+    @staticmethod
+    def infer(data: str) -> bool:
+        """
+        Infer if the code/data is of the type this handler can process. Used for cases where extension may not be reliable.
+        """
+        try:
+            ast.parse(data)
+            return True
+        except SyntaxError:
+            return False
+        except Exception:
+            return False

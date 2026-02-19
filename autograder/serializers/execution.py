@@ -29,17 +29,92 @@ class FileExecutionRequestSerializer(serializers.Serializer):
         default=False,
         help_text="If true, bypass cache and force new execution"
     )
+    test_code = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Optional test script to inject during execution"
+    )
+    code_override = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Optional content override for the file (e.g., edited notebook JSON)"
+    )
+
+    # Accept both camelCase (from generated TS client) and snake_case
+    CAMEL_TO_SNAKE = {
+        'fileId': 'file_id',
+        'forceExecute': 'force_execute',
+        'testCode': 'test_code',
+        'codeOverride': 'code_override',
+    }
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        for camel, snake in self.CAMEL_TO_SNAKE.items():
+            if camel in data and snake not in data:
+                data[snake] = data.pop(camel)
+        return super().to_internal_value(data)
 
 
 class AsyncExecutionRequestSerializer(FileExecutionRequestSerializer):
     """Request serializer for async execution"""
-    pass  # Same as base, add extra fields if needed
+    example_code = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Optional example code to inject during execution"
+    )
+
+    CAMEL_TO_SNAKE = {
+        **FileExecutionRequestSerializer.CAMEL_TO_SNAKE,
+        'exampleCode': 'example_code',
+    }
+
+
+class CodeExecutionRequestSerializer(serializers.Serializer):
+    """Request serializer for code execution"""
+    code = serializers.CharField(help_text="Code to execute")
+    language = serializers.CharField(help_text="Language for execution")
+    timeout = serializers.IntegerField(required=False, default=30, min_value=1, max_value=300)
+    working_dir = serializers.CharField(required=False, allow_null=True)
+
+
+class NotebookExecutionRequestSerializer(serializers.Serializer):
+    """Request serializer for notebook execution"""
+    notebook_content = serializers.CharField(help_text="Notebook JSON content")
+    timeout = serializers.IntegerField(required=False, default=60, min_value=1, max_value=300)
+    kernel_name = serializers.CharField(required=False, default="python3")
+
+
+class NotebookCellExecutionRequestSerializer(serializers.Serializer):
+    """Request serializer for executing a single notebook cell"""
+    cell_code = serializers.CharField(help_text="Cell code to execute")
+    cell_index = serializers.IntegerField(required=False, default=0)
+    timeout = serializers.IntegerField(required=False, default=30, min_value=1, max_value=300)
+    kernel_name = serializers.CharField(required=False, default="python3")
 
 
 class TestExecutionRequestSerializer(serializers.Serializer):
     """Request serializer for running tests"""
-    testId = serializers.IntegerField(help_text="ID of the test case to run")
-    submissionId = serializers.IntegerField(help_text="ID of the submission to test")
+    testId = serializers.IntegerField(
+        required=False, 
+        allow_null=True,
+        help_text="ID of the test to run. If null, runs all tests."
+    )
+    submissionId = serializers.IntegerField(
+        help_text="ID of the submission to test"
+    )
+    file_overrides = serializers.DictField(
+        child=serializers.CharField(),
+        required=False,
+        default=dict,
+        help_text="Map of file ID to temporary content for ephemeral execution"
+    )
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        if 'fileOverrides' in data and 'file_overrides' not in data:
+            data['file_overrides'] = data.pop('fileOverrides')
+        return super().to_internal_value(data)
 
 
 # =============================================================================
@@ -230,6 +305,11 @@ class ExecutionResultSerializer(serializers.Serializer):
         required=False,
         help_text="System-level logs from the executor"
     )
+    tests = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        help_text="Structured test results (if present)"
+    )
     timestamp = serializers.DateTimeField(
         required=False,
         help_text="When the execution completed"
@@ -315,11 +395,33 @@ class TestExecutionResultSerializer(serializers.Serializer):
     success = serializers.BooleanField(
         help_text="Whether the test execution completed"
     )
-    result = serializers.DictField(
+    result = serializers.JSONField(
         required=False,
-        help_text="Test result details"
+        help_text="Test result details (object or list)"
     )
     error = serializers.CharField(
         required=False,
         help_text="Error message if test failed"
     )
+
+
+# =============================================================================
+# Shell Metrics Serializers
+# =============================================================================
+
+class ShellMetricsSessionSerializer(serializers.Serializer):
+    """Serializer for a single shell session metrics payload"""
+    sessionId = serializers.CharField(required=False)
+    lastActivity = serializers.FloatField(required=False, allow_null=True)
+
+
+class ShellMetricsResponseSerializer(serializers.Serializer):
+    """Response serializer for shell metrics endpoint"""
+    activeCount = serializers.IntegerField()
+    inCount = serializers.IntegerField()
+    outCount = serializers.IntegerField()
+    workerCount = serializers.IntegerField()
+    workerIds = serializers.ListField(child=serializers.CharField(), required=False)
+    activeIds = serializers.ListField(child=serializers.CharField(), required=False)
+    redisUrl = serializers.CharField(required=False)
+    sessions = ShellMetricsSessionSerializer(many=True, required=False)

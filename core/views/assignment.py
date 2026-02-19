@@ -4,7 +4,8 @@ from core.logging import logEvent
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
 from rest_framework.request import Request
-from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats
+from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats, AssignmentCloneSerializer, AssignmentGenerateTestSerializer, AssignmentGenerateTestResponseSerializer
+from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.serializers.rubricComment import RubricCommentSerializer
@@ -29,6 +30,16 @@ from rest_framework.decorators import action, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from core.pagination import DefaultPagination, LargeObjectsPagination
+from drf_spectacular.utils import extend_schema
+
+from core.serializers.actionResponses import (
+  AssignmentQueueLengthResponseSerializer,
+  AssignmentRubricResponseSerializer,
+  AssignmentStudentTestsResponseSerializer,
+  BeforeStudentUploadResponseSerializer,
+  AssignmentDownloadResponseSerializer,
+  AssignmentStudentUploadGetResponseSerializer,
+)
 
 
 from core.permissions.permissions import AssignmentPermissions, RubricCommentPermissions
@@ -37,9 +48,10 @@ from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff, isSuperGrader, canViewUnanonymizedSubmissions
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub
 
-from django.utils.timezone import now
+from django.utils import timezone
 
-from django.db.models import Q
+from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField
+from django.db.models.functions import Coalesce
 
 from core.utils import copy_assignment
 from core.handlers.late_submission_handler import LateSubmissionHandler
@@ -150,9 +162,24 @@ class AssignmentViewSet(ListProtectedViewSet):
     else:
       return AssignmentSerializer
 
+  def get_queryset(self):
+    queryset = Assignment.objects.all()
+    if self.action == 'retrieve':
+      queryset = queryset.annotate(
+          submissions_count_anno=Count('submissions', distinct=True),
+          submissions_finalized_count_anno=Count('submissions', filter=Q(submissions__isFinalized=True), distinct=True),
+          submissions_inprogress_count_anno=Count('submissions', filter=Q(submissions__isFinalized=False) & ~Q(submissions__grader=None), distinct=True),
+          submissions_unclaimed_count_anno=Count('submissions', filter=Q(submissions__grader=None), distinct=True),
+          stats_max_anno=Coalesce(Max('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
+          stats_min_anno=Coalesce(Min('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
+          stats_mean_anno=Coalesce(Avg('submissions__grade', filter=Q(submissions__isFinalized=True)), 0.0, output_field=FloatField())
+      )
+    return queryset
+
   # Extra functions
   #####################################################################################
 
+  @extend_schema(responses=CommentSerializer(many=True))
   @action(detail=True)
   def comments(self, request, pk=None):
     """
@@ -185,6 +212,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     return Response(serial.data)
 
+  @extend_schema(responses=AssignmentQueueLengthResponseSerializer)
   @action(detail=True)
   def queueLength(self, request, pk=None):
     """
@@ -261,6 +289,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     return Response(toRet)
 
   # Returns the serialized rubric for this assignment
+  @extend_schema(responses=AssignmentRubricResponseSerializer)
   @action(detail=True, permission_classes=((IsAuthenticated, RubricCommentPermissions)), methods=['GET'])
   def rubric(self, request, pk=None):
     """
@@ -288,6 +317,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     return Response(toRet)
 
+  @extend_schema(responses=SubmissionSerializer(many=True))
   @action(detail=True, methods=['GET'])
   def drawUnassigned(self, request, pk=None):
     """
@@ -356,6 +386,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 # Optional arguments: username, grader
 # If neither specified, returns full list of submissions for this assignment
+  @extend_schema(responses=SubmissionSerializer(many=True))
   @action(detail=True, pagination_class=DefaultPagination)
   def submissions(self, request, pk=None):
     """
@@ -475,6 +506,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     return Response(serializer.data)
 
+  @extend_schema(responses=SubmissionHistorySerializer(many=True))
   @action(detail=True, methods=['GET'], pagination_class=DefaultPagination)
   def submissionHistories(self, request: Request, pk=None):
     user = request.user
@@ -496,6 +528,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     serializer = SubmissionHistorySerializer(submissionHistories, many=True, context={'request:': request})
     return Response(serializer.data)
 
+  @extend_schema(responses=AssignmentStudentTestsResponseSerializer)
   @action(detail=True, methods=["GET"])
   def studentTests(self, request, pk=None):
     #  Only accessed by students
@@ -534,6 +567,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         'testCategories': category_serializer.data
     })
 
+  @extend_schema(responses=BeforeStudentUploadResponseSerializer)
   @action(detail=True, methods=["GET"])
   def beforeStudentUpload(self, request: Request, pk=None):
     """
@@ -557,7 +591,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     if not isStudent(user, course) or not assignment.allowStudentUpload:
       return returnForbidden()
 
-    submission = Submission(assignment=assignment, dateUploaded=now())
+    submission = Submission(assignment=assignment, dateUploaded=timezone.now())
 
     # FIXME: This will not check for partner submissions
     # We can't just have the POST body contain partner ids, for the same information
@@ -584,6 +618,7 @@ class AssignmentViewSet(ListProtectedViewSet):
           "adjustedDaysLate": handler.calculated_days_late()
       }, status=status.HTTP_200_OK)
 
+  @extend_schema(responses=AssignmentDownloadResponseSerializer)
   @action(detail=True, methods=["GET"])
   def download(self, request: Request, pk=None):
     """
@@ -616,6 +651,8 @@ class AssignmentViewSet(ListProtectedViewSet):
     })
   
   # Upload assignment
+  @extend_schema(methods=["GET"], responses=AssignmentStudentUploadGetResponseSerializer)
+  @extend_schema(methods=["POST", "PATCH"], responses=StudentSubmissionSerializer)
   @action(detail=True, methods=["POST", "PATCH", "GET"])
   def studentUpload(self, request, pk=None):
     """
@@ -640,13 +677,13 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 
       # Began late submission check
-      if assignment.uploadDueDate and now() > assignment.uploadDueDate:
+      if assignment.uploadDueDate and timezone.now() > assignment.uploadDueDate:
         if not assignment.allowLateUploads:
           raise serializers.ValidationError("Late submissions are not allowed for this assignment.")
         
         # Calculate maxLateDate
         maxLateDate = assignment.uploadDueDate + timedelta(days=assignment.maxLateDays)
-        if now() > maxLateDate:
+        if timezone.now() > maxLateDate:
           raise serializers.ValidationError("The maximum late submission period has passed for this assignment.")
         
       # Ended late submission check
@@ -724,7 +761,7 @@ class AssignmentViewSet(ListProtectedViewSet):
                                    'extension'], path=f['path'] if f['path'] else None)
 
       # Update submission date once files have been uploaded, triggers auto-execution celery task
-      submission.dateUploaded = now()
+      submission.dateUploaded = timezone.now()
 
       if assignment.liveFeedbackMode:
         submission.isFinalized = False
@@ -780,6 +817,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         }
         return Response(toRet)
 
+  @extend_schema(responses=SubmissionWithTestsSerializer(many=True))
   @action(detail=True, methods=["GET"], pagination_class=LargeObjectsPagination)
   def submissionTests(self, request, pk=None):
     """
@@ -807,6 +845,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     return Response(serializer.data)
 
 
+  @extend_schema(responses=AssignmentDataSetSerializer(many=True))
   @action(detail=True, methods=["GET"])
   def datasets(self, request, pk=None):
     """
@@ -822,6 +861,154 @@ class AssignmentViewSet(ListProtectedViewSet):
     serializer = AssignmentDataSetSerializer(datasets, many=True, context={'request': request})
     return Response(serializer.data)
 
+  @extend_schema(request=AssignmentGenerateTestSerializer, responses={200: AssignmentGenerateTestResponseSerializer})
+  @action(detail=True, methods=["POST"])
+  def generateTest(self, request, pk=None):
+    """
+    Generate an AI-powered test script for a file in this assignment.
+    
+    Request body:
+    - target_filename: str (required) - Name of the file to test (e.g., 'main.py')
+    - context_file_id: int (optional) - ID of an AssignmentFile to use as context (Solution/Starter)
+    - context_file_name: str (optional) - Name of an AssignmentFile (if ID not provided)
+    - language: str (optional) - Target language (python, java, etc.)
+    """
+    from asgiref.sync import async_to_sync
+    from core.services.ai_service import AIService
+    
+    user = self.request.user
+    assignment = self.get_object()
+    course = assignment.course
+    
+    # Check permissions
+    if not isCourseAdmin(user, course) and not isSuperGrader(user, course):
+        return returnForbidden()
+        
+    # Check AI configuration
+    if not course.ai_provider or not course.ai_api_key or course.ai_disabled:
+        return Response(
+            {'error': 'AI is not configured/enabled for this course.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    serializer = AssignmentGenerateTestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    params = serializer.validated_data
+
+    target_filename = params.get('targetFilename') or params.get('target_filename')
+    context_file_id = params.get('contextFileId') or params.get('context_file_id')
+    context_file_name = params.get('contextFileName') or params.get('context_file_name')
+    # Default language logic is handled by serializer default, but check both keys
+    language = params.get('language', 'python')
+    rubric_text = params.get('rubricText') or params.get('rubric_text', '')
+        
+    # Fetch context file
+    context_content = ""
+    context_name = "Assignment Context"
+    
+    if context_file_id:
+        try:
+            af = AssignmentFile.objects.get(id=context_file_id, assignment=assignment)
+            context_content = af.data
+            context_name = af.name
+        except AssignmentFile.DoesNotExist:
+             return Response({'error': 'Context file not found'}, status=status.HTTP_404_NOT_FOUND)
+    elif context_file_name:
+         af = AssignmentFile.objects.filter(assignment=assignment, name=context_file_name).first()
+         if af:
+             context_content = af.data
+             context_name = af.name
+             
+    # Notebook Language Detection
+    #If target is a notebook, we need to know the kernel language to provide correct examples
+    # Target Code Extraction & Language Detection
+    target_code = None
+    
+    if target_filename:
+        try:
+            # Try to find the target file (Solution/Starter)
+            target_file = AssignmentFile.objects.filter(assignment=assignment, name=target_filename).first()
+            
+            if target_file and target_file.data:
+                if target_filename.endswith('.ipynb'):
+                     # Notebook: Extract code from cells
+                     try:
+                        import json
+                        nb_data = json.loads(target_file.data)
+                        
+                        # Detect language from kernel
+                        kernelspec = nb_data.get('metadata', {}).get('kernelspec', {})
+                        kernel_lang = kernelspec.get('language', '').lower()
+                        if kernel_lang:
+                            if 'python' in kernel_lang: language = 'python'
+                            elif 'r' == kernel_lang: language = 'r'
+                            elif 'javascript' in kernel_lang or 'node' in kernel_lang: language = 'node'
+                            elif 'php' in kernel_lang: language = 'php'
+                            elif 'ruby' in kernel_lang: language = 'ruby'
+                            elif 'c++' in kernel_lang or 'cpp' in kernel_lang: language = 'cpp'
+                            else: language = kernel_lang 
+                            
+                        # Extract code + markdown (markdown included as comments for AI context)
+                        def _comment_block(text: str, lang: str) -> str:
+                          if text is None:
+                            return ""
+                          # Normalize comment prefix by language
+                          lang_key = (lang or "").lower()
+                          if any(k in lang_key for k in ["java", "js", "ts", "c++", "cpp", "c#", "c/"]):
+                            prefix = "// "
+                          elif any(k in lang_key for k in ["python", "r", "ruby", "bash", "sh", "shell", "php", "node", "javascript", "typescript"]):
+                            prefix = "# "
+                          else:
+                            prefix = "// "
+                          lines = text.splitlines() or [""]
+                          return "\n".join(f"{prefix}{line}" for line in lines)
+
+                        code_cells = []
+                        cells = nb_data.get('cells', [])
+                        for cell in cells:
+                          cell_type = cell.get('cell_type')
+                          source = cell.get('source', '')
+                          if isinstance(source, list):
+                            source = ''.join(source)
+
+                          if cell_type == 'markdown':
+                            if source:
+                              code_cells.append(_comment_block(f"[Markdown]\n{source}", language))
+                          elif cell_type == 'code':
+                            code_cells.append(source)
+
+                        target_code = "\n\n".join([c for c in code_cells if c is not None])
+                     except Exception as e:
+                        logger.warning(f"Failed to parse notebook: {e}")
+                else:
+                    # Regular File: Use content directly
+                    target_code = target_file.data
+                    
+        except Exception as e:
+            logger.warning(f"Failed to extract target code: {e}")
+
+    service = AIService(course, assignment)
+    try:
+        # Generate script
+        result = async_to_sync(service.generate_test_script)(
+            context_file_content=context_content, 
+            context_filename=context_name,
+            target_filename=target_filename,
+            target_code=target_code,
+            language=language,
+            rubric_text=rubric_text
+        )
+        
+        if result.success:
+            return Response({'script': result.text})
+        else:
+            return Response({'error': result.error}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"AI Generation failed: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+  @extend_schema(request=AssignmentCloneSerializer, responses=AssignmentSerializer)
   @action(detail=True, methods=["POST"])
   def clone(self, request, pk=None):
     """

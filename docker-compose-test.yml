@@ -28,6 +28,8 @@ services:
       - --innodb_page_size=16k
       - --innodb_buffer_pool_size=128M # Smaller for test
       - --innodb_log_file_size=64M
+    labels:
+      - "autoheal=true"
     restart: always
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "--silent"]
@@ -65,6 +67,8 @@ services:
         condition: service_healthy
       codepost-redis:
         condition: service_started
+    labels:
+      - "autoheal=true"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health-check"]
       interval: 30s
@@ -99,6 +103,13 @@ services:
         condition: service_started
       codepost-database:
         condition: service_healthy
+
+  codepost-test-autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: codepost-test-autoheal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
 
 volumes:
   redis-data-test:

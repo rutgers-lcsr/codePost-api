@@ -37,7 +37,6 @@ class TestPermissions_Assignment_studentUpload(APITestCase):
 
     response = request_as('read', other_student, endpoint, {})
     self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-
   def test_permission_studentUpload_not_allowed(self):
     student = Persona.STUDENT_OF_SUB(self)
     other_student = Persona.STUDENT_OF_OTHER_ORG(self)
@@ -58,3 +57,4 @@ class TestPermissions_Assignment_studentUpload(APITestCase):
 
     response = request_as('read', other_student, endpoint, {})
     self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+

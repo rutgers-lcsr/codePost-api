@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "codepost-api"
-version = "0.1.0"
+version = "3.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
@@ -68,7 +68,7 @@ propcache = "0.3.2"
 py = "1.11.0"
 py-unused-deps = "0.4.2"
 pyjwt = "2.10.1"
-pytest = "8.3.5"
+pytest = "^8.3.5"
 python-dateutil = "2.8.2"
 python-http-client = "3.3.7"
 pytz = "2025.2"
@@ -103,6 +103,7 @@ openai = "^1.10.0"
 httpx = "^0.26.0"
 django-encrypted-model-fields = "*"
 drf-spectacular = "^0.27.0"
+channels = "^4.1.0"
 
 
 [build-system]

@@ -312,7 +312,11 @@ class Course(BaseModel):
   )
   ai_disabled = models.BooleanField(
       default=False,
-      help_text="If True, AI comment generation is disabled even if configured"
+      help_text="If True, all AI features are disabled even if configured"
+  )
+  ai_comments_disabled = models.BooleanField(
+      default=False,
+      help_text="If True, AI comment generation is disabled even if AI is globally enabled"
   )
 
   class Meta:
@@ -433,6 +437,15 @@ class Assignment(BaseModel):
   allowLateUploads = models.BooleanField(default=False, help_text=(
       "A boolean field. If True and an uploadDueDate is set, students will still be able to submit after a deadline has passed."))
   lateDeductions = JSONField(default=[], help_text="An array of point deductions for each day late.")
+
+  gradersCanEditSubmissions = models.BooleanField(default=False, help_text=(
+      "A boolean field. If True, graders will be allowed to edit student submissions (e.g. for testing fixes)."))
+  
+  runTestsOnSubmit = models.BooleanField(default=True, help_text=(
+      "If True, autograder tests will automatically run when a student submits."))
+  
+  testsAffectGrade = models.BooleanField(default=True, help_text=(
+      "If True, the results of autograder tests will be included in the submission grade calculation."))
 
   # AI-powered comment generation
   ai_system_prompt = models.TextField(
@@ -580,7 +593,8 @@ class Submission(BaseModel):
   course = property(lambda self: self.assignment.course)
 
   def save(self, *args, **kwargs):
-    if not self.gradeFrozen and self.isFinalized:
+    # Always recalculate grade when not frozen (allows tests to affect grade before finalization)
+    if not self.gradeFrozen:
       self.grade = calculate_grade(self)
     self.dateEdited = now()
 
@@ -687,7 +701,7 @@ class File(BaseModel):
   def __getattr__(self, name):
       # Delegate unknown attributes to the handler
       # Avoid recursion if handler is missing
-      if name in ['_handler', 'handler']:
+      if name in ['_handler', 'handler', 'code']:
           raise AttributeError(name)
           
       try:
@@ -779,10 +793,23 @@ class AssignmentDataSet(BaseModel):
   is_active = models.BooleanField(
     default=True,
     help_text=("If True, this dataset will be mounted during code execution."))
+  
+  hidden = models.BooleanField(
+    default=False,
+    help_text=("If True, this dataset will be hidden from students."))
+
+  # Whether this dataset is a test resource (linked to a TestCategory)
+  is_test_resource = models.BooleanField(
+      default=False,
+      help_text="If True, this dataset is used as a resource for a TestCategory.")
 
   course = property(lambda self: self.assignment.course)
   
   def save(self, *args, **kwargs):
+    # Test resources should never be student-visible.
+    if self.is_test_resource:
+      self.hidden = True
+
     # Set default mount_path if not provided
     if not self.mount_path and self.name:
       # Sanitize name for filesystem use - keep dots for file extensions
@@ -791,6 +818,15 @@ class AssignmentDataSet(BaseModel):
       self.mount_path = f'shared/{safe_name}'
     
     super(AssignmentDataSet, self).save(*args, **kwargs)
+  
+  def delete(self, *args, **kwargs):
+    # Delete the file from disk when the dataset is deleted
+    if self.file:
+      try:
+        self.file.delete(save=False)
+      except Exception:
+        pass  # File might not exist or be inaccessible
+    super(AssignmentDataSet, self).delete(*args, **kwargs)
   
   class Meta:
     unique_together = ('assignment', 'name')
@@ -872,8 +908,8 @@ class CachedExecutionResult(BaseModel):
     logger = logging.getLogger(__name__)
     logger.info(f"[CachedExecutionResult.get] Checking cache for file {file.id}")
     
-    # Get file content - File subclasses use 'data', some special files use 'code'
-    file_content = getattr(file, 'data', None) or getattr(file, 'code', '')
+    # Get file content - File subclasses use 'data'
+    file_content = getattr(file, 'data', None) or ''
     if not file_content:
       logger.warning(f"[CachedExecutionResult.get] File {file.id} has no content")
       return None
@@ -896,17 +932,51 @@ class CachedExecutionResult(BaseModel):
   
   def get_cached_formated_response(self,file:File):
     # Return in the same format as fresh execution
+    output_data = self.output_data
+    success = True
+    stdout = None
+    stderr = None
+    error = None
+    system_logs = None
+    tests = None
+    execution_time = self.execution_time_seconds
+
+    # If cached output_data looks like ExecutionResult.to_dict(), unwrap and promote fields
+    if isinstance(output_data, dict):
+      if any(key in output_data for key in ("stdout", "stderr", "error", "success", "output_data")):
+        success = output_data.get("success", True)
+        stdout = output_data.get("stdout")
+        stderr = output_data.get("stderr")
+        error = output_data.get("error")
+        system_logs = output_data.get("system_logs")
+        tests = output_data.get("tests")
+        if output_data.get("execution_time") is not None:
+          execution_time = output_data.get("execution_time")
+
+        # Prefer the inner output_data if present (matches fresh execution response shape)
+        if output_data.get("output_data") is not None:
+          output_data = output_data.get("output_data")
+
     response_data = {
-        "success": True,
-        "output_data": self.output_data,
+        "success": success,
+        "output_data": output_data,
         "file_id": file.id,
         "file_name": file.name,
-        "error": None,
-        "execution_time": self.execution_time_seconds,
+        "error": error,
+        "execution_time": execution_time,
         "cached": True,
         "executed_at": self.executed_at.isoformat(),
         "executed_by": self.executed_by.username if self.executed_by else None,
     }
+
+    if stdout is not None:
+      response_data["stdout"] = stdout
+    if stderr is not None:
+      response_data["stderr"] = stderr
+    if system_logs is not None:
+      response_data["system_logs"] = system_logs
+    if tests is not None:
+      response_data["tests"] = tests
     submission, assignment, course = file.get_file_info()
     if submission:
       response_data["submission_id"] = submission.id
@@ -938,8 +1008,8 @@ class CachedExecutionResult(BaseModel):
     logger = logging.getLogger(__name__)
     logger.info(f"[CachedExecutionResult.save] Attempting to save cache for file {file.id}")
     
-    # Get file content - File subclasses use 'data', some special files use 'code'
-    file_content = getattr(file, 'data', None) or getattr(file, 'code', '')
+    # Get file content - File subclasses use 'data'
+    file_content = getattr(file, 'data', None) or ''
     if not file_content:
       logger.warning(f"[CachedExecutionResult.save] File {file.id} has no content, skipping cache")
       return None
@@ -984,9 +1054,24 @@ class AssignmentFile(File):
   required = models.BooleanField(
       default=False, help_text="If student upload is enabled, a file with this name and extension will be required.")
   description = models.TextField(blank=True, help_text=("Optional description shown to students."))
+  
+  hidden = models.BooleanField(
+    default=False,
+    help_text=("If True, this file will be hidden from students (but available for tests/helpers)."))
+  
+  # Whether this file is a test resource (linked to a TestCategory)
+  is_test_resource = models.BooleanField(
+      default=False,
+      help_text="If True, this file is used as a resource for a TestCategory.")
   isVisible = property(lambda self: self.assignment.isVisible)
 
   course = property(lambda self: self.assignment.course)
+
+  def save(self, *args, **kwargs):
+    # Test resources should never be student-visible.
+    if self.is_test_resource:
+      self.hidden = True
+    return super(AssignmentFile, self).save(*args, **kwargs)
 
 
 class CourseFile(File):
@@ -1066,6 +1151,12 @@ class TestCategory(BaseModel):
   assignment: Assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE,  # type: ignore[assignment]
                                  related_name="testCategories", help_text=("The related assignment__id."))
   name = models.CharField(max_length=48, help_text=("The name of the test."))
+  
+  testScript = models.TextField(blank=True, default="", help_text=("Python script containing @test decorated functions."))
+  maxPoints = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text=("Total points available for this category."))
+  sortKey = models.IntegerField(default=0, help_text=("Integer to specify the order of display."))
+  targetFileName = models.CharField(max_length=255, null=True, blank=True, help_text="The name of the file this test targets.")
+  
   course = property(lambda self: self.assignment.course)
 
   class Meta:
@@ -1077,7 +1168,8 @@ testTypes = (
     ('unit', 'unit'),
     ('shell', 'shell'),
     ('file', 'file'),
-    ('external', 'external'),)
+    ('external', 'external'),
+    ('script', 'script'),)
 
 testCase_status_types = (
     (0, 'Passed'),
@@ -1108,21 +1200,16 @@ class TestCase(BaseModel):
   exposed = models.BooleanField(default=False, help_text=(
       "If True and type is not 'external', this test will be run when a student submits, and the results shown to the student"))
   lastSolutionRun = models.IntegerField(default=3, choices=testCase_status_types)
+  
+  rubricItem = models.ForeignKey(RubricComment, null=True, blank=True, on_delete=models.SET_NULL, help_text=("The related rubric comment. If set, failure applies this rubric item."))
 
-  ################# Only relevant to I/O Tests ########################################
-  function = models.TextField(blank=True, help_text=("The function name to test"))
-  fileName = models.TextField(blank=True, help_text=("The file name to test"))
-  outputIsFile = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if the output is the name of a file to be compared to."))
-  expectedOutput = models.TextField(blank=True, help_text=("The expected output of the test"))
-  input = models.TextField(blank=True, help_text=("The input of the test"))
-  checkReturn = models.BooleanField(default=True, help_text=(
-      "A boolean field. 'True' if the output should be compared to the return of the function. False if it should be compared to std out."))
-  isFlexible = models.BooleanField(default=False, help_text=("Flexible mode for output checking."))
-  outputIsRegexp = models.BooleanField(default=False, help_text=("Is expected output specified in the form of a regexp?"))
-  expectPlot = models.BooleanField(default=False, help_text=("If True, the test will only pass if a plot is generated."))
-  dataSet = models.ForeignKey("AssignmentDataSet", null=True, blank=True, on_delete=models.SET_NULL, help_text=("The dataset to mount for this test."))
+  functionName = models.CharField(max_length=128, blank=True, null=True, help_text=("The name of the function in the test script."))
+
+  ################# Script / Notebook / Robust Framework Fields ########################
+  # Field for custom test scripts (type='script')
+  testCode = models.TextField(blank=True, help_text=("The custom test script code."))
   targetCellId = models.CharField(max_length=64, blank=True, null=True, help_text=("The ID of the notebook cell to target for execution."))
+  timeout = models.IntegerField(default=30, help_text=("Execution timeout in seconds for this test."))
 
   course = property(lambda self: self.testCategory.course)
 
@@ -1142,6 +1229,12 @@ class SubmissionTest(BaseModel):
       "A boolean field. 'True' if the submission passed this test. 'False' otherwise."))
   isError = models.BooleanField(default=False, help_text=(
       "A boolean field. 'True' if the test resulted in an error. False otherwise."))
+  results = models.JSONField(null=True, blank=True, help_text=(
+      "Structured test results (list of subtests)."))
+  score = models.DecimalField(max_digits=7, decimal_places=2, default=0, help_text=(
+      "Aggregate score earned from all subtests."))
+  maxScore = models.DecimalField(max_digits=7, decimal_places=2, default=0, help_text=(
+      "Maximum possible score from all subtests."))
 
   course = property(lambda self: self.submission.course)
 
@@ -1297,6 +1390,12 @@ def getLatestSubmissionTests(submission):
 
 
 def calculate_grade(submission: Submission) -> Decimal:
+  if submission.pk is None:
+    if submission.assignment.additiveGrading:
+      return Decimal(0)
+    else:
+      return Decimal(submission.assignment.points)
+
   # key = category id (0 = no rubricComment), value = aggregate deductions
   deductions = {}
   deductions[0] = 0
@@ -1324,19 +1423,28 @@ def calculate_grade(submission: Submission) -> Decimal:
           deductions[key] = min(deductions[key], category.pointLimit)
 
   # Now account for points corresponding to tests
-  tests = getLatestSubmissionTests(submission)
-  counter = 0
-  for test in tests:
-    if test.passed:
-      counter += test.testCase.pointsPass
-    else:
-      counter += test.testCase.pointsFail
+  counter = Decimal(0)
+  if submission.assignment.testsAffectGrade:
+    tests = getLatestSubmissionTests(submission)
+    for test in tests:
+      # Use proportional scoring if maxScore is set (new partial credit system)
+      if test.maxScore and test.maxScore > 0:
+        # Calculate ratio of score earned
+        ratio = Decimal(test.score) / Decimal(test.maxScore)
+        # Award proportional points (ratio * pointsPass)
+        counter += ratio * Decimal(test.testCase.pointsPass)
+      else:
+        # Fallback to binary pass/fail for legacy tests
+        if test.passed:
+          counter += Decimal(test.testCase.pointsPass)
+        else:
+          counter += Decimal(test.testCase.pointsFail)
 
   # Reduce to deduction
   if submission.assignment.additiveGrading:
     return Decimal(-1 * sum(deductions.values()) + counter)
   else:
-    return Decimal(submission.assignment.points - sum(deductions.values()) + counter)
+    return Decimal(submission.assignment.points) - Decimal(sum(deductions.values())) + counter
 
 
 def updateSubmissionHistory(submission: Submission):
@@ -1370,6 +1478,43 @@ def save_user_profile(sender, instance, **kwargs):
   except Profile.DoesNotExist:
     Profile.objects.create(user=instance)
 
+
+class TestCategoryResource(BaseModel):
+  if TYPE_CHECKING:
+    id: int
+    category: models.ForeignKey[TestCategory, TestCategory]
+    file: Optional[models.ForeignKey[AssignmentFile, AssignmentFile]]
+    dataset: Optional[models.ForeignKey[AssignmentDataSet, AssignmentDataSet]]
+
+  category = models.ForeignKey("TestCategory", on_delete=models.CASCADE, related_name="resources", help_text="The related test category.")
+  
+  # A resource can be either a File or a DataSet
+  file = models.ForeignKey("AssignmentFile", on_delete=models.CASCADE, null=True, blank=True, help_text="The source file.")
+  dataset = models.ForeignKey("AssignmentDataSet", on_delete=models.CASCADE, null=True, blank=True, help_text="The source dataset.")
+  
+  # The path/name this resource will have in the test environment (Aliasing)
+  target_path = models.CharField(max_length=512, help_text="The filename or path this resource will be saved as during test execution. Allows aliasing (e.g. use 'test1.txt' as 'input.txt').")
+
+  def save(self, *args, **kwargs):
+    if not self.file and not self.dataset:
+      raise ValidationError("A TestCategoryResource must have either a file or a dataset.")
+    if self.file and self.dataset:
+      raise ValidationError("A TestCategoryResource cannot have both a file and a dataset.")
+
+    # Automatically tag the linked resource as a test resource
+    if self.file:
+      self.file.is_test_resource = True 
+      self.file.save()
+    if self.dataset:
+      self.dataset.is_test_resource = True
+      self.dataset.save()
+
+    super(TestCategoryResource, self).save(*args, **kwargs)
+
+  class Meta:
+    unique_together = [
+        ('category', 'target_path') # Ensure no two resources try to write to the same path
+    ]
 
 ############# TRIGGER GRADE COMPUTATION #######################################
 
@@ -1432,6 +1577,34 @@ def save_submission_from_comment_delete(sender, instance, **kwargs):
   instance.file.submission.save()
 
 
+@receiver(post_save, sender=SubmissionTest)
+def save_submission_from_test(sender, instance, **kwargs):
+  """Trigger grade recalculation when test results change."""
+  instance.submission.save()
+
+
+@receiver(post_delete, sender=SubmissionTest)
+def save_submission_from_test_delete(sender, instance, **kwargs):
+  """Trigger grade recalculation when test results are deleted."""
+  try:
+    instance.submission.save()
+  except Submission.DoesNotExist:
+    pass
+
+
+@receiver(post_save, sender=TestCategory)
+def update_test_cases_from_script(sender, instance, **kwargs):
+    """Parse test script and update TestCases on save."""
+    # Avoid circular imports or start-up issues
+    try:
+        from autograder.services.TestParsingService import TestParsingService
+        TestParsingService.update_test_cases(instance)
+    except Exception as e:
+        # Logging here would be good, but for now just pass to avoid breaking save
+        # in case of migration/startup issues
+        pass
+
+
 @receiver(pre_save, sender=Submission)
 def updateRegradeResponse(sender, instance, **kwargs):
   if(not instance.questionResponse):
@@ -1448,10 +1621,10 @@ def updateRegradeResponse(sender, instance, **kwargs):
 class CommentTemplate(BaseModel):
   if TYPE_CHECKING:
     id: int
-    owner: User
-    assignment: Assignment
-    rubricComment: RubricComment | None
-    sourceComment: Comment | None
+    owner: models.ForeignKey[User, User]
+    assignment: models.ForeignKey[Assignment, Assignment]
+    rubricComment: Optional[models.ForeignKey[RubricComment, RubricComment]]
+    sourceComment: Optional[models.ForeignKey[Comment, Comment]]
 
   text = models.TextField(help_text=("The text of the template."))
   owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="comment_templates", help_text=("The creator of the template."))

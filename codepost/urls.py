@@ -38,6 +38,7 @@ from core.views.comment import CommentViewSet
 from core.views.submissionTest import SubmissionTestViewSet
 from core.views.testCase import TestCaseViewSet
 from core.views.testCategory import TestCategoryViewSet
+from core.views.testCategoryResource import TestCategoryResourceViewSet
 from core.views.assignmentDataSet import AssignmentDataSetViewSet
 from core.views.dashboard import DashboardViewSet
 from core.views.commentTemplate import CommentTemplateViewSet
@@ -61,6 +62,9 @@ class RedirectToAdminViewSet(ViewSet):
     """
     A simple ViewSet that redirects to the admin interface.
     """
+    # This is not a JSON API endpoint; exclude it from OpenAPI generation.
+    schema = None
+
     def list(self, request):
         from django.shortcuts import redirect
         return redirect('/admin/')
@@ -83,6 +87,7 @@ router.register(r'courseFiles', CourseFileViewSet)
 # router.register(r'fileTemplates', AssignmentFileViewSet)  # Deprecated - redirects to AssignmentFileViewSet
 router.register(r'testCases', TestCaseViewSet)
 router.register(r'testCategories', TestCategoryViewSet)
+router.register(r'testCategoryResources', TestCategoryResourceViewSet)
 router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'webhooks', WebhookViewSet)
 router.register(r'assignmentDataSets', AssignmentDataSetViewSet)

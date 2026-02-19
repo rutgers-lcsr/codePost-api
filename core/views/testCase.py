@@ -7,6 +7,8 @@ from core.models import Submission
 from core.permissions.helpers import isStaffOfSub, returnNotAuthorized
 
 from rest_framework.decorators import action
+from drf_spectacular.utils import extend_schema
+from core.serializers.actionResponses import TestCaseRunRequestSerializer, TestCaseRunResponseSerializer
 from core.permissions.helpers import isAuthenticated, returnForbidden
 
 from core.permissions.helpers import isCourseAdmin, isCourseStaff
@@ -45,6 +47,7 @@ class TestCaseViewSet(ListProtectedViewSet):
     serializer_class = TestCaseSerializer
     permission_classes = (IsAuthenticated, TestCasePermissions)
 
+    @extend_schema(request=TestCaseRunRequestSerializer, responses=TestCaseRunResponseSerializer)
     @action(detail=True, methods=["POST"])
     def run(self, request, pk=None):
         user = self.request.user
@@ -63,15 +66,17 @@ class TestCaseViewSet(ListProtectedViewSet):
                 "Environment has not been created for this asignment."
             )
 
-        submission = self.request.data.get("submission", None)
-        files = None
+        serializer = TestCaseRunRequestSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+
+        validated_data = serializer.validated_data
+        if not isinstance(validated_data, dict):
+            validated_data = {}
+
+        submission = validated_data.get("submission", None)
+        files = validated_data.get("files", None)
 
         if submission:
-            files = self.request.data.get("files", None)
-
-            if files != None:
-                files = json.loads(files)
-
             try:
                 submission = Submission.objects.get(id=submission)
             except:

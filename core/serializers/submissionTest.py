@@ -7,6 +7,6 @@ class SubmissionTestSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = SubmissionTest
-    fields = ('id', 'submission', 'testCase', 'logs', 'passed', 'testCategory', 'created', 'modified', 'isError')
+    fields = ('id', 'submission', 'testCase', 'logs', 'passed', 'testCategory', 'created', 'modified', 'isError', 'score', 'maxScore', 'results')
     POST_permissions_fields = ('submission',)
     read_only_fields = ('testCategory', 'modified', 'created', )

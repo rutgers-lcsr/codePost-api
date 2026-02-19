@@ -3,6 +3,7 @@ const vm = require("vm");
 
 // Placeholder for base64 encoded cells
 const cellsB64 = "{cells_b64}";
+const testCodeB64 = "{test_code_b64}";
 
 // Decode cells
 const cellsJson = Buffer.from(cellsB64, "base64").toString("utf-8");
@@ -13,6 +14,92 @@ try {
     console.error("Failed to parse cells JSON");
     process.exit(1);
 }
+
+// ============= Tester Framework =============
+const tests = [];
+const testResults = [];
+
+function test(name, points, description, fn, timeout) {
+    if (typeof description === 'function') {
+        timeout = fn;
+        fn = description;
+        description = null;
+    }
+    if (typeof timeout === 'undefined' || timeout === null) {
+        timeout = 30;
+    }
+
+    tests.push({ name, points, description, fn, timeout });
+}
+
+async function runTestCase(testCase) {
+    const result = {
+        name: testCase.name,
+        max_score: testCase.points,
+        description: testCase.description,
+        message: "",
+        score: 0,
+        passed: false,
+        status: "failed",
+        error: ""
+    };
+
+    const timeoutMs = Math.max(0, Number(testCase.timeout) || 30) * 1000;
+    const start = Date.now();
+
+    try {
+        const maybePromise = testCase.fn();
+        const outcome = (maybePromise && typeof maybePromise.then === "function")
+            ? await Promise.race([
+                maybePromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error(`Test timed out after ${timeoutMs / 1000}s`)), timeoutMs))
+            ])
+            : maybePromise;
+
+        if (Array.isArray(outcome) && outcome.length >= 2 && typeof outcome[0] === "number") {
+            result.score = Math.max(0, Math.min(outcome[0], testCase.points));
+            result.message = outcome[1] != null ? String(outcome[1]) : "";
+            result.passed = result.score === testCase.points;
+            result.status = result.passed ? "passed" : "partial";
+        } else if (outcome && typeof outcome === "object" && typeof outcome.score === "number") {
+            result.score = Math.max(0, Math.min(outcome.score, testCase.points));
+            result.message = outcome.message != null ? String(outcome.message) : "";
+            result.passed = result.score === testCase.points;
+            result.status = result.passed ? "passed" : "partial";
+        } else if (typeof outcome === "number") {
+            result.score = Math.max(0, Math.min(outcome, testCase.points));
+            result.passed = result.score === testCase.points;
+            result.status = result.passed ? "passed" : "partial";
+        } else if (typeof outcome === "string") {
+            result.message = outcome;
+            result.passed = true;
+            result.score = testCase.points;
+            result.status = "passed";
+        } else {
+            result.passed = true;
+            result.score = testCase.points;
+            result.status = "passed";
+        }
+    } catch (e) {
+        result.error = e.message || String(e);
+        result.status = result.error && result.error.includes("timed out") ? "error" : "failed";
+    }
+
+    testResults.push(result);
+}
+
+async function runAllTests() {
+    for (const t of tests) {
+        await runTestCase(t);
+    }
+}
+
+function outputTestResults() {
+    console.log("<<<TEST_RESULT_JSON_START>>>");
+    console.log(JSON.stringify(testResults));
+    console.log("<<<TEST_RESULT_JSON_END>>>");
+}
+// ============================================
 
 const results = [];
 const context = vm.createContext({
@@ -32,6 +119,7 @@ const context = vm.createContext({
     require: require,
     process: process,
     Buffer: Buffer,
+    test: test, // Expose test function to VM context
 });
 
 let currentStdout = null;
@@ -92,8 +180,6 @@ async function run() {
                     traceback: errorVal.stack ? errorVal.stack.split("\n") : [],
                 });
             } else if (resultValue !== undefined) {
-                // Simulate execute_result if needed, but usually console.log is enough for JS.
-                // Jupyter JS kernels usually output the last expression
                 outputs.push({
                     output_type: "execute_result",
                     execution_count: executionCount,
@@ -113,11 +199,29 @@ async function run() {
         }
     }
 
+    // Execute test code if provided
+    if (testCodeB64 && testCodeB64.length > 0) {
+        try {
+            const testCode = Buffer.from(testCodeB64, "base64").toString("utf-8");
+            if (testCode.trim().length > 0) {
+                vm.runInContext(testCode, context);
+            }
+        } catch (e) {
+            test("Test Script Execution", 0, () => {
+                throw new Error("Failed to run test script: " + (e.message || e));
+            });
+        }
+    }
+
+    await runAllTests();
+    // Output test results
+    outputTestResults();
+
     const finalResult = {
         success: true,
         stdout: "",
         stderr: "",
-        execution_time: 0, // Calculated by runner
+        execution_time: 0,
         output_data: {
             cells: results,
             notebook: "",

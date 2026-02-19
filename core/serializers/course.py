@@ -128,11 +128,14 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
             source_course = Course.objects.get(id=clone_from_id)
             # Permission check: User must be admin of source course to clone its settings (esp. API keys)
             if isCourseStaff(courseAdmin, source_course) or courseAdmin.is_superuser:
+                from core.utils import copy_assignment
+
                 # Copy AI Settings
                 obj.ai_provider = source_course.ai_provider
                 obj.ai_api_key = source_course.ai_api_key  # Secure copy of encrypted key
                 obj.ai_base_url = source_course.ai_base_url
                 obj.ai_model = source_course.ai_model
+                obj.ai_comments_disabled = source_course.ai_comments_disabled
                 
                 # Copy other settings if consistent with tooltips.tsx claim:
                 # "Cloning a course will copy all assignments (including rubrics) and course settings"
@@ -144,6 +147,17 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
                 obj.minComments = source_course.minComments
                 obj.noUnfinalize = source_course.noUnfinalize
                 obj.lateDayCreditsAllowable = source_course.lateDayCreditsAllowable
+
+                # Copy assignments into the new course
+                for source_assignment in source_course.assignments.all().order_by('sortKey', 'id'):
+                    copied_assignment = copy_assignment(source_assignment, obj)
+                    if copied_assignment is None:
+                        logger.warning(
+                            "Failed to clone assignment %s while cloning course %s into course %s",
+                            source_assignment.id,
+                            source_course.id,
+                            obj.id,
+                        )
                 
             else:
                  logger.warning(f"User {courseAdmin.email} tried to clone course {clone_from_id} without permission")
@@ -167,19 +181,38 @@ class CourseSettingsSerializer(ModelSerializerWithPOSTCheck):
 
 class CourseAISettingsSerializer(serializers.ModelSerializer):
   """Serializer for course AI configuration. Admin-only access."""
-  ai_enabled = serializers.SerializerMethodField()
+  aiProvider = serializers.ChoiceField(source='ai_provider', choices=Course.AI_PROVIDER_CHOICES, required=False, allow_null=True)
+  aiApiKey = serializers.CharField(source='ai_api_key', required=False, allow_null=True, allow_blank=True, write_only=True)
+  aiBaseUrl = serializers.CharField(source='ai_base_url', required=False, allow_null=True, allow_blank=True)
+  aiModel = serializers.CharField(source='ai_model', required=False, allow_null=True, allow_blank=True)
+  aiDisabled = serializers.BooleanField(source='ai_disabled', required=False)
+  aiCommentsDisabled = serializers.BooleanField(source='ai_comments_disabled', required=False)
+  aiEnabled = serializers.SerializerMethodField()
+  aiCommentsEnabled = serializers.SerializerMethodField()
   
   class Meta:
     model = Course
-    fields = ('id', 'ai_provider', 'ai_api_key', 'ai_base_url', 'ai_model', 'ai_disabled', 'ai_enabled')
-    extra_kwargs = {
-      'ai_api_key': {'write_only': True}  # Never return API key in response
-    }
+    fields = (
+      'id',
+      'aiProvider',
+      'aiApiKey',
+      'aiBaseUrl',
+      'aiModel',
+      'aiDisabled',
+      'aiCommentsDisabled',
+      'aiEnabled',
+      'aiCommentsEnabled',
+    )
   
   @extend_schema_field(serializers.BooleanField)
-  def get_ai_enabled(self, obj):
-    """Returns True if AI is configured and not disabled for this course."""
+  def get_aiEnabled(self, obj):
+    """Returns True if AI is globally configured and enabled for this course."""
     return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled)
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_aiCommentsEnabled(self, obj):
+    """Returns True if AI comments are available (global AI enabled + comments toggle enabled)."""
+    return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled and not obj.ai_comments_disabled)
 
 
 class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
@@ -300,4 +333,18 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
       section.save()
 
     return newData
+
+
+class CourseRosterMapSerializer(serializers.Serializer):
+  rosterMap = serializers.DictField(
+      child=serializers.CharField(allow_blank=True, allow_null=True),
+      required=False
+  )
+
+
+class CourseStudentCaptionsSerializer(serializers.Serializer):
+  studentCaptions = serializers.DictField(
+      child=serializers.CharField(allow_blank=True, allow_null=True),
+      required=False
+  )
 

@@ -1,6 +1,8 @@
 import re
 import logging
 from typing import Set, Optional
+
+import javalang.tree
 from .base import BaseFileHandler
 
 logger = logging.getLogger(__name__)

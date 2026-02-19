@@ -1,17 +1,18 @@
 """
 Dashboard ViewSet for platform admin statistics.
 """
-from rest_framework import viewsets, serializers
+from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.utils import extend_schema
 from django.contrib.auth.models import User
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
 
 from core.models import Organization, Course, Assignment, Section
+from core.serializers.dashboard import DashboardStatsSerializer
 
 
 class DashboardViewSet(viewsets.ViewSet):
@@ -21,30 +22,7 @@ class DashboardViewSet(viewsets.ViewSet):
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
 
-    @extend_schema(
-        responses={
-            200: inline_serializer(
-                name='DashboardStats',
-                fields={
-                    'totalOrganizations': serializers.IntegerField(),
-                    'totalCourses': serializers.IntegerField(),
-                    'activeCourses': serializers.IntegerField(),
-                    'archivedCourses': serializers.IntegerField(),
-                    'totalUniqueUsers': serializers.IntegerField(),
-                    'totalCodePostAdmins': serializers.IntegerField(),
-                    'totalCourseAdmins': serializers.IntegerField(),
-                    'totalGraders': serializers.IntegerField(),
-                    'totalStudents': serializers.IntegerField(),
-                    'totalSections': serializers.IntegerField(),
-                    'totalAssignments': serializers.IntegerField(),
-                    'avgCoursesPerOrg': serializers.FloatField(),
-                    'avgStudentsPerCourse': serializers.FloatField(),
-                    'totalInactiveUsers': serializers.IntegerField(),
-                    'activeUsers30d': serializers.IntegerField(),
-                }
-            )
-        }
-    )
+    @extend_schema(responses={200: DashboardStatsSerializer})
     @action(detail=False, methods=['GET'])
     def stats(self, request):
         """
