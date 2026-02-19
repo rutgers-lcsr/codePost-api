@@ -37,6 +37,25 @@ class SubmissionVersionHandler:
 
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
             for file in files:
-                zip_file.writestr(file.name, file.data)
+                data = file.data
+
+                # For binary files, data might be base64. Try to decode if it looks like base64 or is a binary extension.
+                BINARY_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
+                if any(file.name.lower().endswith('.' + ext) for ext in BINARY_EXTENSIONS):
+                    # Check for data URI prefix and strip it if present
+                    if data.startswith('data:'):
+                        try:
+                            header, encoded = data.split(',', 1)
+                            data = base64.b64decode(encoded)
+                        except Exception:
+                            pass
+                    else:
+                        # No prefix, try direct decode if it looks like base64
+                        try:
+                            data = base64.b64decode(data)
+                        except Exception:
+                            pass
+                
+                zip_file.writestr(file.name, data)
 
         return base64.b64encode(zip_buffer.getvalue()).decode()
