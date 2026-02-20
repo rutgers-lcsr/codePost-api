@@ -180,12 +180,13 @@ class UserViewSet(SuperUserListProtectedViewSet):
     if not user.profile.canModifyRosters:
       return returnForbidden()
 
-    if user.profile.api_token:
-      user.profile.api_token.delete()
+    # Clean up any existing token rows for this user to avoid unique constraint
+    # failures when profile.api_token is stale or unset.
+    Token.objects.filter(user=user).delete()
 
     token = Token.objects.create(user=user)
     user.profile.api_token = token
-    user.save()
+    user.profile.save(update_fields=['api_token'])
 
     serializer = UserSerializer(user, context={'request': request})
     return Response(serializer.data)
