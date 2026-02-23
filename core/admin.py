@@ -1,11 +1,12 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.contrib import admin
-from django.db.models import Count, Q
+from django.db.models import Count, Q, F
 from django.utils.html import format_html
 from django.urls import reverse, path
 from django.utils.safestring import mark_safe
 from django.http import HttpResponseRedirect
 from django.shortcuts import redirect
+from django.utils import timezone
 from typing import Any, Optional
 
 from core.models import (
@@ -14,6 +15,7 @@ from core.models import (
     AssignmentDataSet,
     CachedExecutionResult,
     Comment,
+    CommentTemplate,
     CommentTag,
     Course,
     CourseFile,
@@ -34,6 +36,7 @@ from core.models import (
     SubmissionTest,
     TestCase,
     TestCategory,
+    TestCategoryResource,
 )
 
 # ============================================================================
@@ -42,12 +45,283 @@ from core.models import (
 
 admin.site.site_header = "codePost Administration"
 admin.site.site_title = "codePost Admin"
-admin.site.index_title = "Welcome to codePost Administration"
+admin.site.index_title = mark_safe(
+    '<span style="font-weight:600;">Welcome to codePost Administration</span>'
+    '<span style="color:#7a7a7a; margin-left:8px; font-weight:400;">|</span>'
+    '<span style="margin-left:8px; color:#6b7280; font-size:12px;">'
+    '<a href="/docs/" target="_blank" rel="noopener">Docs</a>'
+    '<span style="margin:0 6px; color:#9ca3af;">·</span>'
+    '<a href="/api/schema/swagger-ui/" target="_blank" rel="noopener">Swagger</a>'
+    '<span style="margin:0 6px; color:#9ca3af;">·</span>'
+    '<a href="/api/schema/elements/" target="_blank" rel="noopener">Elements</a>'
+    '<span style="margin:0 6px; color:#9ca3af;">·</span>'
+    '<a href="/api/schema/" target="_blank" rel="noopener">JSON</a>'
+    '<span style="margin:0 6px; color:#9ca3af;">·</span>'
+    '<a href="/api/schema/yaml/" target="_blank" rel="noopener">YAML</a>'
+    '</span>'
+)
+admin.site.site_url = "/docs/"
 
 
 # ============================================================================
 # Custom Admin Classes
 # ============================================================================
+
+
+class AutograderEnabledFilter(admin.SimpleListFilter):
+    title = "autograder configured"
+    parameter_name = "autograder_configured"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Yes"), ("no", "No")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "yes":
+            return queryset.filter(testCategories__isnull=False).distinct()
+        if value == "no":
+            return queryset.filter(testCategories__isnull=True)
+        return queryset
+
+
+class HasResourcesFilter(admin.SimpleListFilter):
+    title = "has resources"
+    parameter_name = "has_resources"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Yes"), ("no", "No")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "yes":
+            return queryset.filter(resources__isnull=False).distinct()
+        if value == "no":
+            return queryset.filter(resources__isnull=True)
+        return queryset
+
+
+class HasTestCasesFilter(admin.SimpleListFilter):
+    title = "has test cases"
+    parameter_name = "has_test_cases"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Yes"), ("no", "No")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "yes":
+            return queryset.filter(testCases__isnull=False).distinct()
+        if value == "no":
+            return queryset.filter(testCases__isnull=True)
+        return queryset
+
+
+class NeverRunTestFilter(admin.SimpleListFilter):
+    title = "solution run status"
+    parameter_name = "solution_run_status"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("never", "Never run"), ("ran", "Has run")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "never":
+            return queryset.filter(lastSolutionRun=3)
+        if value == "ran":
+            return queryset.exclude(lastSolutionRun=3)
+        return queryset
+
+
+class AssignmentDueDateFilter(admin.SimpleListFilter):
+    title = "upload due date"
+    parameter_name = "upload_due_status"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            ("none", "No due date"),
+            ("set", "Has due date"),
+            ("past", "Past due"),
+            ("future", "Due in future"),
+        ]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        now = timezone.now()
+        if value == "none":
+            return queryset.filter(uploadDueDate__isnull=True)
+        if value == "set":
+            return queryset.filter(uploadDueDate__isnull=False)
+        if value == "past":
+            return queryset.filter(uploadDueDate__isnull=False, uploadDueDate__lt=now)
+        if value == "future":
+            return queryset.filter(uploadDueDate__isnull=False, uploadDueDate__gte=now)
+        return queryset
+
+
+class NeedsGradingFilter(admin.SimpleListFilter):
+    title = "needs grading"
+    parameter_name = "needs_grading"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Yes"), ("no", "No")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "yes":
+            return queryset.filter(Q(isFinalized=False) | Q(grade__isnull=True))
+        if value == "no":
+            return queryset.filter(isFinalized=True, grade__isnull=False)
+        return queryset
+
+
+class HasGraderFilter(admin.SimpleListFilter):
+    title = "has grader"
+    parameter_name = "has_grader"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Yes"), ("no", "No")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "yes":
+            return queryset.filter(grader__isnull=False)
+        if value == "no":
+            return queryset.filter(grader__isnull=True)
+        return queryset
+
+
+class CachedExecutionScopeFilter(admin.SimpleListFilter):
+    title = "execution scope"
+    parameter_name = "execution_scope"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            ("submission", "Submission"),
+            ("assignment", "Assignment"),
+            ("course", "Course"),
+            ("unknown", "Unknown"),
+        ]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "submission":
+            return queryset.filter(file__submissionfile__isnull=False)
+        if value == "assignment":
+            return queryset.filter(file__assignmentfile__isnull=False)
+        if value == "course":
+            return queryset.filter(file__coursefile__isnull=False)
+        if value == "unknown":
+            return queryset.filter(
+                file__submissionfile__isnull=True,
+                file__assignmentfile__isnull=True,
+                file__coursefile__isnull=True,
+            )
+        return queryset
+
+
+class CommentRubricLinkFilter(admin.SimpleListFilter):
+    title = "rubric link"
+    parameter_name = "rubric_link"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("linked", "Linked"), ("unlinked", "Unlinked")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "linked":
+            return queryset.filter(rubricComment__isnull=False)
+        if value == "unlinked":
+            return queryset.filter(rubricComment__isnull=True)
+        return queryset
+
+
+class CommentFeedbackFilter(admin.SimpleListFilter):
+    title = "feedback score"
+    parameter_name = "feedback_score"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("positive", "Positive"), ("negative", "Negative"), ("neutral", "Neutral")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "positive":
+            return queryset.filter(feedback__gt=0)
+        if value == "negative":
+            return queryset.filter(feedback__lt=0)
+        if value == "neutral":
+            return queryset.filter(feedback=0)
+        return queryset
+
+
+class SubmissionFileHasCommentsFilter(admin.SimpleListFilter):
+    title = "has comments"
+    parameter_name = "has_comments"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Yes"), ("no", "No")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "yes":
+            return queryset.filter(comments__isnull=False).distinct()
+        if value == "no":
+            return queryset.filter(comments__isnull=True)
+        return queryset
+
+
+class FileHasPathFilter(admin.SimpleListFilter):
+    title = "has path"
+    parameter_name = "has_path"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [("yes", "Yes"), ("no", "No")]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "yes":
+            return queryset.exclude(path__isnull=True).exclude(path="")
+        if value == "no":
+            return queryset.filter(Q(path__isnull=True) | Q(path=""))
+        return queryset
+
+
+class FileScopeFilter(admin.SimpleListFilter):
+    title = "file scope"
+    parameter_name = "file_scope"
+
+    def lookups(self, request: Any, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            ("submission", "Submission"),
+            ("assignment", "Assignment"),
+            ("course", "Course"),
+            ("orphan", "Orphan/Unknown"),
+        ]
+
+    def queryset(self, request: Any, queryset: Any) -> Any:
+        value = self.value()
+        if value == "submission":
+            return queryset.filter(submissionfile__isnull=False)
+        if value == "assignment":
+            return queryset.filter(assignmentfile__isnull=False)
+        if value == "course":
+            return queryset.filter(coursefile__isnull=False)
+        if value == "orphan":
+            return queryset.filter(
+                submissionfile__isnull=True,
+                assignmentfile__isnull=True,
+                coursefile__isnull=True,
+            )
+        return queryset
+
+
+class AuthOneTimeToken(OneTimeToken):
+    """Proxy model so OneTimeToken appears under the 'Auth Token' admin app."""
+
+    class Meta:
+        proxy = True
+        app_label = "authtoken"
+        verbose_name = "One-time token"
+        verbose_name_plural = "One-time tokens"
 
 
 @admin.register(Organization)
@@ -134,7 +408,7 @@ class ProfileAdmin(admin.ModelAdmin):
         return qs.select_related("user", "organization")
 
 
-@admin.register(OneTimeToken)
+@admin.register(AuthOneTimeToken)
 class OneTimeTokenAdmin(admin.ModelAdmin):
     list_display = ("token_preview", "user_email", "is_valid_status", "used", "expires_at", "created")
     search_fields = ("user__email", "user__username", "token")
@@ -183,9 +457,9 @@ class OneTimeTokenAdmin(admin.ModelAdmin):
             'New token generated: <strong style="font-family: monospace; background: #f0f0f0; padding: 2px 6px;">{}</strong>',
             token.token
         ))
-        return redirect('admin:core_onetimetoken_changelist')
+        return redirect(f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist")
     
-    def token_preview(self, obj: OneTimeToken) -> str:
+    def token_preview(self, obj: AuthOneTimeToken) -> str:
         """Display first and last 8 characters of token"""
         token_str = str(obj.token)
         if len(token_str) > 20:
@@ -193,19 +467,19 @@ class OneTimeTokenAdmin(admin.ModelAdmin):
         return token_str
     token_preview.short_description = "Token"
     
-    def user_email(self, obj: OneTimeToken) -> str:
+    def user_email(self, obj: AuthOneTimeToken) -> str:
         """Display user email"""
         return obj.user.email
     user_email.short_description = "User"
     user_email.admin_order_field = "user__email"
     
-    def is_valid_status(self, obj: OneTimeToken) -> bool:
+    def is_valid_status(self, obj: AuthOneTimeToken) -> bool:
         """Check if token is still valid"""
         return obj.is_valid()
     is_valid_status.short_description = "Valid"
     is_valid_status.boolean = True
     
-    def copy_token_button(self, obj: OneTimeToken) -> str:
+    def copy_token_button(self, obj: AuthOneTimeToken) -> str:
         """Display a copyable token field"""
         if obj.token:
             return format_html(
@@ -240,6 +514,10 @@ class CourseAdmin(admin.ModelAdmin):
     list_filter = ("archived", "organization", "created", "modified")
     readonly_fields = ("id", "created", "modified")
     autocomplete_fields = ["organization"]
+    search_help_text = "Search by course name, period, or organization."
+    list_select_related = ("organization",)
+    list_per_page = 50
+    show_full_result_count = False
     filter_horizontal = ("students", "graders", "courseAdmins", "superGraders",
                         "inactive_students", "inactive_graders", "inactive_courseAdmins")
     
@@ -247,10 +525,19 @@ class CourseAdmin(admin.ModelAdmin):
         ("Basic Information", {
             "fields": ("id", "name", "period", "organization", "archived")
         }),
-        ("Settings", {
-            "fields": ("timezone", "sendReleasedSubmissionsToBack", "showStudentsStatistics",
-                      "emailNewUsers", "anonymousGradingDefault", "allowGradersToEditRubric",
-                      "minComments", "noUnfinalize", "activateQueue")
+        ("Core Settings", {
+            "fields": ("timezone", "activateQueue", "anonymousGradingDefault")
+        }),
+        ("Advanced Course Settings", {
+            "fields": (
+                "sendReleasedSubmissionsToBack",
+                "showStudentsStatistics",
+                "emailNewUsers",
+                "allowGradersToEditRubric",
+                "minComments",
+                "noUnfinalize",
+            ),
+            "classes": ("collapse",)
         }),
         ("Student Management", {
             "fields": ("rosterMap", "emailWhitelist", "lateDayCreditsAllowable", 
@@ -282,19 +569,19 @@ class CourseAdmin(admin.ModelAdmin):
     actions = ["archive_courses", "unarchive_courses"]
     
     def student_count(self, obj: Course) -> int:
-        return obj.students.count()
+        return getattr(obj, "student_count_annotated", obj.students.count())
     student_count.short_description = "Students"
     
     def grader_count(self, obj: Course) -> int:
-        return obj.graders.count()
+        return getattr(obj, "grader_count_annotated", obj.graders.count())
     grader_count.short_description = "Graders"
     
     def admin_count(self, obj: Course) -> int:
-        return obj.courseAdmins.count()
+        return getattr(obj, "admin_count_annotated", obj.courseAdmins.count())
     admin_count.short_description = "Admins"
     
     def assignment_count(self, obj: Course) -> int:
-        return obj.assignments.count()
+        return getattr(obj, "assignment_count_annotated", obj.assignments.count())
     assignment_count.short_description = "Assignments"
     
     def is_archived(self, obj: Course) -> bool:
@@ -316,20 +603,29 @@ class CourseAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("organization").prefetch_related(
-            "students", "graders", "courseAdmins", "assignments"
+        return qs.select_related("organization").annotate(
+            student_count_annotated=Count("students", distinct=True),
+            grader_count_annotated=Count("graders", distinct=True),
+            admin_count_annotated=Count("courseAdmins", distinct=True),
+            assignment_count_annotated=Count("assignments", distinct=True),
         )
 
 
 @admin.register(Assignment)
 class AssignmentAdmin(admin.ModelAdmin):
     list_display = ("name", "course", "points", "is_visible", "is_released", 
-                    "submission_count", "mean_grade", "created")
+                    "submission_count", "test_category_count", "test_case_count", "upload_due_date", "mean_grade", "open_submissions", "open_tests", "created")
     search_fields = ("name", "course__name", "course__period")
-    list_filter = ("isVisible", "isReleased", "allowStudentUpload", "anonymousGrading",
-                   "created", "modified")
+    list_filter = ("isVisible", "isReleased", "allowStudentUpload", "anonymousGrading", AutograderEnabledFilter, AssignmentDueDateFilter,
+                   "uploadDueDate", "created", "modified")
     readonly_fields = ("course", "mean", "median", "created", "modified")
     autocomplete_fields = ["course"]
+    list_select_related = ("course",)
+    list_per_page = 50
+    show_full_result_count = False
+    search_help_text = "Search by assignment name, course name, or course period."
+    date_hierarchy = "created"
+    ordering = ("-uploadDueDate", "-created")
     
     fieldsets = (
         ("Basic Information", {
@@ -360,8 +656,20 @@ class AssignmentAdmin(admin.ModelAdmin):
     actions = ["release_assignments", "hide_assignments", "enable_student_upload"]
     
     def submission_count(self, obj: Assignment) -> int:
-        return obj.submissions.count()
+        return getattr(obj, "submission_count_annotated", obj.submissions.count())
     submission_count.short_description = "Submissions"
+
+    def test_category_count(self, obj: Assignment) -> int:
+        return getattr(obj, "test_category_count_annotated", obj.testCategories.count())
+    test_category_count.short_description = "Test Categories"
+
+    def test_case_count(self, obj: Assignment) -> int:
+        return getattr(
+            obj,
+            "test_case_count_annotated",
+            TestCase.objects.filter(testCategory__assignment=obj).count(),
+        )
+    test_case_count.short_description = "Test Cases"
     
     def mean_grade(self, obj: Assignment) -> Optional[str]:
         if obj.mean:
@@ -369,6 +677,15 @@ class AssignmentAdmin(admin.ModelAdmin):
         return "-"
     mean_grade.short_description = "Mean"
     mean_grade.admin_order_field = "mean"
+
+    def upload_due_date(self, obj: Assignment) -> Any:
+        return obj.uploadDueDate
+    upload_due_date.short_description = "Upload Due"
+    upload_due_date.admin_order_field = "uploadDueDate"
+
+    def get_ordering(self, request: Any) -> Any:
+        """Default to latest due date first, pushing null due dates to the bottom."""
+        return [F("uploadDueDate").desc(nulls_last=True), "-created"]
     
     def is_visible(self, obj: Assignment) -> bool:
         return obj.isVisible
@@ -379,6 +696,16 @@ class AssignmentAdmin(admin.ModelAdmin):
         return obj.isReleased
     is_released.short_description = "Released"
     is_released.boolean = True
+
+    def open_submissions(self, obj: Assignment) -> str:
+        url = f"{reverse('admin:core_submission_changelist')}?assignment__id__exact={obj.id}"
+        return format_html('<a href="{}">View Submissions</a>', url)
+    open_submissions.short_description = "Submissions"
+
+    def open_tests(self, obj: Assignment) -> str:
+        url = f"{reverse('admin:core_testcategory_changelist')}?assignment__id__exact={obj.id}"
+        return format_html('<a href="{}">View Test Categories</a>', url)
+    open_tests.short_description = "Tests"
     
     def release_assignments(self, request: Any, queryset: Any) -> None:
         """Release selected assignments"""
@@ -400,7 +727,11 @@ class AssignmentAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("course").prefetch_related("submissions")
+        return qs.select_related("course").annotate(
+            submission_count_annotated=Count("submissions", distinct=True),
+            test_category_count_annotated=Count("testCategories", distinct=True),
+            test_case_count_annotated=Count("testCategories__testCases", distinct=True),
+        )
 
 
 @admin.register(Section)
@@ -410,6 +741,8 @@ class SectionAdmin(admin.ModelAdmin):
     list_filter = ("course", "created")
     readonly_fields = ("created", "modified")
     autocomplete_fields = ["course"]
+    search_help_text = "Search by section name or course name."
+    date_hierarchy = "created"
     filter_horizontal = ("leaders", "students")
     
     fieldsets = (
@@ -441,13 +774,26 @@ class SectionAdmin(admin.ModelAdmin):
 
 @admin.register(Submission)
 class SubmissionAdmin(admin.ModelAdmin):
-    list_display = ("id", "assignment", "students_list", "grader", "grade", 
-                    "is_finalized", "has_question", "date_uploaded")
+    list_display = (
+        "id",
+        "assignment",
+        "students_list",
+        "grader",
+        "grade_display",
+        "is_finalized",
+        "has_question",
+        "date_uploaded",
+        "open_files",
+        "open_tests",
+    )
     search_fields = ("id", "assignment__name", "students__email", "grader__email")
-    list_filter = ("isFinalized", "questionIsOpen", "questionIsRegrade", 
+    list_filter = ("isFinalized", NeedsGradingFilter, HasGraderFilter, "questionIsOpen", "questionIsRegrade", 
                    "assignment__course", "created")
     readonly_fields = ("assignment", "dateEdited", "dateUploaded", "created", "modified")
     autocomplete_fields = ["assignment", "grader", "questionResponder"]
+    list_select_related = ("assignment", "grader")
+    list_per_page = 75
+    show_full_result_count = False
     filter_horizontal = ("students",)
     
     fieldsets = (
@@ -455,7 +801,11 @@ class SubmissionAdmin(admin.ModelAdmin):
             "fields": ("assignment", "students", "grader")
         }),
         ("Grading", {
-            "fields": ("isFinalized", "grade", "gradeFrozen", "queueOrderKey")
+            "fields": ("isFinalized", "grade")
+        }),
+        ("Advanced Grading Controls", {
+            "fields": ("gradeFrozen", "queueOrderKey"),
+            "classes": ("collapse",)
         }),
         ("Late Submission", {
             "fields": ("lateDayCreditsUsed",),
@@ -476,7 +826,8 @@ class SubmissionAdmin(admin.ModelAdmin):
         }),
     )
     
-    actions = ["finalize_submissions", "unfinalize_submissions"]
+    actions = ["finalize_submissions", "unfinalize_submissions", "close_open_questions"]
+    date_hierarchy = "created"
     
     def students_list(self, obj: Submission) -> str:
         emails = [s.email for s in obj.students.all()[:3]]
@@ -490,6 +841,11 @@ class SubmissionAdmin(admin.ModelAdmin):
         return obj.isFinalized
     is_finalized.short_description = "Finalized"
     is_finalized.boolean = True
+
+    def grade_display(self, obj: Submission) -> str:
+        return f"{obj.grade:.2f}" if obj.grade is not None else "-"
+    grade_display.short_description = "Grade"
+    grade_display.admin_order_field = "grade"
     
     def has_question(self, obj: Submission) -> bool:
         return obj.questionIsOpen
@@ -500,6 +856,16 @@ class SubmissionAdmin(admin.ModelAdmin):
         return obj.dateUploaded
     date_uploaded.short_description = "Uploaded"
     date_uploaded.admin_order_field = "dateUploaded"
+
+    def open_files(self, obj: Submission) -> str:
+        url = f"{reverse('admin:core_submissionfile_changelist')}?submission__id__exact={obj.id}"
+        return format_html('<a href="{}">Files</a>', url)
+    open_files.short_description = "Files"
+
+    def open_tests(self, obj: Submission) -> str:
+        url = f"{reverse('admin:core_submissiontest_changelist')}?submission__id__exact={obj.id}"
+        return format_html('<a href="{}">Tests</a>', url)
+    open_tests.short_description = "Tests"
     
     def finalize_submissions(self, request: Any, queryset: Any) -> None:
         """Finalize selected submissions"""
@@ -512,6 +878,12 @@ class SubmissionAdmin(admin.ModelAdmin):
         updated = queryset.update(isFinalized=False)
         self.message_user(request, f"{updated} submission(s) unfinalized.")
     unfinalize_submissions.short_description = "Unfinalize selected submissions"
+
+    def close_open_questions(self, request: Any, queryset: Any) -> None:
+        """Mark open student questions as closed"""
+        updated = queryset.filter(questionIsOpen=True).update(questionIsOpen=False)
+        self.message_user(request, f"Closed {updated} open question(s).")
+    close_open_questions.short_description = "Close open student questions"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
@@ -520,11 +892,28 @@ class SubmissionAdmin(admin.ModelAdmin):
 
 @admin.register(Comment)
 class CommentAdmin(admin.ModelAdmin):
-    list_display = ("id", "file", "author", "point_delta", "text_preview", "created")
-    search_fields = ("text", "author__email", "file__submission__id")
-    list_filter = ("created", "rubricComment")
+    list_display = (
+        "id",
+        "assignment_name",
+        "submission_id",
+        "file",
+        "author",
+        "rubric_status",
+        "point_delta",
+        "feedback_score",
+        "text_preview",
+        "open_submission",
+        "created",
+    )
+    search_fields = ("text", "author__email", "file__submission__id", "file__submission__assignment__name", "file__name")
+    list_filter = (CommentRubricLinkFilter, CommentFeedbackFilter, "created", "rubricComment", "author", "file__submission__assignment")
     readonly_fields = ("file", "author", "rubricComment", "created", "modified")
     autocomplete_fields = ["file", "author", "rubricComment"]
+    search_help_text = "Search by comment text, author email, file name, submission ID, or assignment."
+    list_select_related = ("file", "author", "rubricComment")
+    list_per_page = 100
+    show_full_result_count = False
+    date_hierarchy = "created"
     filter_horizontal = ("tags",)
     
     fieldsets = (
@@ -558,10 +947,34 @@ class CommentAdmin(admin.ModelAdmin):
         return "-"
     point_delta.short_description = "Points"
     point_delta.admin_order_field = "pointDelta"
+
+    def feedback_score(self, obj: Comment) -> int:
+        return obj.feedback
+    feedback_score.short_description = "Feedback"
+    feedback_score.admin_order_field = "feedback"
+
+    def rubric_status(self, obj: Comment) -> str:
+        return "Linked" if obj.rubricComment else "Unlinked"
+    rubric_status.short_description = "Rubric"
+
+    def assignment_name(self, obj: Comment) -> str:
+        return obj.file.submission.assignment.name
+    assignment_name.short_description = "Assignment"
+    assignment_name.admin_order_field = "file__submission__assignment__name"
+
+    def submission_id(self, obj: Comment) -> int:
+        return obj.file.submission.id
+    submission_id.short_description = "Submission"
+    submission_id.admin_order_field = "file__submission__id"
+
+    def open_submission(self, obj: Comment) -> str:
+        url = reverse("admin:core_submission_change", args=[obj.file.submission.id])
+        return format_html('<a href="{}">Open Submission</a>', url)
+    open_submission.short_description = "Submission"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("file", "author", "rubricComment")
+        return qs.select_related("file", "file__submission", "file__submission__assignment", "author", "rubricComment")
 
 
 @admin.register(CommentTag)
@@ -580,6 +993,73 @@ class CommentTagAdmin(admin.ModelAdmin):
         return qs.prefetch_related("tag_comments")
 
 
+@admin.register(CommentTemplate)
+class CommentTemplateAdmin(admin.ModelAdmin):
+    list_display = ("id", "text_preview", "owner_email", "assignment", "is_global", "point_delta", "created")
+    search_fields = ("text", "owner__email", "assignment__name", "rubricComment__name", "filePath")
+    list_filter = ("isGlobal", "assignment__course", "created")
+    readonly_fields = ("created", "modified")
+    autocomplete_fields = ["owner", "assignment", "rubricComment", "sourceComment"]
+    actions = ["mark_global", "mark_private"]
+    list_select_related = ("owner", "assignment")
+    list_per_page = 100
+    show_full_result_count = False
+    search_help_text = "Search templates by text, owner email, assignment, rubric comment name, or file path."
+    date_hierarchy = "created"
+
+    fieldsets = (
+        ("Template", {
+            "fields": ("assignment", "owner", "isGlobal", "text")
+        }),
+        ("Scoring & Linkage", {
+            "fields": ("pointDelta", "rubricComment", "sourceComment")
+        }),
+        ("Optional Matching", {
+            "fields": ("cellId", "filePath"),
+            "classes": ("collapse",)
+        }),
+        ("Timestamps", {
+            "fields": ("created", "modified"),
+            "classes": ("collapse",)
+        }),
+    )
+
+    def text_preview(self, obj: CommentTemplate) -> str:
+        return obj.text[:80] + "..." if len(obj.text) > 80 else obj.text
+    text_preview.short_description = "Text"
+
+    def owner_email(self, obj: CommentTemplate) -> str:
+        return obj.owner.email
+    owner_email.short_description = "Owner"
+    owner_email.admin_order_field = "owner__email"
+
+    def is_global(self, obj: CommentTemplate) -> bool:
+        return obj.isGlobal
+    is_global.short_description = "Global"
+    is_global.boolean = True
+
+    def point_delta(self, obj: CommentTemplate) -> str:
+        if obj.pointDelta is None:
+            return "-"
+        return f"{obj.pointDelta:+.2f}"
+    point_delta.short_description = "Points"
+    point_delta.admin_order_field = "pointDelta"
+
+    def mark_global(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(isGlobal=True)
+        self.message_user(request, f"Marked {updated} template(s) as global.")
+    mark_global.short_description = "Mark selected templates as global"
+
+    def mark_private(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(isGlobal=False)
+        self.message_user(request, f"Marked {updated} template(s) as private.")
+    mark_private.short_description = "Mark selected templates as private"
+
+    def get_queryset(self, request: Any) -> Any:
+        qs = super().get_queryset(request)
+        return qs.select_related("owner", "assignment", "assignment__course", "rubricComment", "sourceComment")
+
+
 @admin.register(RubricCategory)
 class RubricCategoryAdmin(admin.ModelAdmin):
     list_display = ("name", "assignment", "point_limit", "sort_key", "at_most_once", "created")
@@ -587,6 +1067,8 @@ class RubricCategoryAdmin(admin.ModelAdmin):
     list_filter = ("atMostOnce", "assignment__course", "created")
     readonly_fields = ("assignment", "created", "modified")
     autocomplete_fields = ["assignment"]
+    search_help_text = "Search rubric categories by name or assignment."
+    date_hierarchy = "created"
     
     fieldsets = (
         ("Basic Information", {
@@ -623,11 +1105,16 @@ class RubricCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(RubricComment)
 class RubricCommentAdmin(admin.ModelAdmin):
-    list_display = ("name_or_text", "category", "point_delta", "sort_key", "created")
+    list_display = ("name_or_text", "assignment_name", "category", "point_delta", "usage_count", "sort_key", "open_usage", "created")
     search_fields = ("text", "name", "category__name")
     list_filter = ("category__assignment", "created")
     readonly_fields = ("created", "modified")
     autocomplete_fields = ["category"]
+    list_select_related = ("category",)
+    list_per_page = 100
+    show_full_result_count = False
+    search_help_text = "Search by rubric comment text/name or category."
+    date_hierarchy = "created"
     
     fieldsets = (
         ("Content", {
@@ -661,10 +1148,26 @@ class RubricCommentAdmin(admin.ModelAdmin):
         return obj.sortKey
     sort_key.short_description = "Sort"
     sort_key.admin_order_field = "sortKey"
+
+    def assignment_name(self, obj: RubricComment) -> str:
+        return obj.category.assignment.name
+    assignment_name.short_description = "Assignment"
+    assignment_name.admin_order_field = "category__assignment__name"
+
+    def usage_count(self, obj: RubricComment) -> int:
+        return getattr(obj, "comment_count_annotated", obj.comments.count())
+    usage_count.short_description = "Used"
+
+    def open_usage(self, obj: RubricComment) -> str:
+        url = f"{reverse('admin:core_comment_changelist')}?rubricComment__id__exact={obj.id}"
+        return format_html('<a href="{}">View Comments</a>', url)
+    open_usage.short_description = "Usage"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("category", "category__assignment")
+        return qs.select_related("category", "category__assignment").annotate(
+            comment_count_annotated=Count("comments", distinct=True)
+        )
 
 
 @admin.register(SubmissionHistory)
@@ -674,6 +1177,8 @@ class SubmissionHistoryAdmin(admin.ModelAdmin):
     list_filter = ("hasViewed", "created")
     readonly_fields = ("submission", "student", "dateViewed", "created", "modified")
     autocomplete_fields = ["submission", "student"]
+    search_help_text = "Search by submission ID or student email."
+    date_hierarchy = "created"
     
     def has_viewed(self, obj: SubmissionHistory) -> bool:
         return obj.hasViewed
@@ -692,11 +1197,28 @@ class SubmissionHistoryAdmin(admin.ModelAdmin):
 
 @admin.register(SubmissionFile)
 class SubmissionFileAdmin(admin.ModelAdmin):
-    list_display = ("id", "file_name", "submission", "students_list", "created")
-    search_fields = ("name", "submission__id", "submission__students__email")
-    list_filter = ("hiddenBeforePublish", "created")
+    list_display = (
+        "id",
+        "file_name",
+        "assignment_name",
+        "submission",
+        "students_list",
+        "comment_count",
+        "hiddenBeforePublish",
+        "open_submission",
+        "open_comments",
+        "created",
+    )
+    search_fields = ("name", "path", "submission__id", "submission__students__email", "submission__assignment__name")
+    list_filter = ("hiddenBeforePublish", SubmissionFileHasCommentsFilter, "submission__assignment__course", "created")
     readonly_fields = ("submission", "created", "modified")
     autocomplete_fields = ["submission"]
+    search_help_text = "Search by filename/path, submission ID, student email, or assignment."
+    list_select_related = ("submission", "submission__assignment", "submission__assignment__course")
+    list_per_page = 100
+    show_full_result_count = False
+    date_hierarchy = "created"
+    actions = ["hide_before_publish", "show_before_publish"]
     
     fieldsets = (
         ("File Information", {
@@ -729,19 +1251,56 @@ class SubmissionFileAdmin(admin.ModelAdmin):
             return ", ".join(emails)
         return "-"
     students_list.short_description = "Students"
+
+    def assignment_name(self, obj: SubmissionFile) -> str:
+        return obj.submission.assignment.name
+    assignment_name.short_description = "Assignment"
+    assignment_name.admin_order_field = "submission__assignment__name"
+
+    def comment_count(self, obj: SubmissionFile) -> int:
+        return getattr(obj, "comment_count_annotated", obj.comments.count())
+    comment_count.short_description = "Comments"
+
+    def open_submission(self, obj: SubmissionFile) -> str:
+        url = reverse("admin:core_submission_change", args=[obj.submission.id])
+        return format_html('<a href="{}">Open Submission</a>', url)
+    open_submission.short_description = "Submission"
+
+    def open_comments(self, obj: SubmissionFile) -> str:
+        url = f"{reverse('admin:core_comment_changelist')}?file__id__exact={obj.id}"
+        return format_html('<a href="{}">View Comments</a>', url)
+    open_comments.short_description = "Comments"
+
+    def hide_before_publish(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(hiddenBeforePublish=True)
+        self.message_user(request, f"Set hidden-before-publish on {updated} file(s).")
+    hide_before_publish.short_description = "Hide selected files before publish"
+
+    def show_before_publish(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(hiddenBeforePublish=False)
+        self.message_user(request, f"Cleared hidden-before-publish on {updated} file(s).")
+    show_before_publish.short_description = "Show selected files before publish"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("submission").prefetch_related("submission__students")
+        return qs.select_related("submission", "submission__assignment", "submission__assignment__course").prefetch_related("submission__students").annotate(
+            comment_count_annotated=Count("comments", distinct=True)
+        )
 
 
 @admin.register(AssignmentFile)
 class AssignmentFileAdmin(admin.ModelAdmin):
-    list_display = ("id", "file_name", "assignment", "required", "created")
-    search_fields = ("name", "assignment__name")
-    list_filter = ("required", "created")
+    list_display = ("id", "file_name", "assignment", "required", "hidden", "is_test_resource", "created", "open_assignment")
+    search_fields = ("name", "path", "assignment__name", "assignment__course__name")
+    list_filter = ("required", "hidden", "is_test_resource", "assignment__course", "created")
     readonly_fields = ("assignment", "created", "modified")
     autocomplete_fields = ["assignment"]
+    search_help_text = "Search by filename/path, assignment, or course."
+    list_select_related = ("assignment",)
+    list_per_page = 100
+    show_full_result_count = False
+    date_hierarchy = "created"
+    actions = ["mark_test_resource", "clear_test_resource", "hide_selected_files", "unhide_selected_files"]
     
     fieldsets = (
         ("File Information", {
@@ -764,19 +1323,68 @@ class AssignmentFileAdmin(admin.ModelAdmin):
         return obj.name
     file_name.short_description = "File Name"
     file_name.admin_order_field = "name"
+
+    def open_assignment(self, obj: AssignmentFile) -> str:
+        url = reverse("admin:core_assignment_change", args=[obj.assignment_id])
+        return format_html('<a href="{}">Open Assignment</a>', url)
+    open_assignment.short_description = "Assignment"
+
+    def mark_test_resource(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(is_test_resource=True, hidden=True)
+        self.message_user(request, f"Marked {updated} file(s) as test resources.")
+    mark_test_resource.short_description = "Mark selected files as test resources"
+
+    def clear_test_resource(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(is_test_resource=False)
+        self.message_user(request, f"Cleared test resource flag for {updated} file(s).")
+    clear_test_resource.short_description = "Clear test resource flag"
+
+    def hide_selected_files(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(hidden=True)
+        self.message_user(request, f"Hidden {updated} file(s).")
+    hide_selected_files.short_description = "Hide selected files"
+
+    def unhide_selected_files(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(hidden=False)
+        self.message_user(request, f"Made {updated} file(s) visible.")
+    unhide_selected_files.short_description = "Make selected files visible"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("assignment")
+        return qs.select_related("assignment", "assignment__course")
 
 @admin.register(CachedExecutionResult)
 class CachedExecutionResultAdmin(admin.ModelAdmin):
-    list_display = ("id", "file_name", "executed_by_email", "executed_at", "execution_time", "file_type", "created")
-    search_fields = ("file__name", "executed_by__email", "file_content_hash")
-    list_filter = ("executed_at", "created")
+    list_display = (
+        "id",
+        "file_name",
+        "scope",
+        "context_ref",
+        "executed_by_email",
+        "executed_at",
+        "execution_time",
+        "hash_short",
+        "created",
+    )
+    search_fields = (
+        "file__name",
+        "executed_by__email",
+        "file_content_hash",
+        "file__submissionfile__submission__id",
+        "file__submissionfile__submission__assignment__name",
+        "file__assignmentfile__assignment__name",
+        "file__coursefile__course__name",
+    )
+    list_filter = (CachedExecutionScopeFilter, "file__extension", "executed_by", "executed_at", "created")
+    date_hierarchy = "executed_at"
+    ordering = ("-executed_at",)
+    list_select_related = ("file", "executed_by")
+    list_per_page = 100
+    show_full_result_count = False
     readonly_fields = ("file", "executed_by", "executed_at", "file_content_hash", 
-                        "execution_time_seconds", "created", "modified")
+                        "execution_time_seconds", "output_preview", "created", "modified")
     autocomplete_fields = ["file", "executed_by"]
+    search_help_text = "Search by file, executor email, hash, submission ID, assignment, or course context."
     
     fieldsets = (
         ("File Information", {
@@ -786,7 +1394,7 @@ class CachedExecutionResultAdmin(admin.ModelAdmin):
             "fields": ("executed_by", "executed_at", "execution_time_seconds")
         }),
         ("Output Data", {
-            "fields": ("output_data",),
+            "fields": ("output_data", "output_preview"),
             "classes": ("collapse",)
         }),
         ("Timestamps", {
@@ -811,29 +1419,98 @@ class CachedExecutionResultAdmin(admin.ModelAdmin):
         return "-"
     execution_time.short_description = "Execution Time"
     execution_time.admin_order_field = "execution_time_seconds"
-    
-    def file_type(self, obj: CachedExecutionResult) -> str:
-        return obj.file.__class__.__name__ if obj.file else "-"
-    file_type.short_description = "File Type"
+
+    def scope(self, obj: CachedExecutionResult) -> str:
+        if hasattr(obj.file, "submissionfile"):
+            return "Submission"
+        if hasattr(obj.file, "assignmentfile"):
+            return "Assignment"
+        if hasattr(obj.file, "coursefile"):
+            return "Course"
+        return "Unknown"
+    scope.short_description = "Scope"
+
+    def context_ref(self, obj: CachedExecutionResult) -> str:
+        try:
+            if hasattr(obj.file, "submissionfile"):
+                submission = obj.file.submissionfile.submission
+                return f"Submission #{submission.id}"
+            if hasattr(obj.file, "assignmentfile"):
+                assignment = obj.file.assignmentfile.assignment
+                return f"Assignment: {assignment.name}"
+            if hasattr(obj.file, "coursefile"):
+                course = obj.file.coursefile.course
+                return f"Course: {course.name}"
+        except Exception:
+            pass
+        return "-"
+    context_ref.short_description = "Context"
+
+    def hash_short(self, obj: CachedExecutionResult) -> str:
+        hash_value = obj.file_content_hash or ""
+        if len(hash_value) <= 12:
+            return hash_value
+        return f"{hash_value[:6]}...{hash_value[-6:]}"
+    hash_short.short_description = "Hash"
+    hash_short.admin_order_field = "file_content_hash"
+
+    def output_preview(self, obj: CachedExecutionResult) -> str:
+        from json import dumps
+
+        if obj.output_data is None:
+            return "-"
+
+        preview = dumps(obj.output_data, indent=2, ensure_ascii=False)
+        if len(preview) > 20000:
+            preview = preview[:20000] + "\n... (truncated)"
+
+        return format_html(
+            '<pre style="max-height: 380px; overflow: auto; white-space: pre-wrap; margin: 0;">{}</pre>',
+            preview,
+        )
+    output_preview.short_description = "Pretty Output Preview"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("file", "executed_by")
+        return qs.select_related(
+            "file",
+            "executed_by",
+            "file__submissionfile__submission",
+            "file__submissionfile__submission__assignment",
+            "file__assignmentfile__assignment",
+            "file__coursefile__course",
+        )
     
 @admin.register(AssignmentDataSet)
 class AssignmentDataSetAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "assignment", "created")
-    search_fields = ("name", "assignment__name")
-    list_filter = ("created",)
+    list_display = (
+        "id",
+        "name",
+        "assignment",
+        "mount_path_short",
+        "is_active",
+        "hidden",
+        "is_test_resource",
+        "created",
+        "open_assignment",
+    )
+    search_fields = ("name", "description", "mount_path", "assignment__name", "assignment__course__name")
+    list_filter = ("is_active", "hidden", "is_test_resource", "assignment__course", "created")
     readonly_fields = ("assignment", "created", "modified")
     autocomplete_fields = ["assignment"]
+    search_help_text = "Search by dataset name/description/mount path, assignment, or course."
+    list_select_related = ("assignment",)
+    list_per_page = 100
+    show_full_result_count = False
+    date_hierarchy = "created"
+    actions = ["activate_selected", "deactivate_selected", "hide_selected", "unhide_selected"]
     
     fieldsets = (
         ("Data Set Information", {
-            "fields": ("name", "assignment", "description")
+            "fields": ("name", "assignment", "description", "file")
         }),
         ("Content", {
-            "fields": ("mount_path", ),
+            "fields": ("mount_path", "is_active", "hidden", "is_test_resource"),
             "classes": ("collapse",)
         }),
         ("Timestamps", {
@@ -841,67 +1518,235 @@ class AssignmentDataSetAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
     )
+
+    def mount_path_short(self, obj: AssignmentDataSet) -> str:
+        if not obj.mount_path:
+            return "-"
+        return obj.mount_path if len(obj.mount_path) <= 36 else obj.mount_path[:33] + "..."
+    mount_path_short.short_description = "Mount Path"
+    mount_path_short.admin_order_field = "mount_path"
+
+    def open_assignment(self, obj: AssignmentDataSet) -> str:
+        url = reverse("admin:core_assignment_change", args=[obj.assignment.id])
+        return format_html('<a href="{}">Open Assignment</a>', url)
+    open_assignment.short_description = "Assignment"
+
+    def activate_selected(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(is_active=True)
+        self.message_user(request, f"Activated {updated} dataset(s).")
+    activate_selected.short_description = "Activate selected datasets"
+
+    def deactivate_selected(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(is_active=False)
+        self.message_user(request, f"Deactivated {updated} dataset(s).")
+    deactivate_selected.short_description = "Deactivate selected datasets"
+
+    def hide_selected(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(hidden=True)
+        self.message_user(request, f"Hidden {updated} dataset(s).")
+    hide_selected.short_description = "Hide selected datasets"
+
+    def unhide_selected(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(hidden=False)
+        self.message_user(request, f"Made {updated} dataset(s) visible.")
+    unhide_selected.short_description = "Make selected datasets visible"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("assignment")
+        return qs.select_related("assignment", "assignment__course")
     
 @admin.register(CourseFile)
 class CourseFileAdmin(admin.ModelAdmin):
-    list_display = ("id", "file_name", "course", "created")
-    search_fields = ("name", "course__name")
+    list_display = ("id", "file_name", "course", "course_period", "open_course", "created")
+    search_fields = ("name", "path", "course__name", "course__period")
     list_filter = ("course", "created")
     readonly_fields = ("course", "created", "modified")
     autocomplete_fields = ["course"]
+    search_help_text = "Search by filename/path, course name, or period."
+    list_select_related = ("course",)
+    list_per_page = 100
+    show_full_result_count = False
+    date_hierarchy = "created"
     
     def file_name(self, obj: CourseFile) -> str:
         return obj.name
     file_name.short_description = "File Name"
     file_name.admin_order_field = "name"
+
+    def course_period(self, obj: CourseFile) -> str:
+        return obj.course.period
+    course_period.short_description = "Period"
+    course_period.admin_order_field = "course__period"
+
+    def open_course(self, obj: CourseFile) -> str:
+        url = reverse("admin:core_course_change", args=[obj.course.id])
+        return format_html('<a href="{}">Open Course</a>', url)
+    open_course.short_description = "Course"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
         return qs.select_related("course")
 
 
+class TestCaseInline(admin.TabularInline):
+    model = TestCase
+    extra = 0
+    fields = (
+        "sortKey",
+        "description",
+        "type",
+        "pointsPass",
+        "pointsFail",
+        "exposed",
+        "lastSolutionRun",
+        "rubricItem",
+    )
+    autocomplete_fields = ["rubricItem"]
+    ordering = ("sortKey", "id")
+    show_change_link = True
+
+
+class TestCategoryResourceInline(admin.TabularInline):
+    model = TestCategoryResource
+    extra = 0
+    fields = ("target_path", "file", "dataset")
+    autocomplete_fields = ["file", "dataset"]
+
+
 @admin.register(TestCategory)
 class TestCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "assignment", "test_case_count", "created")
+    list_display = (
+        "name",
+        "assignment",
+        "sort_key",
+        "target_file",
+        "max_points",
+        "test_case_count",
+        "resource_count",
+        "open_test_cases",
+        "open_resources",
+        "created",
+    )
     search_fields = ("name", "assignment__name")
-    list_filter = ("assignment__course", "created")
+    list_filter = ("assignment__course", HasTestCasesFilter, HasResourcesFilter, "created")
     readonly_fields = ("assignment", "created", "modified")
     autocomplete_fields = ["assignment"]
-    
-    def test_case_count(self, obj: TestCategory) -> int:
-        return obj.testCases.count()
-    test_case_count.short_description = "Test Cases"
-    
-    def get_queryset(self, request: Any) -> Any:
-        qs = super().get_queryset(request)
-        return qs.select_related("assignment").prefetch_related("testCases")
-
-
-@admin.register(TestCase)
-class TestCaseAdmin(admin.ModelAdmin):
-    list_display = ("description", "testCategory", "type", "points_pass", "points_fail", 
-                    "sort_key", "created")
-    search_fields = ("description", "testCategory__name")
-    list_filter = ("type", "testCategory__assignment", "created")
-    readonly_fields = ("testCategory", "created", "modified")
-    autocomplete_fields = ["testCategory"]
-    
+    search_help_text = "Search test categories by name or assignment."
+    list_select_related = ("assignment",)
+    list_per_page = 75
+    show_full_result_count = False
+    inlines = [TestCaseInline, TestCategoryResourceInline]
+    date_hierarchy = "created"
     fieldsets = (
-        ("Basic Information", {
-            "fields": ("testCategory", "description", "type", "sortKey")
+        ("Category", {
+            "fields": ("assignment", "name", "sortKey", "targetFileName")
         }),
-        ("Points", {
-            "fields": ("pointsPass", "pointsFail")
+        ("Scoring", {
+            "fields": ("maxPoints",)
+        }),
+        ("Script", {
+            "fields": ("testScript",),
+            "classes": ("collapse",)
         }),
         ("Timestamps", {
             "fields": ("created", "modified"),
             "classes": ("collapse",)
         }),
     )
+    
+    def test_case_count(self, obj: TestCategory) -> int:
+        return getattr(obj, "test_case_count_annotated", obj.testCases.count())
+    test_case_count.short_description = "Test Cases"
+
+    def resource_count(self, obj: TestCategory) -> int:
+        return getattr(obj, "resource_count_annotated", TestCategoryResource.objects.filter(category=obj).count())
+    resource_count.short_description = "Resources"
+
+    def open_test_cases(self, obj: TestCategory) -> str:
+        url = f"{reverse('admin:core_testcase_changelist')}?testCategory__id__exact={obj.id}"
+        return format_html('<a href="{}">View Cases</a>', url)
+    open_test_cases.short_description = "Cases"
+
+    def open_resources(self, obj: TestCategory) -> str:
+        url = f"{reverse('admin:core_testcategoryresource_changelist')}?category__id__exact={obj.id}"
+        return format_html('<a href="{}">View Resources</a>', url)
+    open_resources.short_description = "Resources"
+
+    def sort_key(self, obj: TestCategory) -> int:
+        return obj.sortKey
+    sort_key.short_description = "Sort"
+    sort_key.admin_order_field = "sortKey"
+
+    def target_file(self, obj: TestCategory) -> str:
+        return obj.targetFileName or "-"
+    target_file.short_description = "Target File"
+
+    def max_points(self, obj: TestCategory) -> str:
+        return f"{obj.maxPoints:.2f}"
+    max_points.short_description = "Max Points"
+    max_points.admin_order_field = "maxPoints"
+    
+    def get_queryset(self, request: Any) -> Any:
+        qs = super().get_queryset(request)
+        return qs.select_related("assignment", "assignment__course").annotate(
+            test_case_count_annotated=Count("testCases", distinct=True),
+            resource_count_annotated=Count("resources", distinct=True),
+        )
+
+
+@admin.register(TestCase)
+class TestCaseAdmin(admin.ModelAdmin):
+    list_display = (
+        "description",
+        "testCategory",
+        "assignment_name",
+        "type",
+        "exposed",
+        "points_pass",
+        "points_fail",
+        "last_solution_run",
+        "sort_key",
+        "created",
+    )
+    search_fields = ("description", "testCategory__name", "testCategory__assignment__name", "functionName")
+    list_filter = ("type", "exposed", "lastSolutionRun", NeverRunTestFilter, "testCategory__assignment", "created")
+    readonly_fields = ("testCategory", "created", "modified")
+    autocomplete_fields = ["testCategory"]
+    search_help_text = "Search test cases by description, assignment, category, or function name."
+    list_select_related = ("testCategory",)
+    list_per_page = 100
+    show_full_result_count = False
+    actions = ["mark_exposed", "mark_hidden"]
+    date_hierarchy = "created"
+    
+    fieldsets = (
+        ("Basic Information", {
+            "fields": ("testCategory", "description", "type", "sortKey", "functionName")
+        }),
+        ("Points", {
+            "fields": ("pointsPass", "pointsFail")
+        }),
+        ("Behavior", {
+            "fields": ("exposed", "lastSolutionRun", "rubricItem")
+        }),
+        ("Execution", {
+            "fields": ("timeout", "targetCellId"),
+            "classes": ("collapse",)
+        }),
+        ("Content", {
+            "fields": ("text", "explanation", "testCode"),
+            "classes": ("collapse",)
+        }),
+        ("Timestamps", {
+            "fields": ("created", "modified"),
+            "classes": ("collapse",)
+        }),
+    )
+
+    def assignment_name(self, obj: TestCase) -> str:
+        return obj.testCategory.assignment.name
+    assignment_name.short_description = "Assignment"
+    assignment_name.admin_order_field = "testCategory__assignment__name"
     
     def points_pass(self, obj: TestCase) -> str:
         return f"{obj.pointsPass:+.2f}"
@@ -917,19 +1762,86 @@ class TestCaseAdmin(admin.ModelAdmin):
         return obj.sortKey
     sort_key.short_description = "Sort"
     sort_key.admin_order_field = "sortKey"
+
+    def last_solution_run(self, obj: TestCase) -> str:
+        status_labels = {
+            0: "Passed",
+            1: "Failed",
+            2: "Error",
+            3: "Never run",
+        }
+        return status_labels.get(obj.lastSolutionRun, str(obj.lastSolutionRun))
+    last_solution_run.short_description = "Last Solution"
+    last_solution_run.admin_order_field = "lastSolutionRun"
+
+    def mark_exposed(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(exposed=True)
+        self.message_user(request, f"{updated} test case(s) marked as exposed.")
+    mark_exposed.short_description = "Mark selected tests as exposed"
+
+    def mark_hidden(self, request: Any, queryset: Any) -> None:
+        updated = queryset.update(exposed=False)
+        self.message_user(request, f"{updated} test case(s) marked as hidden.")
+    mark_hidden.short_description = "Mark selected tests as hidden"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("testCategory", "testCategory__assignment")
+        return qs.select_related("testCategory", "testCategory__assignment", "testCategory__assignment__course", "rubricItem")
+
+
+@admin.register(TestCategoryResource)
+class TestCategoryResourceAdmin(admin.ModelAdmin):
+    list_display = ("category", "assignment", "resource_type", "resource_name", "target_path", "created")
+    search_fields = (
+        "target_path",
+        "category__name",
+        "category__assignment__name",
+        "file__name",
+        "dataset__name",
+    )
+    list_filter = ("category__assignment__course", "created")
+    readonly_fields = ("created", "modified")
+    autocomplete_fields = ["category", "file", "dataset"]
+    date_hierarchy = "created"
+
+    def assignment(self, obj: TestCategoryResource) -> Assignment:
+        return obj.category.assignment
+    assignment.short_description = "Assignment"
+    assignment.admin_order_field = "category__assignment__name"
+
+    def resource_type(self, obj: TestCategoryResource) -> str:
+        if obj.file is not None:
+            return "File"
+        if obj.dataset is not None:
+            return "Dataset"
+        return "-"
+    resource_type.short_description = "Type"
+
+    def resource_name(self, obj: TestCategoryResource) -> str:
+        if obj.file:
+            return obj.file.name
+        if obj.dataset:
+            return obj.dataset.name
+        return "-"
+    resource_name.short_description = "Resource"
+
+    def get_queryset(self, request: Any) -> Any:
+        qs = super().get_queryset(request)
+        return qs.select_related("category", "category__assignment", "category__assignment__course", "file", "dataset")
 
 
 @admin.register(SubmissionTest)
 class SubmissionTestAdmin(admin.ModelAdmin):
-    list_display = ("submission", "testCase", "passed", "is_error", "created")
-    search_fields = ("submission__id", "testCase__description")
-    list_filter = ("passed", "isError", "created")
+    list_display = ("submission", "assignment", "testCase", "passed", "is_error", "score_display", "created")
+    search_fields = ("submission__id", "testCase__description", "submission__assignment__name")
+    list_filter = ("passed", "isError", "testCase__type", "submission__assignment", "created")
     readonly_fields = ("submission", "testCase", "created", "modified")
     autocomplete_fields = ["submission", "testCase"]
+    search_help_text = "Search by submission ID, assignment name, or test case description."
+    list_select_related = ("submission", "testCase")
+    list_per_page = 100
+    show_full_result_count = False
+    date_hierarchy = "created"
     
     fieldsets = (
         ("Test Information", {
@@ -948,26 +1860,55 @@ class SubmissionTestAdmin(admin.ModelAdmin):
         return obj.isError
     is_error.short_description = "Error"
     is_error.boolean = True
+
+    def assignment(self, obj: SubmissionTest) -> Assignment:
+        return obj.submission.assignment
+    assignment.short_description = "Assignment"
+    assignment.admin_order_field = "submission__assignment__name"
+
+    def score_display(self, obj: SubmissionTest) -> str:
+        return f"{obj.score:.2f}/{obj.maxScore:.2f}"
+    score_display.short_description = "Score"
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("submission", "testCase")
+        return qs.select_related("submission", "submission__assignment", "testCase", "testCase__testCategory")
 
 
 @admin.register(Environment)
 class EnvironmentAdmin(admin.ModelAdmin):
-    list_display = ("assignment", "language", "auto_detect", "build_type", "image_name", "build_status", "created")
-    search_fields = ("assignment__name",)
-    list_filter = ("language", "auto_detect", "buildType", "created")
+    list_display = (
+        "assignment",
+        "course_name",
+        "language",
+        "auto_detect",
+        "build_type",
+        "image_name",
+        "build_status_label",
+        "last_built",
+        "open_assignment",
+        "created",
+    )
+    search_fields = ("assignment__name", "assignment__course__name", "image_name")
+    list_filter = ("language", "auto_detect", "buildType", "build_status", "created")
     readonly_fields = ("assignment", "created", "modified")
     autocomplete_fields = ["assignment"]
+    search_help_text = "Search by assignment, course, or image name."
+    list_select_related = ("assignment",)
+    list_per_page = 75
+    show_full_result_count = False
+    date_hierarchy = "created"
     
     fieldsets = (
         ("Assignment", {
             "fields": ("assignment",)
         }),
-        ("Configuration", {
-            "fields": ("language", "requirements", "auto_detect", "buildType", "dockerfile", "compileText")
+        ("Core Configuration", {
+            "fields": ("language", "auto_detect", "buildType", "image_name")
+        }),
+        ("Advanced Build Inputs", {
+            "fields": ("requirements", "dockerfile", "compileText"),
+            "classes": ("collapse",)
         }),
         ("Docker Settings", {
             "fields": ("dockerRunInstructions",),
@@ -978,7 +1919,7 @@ class EnvironmentAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
         ("Build", {
-            "fields": ("buildID", "image_name", "build_status", "build_logs", "last_built"),
+            "fields": ("buildID", "build_status", "build_logs", "last_built"),
             "classes": ("collapse",)
         }),
         ("Timestamps", {
@@ -991,6 +1932,27 @@ class EnvironmentAdmin(admin.ModelAdmin):
         return obj.buildType
     build_type.short_description = "Build Type"
     build_type.admin_order_field = "buildType"
+
+    def build_status_label(self, obj: Environment) -> str:
+        status_labels = {
+            0: "Not Built",
+            1: "Building",
+            2: "Success",
+            3: "Failed",
+        }
+        return status_labels.get(obj.build_status, str(obj.build_status))
+    build_status_label.short_description = "Build Status"
+    build_status_label.admin_order_field = "build_status"
+
+    def course_name(self, obj: Environment) -> str:
+        return obj.assignment.course.name
+    course_name.short_description = "Course"
+    course_name.admin_order_field = "assignment__course__name"
+
+    def open_assignment(self, obj: Environment) -> str:
+        url = reverse("admin:core_assignment_change", args=[obj.assignment.id])
+        return format_html('<a href="{}">Open Assignment</a>', url)
+    open_assignment.short_description = "Assignment"
     
     # Django admin seems to be saving carriage returns for compile text
     # Replace if admin console saves
@@ -1000,7 +1962,7 @@ class EnvironmentAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("assignment")
+        return qs.select_related("assignment", "assignment__course")
 
 
 
@@ -1012,10 +1974,53 @@ class EnvironmentAdmin(admin.ModelAdmin):
 # Register File model with search_fields for autocomplete
 @admin.register(File)
 class FileAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "extension",)
-    search_fields = ("name", "extension")
-    list_filter = ("extension",)
-    readonly_fields = ("created", "modified")
+    list_display = ("id", "name", "extension", "scope", "context_ref", "has_path", "hash_short", "created")
+    search_fields = ("name", "extension", "path", "hash")
+    list_filter = ("extension", FileScopeFilter, FileHasPathFilter, "created")
+    readonly_fields = ("hash", "created", "modified")
+    list_per_page = 100
+    show_full_result_count = False
+    date_hierarchy = "created"
+    search_help_text = "Search by file name, extension, path, or hash."
+
+    def scope(self, obj: File) -> str:
+        if hasattr(obj, "submissionfile"):
+            return "Submission"
+        if hasattr(obj, "assignmentfile"):
+            return "Assignment"
+        if hasattr(obj, "coursefile"):
+            return "Course"
+        return "Unknown"
+    scope.short_description = "Scope"
+
+    def context_ref(self, obj: File) -> str:
+        try:
+            if hasattr(obj, "submissionfile"):
+                submission = obj.submissionfile.submission
+                return f"Submission #{submission.id}"
+            if hasattr(obj, "assignmentfile"):
+                assignment = obj.assignmentfile.assignment
+                return f"Assignment: {assignment.name}"
+            if hasattr(obj, "coursefile"):
+                course = obj.coursefile.course
+                return f"Course: {course.name}"
+        except Exception:
+            pass
+        return "-"
+    context_ref.short_description = "Context"
+
+    def has_path(self, obj: File) -> bool:
+        return bool(obj.path)
+    has_path.short_description = "Path"
+    has_path.boolean = True
+
+    def hash_short(self, obj: File) -> str:
+        hash_value = obj.hash or ""
+        if len(hash_value) <= 12:
+            return hash_value
+        return f"{hash_value[:6]}...{hash_value[-6:]}"
+    hash_short.short_description = "Hash"
+    hash_short.admin_order_field = "hash"
 
 
 
