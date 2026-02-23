@@ -1,157 +1,331 @@
-# codePost API & Deployment Guide
+# codePost API
 
-This repository contains the backend API for [codePost](https://codepost.cs.rutgers.edu), built with Django. It also serves as the central hub for deploying the full codePost stack (API, Database, Workers, and services) using Docker Compose.
+This repository contains the backend API for [codePost](https://codepost.cs.rutgers.edu), built with Django.
 
-## Prerequisites
+This README documents the **current production deployment flow** used for codePost with a multi-VM layout and `docker-compose`.
 
--   [Docker](https://docs.docker.com/get-docker/)
--   [Docker Compose](https://docs.docker.com/compose/install/)
+## What this repository deploys
 
-## Architecture Overview
+Primary services in this repo:
 
-The deployment consists of several services orchestrated via Docker Compose:
+- `codepost-api`: Django API service
+- `codepost-entry`: Nginx TLS reverse proxy for API
+- `codepost-worker`: Celery worker for background jobs/autograding
+- `codepost-worker-shell`: worker-shell relay process
+- `codepost-database`: MariaDB
+- `codepost-redis`: Redis
 
--   **`codepost-api`**: The main Django application server (Gunicorn).
--   **`codepost-worker`**: Celery worker for asynchronous tasks (autograding, emails).
--   **`codepost-database`**: MariaDB instance for persistent data.
--   **`codepost-redis`**: Redis for caching and Celery message brokering.
--   **`codepost-entry`**: Nginx reverse proxy handling SSL and routing to the API.
--   **`codepost-flower`**: (Optional) Tool for monitoring Celery workers.
+Optional operational services:
 
-## Deployment Steps
+- `codepost-flower`: Celery monitoring UI
+- `adminer`: database web UI
 
-### 1. Networking Setup
+## Production deployment (multi-VM)
 
-Ensure you have a Docker network created for the services to communicate. The default configuration uses `codepost-network`.
+### End-to-end setup (from git clone to full deployment)
+
+This is the fastest path for a new operator starting from zero.
+
+#### 0) Prepare host machines
+
+Provision these VMs:
+
+- Data VM
+- Backend VM
+- Worker VM
+- Frontend VM
+
+Install on each VM:
+
+- Git
+- Docker Engine
+- Docker Compose plugin (`docker-compose` command)
+- Python 3 (for env generation script)
+
+Also ensure:
+
+- VM-to-VM connectivity is open for required ports (DB/Redis/API)
+- DNS records are configured for API and frontend domains
+
+#### 1) Clone repositories
+
+On Data, Backend, and Worker VMs:
 
 ```bash
-docker network create codepost-network
+git clone https://github.com/rutgers-lcsr/codePost-api.git
+cd codePost-api
 ```
 
-### 2. Environment Configuration
+On Frontend VM:
 
-Create a `.env` file in the root of the `codePost-api` directory. You can start by copying `.env.example` if it exists, or use the reference below.
+```bash
+git clone https://github.com/rutgers-lcsr/codePost-ui.git
+cd codePost-ui
+```
 
-**Required `.env` Variables:**
+#### 2) Create and distribute API `.env`
+
+Create `.env` once in `codePost-api/` (for example on Backend VM):
+
+```bash
+python3 ./scripts/create_env.py
+```
+
+Then copy the same `.env` to Data VM and Worker VM in their `codePost-api/` folders.
+
+Important values to confirm before deploy:
+
+- `DB_HOSTNAME` points to the Data VM host
+- `API_URL` is your external API URL (example: `https://api.example.edu`)
+- `CLIENT_URL` is your frontend URL (example: `https://codepost.example.edu`)
+- `WORKER_SHELL_SHARED_SECRET` is identical on Backend + Worker
+- `NFS_*` values are set correctly if NFS-backed DB volume is enabled
+
+#### 3) Prepare API TLS certs (Backend VM)
+
+In `codePost-api/`, place cert files:
+
+- `certs/fullchain.pem`
+- `certs/privkey.pem`
+
+#### 4) Create frontend `.env` (Frontend VM)
+
+In `codePost-ui/`, create `.env` with:
 
 ```ini
-# Debugging
+REACT_APP_API_URL=https://api.yourdomain.com
+```
+
+#### 5) Prepare frontend TLS certs (Frontend VM)
+
+In `codePost-ui/`, place cert files:
+
+- `certs/fullchain.pem`
+- `certs/privkey.pem`
+
+#### 6) Deploy in order
+
+On Data VM (`codePost-api/`):
+
+```bash
+docker-compose --env-file .env -f docker-compose-data.yml up -d
+```
+
+On Backend VM (`codePost-api/`):
+
+```bash
+docker-compose --env-file .env -f docker-compose-prod.yml up -d --build
+```
+
+On Worker VM (`codePost-api/`):
+
+```bash
+docker-compose --env-file .env -f docker-compose-worker.yml up -d --build
+```
+
+On Frontend VM (`codePost-ui/`):
+
+```bash
+docker-compose --env-file .env -f docker-compose.yml up -d --build
+```
+
+#### 7) Verify deployment
+
+- API health check: `https://<api-domain>/health-check`
+- Frontend loads over HTTPS
+- Login succeeds in UI
+- Background jobs run successfully on worker
+
+#### 8) First admin setup
+
+- `init.sh` auto-creates admin user from `API_USER` / `API_PASSWORD`
+- Open Django admin at `https://<api-domain>/admin/`
+- Create Organization and link your profile
+
+Current recommended topology:
+
+- **Data VM**: `docker-compose-data.yml`
+- **Backend VM**: `docker-compose-prod.yml`
+- **Worker VM**: `docker-compose-worker.yml`
+- **Frontend VM**: deployed from `codePost-ui` (see [README](https://github.com/rutgers-lcsr/codePost-ui/blob/master/README.md))
+
+### Deployment order
+
+Use this order for first deploy and most restarts:
+
+1. Data VM
+2. Backend VM
+3. Worker VM
+4. Frontend VM
+
+### Prerequisites
+
+- Docker + Docker Compose plugin installed
+- DNS / routing configured so VMs can reach each other
+- TLS certificates available on API and UI hosts
+- Host paths created where required:
+    - `HOST_DATASET_ROOT` (default `/mnt/datasets`)
+    - `/tmp/codepost-staging`
+
+### Environment variables (`.env`)
+
+Create a `.env` file in `codePost-api/` using one of the following:
+
+```bash
+# Interactive (recommended)
+python3 ./scripts/create_env.py
+
+# Non-interactive defaults/placeholders
+python3 ./scripts/create_env.py --non-interactive
+
+# Backward-compatible wrapper still works
+./scripts/create_env.sh
+```
+
+The interactive flow will ask whether optional features should be activated (for example, NFS-backed DB volume and autograder auto-execution).
+
+Or copy `.env.example` manually and edit values.
+
+Required (or strongly recommended) fields for production:
+
+```ini
 DEBUG=False
 
-# Security & Encryption
-SECRET_KEY=<generate_a_secure_random_string>
-FIELD_ENCRYPTION_KEY=<generate_a_secure_key_for_db_encryption>
+SECRET_KEY=<secure_random_string>
+FIELD_ENCRYPTION_KEY=<secure_random_key>
 
-# Database Configuration
-DB_HOSTNAME=codepost-database
+DB_HOSTNAME=<hostname_or_ip_of_data_vm_database_and_redis>
 DB_NAME=codepost
-DB_USER=codepost_user
-DB_PASSWORD=<secure_db_password>
-ROOT_DATABASE_PASSWORD=<secure_root_password>
+DB_PASSWORD=<db_password>
+ROOT_DATABASE_PASSWORD=<db_root_password>
 
-# API Admin User (created on startup if not exists)
-API_USER=admin_user
-API_PASSWORD=<secure_admin_password>
+API_USER=<initial_admin_username>
+API_PASSWORD=<initial_admin_password>
 
-# URLs (Important for CORS and emails)
 API_URL=https://api.yourdomain.com
 CLIENT_URL=https://yourdomain.com
 
-# Email Settings
-EMAIL_HOST=smtp.yourprovider.com
-DEFAULT_EMAIL_FROM=no-reply@yourdomain.com
+EMAIL_HOST=<smtp_host>
+DEFAULT_EMAIL_FROM=<noreply@yourdomain.com>
 
-# Celery / Redis
 CELERY_CONCURRENCY=4
-
-# Storage Paths (Host) must be mounted to the container for the api and the workers to access them
 HOST_DATASET_ROOT=/mnt/datasets
+
+WORKER_SHELL_SHARED_SECRET=<shared_secret_used_by_api_and_worker>
+WORKER_SHELL_REDIS_URL=redis://<data-vm-host>:6379
+WORKER_SHELL_WORKER_ID=<optional_worker_id>
+
+# Required when using NFS-backed database volume in docker-compose-data.yml
+NFS_SERVER_IP=<nfs_server_ip>
+NFS_SHARE_PATH=<nfs_export_path>
 ```
 
-### 3. Deploy Core Services (Database & Redis)
+Notes:
 
-Start the persistent storage services first.
+- Compose files set `DB_USERNAME=codepost_user` internally.
+- `.env.example` includes `DB_USER`; this variable is retained for compatibility but is not used by the current compose runtime.
+- `DB_HOSTNAME` is also used for Redis URLs in current compose files.
+
+### Step 1: Data VM
+
+On the Data VM, from `codePost-api/`:
 
 ```bash
-docker-compose -f docker-compose-data.yml up -d
+docker-compose --env-file .env -f docker-compose-data.yml up -d
 ```
 
-### 4. Deploy API & Workers
+This starts MariaDB + Redis and optional operations services (`codepost-flower`, `adminer`).
 
-Once the database is up and healthy, deploy the API and Worker containers.
+### Step 2: Backend VM
+
+On the Backend VM, from `codePost-api/`:
 
 ```bash
-# Deploys the API and Nginx entry point
-docker-compose -f docker-compose-prod.yml up -d
-
-# Deploys the Celery Worker
-docker-compose -f docker-compose-worker.yml up -d
+docker-compose --env-file .env -f docker-compose-prod.yml up -d --build
 ```
 
-### SSL Configuration
+This starts API + Nginx entry service.
 
- The `codepost-entry` service (Nginx) expects SSL certificates to be present in the `./certs` directory relative to this repository root.
+### Step 3: Worker VM
 
--   Place your full chain certificate at `./certs/fullchain.pem`
--   Place your private key at `./certs/privkey.pem`
+On the Worker VM, from `codePost-api/`:
 
-## Development Setup
+```bash
+docker-compose --env-file .env -f docker-compose-worker.yml up -d --build
+```
+
+This starts Celery worker + worker-shell relay.
+
+### Step 4: Frontend VM
+
+Deploy UI from `codePost-ui` using its README (`../codePost-ui/README.md`).
+
+## TLS certificates
+
+`codepost-entry` expects cert files mounted from `./certs`:
+
+- `./certs/fullchain.pem`
+- `./certs/privkey.pem`
+
+These map to:
+
+- `/etc/ssl/certs/fullchain.pem`
+- `/etc/ssl/certs/privkey.pem`
+
+## Initialization behavior (`init.sh`)
+
+At startup, API containers run `init.sh`, which:
+
+1. runs migrations (`python manage.py migrate --noinput`)
+2. creates/updates the API admin user from `API_USER` and `API_PASSWORD`
+3. prints/creates API token for that user
+
+## Verification checklist
+
+After deploy:
+
+- Data VM: DB and Redis containers healthy
+- Backend VM: `https://<api-domain>/health-check` reachable
+- Worker VM: worker containers running and stable
+- Frontend VM: UI loads and can make authenticated API requests
+
+## Development setup
 
 For local development:
 
-1.  Install dependencies: `pip install poetry && poetry install`
-2.  Run migration: `python manage.py migrate`
-3.  Start server: `./init.sh python manage.py runserver`
+1. `pip install poetry && poetry install`
+2. `python manage.py migrate`
+3. `./init.sh python manage.py runserver`
 
-## Bootstrapping & Initialization
+## Manual user creation
 
-When the container starts, `init.sh` runs automatically to bootstrap the application:
-
-1.  **Migrations**: It runs `python manage.py migrate` to ensure the database schema is up to date.
-2.  **Admin User**: It automatically creates a superuser based on the `API_USER` and `API_PASSWORD` environment variables.
-    -   If the user does not exist, it is created.
-    -   An API Token is generated and printed to the logs.
-    -   This allows you to immediately log in to the admin panel or authenticate via API.
-
-## Manual User Creation
-
-If you need to create additional users manually, you can use the following Django management commands:
-
-### Standard Superuser
-
-To create a new superuser interactively:
+Create interactive superuser:
 
 ```bash
-docker compose -f docker-compose-prod.yml exec codepost-api python manage.py createsuperuser
+docker-compose -f docker-compose-prod.yml exec codepost-api python manage.py createsuperuser
 ```
 
-### Default Development Users (Legacy)
-
-There is a custom command that creates a set of hardcoded development users (e.g., `james@example.com`, `vinay@example.com` with password `rootabega`):
+Legacy helper for default development users:
 
 ```bash
-docker compose -f docker-compose-prod.yml exec codepost-api python manage.py createsu
+docker-compose -f docker-compose-prod.yml exec codepost-api python manage.py createsu
 ```
 
-## Organization Setup
+## Organization setup
 
-After creating your admin user, you need to set up an **Organization** (e.g., your University).
+After admin user creation:
 
-1.  Log in to the **Django Admin Panel** at `http://localhost:8000/admin/` (or your deployed URL).
-2.  Navigate to **Core > Organizations**.
-3.  Click **Add Organization** in the top right.
-4.  Fill in the required fields:
-    *   **Name**: Full name (e.g., `Princeton University`)
-    *   **Shortname**: Abbreviation (e.g., `Princeton`) – *Must be unique*
-5.  Click **Save**.
+1. Open Django admin (`/admin/`)
+2. Create an Organization under `Core > Organizations`
+3. Link your user profile under `Core > Profiles`
+4. Enable needed permissions (`CanCreateCourses`, `CanModifyRosters`)
 
-### Linking Your User
+## License
 
-To associate your admin user with this organization:
+This repository is licensed under the Rutgers Non-commercial License (RU-NCL).
 
-1.  Go to **Core > Profiles** in the Admin Panel.
-2.  Find your user profile (e.g., `james@example.com`).
-3.  Set the **Organization** field to the one you just created.
-4.  Ensure **CanCreateCourses** and **CanModifyRosters** are checked if you need full permissions.
-5.  Click **Save**.
+See [`LICENSE`](./LICENSE) for the full terms.
 
+## Internal/legacy deployment notes
+
+Alternative deployment files (including platform-specific configurations) are maintained separately from this public quickstart.

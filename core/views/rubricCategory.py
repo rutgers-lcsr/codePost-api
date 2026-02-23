@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from core.models import RubricCategory
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.views.template import ListProtectedViewSet

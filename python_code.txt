@@ -1,7 +1,0 @@
-@test("Student's NumPy array assertions", points=10)
-def test_student_numpy_assertions():
-    # The student's submission defines a function 'test_numpy_array'
-    # which contains its own set of assertions for numpy operations.
-    # We call this function directly to evaluate if their internal assertions pass.
-    # If any assertion within test_numpy_array fails, this test will fail.
-    test_numpy_array()

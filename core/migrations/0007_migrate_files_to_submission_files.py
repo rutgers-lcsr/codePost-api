@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 # Generated manually to handle File -> SubmissionFile/AssignmentFile/CourseFile migration
 # This migration handles both clean (production) and partial (staging) states
 # PATCHED for SQLite compatibility (tests)

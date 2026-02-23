@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from abc import abstractmethod
 from rest_framework import permissions
 from rest_framework.request import Request

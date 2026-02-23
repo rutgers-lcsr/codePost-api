@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from rest_framework.test import APITestCase
 from core.models import User, Organization
 from core.serializers.course import CourseSerializer

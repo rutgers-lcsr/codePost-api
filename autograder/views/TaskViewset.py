@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from rest_framework import viewsets
 from rest_framework.response import Response
 from django_celery_results.models import TaskResult

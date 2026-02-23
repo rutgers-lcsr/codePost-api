@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 # https://www.fusionbox.com/blog/detail/create-react-app-and-django/624/
 def dev_cors_middleware(get_response):
     """

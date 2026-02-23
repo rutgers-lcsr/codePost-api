@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from celery import shared_task
 from core.models import File, User, CachedExecutionResult
 from autograder.services.executors import Executor

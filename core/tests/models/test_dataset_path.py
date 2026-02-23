@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.test import SimpleTestCase
 from unittest.mock import MagicMock
 from core.models import dataset_upload_path, AssignmentDataSet

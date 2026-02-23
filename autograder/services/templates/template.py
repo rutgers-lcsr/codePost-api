@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 # The following is a template for running code which is meant to be used by the autograder,
 # This will run inline inside a docker container.
 

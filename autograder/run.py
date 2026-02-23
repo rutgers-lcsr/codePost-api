@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
 # External libraries
 from ast import Sub
 from calendar import c
@@ -26,6 +27,7 @@ from autograder.testUtils.ag_logging import (
 )
 
 from core.models import (
+    File,
     SubmissionFile,
     TestCase,
     SubmissionTest,
@@ -44,6 +46,7 @@ from autograder.testUtils.parse import parseTests, writeCmdScript
 from core.emails import TestRunAllCompleteEmail
 
 from datetime import datetime
+from typing import Any, cast
 
 import re
 import traceback
@@ -77,7 +80,7 @@ def AutoDetectEnvironment(assignment_id):
         logger.error(f"[AutoDetect] Task failed for assignment {assignment_id}: {e}")
 
 @app.task(priority=0)
-def BuildEnvironment(environmentID, rerun_submission_ids: list[int] = None):
+def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = None):
     """
     Builds the Docker environment for a given Environment ID.
     Optionally reruns submissions after successful build.
@@ -104,7 +107,7 @@ def BuildEnvironment(environmentID, rerun_submission_ids: list[int] = None):
     if result.get("success") and rerun_submission_ids:
         logger.info(f"[BuildEnvironment] Triggering reruns for {len(rerun_submission_ids)} submissions")
         for sub_id in rerun_submission_ids:
-            RunSubmission.delay(sub_id)
+            cast(Any, RunSubmission).delay(sub_id)
             logger.info(f"[BuildEnvironment] Queued rerun for submission {sub_id}")
     
     return result
@@ -195,8 +198,7 @@ def NotifyConvergenceFailure(environment_id: int, success_rate: float):
     """
     Celery task to notify course admin of convergence failure.
     """
-    from core.emails import send_email_to_admins
-    
+
     try:
         env = Environment.objects.get(pk=environment_id)
         assignment = env.assignment
@@ -230,7 +232,7 @@ codePost Autograder
 """
         
         # Send to course admins
-        admins = course.administrators.all()
+        admins = course.courseAdmins.all()
         for admin in admins:
             try:
                 admin.email_user(subject, body)
@@ -331,7 +333,8 @@ def RunAll(environmentID, user, sendEmail=False):
         RunAll.update_state(state="PROGRESS", meta={"progress": map})
 
     ######################## 7. Turn off "isRunning" ######################################
-    environment.isRunning = False
+    # Backwards-compatible dynamic attr set for legacy field names.
+    setattr(environment, "isRunning", False)
     environment.save()
 
     if sendEmail:
@@ -386,17 +389,18 @@ def RunSubmission(self, submissionID: int):
     """
     try:
         submission = Submission.objects.get(id=submissionID)
-        logger.info(f"[RunSubmission] Processing submission {submission.id} for assignment {submission.assignment_id}")
+        assignment_id = submission.assignment.id
+        logger.info(f"[RunSubmission] Processing submission {submission.id} for assignment {assignment_id}")
         
         # Explicitly get environment using assignment_id to avoid descriptor ambiguity
-        environment = Environment.objects.get(assignment_id=submission.assignment_id)
+        environment = Environment.objects.get(assignment_id=assignment_id)
         logger.info(f"[RunSubmission] Found environment {environment.id} (image: {environment.image_name})")
         
     except Submission.DoesNotExist:
         logger.error(f"Submission {submissionID} not found")
         return {"success": False, "error": "Submission not found"}
     except Environment.DoesNotExist:
-        logger.error(f"Environment for assignment {submission.assignment_id} not found")
+        logger.error(f"Environment for assignment {submission.assignment.id} not found")
         return {"success": False, "error": "Environment not found"}
 
     # Wait for build if pending
@@ -422,7 +426,7 @@ def RunSubmission(self, submissionID: int):
 
 
     for f in file_objs:
-        executor = Executor.factory(f)
+        executor = Executor.factory(cast(Any, f))
         if executor:
             files.append(f)
     
@@ -458,7 +462,7 @@ def RunSubmission(self, submissionID: int):
 
             # Retrieve custom image name if built
             image_name = environment.image_name if environment.image_name else None
-            executor = Executor.factory(f, image_name=image_name)
+            executor = Executor.factory(cast(Any, f), image_name=image_name)
             
             if not executor:
                 logger.info(f"File {f.id} has no executor, skipping.")
@@ -1109,7 +1113,7 @@ def _runAndDump(environment, submission, logs):
             submission=submission,
             name="_tests.txt",
             extension=".txt",
-            code=logs,
+            data=logs,
             path="",
             hiddenBeforePublish=True,
         )

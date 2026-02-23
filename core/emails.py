@@ -1,3 +1,4 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from abc import ABC, abstractmethod
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
