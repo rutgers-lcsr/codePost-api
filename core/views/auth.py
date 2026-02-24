@@ -160,13 +160,14 @@ def generate_one_time_token(request):
   # Ensure the requestee user is a course admin and that target user is a student/grader/instructor
   from django.db.models import Q
 
-  sharded_course = Course.objects.filter(
-      Q(courseAdmins=request.user) &
-      (
-          Q(students=user) |
-          Q(graders=user) |
-          Q(courseAdmins=user)
-      )
+  # Use chained .filter() calls so Django creates separate M2M JOINs.
+  # A single filter(Q(courseAdmins=request.user) & Q(courseAdmins=user)) would
+  # resolve both lookups to the same JOIN alias, making the AND impossible when
+  # request.user != user.
+  sharded_course = Course.objects.filter(courseAdmins=request.user).filter(
+      Q(students=user) |
+      Q(graders=user) |
+      Q(courseAdmins=user)
   )
 
   if not sharded_course.exists() and not request.user.username == username:
