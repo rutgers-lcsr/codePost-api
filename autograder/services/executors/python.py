@@ -344,7 +344,7 @@ class PythonNotebookExecutor(NotebookExecutor):
     LANGUAGE = "python"
 
     TEMPLATE = "notebook_template.py"
-    DOCKER_IMAGE = "codepost/python-executor:latest"
+    DOCKER_IMAGE = "python:3.12-slim"
     EXECUTABLE_EXTENSIONS = ['.ipynb']
     EXECUTION_COMMAND = ["python", "-c"]
        

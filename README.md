@@ -2,6 +2,10 @@
 
 This repository contains the backend API for [codePost](https://codepost.cs.rutgers.edu), built with Django.
 
+## Changelog
+
+- See [`CHANGELOG.md`](./CHANGELOG.md) for recent API changes and release notes.
+
 This README documents the **current production deployment flow** used for codePost with a multi-VM layout and `docker-compose`.
 
 ## What this repository deploys
