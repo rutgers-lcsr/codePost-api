@@ -27,6 +27,14 @@ log("<<<RESULT>>>", "SYSTEM");
 // ============= Test Framework =============
 const tests = [];
 const testResults = [];
+let STUDENT_CODE_SYNTAX_INVALID = false;
+let STUDENT_CODE_SYNTAX_ERROR_MSG = "";
+
+function looksLikeSyntaxInvalid(err) {
+    if (!err) return false;
+    const msg = (err.message || String(err) || "").toLowerCase();
+    return err.name === "SyntaxError" || msg.includes("syntax") || msg.includes("unexpected token");
+}
 
 function test(name, points, description, fn, timeout) {
     if (typeof description === "function") {
@@ -58,6 +66,17 @@ async function runTestCase(testCase) {
         status: "failed",
         error: ""
     };
+
+    if (STUDENT_CODE_SYNTAX_INVALID) {
+        const baseMsg = "Student code syntax was invalid. Fix syntax errors before running tests.";
+        result.message = baseMsg;
+        result.error = STUDENT_CODE_SYNTAX_ERROR_MSG ? `${baseMsg}\n${STUDENT_CODE_SYNTAX_ERROR_MSG}` : baseMsg;
+        result.status = "error";
+        result.passed = false;
+        result.score = 0;
+        testResults.push(result);
+        return;
+    }
 
     const timeoutMs = Math.max(0, Number(testCase.timeout) || 30) * 1000;
     const start = Date.now();
@@ -125,7 +144,11 @@ function outputTestResults() {
         // FILLER_CODE
     } catch (e) {
         console.error(e);
-        process.exit(1);
+        if (looksLikeSyntaxInvalid(e)) {
+            STUDENT_CODE_SYNTAX_INVALID = true;
+            STUDENT_CODE_SYNTAX_ERROR_MSG = e && (e.stack || e.message || String(e));
+            console.error("Student code syntax was invalid. Tests will be marked with syntax error context.");
+        }
     }
 
     // Execute test code if provided

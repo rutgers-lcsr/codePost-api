@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 import logging
 import re
+from decimal import Decimal
 from typing import Optional, Dict, Any, List
 from django.db import transaction
 from django.utils import timezone
@@ -25,6 +26,150 @@ class TestService:
             return {int(k): v for k, v in file_overrides.items()}
         except (ValueError, TypeError):
             return {}
+
+    @staticmethod
+    def _to_json_safe(value: Any) -> Any:
+        """Recursively convert values to JSON-serializable primitives for JSONField writes."""
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, dict):
+            return {k: TestService._to_json_safe(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [TestService._to_json_safe(v) for v in value]
+        if isinstance(value, tuple):
+            return [TestService._to_json_safe(v) for v in value]
+        return value
+
+    @staticmethod
+    def _looks_like_syntax_or_compile_error(text: str) -> bool:
+        if not text:
+            return False
+
+        patterns = [
+            r"\bSyntaxError\b",
+            r"\bIndentationError\b",
+            r"\bTabError\b",
+            r"invalid syntax",
+            r"unexpected EOF while parsing",
+            r"unexpected token",
+            r"Error:\s*Unexpected",
+            r"reached end of file while parsing",
+            r"';' expected",
+            r"\berror:\b.*\b(expected|before)\b",
+            r"compilation failed",
+            r"failed to compile",
+        ]
+
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+    @staticmethod
+    def _looks_like_secondary_undefined_error(text: str) -> bool:
+        if not text:
+            return False
+
+        patterns = [
+            r"\bNameError\b",
+            r"\bReferenceError\b",
+            r"is not defined",
+            r"cannot find symbol",
+            r"undefined variable",
+        ]
+
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+    @staticmethod
+    def _detect_syntax_hint(execution_result: Dict[str, Any]) -> Optional[str]:
+        """
+        Detect whether the primary failure likely came from a syntax/parse/compile issue
+        in student code and return a concise instructor-facing hint.
+        """
+        stdout = execution_result.get('stdout', '') or ''
+        stderr = execution_result.get('stderr', '') or ''
+        err = execution_result.get('error', '') or ''
+
+        combined = f"{stderr}\n{stdout}\n{err}".strip()
+        if not combined:
+            return None
+
+        # Prefer explicit student-code crash marker emitted by templates
+        if 'Student Code Runtime Error' in combined and TestService._looks_like_syntax_or_compile_error(combined):
+            first_line = next(
+                (
+                    line.strip()
+                    for line in combined.splitlines()
+                    if TestService._looks_like_syntax_or_compile_error(line)
+                ),
+                'Syntax/parse error detected while loading student code.',
+            )
+            return (
+                'Student code has a syntax/parse error, so tests may fail secondarily '
+                f"(e.g., undefined names).\nRoot cause: {first_line}"
+            )
+
+        if TestService._looks_like_syntax_or_compile_error(combined):
+            first_line = next(
+                (
+                    line.strip()
+                    for line in combined.splitlines()
+                    if TestService._looks_like_syntax_or_compile_error(line)
+                ),
+                'Syntax/parse/compile error detected.',
+            )
+            return (
+                'Detected a likely syntax/parse/compile error in student code before '
+                f"test assertions could run cleanly.\nRoot cause: {first_line}"
+            )
+
+        return None
+
+    @staticmethod
+    def _annotate_tests_with_syntax_hint(tests: List[Dict[str, Any]], syntax_hint: Optional[str]) -> List[Dict[str, Any]]:
+        if not syntax_hint:
+            return tests
+
+        annotated: List[Dict[str, Any]] = []
+        for test in tests:
+            t = dict(test)
+            if t.get('passed', False):
+                annotated.append(t)
+                continue
+
+            existing_error = str(t.get('error') or '').strip()
+
+            # Only annotate tests that already look syntax-related (or classic secondary undefined fallout).
+            # This avoids incorrectly labeling unrelated assertion failures in other files/tests.
+            should_attach_hint = False
+            if existing_error:
+                should_attach_hint = (
+                    TestService._looks_like_syntax_or_compile_error(existing_error)
+                    or TestService._looks_like_secondary_undefined_error(existing_error)
+                )
+            else:
+                message_text = str(t.get('message') or '')
+                should_attach_hint = (
+                    TestService._looks_like_syntax_or_compile_error(message_text)
+                    or TestService._looks_like_secondary_undefined_error(message_text)
+                )
+
+            if not should_attach_hint:
+                annotated.append(t)
+                continue
+
+            if existing_error:
+                if syntax_hint not in existing_error:
+                    t['error'] = f"{syntax_hint}\n\n{existing_error}"
+            else:
+                t['error'] = syntax_hint
+
+            if not t.get('message'):
+                t['message'] = 'Fix syntax/parse errors in student code first, then rerun tests.'
+
+            if not t.get('status') or t.get('status') == 'failed':
+                t['status'] = 'error'
+
+            annotated.append(t)
+
+        return annotated
 
     @staticmethod
     def run_suite(submission_id: int, test_case_ids: Optional[List[int]] = None, user_id: str = None, file_overrides: Dict[int, str] = None) -> List[Dict[str, Any]]:
@@ -115,6 +260,48 @@ class TestService:
                     submission_files = list(submission.files.all())
                     if most_common_fname:
                         target_file_obj = next((f for f in submission_files if f.name == most_common_fname), None)
+
+                    # If the category explicitly targets a file and it's missing from submission,
+                    # do NOT fallback to any other file (that produces misleading syntax errors).
+                    if category.targetFileName and not target_file_obj:
+                        missing_msg = (
+                            f"Target file '{category.targetFileName}' was not found in submission. "
+                            "This test category was not executed."
+                        )
+
+                        for test in category_tests:
+                            TestService._save_test_result(
+                                submission,
+                                test,
+                                False,
+                                0,
+                                missing_msg,
+                                True,
+                                test.pointsPass,
+                                [
+                                    {
+                                        "name": test.functionName,
+                                        "passed": False,
+                                        "score": 0,
+                                        "max_score": test.pointsPass,
+                                        "status": "error",
+                                        "error": missing_msg,
+                                        "message": "Required submission file is missing.",
+                                    }
+                                ],
+                            )
+
+                            all_results.append(
+                                {
+                                    "success": False,
+                                    "error": missing_msg,
+                                    "testCaseId": test.id,
+                                    "testCaseDescription": test.description,
+                                }
+                            )
+
+                        # Skip execution for this category entirely.
+                        continue
                     
                     if not target_file_obj:
                          # Fallback to test case logic if not found (or if explicit target is missing from submission)
@@ -133,6 +320,8 @@ class TestService:
                     # The executor returns a list of individual test results in 'tests' key
                     # Format: [{name: 'test_foo', passed: True, score: 5, ...}, ...]
                     raw_test_results = exec_result_dict.get('tests', [])
+                    syntax_hint = TestService._detect_syntax_hint(exec_result_dict)
+                    raw_test_results = TestService._annotate_tests_with_syntax_hint(raw_test_results, syntax_hint)
                     
                     logger.info(f"DEBUG: run_suite received {len(raw_test_results)} results from executor.")
                     for r in raw_test_results:
@@ -261,8 +450,13 @@ class TestService:
                                  else:
                                      error_msg += "No test results returned by script.\n"
 
-                                 if combined_log:
-                                     error_msg += f"\nCategory Execution Logs:\n{combined_log}"
+                                 # Do not append category-wide raw logs here.
+                                 # They may contain unrelated syntax errors from other contexts/files,
+                                 # which can incorrectly label this specific test as a syntax issue.
+                                 error_msg += (
+                                     "\nCategory execution log omitted for this test-level error to avoid "
+                                     "cross-test contamination."
+                                 )
 
                                  # Save error result to DB so frontend sees it
                                  TestService._save_test_result(
@@ -315,6 +509,17 @@ class TestService:
         try:
             test_case = TestCase.objects.get(id=test_case_id)
             submission = Submission.objects.get(id=submission_id)
+
+            if hasattr(test_case, 'testCategory') and test_case.testCategory and test_case.testCategory.targetFileName:
+                required_name = test_case.testCategory.targetFileName
+                if not submission.files.filter(name=required_name).exists():
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Target file '{required_name}' was not found in submission. "
+                            "This test cannot run until the required file is submitted."
+                        ),
+                    }
             
             # 1. Identify Target File
             target_file = TestService._get_target_file(submission, test_case)
@@ -757,10 +962,16 @@ class TestService:
         stderr = execution_result.get('stderr', '')
         logs = f"{stdout}\n{stderr}".strip()
         
+        syntax_hint = TestService._detect_syntax_hint(execution_result)
+        if syntax_hint:
+            logs = f"{syntax_hint}\n\n{logs}".strip()
+
         # Check for error (infrastructure level)
         # However, for unit tests, if 'error' exists it usually means compilation failed or similar.
         # So passed should definitely be False if error exists.
         is_error = execution_result.get('error') is not None
+        if syntax_hint:
+            is_error = True
         if is_error:
             passed = False
         
@@ -776,6 +987,7 @@ class TestService:
         Parses the JSON results returned by the test framework (e.g. from Tester class).
         """
         tests = execution_result.get('tests', [])
+        syntax_hint = TestService._detect_syntax_hint(execution_result)
         
         # Combine logs
         stdout = execution_result.get('stdout', '')
@@ -788,15 +1000,19 @@ class TestService:
             logs = f"{stdout}\n{stderr}".strip()
             if not logs:
                 logs = "[Error] Test script produced no output and no test results found."
+            if syntax_hint:
+                logs = f"{syntax_hint}\n\n{logs}".strip()
             
             return {
                 "passed": False,
                 "logs": logs,
-                "isError": execution_result.get('error') is not None,
+                "isError": execution_result.get('error') is not None or bool(syntax_hint),
                 "score": 0,
                 "maxScore": 0,
                 "results": []
             }
+
+        tests = TestService._annotate_tests_with_syntax_hint(tests, syntax_hint)
             
         # Aggregate results
         # If ANY test failed, the whole TestCase fails (strict mode for now)
@@ -837,11 +1053,13 @@ class TestService:
         # Append system error if exists
         if execution_result.get('error'):
              logs += f"\n\nSystem Error: {execution_result.get('error')}"
+        if syntax_hint:
+            logs = f"{syntax_hint}\n\n{logs}".strip()
              
         return {
             "passed": all_passed,
             "logs": logs,
-            "isError": execution_result.get('error') is not None,
+            "isError": execution_result.get('error') is not None or bool(syntax_hint),
             "score": total_score,
             "maxScore": total_max_score,
             "stdout": execution_result.get('stdout'),
@@ -850,10 +1068,21 @@ class TestService:
         }
 
     @staticmethod
-    def _save_test_result(submission: Submission, test_case: TestCase, passed: bool, score: float, logs: str, is_error: bool, max_score: float, results: List[Dict[str, Any]] = []) -> SubmissionTest:
+    def _save_test_result(
+        submission: Submission,
+        test_case: TestCase,
+        passed: bool,
+        score: float,
+        logs: str,
+        is_error: bool,
+        max_score: float,
+        results: Optional[List[Dict[str, Any]]] = None,
+    ) -> SubmissionTest:
         """
         Helper to save/update a SubmissionTest result and sync rubric outcomes.
         """
+        safe_results = TestService._to_json_safe(results or [])
+
         # Save SubmissionTest Result
         submission_test, created = SubmissionTest.objects.update_or_create(
             submission=submission,
@@ -864,7 +1093,7 @@ class TestService:
                 "isError": is_error,
                 "score": score,
                 "maxScore": max_score,
-                "results": results,
+                "results": safe_results,
             }
         )
         

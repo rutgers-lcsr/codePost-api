@@ -113,6 +113,8 @@ public class notebook_template {
         }
 
         List<Map<String, Object>> results = new ArrayList<>();
+        boolean studentCodeSyntaxInvalid = false;
+        String studentCodeSyntaxErrorMsg = "";
 
         // Check if too many cells
         if (cells.size() > MAX_CELLS) {
@@ -191,6 +193,16 @@ public class notebook_template {
                         evaluateCellSource(jshell, cellSource, psErr, evalResult, successRef, errorMsgRef);
                         success = successRef[0];
                         errorMsg = errorMsgRef[0];
+
+                        if (!success && isLikelySyntaxCompilationIssue(errorMsg,
+                                jshellErr.toString(StandardCharsets.UTF_8))) {
+                            studentCodeSyntaxInvalid = true;
+                            if (errorMsg != null && !errorMsg.isEmpty()) {
+                                studentCodeSyntaxErrorMsg = errorMsg;
+                            } else {
+                                studentCodeSyntaxErrorMsg = jshellErr.toString(StandardCharsets.UTF_8);
+                            }
+                        }
 
                         // Append expression values to output
                         if (evalResult.length() > 0) {
@@ -319,6 +331,17 @@ public class notebook_template {
                             });
 
                     // 2. Run Test Logic
+                    String escapedSyntaxMsg = studentCodeSyntaxErrorMsg == null ? ""
+                            : studentCodeSyntaxErrorMsg
+                                    .replace("\\", "\\\\")
+                                    .replace("\"", "\\\"")
+                                    .replace("\n", "\\n")
+                                    .replace("\r", "\\r");
+
+                    jshell.eval("boolean CODEPOST_STUDENT_SYNTAX_INVALID = "
+                            + (studentCodeSyntaxInvalid ? "true" : "false") + ";");
+                    jshell.eval("String CODEPOST_STUDENT_SYNTAX_ERROR_MSG = \"" + escapedSyntaxMsg + "\";");
+
                     jshell.eval("   java.util.function.Supplier<String> __runTests = () -> { " +
                             "       StringBuilder _sb = new StringBuilder(); " +
                             "       List<TestResult> _results = new ArrayList<>(); Class<?> _target = null; " +
@@ -335,6 +358,16 @@ public class notebook_template {
                             "               Test _ann = _m.getAnnotation(Test.class); " +
                             "               TestResult _tr = new TestResult(_ann.name().isEmpty() ? _m.getName() : _ann.name(), _ann.points(), _ann.description()); "
                             +
+                            "               if (CODEPOST_STUDENT_SYNTAX_INVALID) { " +
+                            "                   String _base = \"Student code syntax was invalid. Fix syntax errors before running tests.\"; "
+                            +
+                            "                   _tr.passed = false; _tr.score = 0; _tr.status = \"error\"; _tr.message = _base; "
+                            +
+                            "                   _tr.error = (CODEPOST_STUDENT_SYNTAX_ERROR_MSG==null || CODEPOST_STUDENT_SYNTAX_ERROR_MSG.isEmpty()) ? _base : (_base + \"\\n\" + CODEPOST_STUDENT_SYNTAX_ERROR_MSG); "
+                            +
+                            "                   _results.add(_tr); " +
+                            "                   continue; " +
+                            "               } " +
                             "               ExecutorService _exec = Executors.newSingleThreadExecutor(); " +
                             "               Future<Object> _future = _exec.submit(() -> { " +
                             "                   try { _m.setAccessible(true); return _m.invoke(_instance); } " +
@@ -557,9 +590,20 @@ public class notebook_template {
                 }
             } else if (event.status() == Status.REJECTED) {
                 successRef[0] = false;
+                StringBuilder firstDiag = new StringBuilder();
                 jshell.diagnostics(event.snippet()).forEach(diag -> {
-                    psErr.println(diag.getMessage(Locale.getDefault()));
+                    String message = diag.getMessage(Locale.getDefault());
+                    psErr.println(message);
+                    if (firstDiag.length() == 0) {
+                        firstDiag.append(message);
+                    }
                 });
+
+                if (errorMsgRef[0] == null || errorMsgRef[0].isEmpty()) {
+                    errorMsgRef[0] = firstDiag.length() > 0
+                            ? "Compilation error: " + firstDiag
+                            : "Compilation error in notebook cell";
+                }
             }
 
             if (event.exception() != null) {
@@ -568,6 +612,20 @@ public class notebook_template {
                 errorMsgRef[0] = event.exception().getMessage();
             }
         }
+    }
+
+    private static boolean isLikelySyntaxCompilationIssue(String errorMsg, String stderrText) {
+        String combined = ((errorMsg == null ? "" : errorMsg) + "\n" + (stderrText == null ? "" : stderrText))
+                .toLowerCase();
+
+        return combined.contains("compilation error")
+                || combined.contains("cannot find symbol")
+                || combined.contains("';' expected")
+                || combined.contains("not a statement")
+                || combined.contains("illegal start")
+                || combined.contains("reached end of file")
+                || combined.contains("class, interface, enum")
+                || combined.contains("expected");
     }
 
     // Simple JSON array parser (handles nested objects)

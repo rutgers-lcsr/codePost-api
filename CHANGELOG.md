@@ -24,6 +24,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 - Increased Nginx upload/body size limit to 6 MB for larger submissions.
 - Switched API runtime from WSGI to ASGI for WebSocket support.
 - Updated codePost admin panel configuration.
+- Tests now check syntax of code before saving to prevent syntax errors in test cases.
 
 ### Fixed
 

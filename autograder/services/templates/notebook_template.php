@@ -12,11 +12,16 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     exit(1);
 }
 
+$STUDENT_CODE_SYNTAX_INVALID = false;
+$STUDENT_CODE_SYNTAX_ERROR_MSG = "";
+
 // ============= Tester Framework =============
 class Tester {
     private static $results = [];
     
     public static function test(string $name, float $points, $description, $fn = null, $timeout = 30): void {
+        global $STUDENT_CODE_SYNTAX_INVALID, $STUDENT_CODE_SYNTAX_ERROR_MSG;
+
         if (is_callable($description)) {
             $fn = $description;
             $description = null;
@@ -37,6 +42,19 @@ class Tester {
             "status" => "failed",
             "error" => ""
         ];
+
+        if ($STUDENT_CODE_SYNTAX_INVALID) {
+            $baseMsg = "Student code syntax was invalid. Fix syntax errors before running tests.";
+            $result["passed"] = false;
+            $result["score"] = 0;
+            $result["status"] = "error";
+            $result["message"] = $baseMsg;
+            $result["error"] = !empty($STUDENT_CODE_SYNTAX_ERROR_MSG)
+                ? ($baseMsg . "\n" . $STUDENT_CODE_SYNTAX_ERROR_MSG)
+                : $baseMsg;
+            self::$results[] = $result;
+            return;
+        }
         
         try {
             if (function_exists('pcntl_signal') && function_exists('pcntl_alarm')) {
@@ -136,6 +154,10 @@ foreach ($cells as $cell) {
         } catch (Throwable $e) {
             $success = false;
             $error_obj = $e;
+            if (!$STUDENT_CODE_SYNTAX_INVALID && ($e instanceof ParseError)) {
+                $STUDENT_CODE_SYNTAX_INVALID = true;
+                $STUDENT_CODE_SYNTAX_ERROR_MSG = $e->getMessage();
+            }
             echo "\nError: " . $e->getMessage();
         }
         

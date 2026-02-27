@@ -1,5 +1,8 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 # CodePost R Plot Capture Wrapper
+STUDENT_CODE_SYNTAX_INVALID <- FALSE
+STUDENT_CODE_SYNTAX_ERROR_MSG <- ""
+
 local({
     # Create a temp dir for plots
     plot_dir <- tempfile()
@@ -39,6 +42,10 @@ local({
             }
         }
         
+    }, error = function(e) {
+        STUDENT_CODE_SYNTAX_INVALID <<- TRUE
+        STUDENT_CODE_SYNTAX_ERROR_MSG <<- conditionMessage(e)
+        message(paste0("Student code syntax was invalid. ", conditionMessage(e)))
     }, finally = {
         # Close device
         dev.off()
@@ -108,6 +115,22 @@ run_test <- function(name, points, description = NULL, fn = NULL, timeout = 30) 
         status = "failed",
         error = ""
     )
+
+    if (isTRUE(STUDENT_CODE_SYNTAX_INVALID)) {
+        base_msg <- "Student code syntax was invalid. Fix syntax errors before running tests."
+        result$passed <- FALSE
+        result$score <- 0
+        result$status <- "error"
+        result$message <- base_msg
+        result$error <- if (nzchar(STUDENT_CODE_SYNTAX_ERROR_MSG)) {
+            paste(base_msg, STUDENT_CODE_SYNTAX_ERROR_MSG, sep = "\n")
+        } else {
+            base_msg
+        }
+
+        test_results <<- c(test_results, list(result))
+        return(invisible(NULL))
+    }
 
     tryCatch({
         setTimeLimit(elapsed = timeout, transient = TRUE)

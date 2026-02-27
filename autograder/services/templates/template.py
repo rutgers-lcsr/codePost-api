@@ -184,6 +184,16 @@ class TestCase:
         
     def run(self) -> TestResult:
         result = TestResult(self.name, self.points, self.description)
+
+        if globals().get("STUDENT_CODE_SYNTAX_INVALID", False):
+            syntax_msg = globals().get("STUDENT_CODE_SYNTAX_ERROR_MSG", "").strip()
+            base_msg = "Student code syntax was invalid. Fix syntax errors before running tests."
+            result.passed = False
+            result.score = 0
+            result.status = "error"
+            result.message = base_msg
+            result.error = f"{base_msg}\n{syntax_msg}" if syntax_msg else base_msg
+            return result
         
         # Capture stdout/stderr during test execution
         stdout_capture = io.StringIO()
@@ -319,6 +329,9 @@ STUDENT_PSEUDO_FILE = "#{STUDENT_FILE_PATH}"
 if not STUDENT_PSEUDO_FILE or STUDENT_PSEUDO_FILE.startswith("#{"):
     STUDENT_PSEUDO_FILE = "/work/student.py"
 
+STUDENT_CODE_SYNTAX_INVALID = False
+STUDENT_CODE_SYNTAX_ERROR_MSG = ""
+
 
 def _exec_with_pseudo_file(source_code: str, pseudo_file: str) -> None:
     """Execute code with a temporary __file__ for script compatibility."""
@@ -347,7 +360,14 @@ try:
     student_code = base64.b64decode(student_code_b64).decode("utf-8")
 
     _exec_with_pseudo_file(student_code, STUDENT_PSEUDO_FILE)
-    
+except (SyntaxError, IndentationError, TabError):
+    STUDENT_CODE_SYNTAX_INVALID = True
+    STUDENT_CODE_SYNTAX_ERROR_MSG = traceback.format_exc()
+    print(
+        "Student Code Syntax Error:\n"
+        f"{STUDENT_CODE_SYNTAX_ERROR_MSG}",
+        file=sys.stderr,
+    )
 except Exception as e:
     # If the student code crashes at top-level, we print the error
     # but we still proceed to run tests (which will likely fail if they depend on defined functions)

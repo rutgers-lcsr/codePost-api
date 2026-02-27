@@ -30,6 +30,8 @@ execution_count = 0
 # Shared Execution Context
 # ============================================
 $execution_context = Object.new
+$STUDENT_CODE_SYNTAX_INVALID = false
+$STUDENT_CODE_SYNTAX_ERROR_MSG = ""
 
 cells.each do |cell|
   if cell['type'] == 'markdown'
@@ -54,6 +56,10 @@ cells.each do |cell|
       rescue Exception => e
         success = false
         error_obj = e
+        if !$STUDENT_CODE_SYNTAX_INVALID && e.is_a?(SyntaxError)
+          $STUDENT_CODE_SYNTAX_INVALID = true
+          $STUDENT_CODE_SYNTAX_ERROR_MSG = e.message.to_s
+        end
         # Print error to stderr so we catch it
         $stderr.puts e.message
         $stderr.puts e.backtrace.join("\n")
@@ -135,6 +141,17 @@ def run_test(name, points, description=nil, timeout=30, &block)
     "status" => "failed",
     "error" => ""
   }
+
+  if $STUDENT_CODE_SYNTAX_INVALID
+    base_msg = "Student code syntax was invalid. Fix syntax errors before running tests."
+    result["passed"] = false
+    result["score"] = 0
+    result["status"] = "error"
+    result["message"] = base_msg
+    result["error"] = $STUDENT_CODE_SYNTAX_ERROR_MSG.to_s.empty? ? base_msg : "#{base_msg}\n#{$STUDENT_CODE_SYNTAX_ERROR_MSG}"
+    $test_results << result
+    return
+  end
   
   begin
     ret = nil
