@@ -36,7 +36,7 @@ def isStudent(user, course):
   return course in user.student_courses.all()
 
 def isGrader(user, course):
-  return course in user.grader_courses.all()
+  return course in user.grader_courses.all() or isSuperGrader(user, course)
 
 def isSuperGrader(user, course):
   """
@@ -60,7 +60,7 @@ def isCourseStaff(user, course):
   """
   Check if the user is a staff member of the course.
   """
-  return isGrader(user, course) or isCourseAdmin(user, course)
+  return isGrader(user, course) or isSuperGrader(user, course) or isCourseAdmin(user, course)
 
 def isCourseMember(user, course):
   return isStudent(user, course) or isCourseStaff(user, course)

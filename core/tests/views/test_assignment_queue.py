@@ -10,6 +10,7 @@ class TestAssignmentQueue(TestCase):
         # Create Users
         self.course_admin = User.objects.create_user(username='admin', email='admin@codepost.io', password='password')
         self.grader = User.objects.create_user(username='grader', email='grader@codepost.io', password='password')
+        self.supergrader = User.objects.create_user(username='supergrader', email='supergrader@codepost.io', password='password')
         self.student1 = User.objects.create_user(username='student1', email='student1@codepost.io', password='password')
         self.student2 = User.objects.create_user(username='student2', email='student2@codepost.io', password='password')
         
@@ -20,6 +21,7 @@ class TestAssignmentQueue(TestCase):
         self.course = Course.objects.create(name='CS101', period='Fall 2023', organization=self.organization)
         self.course.courseAdmins.add(self.course_admin)
         self.course.graders.add(self.grader)
+        self.course.superGraders.add(self.supergrader)
         self.course.students.add(self.student1, self.student2)
         
         # Create Sections
@@ -108,4 +110,13 @@ class TestAssignmentQueue(TestCase):
         
         # Check again
         response = self.client.get(url)
+        self.assertEqual(response.data['unclaimed'], 2)
+
+    def test_queue_length_accessible_to_supergrader(self):
+        self.client.force_authenticate(user=self.supergrader)
+
+        url = f'/assignments/{self.assignment.id}/queueLength/'
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['unclaimed'], 2)
