@@ -43,19 +43,6 @@ class Tester {
             "error" => ""
         ];
 
-        if ($STUDENT_CODE_SYNTAX_INVALID) {
-            $baseMsg = "Student code syntax was invalid. Fix syntax errors before running tests.";
-            $result["passed"] = false;
-            $result["score"] = 0;
-            $result["status"] = "error";
-            $result["message"] = $baseMsg;
-            $result["error"] = !empty($STUDENT_CODE_SYNTAX_ERROR_MSG)
-                ? ($baseMsg . "\n" . $STUDENT_CODE_SYNTAX_ERROR_MSG)
-                : $baseMsg;
-            self::$results[] = $result;
-            return;
-        }
-        
         try {
             if (function_exists('pcntl_signal') && function_exists('pcntl_alarm')) {
                 pcntl_signal(SIGALRM, function() use ($timeout) {

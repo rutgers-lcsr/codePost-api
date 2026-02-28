@@ -69,3 +69,16 @@ class TestParsingServiceAlignmentTests(SimpleTestCase):
             TestParsingService.update_test_cases(category)
 
         parse_mock.assert_called_once_with(category, language="java-17")
+
+    def test_python_positional_points_are_parsed(self):
+        script = '''
+@test("Partial Credit", 5)
+def test_partial():
+    return 2.5
+'''
+        parsed = self._parse(script, "python")
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["name"], "Partial Credit")
+        self.assertEqual(parsed[0]["functionName"], "test_partial")
+        self.assertEqual(parsed[0]["points"], 5)

@@ -86,8 +86,9 @@ class TestService:
         stdout = execution_result.get('stdout', '') or ''
         stderr = execution_result.get('stderr', '') or ''
         err = execution_result.get('error', '') or ''
+        notebook_cell_errors = TestService._collect_notebook_cell_error_text(execution_result)
 
-        combined = f"{stderr}\n{stdout}\n{err}".strip()
+        combined = f"{stderr}\n{stdout}\n{err}\n{notebook_cell_errors}".strip()
         if not combined:
             return None
 
@@ -121,6 +122,72 @@ class TestService:
             )
 
         return None
+
+    @staticmethod
+    def _collect_notebook_cell_error_text(execution_result: Dict[str, Any]) -> str:
+        """Collect notebook cell-level stderr/error text for syntax hint detection."""
+        output_data = execution_result.get('output_data') or {}
+        cells = output_data.get('cells') or []
+        if not isinstance(cells, list):
+            return ''
+
+        chunks: List[str] = []
+        for idx, cell in enumerate(cells):
+            if not isinstance(cell, dict):
+                continue
+            if cell.get('cell_type') != 'code':
+                continue
+
+            cell_idx = cell.get('idx')
+            if isinstance(cell_idx, int):
+                cell_label = f"Notebook cell {cell_idx + 1}"
+            else:
+                cell_label = f"Notebook cell {idx + 1}"
+
+            cell_source_raw = cell.get('source') or ''
+            if isinstance(cell_source_raw, list):
+                cell_source = ''.join(str(line) for line in cell_source_raw)
+            else:
+                cell_source = str(cell_source_raw)
+
+            source_lines = cell_source.splitlines()
+            numbered_source = '\n'.join(
+                f"{line_no + 1:>4} | {line_text}"
+                for line_no, line_text in enumerate(source_lines[:80])
+            )
+            if len(source_lines) > 80:
+                numbered_source += '\n... [cell source truncated]'
+
+            outputs = cell.get('outputs') or []
+            if not isinstance(outputs, list):
+                continue
+
+            for output in outputs:
+                if not isinstance(output, dict):
+                    continue
+
+                output_type = output.get('output_type')
+
+                if output_type == 'error':
+                    ename = str(output.get('ename') or '')
+                    evalue = str(output.get('evalue') or '')
+                    traceback = output.get('traceback') or []
+                    if isinstance(traceback, list):
+                        traceback_text = '\n'.join(str(x) for x in traceback)
+                    else:
+                        traceback_text = str(traceback)
+                    detail = (
+                        f"{cell_label}\n"
+                        f"{ename}\n{evalue}\n{traceback_text}\n"
+                        f"Source:\n{numbered_source}"
+                    ).strip()
+                    chunks.append(detail)
+                elif output_type == 'stream' and str(output.get('name') or '').lower() == 'stderr':
+                    stderr_text = str(output.get('text') or '')
+                    if stderr_text.strip():
+                        chunks.append(f"{cell_label}\n{stderr_text}\nSource:\n{numbered_source}".strip())
+
+        return '\n'.join(chunk for chunk in chunks if chunk)
 
     @staticmethod
     def _annotate_tests_with_syntax_hint(tests: List[Dict[str, Any]], syntax_hint: Optional[str]) -> List[Dict[str, Any]]:
@@ -970,8 +1037,6 @@ class TestService:
         # However, for unit tests, if 'error' exists it usually means compilation failed or similar.
         # So passed should definitely be False if error exists.
         is_error = execution_result.get('error') is not None
-        if syntax_hint:
-            is_error = True
         if is_error:
             passed = False
         
@@ -988,6 +1053,7 @@ class TestService:
         """
         tests = execution_result.get('tests', [])
         syntax_hint = TestService._detect_syntax_hint(execution_result)
+        notebook_syntax_detail = TestService._collect_notebook_cell_error_text(execution_result).strip()
         
         # Combine logs
         stdout = execution_result.get('stdout', '')
@@ -1006,13 +1072,20 @@ class TestService:
             return {
                 "passed": False,
                 "logs": logs,
-                "isError": execution_result.get('error') is not None or bool(syntax_hint),
+                "isError": execution_result.get('error') is not None,
                 "score": 0,
                 "maxScore": 0,
                 "results": []
             }
 
         tests = TestService._annotate_tests_with_syntax_hint(tests, syntax_hint)
+        syntax_hint_attached_to_test = bool(
+            syntax_hint
+            and any(
+                syntax_hint in str(t.get('error') or '')
+                for t in tests
+            )
+        )
             
         # Aggregate results
         # If ANY test failed, the whole TestCase fails (strict mode for now)
@@ -1053,13 +1126,21 @@ class TestService:
         # Append system error if exists
         if execution_result.get('error'):
              logs += f"\n\nSystem Error: {execution_result.get('error')}"
-        if syntax_hint:
+        if syntax_hint_attached_to_test:
             logs = f"{syntax_hint}\n\n{logs}".strip()
+        elif syntax_hint:
+            advisory_detail = notebook_syntax_detail or syntax_hint
+            logs = (
+                f"{logs}\n\n"
+                "Notebook syntax advisory: one or more notebook cells had syntax/parse/compile issues. "
+                "This specific test result may still be valid if it does not depend on those cells.\n"
+                f"Full syntax details:\n{advisory_detail}"
+            ).strip()
              
         return {
             "passed": all_passed,
             "logs": logs,
-            "isError": execution_result.get('error') is not None or bool(syntax_hint),
+            "isError": execution_result.get('error') is not None,
             "score": total_score,
             "maxScore": total_max_score,
             "stdout": execution_result.get('stdout'),

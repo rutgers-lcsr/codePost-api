@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from core.models import Submission, calculate_grade
+from core.models import Submission, calculate_grade, TestCategory, TestCase as AutograderTestCase, SubmissionTest
 from django.test import TestCase
 from core.tests.utils import setUpClient, setUpSubmission, setUpFile, setUpRubricComment, setUpRubricCategory, setUpComment
 import random
@@ -201,3 +201,38 @@ class Caps_Old_Paths(TestCase):
 
   def test_additive(self, paths=False):
     Caps_Old.test_additive(self, True)
+
+
+class ScriptTestScoreAggregation(TestCase):
+
+  def setUp(self):
+    setUpClient(self)
+
+  def test_partial_score_counts_even_when_points_pass_is_zero(self):
+    submission = setUpSubmission(self)
+    assignment = submission.assignment
+    assignment.additiveGrading = True
+    assignment.testsAffectGrade = True
+    assignment.save()
+
+    category = TestCategory.objects.create(assignment=assignment, name="Script Category")
+    test_case = AutograderTestCase.objects.create(
+      testCategory=category,
+      description="Partial test",
+      type='script',
+      pointsPass=0,
+      pointsFail=0,
+      functionName='test_partial',
+    )
+
+    SubmissionTest.objects.create(
+      submission=submission,
+      testCase=test_case,
+      logs='partial credit',
+      passed=False,
+      isError=False,
+      score=decimal.Decimal('2.50'),
+      maxScore=decimal.Decimal('5.00'),
+    )
+
+    self.assertEqual(calculate_grade(submission), decimal.Decimal('2.50'))

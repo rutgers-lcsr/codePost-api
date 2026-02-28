@@ -330,22 +330,6 @@ run_test <- function(name, points, description, fn = NULL, timeout = 30) {
         error = ""
     )
 
-    if (isTRUE(STUDENT_CODE_SYNTAX_INVALID)) {
-        base_msg <- "Student code syntax was invalid. Fix syntax errors before running tests."
-        result$passed <- FALSE
-        result$score <- 0
-        result$status <- "error"
-        result$message <- base_msg
-        result$error <- if (nzchar(STUDENT_CODE_SYNTAX_ERROR_MSG)) {
-            paste(base_msg, STUDENT_CODE_SYNTAX_ERROR_MSG, sep = "\n")
-        } else {
-            base_msg
-        }
-
-        test_results <<- c(test_results, list(result))
-        return(invisible(NULL))
-    }
-
     tryCatch({
         # Re-assign fn's environment to cell_env so it can access notebook functions
         environment(fn) <- cell_env

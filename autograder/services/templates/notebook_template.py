@@ -159,16 +159,6 @@ class TestCase:
     def run(self) -> TestResult:
         result = TestResult(self.name, self.points, self.description)
 
-        if globals().get("STUDENT_CODE_SYNTAX_INVALID", False):
-            syntax_msg = globals().get("STUDENT_CODE_SYNTAX_ERROR_MSG", "").strip()
-            base_msg = "Student code syntax was invalid. Fix syntax errors before running tests."
-            result.passed = False
-            result.score = 0
-            result.status = "error"
-            result.message = base_msg
-            result.error = f"{base_msg}\n{syntax_msg}" if syntax_msg else base_msg
-            return result
-
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
         

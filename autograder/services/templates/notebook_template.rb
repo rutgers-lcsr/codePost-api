@@ -142,17 +142,6 @@ def run_test(name, points, description=nil, timeout=30, &block)
     "error" => ""
   }
 
-  if $STUDENT_CODE_SYNTAX_INVALID
-    base_msg = "Student code syntax was invalid. Fix syntax errors before running tests."
-    result["passed"] = false
-    result["score"] = 0
-    result["status"] = "error"
-    result["message"] = base_msg
-    result["error"] = $STUDENT_CODE_SYNTAX_ERROR_MSG.to_s.empty? ? base_msg : "#{base_msg}\n#{$STUDENT_CODE_SYNTAX_ERROR_MSG}"
-    $test_results << result
-    return
-  end
-  
   begin
     ret = nil
     Timeout.timeout(timeout) do

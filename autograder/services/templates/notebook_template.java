@@ -358,7 +358,7 @@ public class notebook_template {
                             "               Test _ann = _m.getAnnotation(Test.class); " +
                             "               TestResult _tr = new TestResult(_ann.name().isEmpty() ? _m.getName() : _ann.name(), _ann.points(), _ann.description()); "
                             +
-                            "               if (CODEPOST_STUDENT_SYNTAX_INVALID) { " +
+                            "               if (false && CODEPOST_STUDENT_SYNTAX_INVALID) { " +
                             "                   String _base = \"Student code syntax was invalid. Fix syntax errors before running tests.\"; "
                             +
                             "                   _tr.passed = false; _tr.score = 0; _tr.status = \"error\"; _tr.message = _base; "

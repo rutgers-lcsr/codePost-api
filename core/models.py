@@ -1428,12 +1428,17 @@ def calculate_grade(submission: Submission) -> Decimal:
   if submission.assignment.testsAffectGrade:
     tests = getLatestSubmissionTests(submission)
     for test in tests:
-      # Use proportional scoring if maxScore is set (new partial credit system)
+      # Use stored earned score directly when maxScore is present.
+      # This is robust for partial-credit script tests even if pointsPass
+      # metadata is stale or zero due to parsing mismatches.
       if test.maxScore and test.maxScore > 0:
-        # Calculate ratio of score earned
-        ratio = Decimal(test.score) / Decimal(test.maxScore)
-        # Award proportional points (ratio * pointsPass)
-        counter += ratio * Decimal(test.testCase.pointsPass)
+        earned = Decimal(test.score)
+        max_possible = Decimal(test.maxScore)
+        if earned < 0:
+          earned = Decimal(0)
+        if earned > max_possible:
+          earned = max_possible
+        counter += earned
       else:
         # Fallback to binary pass/fail for legacy tests
         if test.passed:

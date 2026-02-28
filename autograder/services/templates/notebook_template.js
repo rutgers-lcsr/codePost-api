@@ -53,17 +53,6 @@ async function runTestCase(testCase) {
         error: ""
     };
 
-    if (STUDENT_CODE_SYNTAX_INVALID) {
-        const baseMsg = "Student code syntax was invalid. Fix syntax errors before running tests.";
-        result.message = baseMsg;
-        result.error = STUDENT_CODE_SYNTAX_ERROR_MSG ? `${baseMsg}\n${STUDENT_CODE_SYNTAX_ERROR_MSG}` : baseMsg;
-        result.status = "error";
-        result.passed = false;
-        result.score = 0;
-        testResults.push(result);
-        return;
-    }
-
     const timeoutMs = Math.max(0, Number(testCase.timeout) || 30) * 1000;
     const start = Date.now();
 

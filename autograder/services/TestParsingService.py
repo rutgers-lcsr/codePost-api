@@ -57,15 +57,18 @@ class TestParsingService:
                             if decorator.args:
                                 # First arg is usually name (title)
                                 if isinstance(decorator.args[0], ast.Constant):
-                                     test_info['name'] = decorator.args[0].value
+                                    test_info['name'] = decorator.args[0].value
+                                # Second positional arg may be points (e.g. @test("Name", 5))
+                                if len(decorator.args) > 1 and isinstance(decorator.args[1], ast.Constant) and isinstance(decorator.args[1].value, (int, float)):
+                                    test_info['points'] = decorator.args[1].value
                             
                             for keyword in decorator.keywords:
                                 if keyword.arg == 'points':
-                                    if isinstance(keyword.value, (ast.Constant, ast.Num)):
-                                         test_info['points'] = getattr(keyword.value, 'value', getattr(keyword.value, 'n', 0))
+                                    if isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, (int, float)):
+                                        test_info['points'] = keyword.value.value
                                 elif keyword.arg == 'timeout':
-                                    if isinstance(keyword.value, (ast.Constant, ast.Num)):
-                                         test_info['timeout'] = int(getattr(keyword.value, 'value', getattr(keyword.value, 'n', 0)))
+                                    if isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, (int, float)):
+                                        test_info['timeout'] = int(keyword.value.value)
                                 elif keyword.arg == 'description':
                                     if isinstance(keyword.value, ast.Constant):
                                          test_info['description'] = keyword.value.value
