@@ -171,6 +171,7 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
+    'CAMELIZE_NAMES': True,
     'TITLE': 'codePost API',
     'DESCRIPTION': """
 An API for administrators to mine course data and automate common tasks.

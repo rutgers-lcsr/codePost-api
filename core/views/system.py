@@ -13,6 +13,10 @@ import shutil
 from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer, MaintenanceBannerSerializer, MaintenanceBannerResponseSerializer
 
 
+from djangorestframework_camel_case.render import CamelCaseJSONRenderer
+from djangorestframework_camel_case.parser import CamelCaseJSONParser
+
+
 def _check_database() -> dict:
     """Run a timed SELECT 1 to verify DB connectivity and measure latency."""
     t0 = time.perf_counter()
@@ -158,6 +162,7 @@ def _check_disk() -> dict:
 
 class SystemHealthView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
+    renderer_classes = [CamelCaseJSONRenderer]
 
     @extend_schema(responses={200: SystemHealthResponseSerializer})
     def get(self, request):
@@ -278,6 +283,8 @@ class SystemBannerView(APIView):
     GET  /system/banner/   — public, no auth required.
     PATCH /system/banner/  — admin only; update banner fields.
     """
+    renderer_classes = [CamelCaseJSONRenderer]
+    parser_classes = [CamelCaseJSONParser]
 
     def get_permissions(self):
         if self.request.method == 'PATCH':
