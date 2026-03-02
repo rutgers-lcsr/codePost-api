@@ -106,6 +106,7 @@ drf-spectacular = "^0.27.0"
 channels = "^4.1.0"
 channels-redis = "^4.2.1"
 uvicorn = "^0.35.0"
+djangorestframework-camel-case = "^1.4.2"
 
 
 [build-system]
