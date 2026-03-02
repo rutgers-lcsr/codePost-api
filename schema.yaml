@@ -7806,6 +7806,16 @@ paths:
       operationId: system_activity_retrieve
       parameters:
       - in: query
+        name: category
+        schema:
+          type: string
+        description: Filter by event category (exact match)
+      - in: query
+        name: endDate
+        schema:
+          type: string
+        description: Filter events created on or before this ISO 8601 datetime
+      - in: query
         name: page
         schema:
           type: integer
@@ -7813,6 +7823,16 @@ paths:
         name: pageSize
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Search across description, user, and meta fields
+      - in: query
+        name: startDate
+        schema:
+          type: string
+        description: Filter events created on or after this ISO 8601 datetime
       tags:
       - system
       security:

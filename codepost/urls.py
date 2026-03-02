@@ -132,6 +132,7 @@ urlpatterns = [
     path('system/activity/', SystemActivityView.as_view(), name='system_activity'),
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
+    path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
     re_path('', include(router.urls)),
 ]
 

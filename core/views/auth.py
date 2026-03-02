@@ -82,30 +82,38 @@ obtain_jwt_token = AccountLoginAPIView.as_view()
 class ImpersonateView(APIView):
   """
   View to handle impersonation of users.
+  Accepts either 'username' (exact match) or 'email' (lookup by email) in the POST body.
+  Staff/superusers can impersonate any user. Course admins can only impersonate
+  students or graders in courses they administer.
   """
   permission_classes = [IsAuthenticated]
   
   def post(self, request, *args, **kwargs):
 
-    form = ImpersonateForm(request.data)
-    if not form.is_valid():
-      return Response({"error": form.errors}, status=400)
+    username = (request.data.get('username') or '').strip()
+    email = (request.data.get('email') or '').strip()
 
-    username = form.cleaned_data.get('username')
+    if not username and not email:
+      return Response({"error": "Either 'username' or 'email' is required."}, status=400)
 
-    # Check if the becomee user exists
+    # Resolve the target user
     try:
-      user = User.objects.get(username=username, is_active=True)
+      if username:
+        user = User.objects.get(username=username, is_active=True)
+      else:
+        user = User.objects.get(email=email, is_active=True)
     except User.DoesNotExist:
       return Response({"error": "User does not exist"}, status=404)
     
-    # Ensure the requestee user is a course admin and that target user is a student/grader
-    sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
-    if not sharded_course.exists():
-      return Response({"error": "You do not have permission to impersonate this user."}, status=403)
+    # Authorization: staff/superusers can impersonate anyone.
+    # Course admins can only impersonate students/graders in their courses.
+    if not (request.user.is_staff or request.user.is_superuser):
+      sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
+      if not sharded_course.exists():
+        return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
     # if never_expire is set, we will set the token to expire in 1 year
-    should_expire = form.cleaned_data.get('never_expire', False) == True
+    should_expire = request.data.get('never_expire', False) == True
     
     # Log the impersonation event
     logEvent(

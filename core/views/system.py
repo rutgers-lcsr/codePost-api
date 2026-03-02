@@ -54,6 +54,14 @@ class SystemActivityView(APIView):
         parameters=[
             OpenApiParameter(name="page", required=False, type=int, location=OpenApiParameter.QUERY),
             OpenApiParameter(name="pageSize", required=False, type=int, location=OpenApiParameter.QUERY),
+            OpenApiParameter(name="category", required=False, type=str, location=OpenApiParameter.QUERY,
+                             description="Filter by event category (exact match)"),
+            OpenApiParameter(name="search", required=False, type=str, location=OpenApiParameter.QUERY,
+                             description="Search across description, user, and meta fields"),
+            OpenApiParameter(name="startDate", required=False, type=str, location=OpenApiParameter.QUERY,
+                             description="Filter events created on or after this ISO 8601 datetime"),
+            OpenApiParameter(name="endDate", required=False, type=str, location=OpenApiParameter.QUERY,
+                             description="Filter events created on or before this ISO 8601 datetime"),
         ],
     )
     def get(self, request):
@@ -62,6 +70,35 @@ class SystemActivityView(APIView):
         page_num = int(request.query_params.get('page', 1))
 
         events = Event.objects.all().order_by('-created')
+
+        # --- Filtering ---
+        category = request.query_params.get('category', '').strip()
+        if category:
+            events = events.filter(category=category)
+
+        search = request.query_params.get('search', '').strip()
+        if search:
+            from django.db.models import Q
+            events = events.filter(
+                Q(description__icontains=search) |
+                Q(user__icontains=search) |
+                Q(meta__icontains=search)
+            )
+
+        start_date = request.query_params.get('startDate', '').strip()
+        if start_date:
+            from django.utils.dateparse import parse_datetime
+            parsed_start = parse_datetime(start_date)
+            if parsed_start:
+                events = events.filter(created__gte=parsed_start)
+
+        end_date = request.query_params.get('endDate', '').strip()
+        if end_date:
+            from django.utils.dateparse import parse_datetime
+            parsed_end = parse_datetime(end_date)
+            if parsed_end:
+                events = events.filter(created__lte=parsed_end)
+
         paginator = Paginator(events, page_size)
         page = paginator.get_page(page_num)
 
