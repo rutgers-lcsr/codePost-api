@@ -23,6 +23,7 @@ from core.models import (
     File,
     FileTemplate,
     # HelperFile, # Removed as per instruction
+    MaintenanceBanner,
     OneTimeToken,
     Organization,
     Profile,
@@ -2028,6 +2029,127 @@ class FileAdmin(admin.ModelAdmin):
 
 # Deprecated model, but keep in admin for data access
 admin.site.register(FileTemplate)
+
+
+@admin.register(MaintenanceBanner)
+class MaintenanceBannerAdmin(admin.ModelAdmin):
+    """
+    Singleton admin for the site-wide maintenance banner.
+
+    Behaviour:
+    - The changelist immediately redirects to the edit form (pk=1), since there
+      is only ever one row.
+    - ``has_add_permission`` blocks a second row once the singleton exists.
+    - ``has_delete_permission`` always returns False — the singleton must not be
+      deleted through the admin.
+    - ``save_model`` forces pk=1 so even a freshly-created object lands on the
+      canonical singleton row.
+    """
+
+    list_display = ('active_status', 'message_preview', 'color_swatch')
+    readonly_fields = ('banner_preview',)
+
+    fieldsets = (
+        ('Status', {
+            'fields': ('active',),
+        }),
+        ('Content', {
+            'fields': ('severity', 'message', 'color'),
+            'description': (
+                'Use any CSS colour value — e.g. <code>#0e704c</code>, '
+                '<code>red</code>, or <code>rgba(14,112,76,0.9)</code>.'
+            ),
+        }),
+        ('Schedule (optional)', {
+            'fields': ('starts_at', 'ends_at'),
+            'description': (
+                'Leave both blank for immediate activation. '
+                'The banner auto-activates/deactivates at the specified UTC times. '
+                'The manual <em>Active</em> toggle still gates the schedule — '
+                'both must be true for the banner to appear.'
+            ),
+        }),
+        ('Preview', {
+            'fields': ('banner_preview',),
+            'description': 'Rendered after save; reflects the saved values.',
+        }),
+    )
+
+    # ── Permission guards ─────────────────────────────────────────────────────
+
+    def has_add_permission(self, request: Any) -> bool:
+        """Block a second row once the singleton exists."""
+        return not MaintenanceBanner.objects.exists()
+
+    def has_delete_permission(self, request: Any, obj: Any = None) -> bool:
+        """Prevent accidental deletion of the singleton row."""
+        return False
+
+    # ── Singleton enforcement ─────────────────────────────────────────────────
+
+    def save_model(self, request: Any, obj: MaintenanceBanner, form: Any, change: bool) -> None:
+        """Always write to pk=1 to enforce the singleton contract."""
+        obj.pk = 1
+        super().save_model(request, obj, form, change)
+
+    # ── Changelist → edit redirect ────────────────────────────────────────────
+
+    def changelist_view(self, request: Any, extra_context: Any = None) -> HttpResponseRedirect:
+        """Skip the list entirely — jump straight to the singleton edit page."""
+        banner = MaintenanceBanner.load()
+        return redirect(
+            reverse('admin:core_maintenancebanner_change', args=[banner.pk])
+        )
+
+    # ── list_display helpers ──────────────────────────────────────────────────
+
+    def active_status(self, obj: MaintenanceBanner) -> str:
+        if obj.active:
+            return format_html(
+                '<span style="color:#2e7d32; font-weight:600;">&#9679; Active</span>'
+            )
+        return format_html('<span style="color:#9e9e9e;">&#9675; Inactive</span>')
+    active_status.short_description = 'Status'
+
+    def message_preview(self, obj: MaintenanceBanner) -> str:
+        text = obj.message or ''
+        truncated = text[:80] + '\u2026' if len(text) > 80 else text
+        return format_html('<span style="font-family:monospace;">{}</span>', truncated)
+    message_preview.short_description = 'Message'
+
+    def color_swatch(self, obj: MaintenanceBanner) -> str:
+        color = obj.color or '#888888'
+        return format_html(
+            '<span style="display:inline-flex; align-items:center; gap:6px;">'
+            '<span style="width:18px; height:18px; border-radius:3px; '
+            'border:1px solid #ccc; background:{color}; display:inline-block;">'
+            '</span>'
+            '<code>{color}</code>'
+            '</span>',
+            color=color,
+        )
+    color_swatch.short_description = 'Colour'
+
+    # ── readonly change-form helpers ─────────────────────────────────────────
+
+    def banner_preview(self, obj: MaintenanceBanner) -> str:
+        """Render a styled preview of the banner as it will appear to users."""
+        if not obj or not obj.pk:
+            return format_html(
+                '<em style="color:#999;">Save the banner first to see a preview.</em>'
+            )
+        color = obj.color or '#0e704c'
+        message = obj.message or '(no message set)'
+        return format_html(
+            '<div style="background:{color}; color:#fff; padding:10px 16px; '
+            'border-radius:4px; font-size:14px; max-width:640px; '
+            'box-shadow:0 1px 3px rgba(0,0,0,.2);">'
+            '{message}'
+            '</div>',
+            color=color,
+            message=message,
+        )
+    banner_preview.short_description = 'Live Preview'
 
 
 

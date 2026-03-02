@@ -1670,4 +1670,85 @@ __all__ = [
     "AssignmentDataSet",
     "CachedExecutionResult",
     "CommentTemplate",
+    "MaintenanceBanner",
 ]
+
+
+class MaintenanceBanner(models.Model):
+    """
+    Singleton model — always use pk=1.
+    Controls the maintenance banner shown to all frontend users.
+    Manage via Django admin (/admin/).
+
+    Schedule fields (both optional):
+    - starts_at: banner only shows after this UTC datetime (None = show immediately)
+    - ends_at:   banner auto-hides after this UTC datetime (None = no expiry)
+
+    active_now() factors in both the manual toggle and the schedule window.
+    """
+
+    SEVERITY_INFO = "info"
+    SEVERITY_WARNING = "warning"
+    SEVERITY_CRITICAL = "critical"
+    SEVERITY_CHOICES = [
+        (SEVERITY_INFO, "Info"),
+        (SEVERITY_WARNING, "Warning"),
+        (SEVERITY_CRITICAL, "Critical"),
+    ]
+
+    active = models.BooleanField(default=False, help_text="Manually enable/disable the banner.")
+    message = models.TextField(
+        default="codePost is currently undergoing maintenance. Some features may be unavailable.",
+        help_text="The message displayed in the banner.",
+    )
+    color = models.CharField(
+        max_length=30,
+        default="#0e704c",
+        help_text="Background colour (any CSS value, e.g. #0e704c or red).",
+    )
+    severity = models.CharField(
+        max_length=10,
+        choices=SEVERITY_CHOICES,
+        default=SEVERITY_INFO,
+        help_text="Visual severity of the banner (affects the icon shown to users).",
+    )
+    starts_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="If set, the banner will not appear before this UTC time even when active=True.",
+    )
+    ends_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="If set, the banner auto-hides after this UTC time.",
+    )
+
+    class Meta:
+        verbose_name = "Maintenance Banner"
+        verbose_name_plural = "Maintenance Banner"
+
+    def save(self, *args, **kwargs):
+        # Force singleton: always pk=1
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls) -> "MaintenanceBanner":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def is_active_now(self) -> bool:
+        """True only when the manual toggle is on AND within the optional schedule window."""
+        if not self.active:
+            return False
+        from django.utils import timezone
+        now = timezone.now()
+        if self.starts_at is not None and now < self.starts_at:
+            return False
+        if self.ends_at is not None and now > self.ends_at:
+            return False
+        return True
+
+    def __str__(self):
+        status = "ACTIVE" if self.active else "inactive"
+        return f"MaintenanceBanner [{status}]"

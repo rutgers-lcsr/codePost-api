@@ -111,6 +111,21 @@ echo "=========================================="
 echo "3.5. Post-Processing: Fixing Export Conflicts"
 echo "=========================================="
 
+# Add // @ts-nocheck to all generated .ts files.
+# This suppresses TypeScript strict-mode errors (e.g. noUnusedLocals) on
+# auto-generated code without needing to exclude the directory from tsconfig.
+# ESLint's ban-ts-comment rule does NOT apply here because eslint.config.mjs
+# already ignores src/api-client/**.
+echo "Adding // @ts-nocheck to generated .ts files..."
+while IFS= read -r tsfile; do
+    if ! head -1 "$tsfile" | grep -qF '@ts-nocheck'; then
+        TMP_TS=$(mktemp)
+        { echo '// @ts-nocheck'; cat "$tsfile"; } > "$TMP_TS"
+        command mv -f "$TMP_TS" "$tsfile"
+    fi
+done < <(find "$OUTPUT_DIR" -name '*.ts' -type f)
+echo "Done."
+
 # Fix conflicting exports in apis/index.ts
 # Original: export * from './SomeApi';
 # New:      export { SomeApi } from './SomeApi';
@@ -137,7 +152,7 @@ if [ -f "$INDEX_FILE" ]; then
         fi
     done < "$INDEX_FILE"
     
-    mv "$TMP_INDEX" "$INDEX_FILE"
+    command mv -f "$TMP_INDEX" "$INDEX_FILE"
     echo "Patch complete."
 else
     echo "Warning: $INDEX_FILE not found, skipping patch."

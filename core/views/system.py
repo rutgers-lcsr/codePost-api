@@ -1,50 +1,201 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from django.db import connection, DatabaseError
 from log.models import Event
 from django.core.paginator import Paginator
+import time
+import shutil
 
-from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer
-# Optional: import celery for status check, or just check queue?
-# For now, we will do a simple DB check. Celery check is harder without celery-result-backend query or flower.
+from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer, MaintenanceBannerSerializer, MaintenanceBannerResponseSerializer
+
+
+def _check_database() -> dict:
+    """Run a timed SELECT 1 to verify DB connectivity and measure latency."""
+    t0 = time.perf_counter()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+        return {
+            "status": "ok",
+            "label": f"Connected ({latency_ms} ms)",
+            "detail": None,
+            "latency_ms": latency_ms,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "label": "Disconnected",
+            "detail": str(exc),
+            "latency_ms": None,
+        }
+
+
+def _check_celery() -> dict:
+    """Ping Celery workers with a short timeout and report the count."""
+    try:
+        from autograder.celery import app
+        t0 = time.perf_counter()
+        inspector = app.control.inspect(timeout=2.0)
+        pong = inspector.ping()
+        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+        if pong:
+            worker_count = len(pong)
+            return {
+                "status": "ok",
+                "label": f"{worker_count} worker{'s' if worker_count != 1 else ''} online",
+                "detail": None,
+                "latency_ms": latency_ms,
+                "worker_count": worker_count,
+            }
+        return {
+            "status": "warning",
+            "label": "No workers responded",
+            "detail": "Celery ping returned no workers within 2 s.",
+            "latency_ms": latency_ms,
+            "worker_count": 0,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "label": "Error",
+            "detail": str(exc),
+            "latency_ms": None,
+            "worker_count": None,
+        }
+
+
+def _check_cache() -> dict:
+    """Write and read a test key through Django's configured cache backend."""
+    from django.core.cache import cache
+    key = "_system_health_probe"
+    sentinel = "ok"
+    t0 = time.perf_counter()
+    try:
+        cache.set(key, sentinel, timeout=5)
+        result = cache.get(key)
+        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+        if result == sentinel:
+            return {
+                "status": "ok",
+                "label": f"Connected ({latency_ms} ms)",
+                "detail": None,
+                "latency_ms": latency_ms,
+            }
+        return {
+            "status": "warning",
+            "label": "Read-back mismatch",
+            "detail": "Cache set/get returned unexpected value.",
+            "latency_ms": latency_ms,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "label": "Error",
+            "detail": str(exc),
+            "latency_ms": None,
+        }
+
+
+def _check_migrations() -> dict:
+    """Count unapplied migrations using Django's MigrationExecutor."""
+    try:
+        from django.db.migrations.executor import MigrationExecutor
+        executor = MigrationExecutor(connection)
+        targets = executor.loader.graph.leaf_nodes()
+        plan = executor.migration_plan(targets)
+        pending = len(plan)
+        if pending == 0:
+            return {"status": "ok", "label": "Up to date", "detail": None, "pending": 0}
+        return {
+            "status": "warning",
+            "label": f"{pending} pending",
+            "detail": ", ".join(f"{a}.{n}" for a, n in [(m.app_label, m.name) for m, _ in plan[:5]]),
+            "pending": pending,
+        }
+    except Exception as exc:
+        return {"status": "error", "label": "Error", "detail": str(exc), "pending": -1}
+
+
+def _check_disk() -> dict:
+    """Check disk usage on the filesystem where this project lives."""
+    try:
+        import os
+        from django.conf import settings as django_settings
+        path = getattr(django_settings, "BASE_DIR", os.path.dirname(os.path.abspath(__file__)))
+        usage = shutil.disk_usage(str(path))
+        used_pct = round(usage.used / usage.total * 100, 1)
+        free_gb = round(usage.free / (1024 ** 3), 1)
+        if used_pct >= 90:
+            status = "error"
+        elif used_pct >= 75:
+            status = "warning"
+        else:
+            status = "ok"
+        return {
+            "status": status,
+            "label": f"{used_pct}% used — {free_gb} GB free",
+            "detail": None,
+            "latency_ms": None,
+            "used_pct": used_pct,
+            "free_gb": free_gb,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "label": "Error",
+            "detail": str(exc),
+            "latency_ms": None,
+            "used_pct": None,
+            "free_gb": None,
+        }
+
 
 class SystemHealthView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
 
     @extend_schema(responses={200: SystemHealthResponseSerializer})
     def get(self, request):
-        health = {
-            "database": "Unknown",
-            "celery": "Unknown", # Placeholder
-        }
+        from django.utils import timezone
+        from datetime import timedelta
 
-        # Check Database
+        db = _check_database()
+        celery = _check_celery()
+        cache = _check_cache()
+        migrations = _check_migrations()
+        disk = _check_disk()
+
+        # Recent event count (last hour) — best-effort
         try:
-            connection.ensure_connection()
-            health["database"] = "Connected"
-        except DatabaseError:
-            health["database"] = "Disconnected"
+            since = timezone.now() - timedelta(hours=1)
+            recent_events_1h = Event.objects.filter(created__gte=since).count()
+        except Exception:
+            recent_events_1h = -1
 
-        # Check Celery (simple heuristic: are there recent tasks? or just assume running if no error?)
-        # A better check would be pinging a worker, but that's async.
-        # We'll default to "Unknown" or "Assumed Running" for MVP, or check if we can import current app
-        try:
-            from autograder.celery import app
-            # forceful ping?
-            # i = app.control.inspect()
-            # if i.ping(): health["celery"] = "Running"
-            # else: health['celery'] = "Stopped"
-            # Note: control.inspect() can be slow/timeout.
-            health["celery"] = "Running (Assumed)" 
-        except Exception as e:
-            print(f"Celery Health Check Failed: {e}")
-            health["celery"] = "Error Checking"
+        # Overall status: worst of all checks
+        all_statuses = [db["status"], celery["status"], cache["status"], migrations["status"], disk["status"]]
+        if "error" in all_statuses:
+            overall = "critical"
+        elif "warning" in all_statuses:
+            overall = "degraded"
+        else:
+            overall = "ok"
 
-        return Response(health)
+        return Response({
+            "checked_at": timezone.now(),
+            "overall": overall,
+            "database": db,
+            "celery": celery,
+            "cache": cache,
+            "migrations": migrations,
+            "disk": disk,
+            "recent_events_1h": recent_events_1h,
+        })
 
 class SystemActivityView(APIView):
     permission_classes = [IsAuthenticated, IsAdminUser]
@@ -119,5 +270,58 @@ class SystemActivityView(APIView):
             "total": paginator.count,
             "page": page_num,
             "pages": paginator.num_pages
+        })
+
+
+class SystemBannerView(APIView):
+    """
+    GET  /system/banner/   — public, no auth required.
+    PATCH /system/banner/  — admin only; update banner fields.
+    """
+
+    def get_permissions(self):
+        if self.request.method == 'PATCH':
+            return [IsAuthenticated(), IsAdminUser()]
+        return [AllowAny()]
+
+    @extend_schema(
+        responses={200: MaintenanceBannerResponseSerializer},
+        description="Returns the current maintenance banner configuration. No authentication required.",
+    )
+    def get(self, request):
+        from core.models import MaintenanceBanner
+        banner = MaintenanceBanner.load()
+        return Response({
+            'active': banner.active,
+            'active_now': banner.is_active_now(),
+            'message': banner.message,
+            'color': banner.color,
+            'severity': banner.severity,
+            'starts_at': banner.starts_at.isoformat() if banner.starts_at else None,
+            'ends_at': banner.ends_at.isoformat() if banner.ends_at else None,
+        })
+
+    @extend_schema(
+        request=MaintenanceBannerSerializer,
+        responses={200: MaintenanceBannerResponseSerializer},
+        description="Update the maintenance banner. Requires admin authentication.",
+    )
+    def patch(self, request):
+        from core.models import MaintenanceBanner
+        serializer = MaintenanceBannerSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        banner = MaintenanceBanner.load()
+        for field, value in serializer.validated_data.items():
+            setattr(banner, field, value)
+        banner.pk = 1  # enforce singleton
+        banner.save()
+        return Response({
+            'active': banner.active,
+            'active_now': banner.is_active_now(),
+            'message': banner.message,
+            'color': banner.color,
+            'severity': banner.severity,
+            'starts_at': banner.starts_at.isoformat() if banner.starts_at else None,
+            'ends_at': banner.ends_at.isoformat() if banner.ends_at else None,
         })
 

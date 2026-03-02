@@ -41,17 +41,15 @@ def logError(request):
 
   """
   user = request.user
-  error = request.data['error'] if 'error' in request.data else ''
-  errorDetail = request.data[
-      'errorDetail'] if 'errorDetail' in request.data else ''
-  url = request.data['url'] if 'url' in request.data else ''
+  error = request.data.get('error', '')
+  errorDetail = request.data.get('errorDetail', '')
+  url = request.data.get('url', '')
+  screenshot = request.data.get('screenshot', '')
 
- 
   loginas = "{}/loginAs?email={}".format(settings.CLIENT_URL, user)
 
-  message = ":warning: User error ({user} | {url} | <{loginas}|Login>)\n>>>*{error}*\n{errorDetail}".format(
+  message = "User error ({user} | {url} | LoginAs: {loginas})\n{error}\n{errorDetail}".format(
       user=user, url=url, error=error, errorDetail=errorDetail, loginas=loginas)
-
 
   try:
     meta = {
@@ -60,6 +58,8 @@ def logError(request):
       "errorDetail": errorDetail,
       "message": message,
     }
+    if screenshot:
+      meta["screenshot"] = screenshot
     if DEBUG:
       logging.warning(meta)
 

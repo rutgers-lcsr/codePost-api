@@ -50,7 +50,7 @@ from webhooks.view import WebhookViewSet
 
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
-from core.views.system import SystemHealthView, SystemActivityView
+from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView
 
 
 from django.http import HttpResponse
@@ -130,6 +130,7 @@ urlpatterns = [
     re_path('health-check/', health_check),
     path('system/health/', SystemHealthView.as_view(), name='system_health'),
     path('system/activity/', SystemActivityView.as_view(), name='system_activity'),
+    path('system/banner/', SystemBannerView.as_view(), name='system_banner'),
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
