@@ -3,6 +3,10 @@
 import os
 import sys
 
+# Install pkg_resources shim for setuptools >= 82 compatibility
+from core.compat import install_pkg_resources_shim
+install_pkg_resources_shim()
+
 if __name__ == '__main__':
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'codepost.settings')
     try:

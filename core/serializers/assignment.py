@@ -95,7 +95,7 @@ class AssignmentSerializer(AssignmentSerializerBase):
     fields = AssignmentSerializerBase.Meta.fields + ('points', 'hideGrades', 'sortKey', 'anonymousGrading',
                                                      'hideGradersFromStudents', 'commentFeedback', 'additiveGrading', 'allowRegradeRequests', 'regradeInstructions',
                                                      'regradeDeadline', 'forcedRubricMode', 'templateMode', 'collaborativeRubricMode', 'gradersCanEditSubmissions',
-                                                     'testCategories', 'showFrequentlyUsedRubricComments', 'ai_system_prompt', 'runTestsOnSubmit', 'testsAffectGrade')
+                                                     'testCategories', 'showFrequentlyUsedRubricComments', 'ai_system_prompt', 'runFilesOnSubmit', 'runTestsOnSubmit', 'testsAffectGrade')
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + ('testCategories',)
 
 

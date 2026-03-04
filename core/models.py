@@ -442,6 +442,9 @@ class Assignment(BaseModel):
   gradersCanEditSubmissions = models.BooleanField(default=False, help_text=(
       "A boolean field. If True, graders will be allowed to edit student submissions (e.g. for testing fixes)."))
   
+  runFilesOnSubmit = models.BooleanField(default=True, help_text=(
+      "If True, submission files will be automatically executed and cached when a student submits."))
+
   runTestsOnSubmit = models.BooleanField(default=True, help_text=(
       "If True, autograder tests will automatically run when a student submits."))
   

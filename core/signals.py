@@ -21,11 +21,16 @@ def auto_execute_submission(sender, instance, created, **kwargs):
     Automatically execute submission when it's created or updated.
     
     This signal fires after a Submission is saved. If auto-execution is enabled,
-    it queues the RunSubmission Celery task to execute all code files in the submission.
+    it queues the RunSubmission Celery task to execute all code files in the submission
+    and (if the assignment has runTestsOnSubmit enabled) run the test suite.
     This happens both when submissions are created AND when they are updated.
     
     Configuration:
         AUTOGRADER_AUTO_EXECUTE (bool): Enable/disable auto-execution (default: False)
+    
+    The per-assignment ``runFilesOnSubmit`` and ``runTestsOnSubmit`` flags are
+    checked inside the RunSubmission task to decide whether to execute files
+    and/or run tests.  If both are disabled, the task is not queued at all.
     
     Args:
         sender: The Submission model class
@@ -52,12 +57,17 @@ def auto_execute_submission(sender, instance, created, **kwargs):
             "Set AUTOGRADER_AUTO_EXECUTE=True to enable."
         )
         return
-    
-    # Check assignment setting
-    if not instance.assignment.runTestsOnSubmit:
-        logger.debug(f"Auto-execution disabled for assignment {instance.assignment.id}. Skipping.")
-        return
 
+    # Check per-assignment flags — skip if both are disabled
+    run_files = getattr(instance.assignment, 'runFilesOnSubmit', True)
+    run_tests = getattr(instance.assignment, 'runTestsOnSubmit', True)
+    if not run_files and not run_tests:
+        logger.debug(
+            f"Both runFilesOnSubmit and runTestsOnSubmit disabled for "
+            f"assignment {instance.assignment.id}. Skipping."
+        )
+        return
+    
     try:
         # Import here to avoid circular imports
         from autograder.run import RunSubmission

@@ -30,8 +30,7 @@ from docker import DockerClient
 
 from core.models import File, User
 
-# Suppress pkg_resources deprecation warning from coreapi
-warnings.filterwarnings('ignore', message='pkg_resources is deprecated', category=UserWarning)
+# pkg_resources shim is installed via core.compat for setuptools >= 82 compatibility
 
 try:
     import docker

@@ -30,7 +30,7 @@ from django.utils.timezone import now
 
 from core.permissions.helpers import isAuthenticated
 
-from autograder.run import Run, RunType, filterExposedSubmissionTests
+from autograder.run import filterExposedSubmissionTests
 import json
 from rest_framework import serializers
 

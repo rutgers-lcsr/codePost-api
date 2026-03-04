@@ -1,29 +1,19 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
 # External libraries
-from ast import Sub
-from calendar import c
-from operator import is_
 import os
-from socket import timeout
 import threading
 import time
 from celery import shared_task
-import requests
 from enum import Enum
 import json
-from django.contrib.auth.models import User
 
 # Internal imports
 from autograder.celery import app, logger
 from autograder.services.executors import ExecutionResult, Executor
 from autograder.services.TestService import TestService
-from codepost.settings import AUTOGRADER_URL
 from autograder.testUtils.ag_logging import (
     AutograderError,
-    AutograderUsage,
     AutograderRunAllUsage,
-    AutograderTestError,
-    standardLog,
 )
 
 from core.models import (
@@ -35,20 +25,17 @@ from core.models import (
     Environment,
     TestCategory,
     Assignment,
+    User,
 )
-from core.serializers.submissionTest import SubmissionTestSerializer
-from core.tests.views.results import assignment
-from log.models import Event, TrackedAutograderRun
+from log.models import Event
 
 from core.permissions.helpers import isStaffOfSub
-from autograder.testUtils.parse import parseTests, writeCmdScript
 
 from core.emails import TestRunAllCompleteEmail
 
 from datetime import datetime
 from typing import Any, cast
 
-import re
 import traceback
 
 
@@ -249,14 +236,27 @@ codePost Autograder
 
 
 @app.task
-def RunAll(environmentID, user, sendEmail=False):
+def RunAll(environmentID, user_id, sendEmail=False):
     """
-    Deprecated Autograder Run All Task
-    This celery task takes an environment and runs all test on all submissions.
+    Autograder Run All Task
+    This celery task takes an environment and runs all tests on all submissions.
     It updates the progress of the task after each submission run.
+    
+    Args:
+        environmentID: The environment ID
+        user_id: The ID (int) of the requesting user
+        sendEmail: Whether to send a completion email
     """
     environment = Environment.objects.get(id=environmentID)
     assignment = environment.assignment
+
+    # Look up the user object from the ID
+    try:
+        user = User.objects.get(id=user_id)
+        user_str = str(user)
+    except User.DoesNotExist:
+        user = None
+        user_str = str(user_id)
 
     ######################## 1. Get Submissions ######################################
     submissions = environment.assignment.submissions.all()
@@ -272,7 +272,7 @@ def RunAll(environmentID, user, sendEmail=False):
     #####################
     start_time = datetime.now()
     AutograderRunAllUsage(
-        str(user),
+        user_str,
         "Run All Started for assignment {}".format(assignment.name),
         "Number of submissions: {}\nNumber of Tests: {}\n Time Started: {}".format(
             len(submissions),
@@ -281,18 +281,15 @@ def RunAll(environmentID, user, sendEmail=False):
         ),
     )
 
-    map = {}
-    allResults = []
+    progress_map = {}
     ######################## Loop through submissions######################################
     for s in submissions:
         ######################## 3. Run ######################################
         # If creating the submission tests fail (sql connection error), don't block other tests
         try:
-            # Legacy file preparation removed as TestService handles file retrieval
-            
             try:
                 # Use Modern TestService Unified Architecture
-                results = TestService.run_suite(s.id, user_id=str(user))
+                results = TestService.run_suite(s.id, user_id=user_id)
                 
                 # Check for suite-level error
                 if results and isinstance(results[0], dict) and not results[0].get('success') and 'error' in results[0] and 'testCaseId' not in results[0]:
@@ -301,7 +298,6 @@ def RunAll(environmentID, user, sendEmail=False):
                      raise Exception(logs)
 
                 # Fetch the created/updated SubmissionTest objects for progress tracking
-                # We filter by the tests we intended to run
                 newSubmissionTests = list(SubmissionTest.objects.filter(
                     submission=s, 
                     testCase__in=all_test_cases
@@ -311,7 +307,7 @@ def RunAll(environmentID, user, sendEmail=False):
 
             except Exception as e:
                 AutograderError(
-                    str(user),
+                    user_str,
                     "Run all - individual test failed: {}".format(str(s.students.first())),
                     "Exception: {}".format(traceback.format_exc()),
                 )
@@ -322,37 +318,34 @@ def RunAll(environmentID, user, sendEmail=False):
             _runAndDump(environment, s, logs)
         except:
             AutograderError(
-                str(user),
+                user_str,
                 "Run all - individual test failed: {}".format(str(s.students.first())),
                 "Exception: {}".format(traceback.format_exc()),
             )
             newSubmissionTests = []
 
         ######################## 6. Update progress  ######################################
-        map = _calculateProgress(newSubmissionTests, map)
-        RunAll.update_state(state="PROGRESS", meta={"progress": map})
+        progress_map = _calculateProgress(newSubmissionTests, progress_map)
+        RunAll.update_state(state="PROGRESS", meta={"progress": progress_map})
 
     ######################## 7. Turn off "isRunning" ######################################
-    # Backwards-compatible dynamic attr set for legacy field names.
     setattr(environment, "isRunning", False)
     environment.save()
 
-    if sendEmail:
-
+    if sendEmail and user:
         TestRunAllCompleteEmail(user).send_email(assignment_name=assignment.name, course_name=assignment.course.name, course_period=assignment.course.period)
-   
 
     end_time = datetime.now()
     msg = "Run All Completed for assignment {}".format(assignment.name)
     time = "Time Completed {}\n Time Taken {} ".format(
         end_time.strftime("%d/%m/%Y %H:%M:%S"), str(end_time - start_time)
     )
-    AutograderRunAllUsage(str(user), msg, time)
+    AutograderRunAllUsage(user_str, msg, time)
     try:
         meta = {msg: msg, time: time}
         Event.objects.create(
             category="autograder",
-            user=str(user),
+            user=user_str,
             description="Autograder run all completed",
             courseID=assignment.course.id,
             meta=json.dumps(meta),
@@ -372,8 +365,15 @@ class RunType(str, Enum):
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=600,soft_time_limit=550)
 def RunSubmission(self, submissionID: int):
     """
-    This celery task runs all executable files in a submission to cache execution results.
-    This prevents repeated execution of student code when viewing test results or re-running tests.
+    This celery task handles on-submit execution for a submission in two phases:
+    
+    1. **File execution** (if ``runFilesOnSubmit`` is True): Runs all executable files
+       and caches execution results so they don't need to be re-executed later.
+    2. **Test execution** (if ``runTestsOnSubmit`` is True): Runs the full test suite
+       via ``TestService.run_suite()`` against the submission.
+    
+    The two-phase approach ensures cached outputs are available before tests evaluate them.
+    Either phase can be independently enabled/disabled per assignment.
     
     The task will automatically retry up to 3 times if it fails, with a 60-second delay between retries.
     
@@ -381,7 +381,7 @@ def RunSubmission(self, submissionID: int):
         submissionID (int): The ID of the submission to run.
         
     Returns:
-        dict: Summary of execution results
+        dict: Summary of execution and test results
         
     Raises:
         Submission.DoesNotExist: If submission ID is invalid
@@ -415,13 +415,17 @@ def RunSubmission(self, submissionID: int):
                 break
         logger.info(f"[RunSubmission] Environment {environment.id} wait finished. Status: {environment.build_status}")
 
+    # --- Phase 1: Execute files and cache output ---
+    run_files = getattr(submission.assignment, 'runFilesOnSubmit', True)
+
     file_objs = submission.files.all()
     
     if not file_objs or len(file_objs) == 0:
         logger.info(f"No files found for submission {submissionID}")
-        return {"success": True, "message": "No files to execute", "files_processed": 0}
+        if not getattr(submission.assignment, 'runTestsOnSubmit', False):
+            return {"success": True, "message": "No files to execute", "files_processed": 0}
     
-    # Look for file with excutionable extension
+    # Look for file with executable extension
     files: list[SubmissionFile] = []
 
 
@@ -431,10 +435,11 @@ def RunSubmission(self, submissionID: int):
             files.append(f)
     
     
-    # If no executable file found, return
+    # If no executable file found, skip file execution but may still run tests
     if not files or len(files) == 0:
         logger.info(f"No executable file found for submission {submissionID}")
-        return {"success": True, "message": "No executable files found", "files_processed": 0}
+        if not getattr(submission.assignment, 'runTestsOnSubmit', False):
+            return {"success": True, "message": "No executable files found", "files_processed": 0}
 
     logger.info(f"Running submission {submissionID} with {len(files)} executable files out of {len(file_objs)} total files")
 
@@ -454,9 +459,14 @@ def RunSubmission(self, submissionID: int):
     except Exception:
         pass
     
-    try:
+    if not run_files:
+        logger.debug(f"[RunSubmission] runFilesOnSubmit disabled for assignment {submission.assignment.id}. Skipping file execution.")
+    elif not files:
+        logger.debug(f"[RunSubmission] No executable files to run.")
+    else:
+      try:
         for f in files:
-            result = None  # type: ignore[ExecutionResult]
+            result: ExecutionResult = None  # type: ignore[ExecutionResult]
             execution_error = None
             execution_complete = threading.Event()
 
@@ -552,7 +562,7 @@ def RunSubmission(self, submissionID: int):
                 failed += 1
                 results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": f"Cache save failed: {str(e)}"})
     
-    except Exception as e:
+      except Exception as e:
         logger.error(f"[RunSubmission] Unexpected error processing submission {submissionID}: {e}", exc_info=True)
         # Retry the task if we hit an unexpected error
         raise self.retry(exc=e)
@@ -564,6 +574,26 @@ def RunSubmission(self, submissionID: int):
     except Exception as e:
         logger.error(f"[ColdStart] Error running Autodetector: {e}")
     # -----------------------------------------------
+
+    # --- Run Tests (if enabled for this assignment) ---
+    test_results = []
+    run_tests = getattr(submission.assignment, 'runTestsOnSubmit', False)
+    if run_tests:
+        try:
+            test_results = TestService.run_suite(submissionID)
+            test_passed = sum(1 for r in test_results if r.get('passed'))
+            test_failed = len(test_results) - test_passed
+            logger.info(
+                f"[RunSubmission] Test suite for submission {submissionID}: "
+                f"{test_passed} passed, {test_failed} failed out of {len(test_results)} tests"
+            )
+        except Exception as e:
+            logger.error(
+                f"[RunSubmission] Test suite failed for submission {submissionID}: {e}",
+                exc_info=True
+            )
+    else:
+        logger.debug(f"[RunSubmission] runTestsOnSubmit disabled for assignment {submission.assignment.id}. Skipping tests.")
     # -----------------------------------------------
     
     summary = {
@@ -572,7 +602,9 @@ def RunSubmission(self, submissionID: int):
         "files_processed": len(files),
         "successful": successful,
         "failed": failed,
-        "results": results
+        "results": results,
+        "tests_run": run_tests,
+        "test_results_count": len(test_results),
     }
     
     logger.info(f"[RunSubmission] Completed submission {submissionID}: {successful} successful, {failed} failed")
@@ -602,158 +634,7 @@ def Run(
     Files: Submission(pk).files if type Submission else Submission(subID) if subID else SolutionFiles
     Tests: TestCase(pk) if type TestCase else All Tests
     """
-
     return False
-
-    environment = Environment.objects.get(id=environmentID)
-    assignment = environment.assignment
-    type = RunType(json.loads(type))
-
-    start_time = datetime.now()
-    AutograderUsage(
-        str(user),
-        "Run for assignment {}".format(assignment.name),
-        "Type: {}".format(type),
-    )
-
-    ######################## 1. Get File Objects ######################################
-    submissionID = pk if type == RunType.Submission else subID if subID else None
-    submission = Submission.objects.get(id=submissionID) if submissionID else None
-
-    if fileOverrides != None:
-        files = fileOverrides
-    else:
-        # If there's no submission specified, use the submission files if available
-        # Otherwise, this run will proceed without student files.
-        fileObjs = submission.files.all() if submission else []
-        files = [
-            {"name": f.name, "code": f.data, "path": f.path if f.path else ""}
-            for f in fileObjs
-        ]
-
-    ######################## 2. Get Test Objects ######################################
-    if type == RunType.Submission:
-        # Get all tests
-        testCases = TestCase.objects.filter(
-            testCategory__assignment=assignment
-        ).exclude(type__in=testCase_types_to_exclude)
-
-        _tracked_autograder_run_test_case_set = "all"
-    else:
-        testCases = TestCase.objects.filter(id=pk) if type == RunType.TestCase else []
-        _tracked_autograder_run_test_case_set = "partial"
-
-    ######################## 3. Run ######################################
-    (response, logs) = _runTests(
-        testCases,
-        environment,
-        files,
-        user,
-        subID if subID != None else "dummy",
-        assignment=assignment,
-        submission=submission,
-        test_case_set=_tracked_autograder_run_test_case_set,
-        run_by_role=run_by_role,
-    )
-
-    # There is an erorr in the result the user receives. We want to log this to help user education
-    if logs and "error" in logs.lower() or "Operation Timed Out." in logs:
-        AutograderTestError(
-            str(user),
-            "Test logs contains an error: {}".format(
-                str(submission.students.first()) if submission else ""
-            ),
-            logs,
-        )
-
-    ######################## 4. Parse results ######################################
-    if isinstance(response, RunError):
-        # FIXME: parse error
-        AutograderError(
-            str(user),
-            "RUN ERROR: {}".format(
-                str(submission.students.first()) if submission else ""
-            ),
-            "RESPONSE: {}".format(response),
-        )
-        results = [
-            TestResult(t, t.testCategory, False, response, True) for t in testCases
-        ]
-    else:
-        results = [_processResult(r, assignment, user) for r in response]
-        # Filter out any empty results (e.g., if a test case is deleted mid-run)
-        results = [r for r in results if r is not None]
-
-    ######################## 5. Check for run and dump ######################################
-    _runAndDump(environment, submission, logs)
-
-    end_time = datetime.now()
-    msg = "Run completed for assignment {}".format(assignment.name)
-    time = "Time Taken: {}\n".format(str(end_time - start_time))
-    AutograderUsage(str(user), msg, time)
-    try:
-        meta = {msg: msg, time: time}
-        Event.objects.create(
-            category="autograder",
-            user=str(user),
-            description="Autograder run completed",
-            courseID=assignment.course_id,
-            meta=json.dumps(meta),
-        )
-    except:
-        pass
-
-    ######################## 6. Return ######################################
-    if type == RunType.Submission and submission:
-        results = _addMissingTests(
-            results,
-            TestCase.objects.filter(testCategory__assignment=assignment).exclude(
-                type="external"
-            ),
-            response,
-            logs,
-        )
-    if type == RunType.Submission and createSubmissionTests and submission:
-        newSubmissionTests = [_createSubmissionTest(r, submission) for r in results]
-        # Message is an optional message we want to feed back to students based on
-        # conditions hit when parsing results
-        message = ""
-
-        if exposed_only:
-            # If exposed_only, only return the serialized submission tests for exposed test cases
-            (newSubmissionTests, message) = filterExposedSubmissionTests(
-                newSubmissionTests, environment.maxExposedFailedTests
-            )
-            # Increment the times the submission has been run by the student
-            submission.testRunsCompleted += 1
-            submission.save()
-        serializer = SubmissionTestSerializer(newSubmissionTests, many=True)
-
-        # If the setting is turn on to epxose dumped logs to students, then we return it
-        # We return none instead of a blank string in order to differentiate between results that have
-        exposedLogs = None
-        toRet = {
-            "logs": exposedLogs,
-            "submissionTests": serializer.data,
-            "message": message,
-        }
-        return toRet
-    else:
-        # Returning overall logs, to enable "run and dump" while testing
-        # If the logs map to a specific test case, we pass that into the formatting, else we pass in None
-        formattedLogs = _formatLogs(
-            logs, testCases[0] if type == RunType.TestCase else None
-        )
-        toRet = {
-            "logs": formattedLogs,
-            "results": [
-                _formatResult(
-                    r.testCase.id, r.testCategory.id, r.passed, r.logs, r.isError
-                )
-                for r in results
-            ],
-        }
-        return toRet
 
 
 def filterExposedSubmissionTests(submissionTests, maxFailedTests=None):
@@ -792,256 +673,6 @@ def filterExposedSubmissionTests(submissionTests, maxFailedTests=None):
 ##################################################################################################################
 ######################################### HELPER FUNCTONS ########################################################
 ##################################################################################################################
-class RunError(str, Enum):
-    ConnectionError = "Request timed out"
-    JsonParseError = "Something went wrong. Contact the team at team@codepost.io."
-    EmptyOutputError = "Empty output received."
-
-
-class TestResult:
-    def __init__(self, testCase, testCategory, passed, logs, isError):
-        self.testCase = testCase
-        self.testCategory = testCategory
-        self.passed = passed
-        self.logs = logs
-        self.isError = isError
-
-
-## Main Run function
-def _runTests(
-    testCases,
-    environment,
-    files,
-    user,
-    submissionID="dummy",
-    *,
-    assignment,
-    submission,
-    test_case_set,
-    run_by_role,
-):
-    try:
-        _user = User.objects.get(username=user)
-    except:
-        _user = None
-
-    tracked_autograder_run = TrackedAutograderRun.objects.create(
-        run_by=_user,
-        assignment=assignment,
-        submission=submission,
-        test_case_set=test_case_set,
-        run_by_role=run_by_role,
-    )
-    tracked_autograder_run.started = datetime.now()
-    tracked_autograder_run.save()
-    # Was processing helpers here, now removed
-
-    ########################### 2. Process tests ###########################################
-    caseTests = parseTests(testCases, environment.language)
-
-    ########################### 3. Create command script ###################################
-    command = writeCmdScript(
-        caseTests, environment.compileText, environment.language
-    )
-
-    ########################### 4. Send payload to autograder ##############################
-    tests = caseTests
-    payload = {
-        "tests": tests,
-        "files": files,
-        "assignment": environment.assignment.id,
-        "buildID": environment.buildID if environment.buildID > 0 else None,
-        "submission": submissionID,
-        "command": command,
-        "allowNetworkAccess": environment.allowNetworkAccess,
-    }
-
-    # TMP
-    # try:
-    #     standardLog(str(user), "autograder input", json.dumps(payload), "#richard-test")
-    # except:
-    #     print('error with log')
-    resp = requests.post(AUTOGRADER_URL + "/run/", json=payload)
-
-    tracked_autograder_run.ended = datetime.now()
-    tracked_autograder_run.save()
-
-    ########################### 5. Check for erros #################################################
-    try:
-        r = resp.json()
-
-        # TMP
-        # try:
-        #     standardLog(str(user), "autograder output", json.dumps(r), "#richard-test")
-        # except:
-        #     print('error with log')
-
-    except:
-        tracked_autograder_run.errors = resp.text
-        tracked_autograder_run.save()
-
-        if "ConnectionError" in resp.text:
-            AutograderError(
-                str(user),
-                "Operation timed out. Language: {}".format(environment.language),
-                "Response: {}".format(resp.text),
-            )
-            return (RunError.ConnectionError, "")
-        else:
-            AutograderError(
-                str(user),
-                "JSON parse error. Language: {}".format(environment.language),
-                "Response: {}".format(resp.text),
-            )
-            return (RunError.JsonParseError, "")
-    try:
-        # Truncate logs to avoid db write timeouts for exceeding long logs
-
-        # Auto-Convergence Hook
-        try:
-            from autograder.services.converger import Converger
-            # Run convergence in background or synchronous? 
-            # It triggers a build (async task), so it's fast enough.
-            Converger.analyze_and_converge(environment.id, r.get("logs", ""))
-        except Exception as e:
-            pass # Be silent about converger errors to avoid disrupting run
-
-        return (r["results"], _truncateLogs(r["logs"]))
-    except:
-        tracked_autograder_run.errors = resp.text
-        tracked_autograder_run.save()
-
-        AutograderError(
-            str(user),
-            "Key Error {}".format(environment.language),
-            "Response: {}".format(resp.text),
-        )
-        return (RunError.JsonParseError, "")
-
-
-# Autograder requires trailing slash and no beinning slash
-def _parseFilePath(path):
-    if not path:
-        return ""
-    return path.strip("/") + "/"
-
-
-def _addMissingTests(results, allTestCases, response, logs):
-    reasonForMissing = (
-        response
-        if isinstance(response, RunError)
-        else "Operation Timed Out. "
-        if "Operation Timed Out." in logs
-        else logs
-    )
-    existingTestIDs = {r.testCase.id for r in results}
-    for t in allTestCases:
-        if t.id not in existingTestIDs:
-            results.append(
-                TestResult(
-                    t,
-                    t.testCategory,
-                    False,
-                    reasonForMissing + "No output received",
-                    True,
-                )
-            )
-    return results
-
-
-def _createSubmissionTest(result, submission):
-    testQuerySet = SubmissionTest.objects.filter(
-        submission=submission, testCase=result.testCase
-    )
-    # We truncate the logs so that there isn't a db write error for infinite loops with prints
-    shortLogs = _truncateLogs(str(result.logs))
-    if len(testQuerySet) == 1:
-        newTest = testQuerySet[0]
-        newTest.passed = result.passed
-        newTest.logs = shortLogs
-        newTest.isError = result.isError
-    elif len(testQuerySet) > 1:
-        # Delete all submission tests
-        testQuerySet.delete()
-        newTest = SubmissionTest.objects.create(
-            submission=submission,
-            testCase=result.testCase,
-            passed=result.passed,
-            logs=shortLogs,
-            isError=result.isError,
-        )
-    else:
-        newTest = SubmissionTest.objects.create(
-            submission=submission,
-            testCase=result.testCase,
-            passed=result.passed,
-            logs=shortLogs,
-            isError=result.isError,
-        )
-    newTest.save()
-    return newTest
-
-
-testPattern = re.compile(r'^\d+$|^[^"]+?_@_[^"]+$')
-
-
-
-def _processResult(result, assignment, user):
-    # Check to make sure the result ID is in the proper format.
-    if not testPattern.match(result["id"]):
-        AutograderError(
-            str(user),
-            "Incorrect response format. Assignment: {}".format(assignment.id),
-            "Result {}".format(str(result)),
-        )
-    else:
-        if result["id"].isdigit():
-            test_id = int(result["id"])
-            try:
-                testCase = TestCase.objects.get(id=test_id)
-                testCategory = testCase.testCategory
-            except:
-                AutograderError(
-                    str(user),
-                    "Test id not found error: {}".format(assignment.id),
-                    "Result".format(str(result)),
-                )
-                return
-        else:
-            # Case 2: TestOutput call in user-defined file
-            # The id is a string of <testCategoryID>_@_<testDescription>
-            # FIXME: This syntax feels ugly, but the user doesn't have ids to input
-            [categoryName, testDescription] = result["id"].split("_@_")
-            try:
-                testCategory = TestCategory.objects.get(
-                    name=categoryName, assignment=assignment
-                )
-            except:
-                # This should already be created on the front end, but if not, create it
-                testCategory = TestCategory.objects.create(
-                    name=categoryName, assignment=assignment
-                )
-                testCategory.save()
-            try:
-                testCase = TestCase.objects.get(
-                    testCategory=testCategory, description=testDescription
-                )
-            except:
-                # This should already be created on the front end, but if not, create it
-                testCase = TestCase.objects.create(
-                    testCategory=testCategory,
-                    description=testDescription,
-                    type="file",
-                    text="",
-                )
-                testCase.save()
-        return TestResult(
-            testCase,
-            testCategory,
-            result["passed"],
-            _formatLogs(result["log"], testCase),
-            result["isError"],
-        )
 
 
 ## Helper: Parse created submission tests to get progress
@@ -1059,57 +690,14 @@ def _calculateProgress(submissionTests, map):
     return map
 
 
-## Format an individual testcase result
-def _formatResult(caseID, categoryID, passed, logs, isError):
-    return {
-        "testCase": caseID,
-        "testCategory": categoryID,
-        "passed": passed,
-        "logs": logs,
-        "isError": isError,
-    }
-
-
-def _truncateLogs(logs):
-    newLogs = (
-        (logs[:MAX_LOG_LENGTH] + "... [Log length exceeded]")
-        if len(logs) > MAX_LOG_LENGTH
-        else logs
-    )
-    return newLogs
-
-
-def _formatLogs(logs, testCase):
-    # If we know the test case, then replace the test id with the test description
-    if testCase:
-        # check for regex of _test{id}.ext: line
-        logs = re.sub(
-            '(")?_test{}+.?.?.?.?.?"?(:|,)'.format(testCase.id),
-            "[codePost Test] {}:".format(testCase.description),
-            logs,
-        )
-        # check for regex of location: class _test51
-        logs = re.sub(
-            "location: class _test{}".format(testCase.id),
-            "location: class [codePost Test] {}".format(testCase.description),
-            logs,
-        )
-    # If we don't know the test case, replace it with a generic [codePost test]
-    logs = re.sub(
-        '(")?_test[0-9]+.?.?.?.?.?"?(:|,) line', "[codePost Test]: line", logs
-    )
-    logs = re.sub("_codePost_run.sh:", "Run Script:", logs)
-    return logs
-
-
 ## Check for run and dump and, if so, output logs to a _tests.TXT file
 def _runAndDump(environment, submission, logs):
     try:
-        testFile = File.objects.get(submission=submission, name="_tests.txt")
+        testFile = SubmissionFile.objects.get(submission=submission, name="_tests.txt")
         testFile.data = logs
         testFile.save()
-    except:
-        testFile = File.objects.create(
+    except SubmissionFile.DoesNotExist:
+        SubmissionFile.objects.create(
             submission=submission,
             name="_tests.txt",
             extension=".txt",
@@ -1117,7 +705,6 @@ def _runAndDump(environment, submission, logs):
             path="",
             hiddenBeforePublish=True,
         )
-        testFile.save()
     return
 
 

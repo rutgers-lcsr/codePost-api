@@ -16,21 +16,19 @@ from core.permissions.helpers import isCourseAdmin, isStudentOfSub, isStaffOfSub
 from rest_framework import serializers
 from rest_framework.response import Response
 
-from codepost.settings import AUTOGRADER_URL
 from autograder.testUtils.compileTemplates import get_compile_template
 
 from autograder.testUtils.parse import parseTests, writeCmdScript
 from autograder.testUtils.ag_logging import AutograderError, AutograderBuild
 
-from autograder.run import RunAll, Run, RunType, BuildEnvironment
+from autograder.run import RunAll, BuildEnvironment
+from autograder.tasks import run_test_task
 
 from autograder.testUtils.buildHelpers import createDockerFile
 
-import requests
 import json
 
 from typing import Any, cast
-
 
 from autograder.services.builder import Builder
 
@@ -208,7 +206,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
         environment.isRunning = True
         environment.save()
 
-        x = RunAll.delay(environment.id, str(request.user), sendEmail)
+        x = RunAll.delay(environment.id, request.user.id, sendEmail)
         resp_ser = EnvironmentRunAllResponseSerializer(instance={"task": x.task_id})
         return Response(resp_ser.data)
     @extend_schema(
@@ -222,6 +220,10 @@ class EnvironmentViewSet(ListProtectedViewSet):
     )
     @action(detail=True, methods=["PATCH"])
     def run(self, request, pk=None):
+        """
+        Run tests for a submission using the modern TestService architecture.
+        Dispatches run_test_task which calls TestService.run_suite().
+        """
         user = self.request.user
         environment = Environment.objects.get(id=pk)
         assignment = environment.assignment
@@ -230,57 +232,34 @@ class EnvironmentViewSet(ListProtectedViewSet):
         req_ser.is_valid(raise_exception=True)
         vd = cast(dict[str, Any], req_ser.validated_data)
 
-        submission = vd.get("submission", None)
-        simulate = vd.get("simulate", True)
-        fileOverrides = None
-        # an optional parameter for admins to pass in if they want tests to be run as a student
-        # For students, this parameter does not apply: tests are always run in exposed only mode
-        exposedOnly = vd.get("exposedOnly", False)
+        submission_id = vd.get("submission", None)
+        fileOverrides = vd.get("files", None)
 
         if not isAuthenticated(user):
             return returnNotAuthorized()
 
-        if submission:
+        submission = None
+        if submission_id:
             try:
-                submission = Submission.objects.get(id=submission)
-            except:
+                submission = Submission.objects.get(id=submission_id)
+            except Submission.DoesNotExist:
                 raise serializers.ValidationError("Not a valid submission.")
 
         if not (
             isCourseAdmin(user, course)
             or (submission and isStudentOfSub(user, submission))
-            or isStaffOfSub(user, submission)
+            or (submission and isStaffOfSub(user, submission))
         ):
             return returnForbidden()
 
         if not environment.language:
             raise serializers.ValidationError(
-                "Environment has not been created for this asignment."
+                "Environment has not been created for this assignment."
             )
-
-        # Check for file overrides. Here we don't check for the assignment setting for simplicity
-        # There's no attack vector in allowing students to submit file overrides. They can't change their code
-        fileOverrides = vd.get("files", None)
 
         if submission:
-            # If simulate is on or there are file overrides, don't actually create submission tests
-            createSubmissionTests = (
-                False if (simulate or fileOverrides != None) else True
-            )
-            if isCourseAdmin(user, course) or isStaffOfSub(user, submission):
-                x = Run.delay(
-                    user=str(request.user),
-                    environmentID=environment.id,
-                    type=json.dumps(RunType.Submission),
-                    pk=submission.id,
-                    createSubmissionTests=createSubmissionTests,
-                    exposed_only=exposedOnly,
-                    run_by_role="instructor",
-                )
-                resp_ser = EnvironmentRunResponseSerializer(instance={"task": x.task_id})
-                return Response(resp_ser.data)
-            elif isStudentOfSub(user, submission):
-                # Check to see if test runs have been exceeded. If so, return a validation error
+            # Student rate-limit check
+            if isStudentOfSub(user, submission) and not isCourseAdmin(user, course):
                 if (
                     environment.maxStudentTestRuns
                     and submission.testRunsCompleted >= environment.maxStudentTestRuns
@@ -289,29 +268,18 @@ class EnvironmentViewSet(ListProtectedViewSet):
                         "Number of allowable test runs for this submission has hit the max."
                     )
 
-                x = Run.delay(
-                    user=str(request.user),
-                    environmentID=environment.id,
-                    type=json.dumps(RunType.Submission),
-                    pk=submission.id,
-                    createSubmissionTests=createSubmissionTests,
-                    exposed_only=True,
-                    fileOverrides=fileOverrides,
-                    run_by_role="student",
-                )
-                resp_ser = EnvironmentRunResponseSerializer(instance={"task": x.task_id})
-                return Response(resp_ser.data)
+            x = run_test_task.delay(
+                submission.id,
+                user_id=request.user.id,
+                file_overrides=fileOverrides,
+            )
+            resp_ser = EnvironmentRunResponseSerializer(instance={"task": x.task_id})
+            return Response(resp_ser.data)
 
-        # Running on solution code
-        x = Run.delay(
-            user=str(request.user),
-            environmentID=environment.id,
-            type=json.dumps(RunType.Submission),
-            pk=None,
-            run_by_role="instructor",
+        # No submission specified — nothing to run
+        raise serializers.ValidationError(
+            "A submission must be specified to run tests."
         )
-        resp_ser = EnvironmentRunResponseSerializer(instance={"task": x.task_id})
-        return Response(resp_ser.data)
 
     #################################### Export ###############################################
     @extend_schema(request=None, responses={200: OpenApiTypes.STR})

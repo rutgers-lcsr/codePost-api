@@ -452,7 +452,6 @@ else:
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
-USE_L10N = True
 USE_TZ = True
 
 
@@ -478,7 +477,14 @@ if not DEBUG:
 
     # Turn on WhiteNoise storage backend that takes care of compressing static files
     # and creating unique names for each version so they can safely be cached forever.
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
     
 
 STATICFILES_DIRS = []
@@ -486,9 +492,9 @@ STATICFILES_DIRS = []
 # X-Frame-Options
 
 if DEBUG:
-    X_FRAME_OPTIONS = 'ALLOWALL'  # Allow iframe embedding in debug mode
+    X_FRAME_OPTIONS = 'SAMEORIGIN'
 else:
-    X_FRAME_OPTIONS = 'ALLOW-FROM https://codepost.cs.rutgers.edu'  # Allow iframe embedding only from the same origin
+    X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 
 
@@ -535,21 +541,6 @@ if DEBUG:
 ################## End Codepost settings ##############################
 
 ################## Autograder settings ##############################
-
-# Autograder URL
-# This is the URL where the autograder service is running.
-# Used for communication between the API and the autograder.
-
-# Deprecate this soon, original codepost is going down
-
-if DEBUG:
-    AUTOGRADER_URL = "http://127.0.0.1:8000"
-else:
-    AUTOGRADER_URL = "https://4bppxuryyz.codepost.io"
-
-# AUTOGRADER_URL = "https://qoe9ev62y5.codepost.io"
-# AUTOGRADER_URL = "http://127.0.0.1:8002"
-# AUTOGRADER_URL = "https://autograder-cyl1.onrender.com"
 
 ################# Autograder settings end ##############################
 

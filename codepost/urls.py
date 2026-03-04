@@ -20,7 +20,6 @@ from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshSlidingView, TokenVerifyView
 from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token
 
-from rest_framework.renderers import JSONOpenAPIRenderer
 from rest_framework.viewsets import ViewSet
 from core.views.user import UserViewSet
 from core.views.course import CourseViewSet
@@ -98,11 +97,11 @@ router.register(r'commentTemplates', CommentTemplateViewSet, basename='commentTe
 # router.register(r'billing', BillingViewSet, basename='billing')
 
 #############################################
-# CoreAPI (built into Django)
-# ~/docs/
+# API Documentation (drf-spectacular)
+# CoreAPI docs removed in Django 6 / DRF 3.15+
+# ~/docs/ now redirects to ~/api/schema/swagger-ui/
 #############################################
 
-from rest_framework.documentation import include_docs_urls
 API_TITLE = 'codePost API'
 API_DESCRIPTION = 'An API for administrators to mine course data and automate common tasks.'
 
@@ -110,11 +109,6 @@ API_DESCRIPTION = 'An API for administrators to mine course data and automate co
 #############################################
 
 urlpatterns = [
-    re_path(r'^docs/', include_docs_urls(title=API_TITLE, description=API_DESCRIPTION,
-                                         public=True, renderer_classes=[JSONOpenAPIRenderer])),  # OpenAPI JSON renderer
-    # re_path(r'^docs/', include_docs_urls(title=API_TITLE,
-    # description=API_DESCRIPTION, public=True,
-    # renderer_classes=[CustomRenderer])), # UI renderer
     path('admin/', admin.site.urls),
     re_path('^api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('token-auth/', obtain_jwt_token),
@@ -149,11 +143,13 @@ if DEBUG:
     ]
     
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from django.views.generic import TemplateView
+from django.views.generic import TemplateView, RedirectView
 
 urlpatterns += [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     # Optional UI:
     path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/schema/elements/', TemplateView.as_view(template_name='elements.html'), name='elements'),
+    # Redirect old /docs/ URL to swagger UI
+    path('docs/', RedirectView.as_view(url='/api/schema/swagger-ui/', permanent=True), name='docs-redirect'),
 ]
