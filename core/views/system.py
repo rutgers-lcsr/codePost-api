@@ -11,6 +11,7 @@ import time
 import shutil
 
 from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer, MaintenanceBannerSerializer, MaintenanceBannerResponseSerializer
+from core.serializers.ai_usage import AIUsageSummarySerializer
 
 
 from djangorestframework_camel_case.render import CamelCaseJSONRenderer
@@ -331,4 +332,65 @@ class SystemBannerView(APIView):
             'starts_at': banner.starts_at.isoformat() if banner.starts_at else None,
             'ends_at': banner.ends_at.isoformat() if banner.ends_at else None,
         })
+
+
+class SystemAIUsageView(APIView):
+    """
+    GET /system/aiUsage/ — Platform-wide AI usage analytics.
+    Superuser only. Supports granularity, date range, and org breakdown.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    renderer_classes = [CamelCaseJSONRenderer]
+
+    @extend_schema(
+        responses={200: AIUsageSummarySerializer},
+        parameters=[
+            OpenApiParameter(name='granularity', required=False, type=str,
+                             description="Time bucket granularity: 'hourly', 'daily', or 'monthly'",
+                             enum=['hourly', 'daily', 'monthly']),
+            OpenApiParameter(name='startDate', required=False, type=str,
+                             description="Start date (ISO 8601)"),
+            OpenApiParameter(name='endDate', required=False, type=str,
+                             description="End date (ISO 8601)"),
+            OpenApiParameter(name='organizationId', required=False, type=int,
+                             description="Filter to a specific organization ID"),
+        ],
+    )
+    def get(self, request):
+        from core.services.ai_usage_analytics import get_usage_summary
+        from core.models import AIUsageRecord
+        from django.utils.dateparse import parse_datetime
+
+        granularity = request.query_params.get('granularity', 'daily')
+        if granularity not in ('hourly', 'daily', 'monthly'):
+            granularity = 'daily'
+
+        start_date = None
+        end_date = None
+        start_str = request.query_params.get('startDate', '').strip()
+        end_str = request.query_params.get('endDate', '').strip()
+        if start_str:
+            start_date = parse_datetime(start_str)
+        if end_str:
+            end_date = parse_datetime(end_str)
+
+        queryset = AIUsageRecord.objects.all()
+
+        org_id = request.query_params.get('organizationId')
+        if org_id:
+            try:
+                queryset = queryset.filter(organization_id=int(org_id))
+            except (ValueError, TypeError):
+                pass
+
+        summary = get_usage_summary(
+            queryset=queryset,
+            granularity=granularity,
+            start_date=start_date,
+            end_date=end_date,
+            breakdown_field='organization',
+            breakdown_name_field='organization__name',
+        )
+
+        return Response(summary)
 

@@ -189,8 +189,10 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
   aiModel = serializers.CharField(source='ai_model', required=False, allow_null=True, allow_blank=True)
   aiDisabled = serializers.BooleanField(source='ai_disabled', required=False)
   aiCommentsDisabled = serializers.BooleanField(source='ai_comments_disabled', required=False)
+  aiUseOwnSettings = serializers.BooleanField(source='ai_use_own_settings', required=False)
   aiEnabled = serializers.SerializerMethodField()
   aiCommentsEnabled = serializers.SerializerMethodField()
+  orgAiAvailable = serializers.SerializerMethodField()
   
   class Meta:
     model = Course
@@ -202,19 +204,69 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'aiModel',
       'aiDisabled',
       'aiCommentsDisabled',
+      'aiUseOwnSettings',
       'aiEnabled',
       'aiCommentsEnabled',
+      'orgAiAvailable',
     )
+
+  def _get_effective_ai_config(self, obj):
+    """Returns the effective AI configuration for this course, considering org settings."""
+    if obj.ai_use_own_settings:
+      return {
+        'provider': obj.ai_provider,
+        'api_key': obj.ai_api_key,
+        'disabled': obj.ai_disabled,
+        'comments_disabled': obj.ai_comments_disabled,
+      }
+    # Check if org has AI enabled for this course
+    org = obj.organization
+    if org and not org.ai_disabled and org.ai_provider and org.ai_api_key:
+      if org.ai_course_policy == 'all':
+        return {
+          'provider': org.ai_provider,
+          'api_key': org.ai_api_key,
+          'disabled': org.ai_disabled,
+          'comments_disabled': org.ai_comments_disabled,
+        }
+      elif org.ai_course_policy == 'selected' and org.ai_enabled_courses.filter(pk=obj.pk).exists():
+        return {
+          'provider': org.ai_provider,
+          'api_key': org.ai_api_key,
+          'disabled': org.ai_disabled,
+          'comments_disabled': org.ai_comments_disabled,
+        }
+    # Fall back to course's own settings
+    return {
+      'provider': obj.ai_provider,
+      'api_key': obj.ai_api_key,
+      'disabled': obj.ai_disabled,
+      'comments_disabled': obj.ai_comments_disabled,
+    }
   
   @extend_schema_field(serializers.BooleanField)
   def get_aiEnabled(self, obj):
-    """Returns True if AI is globally configured and enabled for this course."""
-    return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled)
+    """Returns True if AI is configured and enabled for this course (considering org settings)."""
+    config = self._get_effective_ai_config(obj)
+    return bool(config['provider'] and config['api_key'] and not config['disabled'])
 
   @extend_schema_field(serializers.BooleanField)
   def get_aiCommentsEnabled(self, obj):
-    """Returns True if AI comments are available (global AI enabled + comments toggle enabled)."""
-    return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled and not obj.ai_comments_disabled)
+    """Returns True if AI comments are available (considering org settings)."""
+    config = self._get_effective_ai_config(obj)
+    return bool(config['provider'] and config['api_key'] and not config['disabled'] and not config['comments_disabled'])
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_orgAiAvailable(self, obj):
+    """Returns True if the organization has AI configured and this course is eligible to use it."""
+    org = obj.organization
+    if not org or org.ai_disabled or not org.ai_provider or not org.ai_api_key:
+      return False
+    if org.ai_course_policy == 'all':
+      return True
+    if org.ai_course_policy == 'selected':
+      return org.ai_enabled_courses.filter(pk=obj.pk).exists()
+    return False
 
 
 class CourseRosterSerializer(ModelSerializerWithPOSTCheck):

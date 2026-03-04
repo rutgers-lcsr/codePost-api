@@ -3505,6 +3505,53 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourseAISettings'
           description: ''
+  /courses/{id}/aiUsage/:
+    get:
+      operationId: courses_aiUsageRetrieve
+      description: |-
+        Returns AI usage analytics for the course.
+        Includes time-series data and per-assignment breakdown.
+        Only accessible by course admins.
+      parameters:
+      - in: query
+        name: endDate
+        schema:
+          type: string
+        description: End date (ISO 8601)
+      - in: query
+        name: granularity
+        schema:
+          type: string
+          enum:
+          - daily
+          - hourly
+          - monthly
+        description: 'Time bucket granularity: ''hourly'', ''daily'', or ''monthly'''
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      - in: query
+        name: startDate
+        schema:
+          type: string
+        description: Start date (ISO 8601)
+      tags:
+      - courses
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIUsageSummary'
+          description: ''
   /courses/{id}/changeInviteCode/:
     patch:
       operationId: courses_changeInviteCodePartialUpdate
@@ -4772,6 +4819,119 @@ paths:
       responses:
         '204':
           description: No response body
+  /organizations/{id}/aiSettings/:
+    get:
+      operationId: organizations_aiSettingsRetrieve
+      description: |-
+        GET: Return the organization's AI configuration.
+        PATCH: Update the organization's AI configuration.
+        Only accessible by Org Staff or superuser.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationAISettings'
+          description: ''
+    patch:
+      operationId: organizations_aiSettingsPartialUpdate
+      description: |-
+        GET: Return the organization's AI configuration.
+        PATCH: Update the organization's AI configuration.
+        Only accessible by Org Staff or superuser.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationAISettingsUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationAISettingsUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedOrganizationAISettingsUpdate'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationAISettings'
+          description: ''
+  /organizations/{id}/aiUsage/:
+    get:
+      operationId: organizations_aiUsageRetrieve
+      description: |-
+        Returns AI usage analytics for the organization.
+        Includes time-series data and per-course breakdown.
+        Only accessible by Org Staff or superuser.
+      parameters:
+      - in: query
+        name: endDate
+        schema:
+          type: string
+        description: End date (ISO 8601)
+      - in: query
+        name: granularity
+        schema:
+          type: string
+          enum:
+          - daily
+          - hourly
+          - monthly
+        description: 'Time bucket granularity: ''hourly'', ''daily'', or ''monthly'''
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      - in: query
+        name: startDate
+        schema:
+          type: string
+        description: Start date (ISO 8601)
+      tags:
+      - organizations
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIUsageSummary'
+          description: ''
   /organizations/{id}/analytics/:
     get:
       operationId: organizations_analyticsRetrieve
@@ -7887,6 +8047,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/SystemActivityResponse'
           description: ''
+  /system/aiUsage/:
+    get:
+      operationId: system_aiUsageRetrieve
+      description: |-
+        GET /system/aiUsage/ — Platform-wide AI usage analytics.
+        Superuser only. Supports granularity, date range, and org breakdown.
+      parameters:
+      - in: query
+        name: endDate
+        schema:
+          type: string
+        description: End date (ISO 8601)
+      - in: query
+        name: granularity
+        schema:
+          type: string
+          enum:
+          - daily
+          - hourly
+          - monthly
+        description: 'Time bucket granularity: ''hourly'', ''daily'', or ''monthly'''
+      - in: query
+        name: organizationId
+        schema:
+          type: integer
+        description: Filter to a specific organization ID
+      - in: query
+        name: startDate
+        schema:
+          type: string
+        description: Start date (ISO 8601)
+      tags:
+      - system
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIUsageSummary'
+          description: ''
   /system/banner/:
     get:
       operationId: system_bannerRetrieve
@@ -9414,6 +9619,127 @@ paths:
           description: No response body
 components:
   schemas:
+    AIUsageBreakdown:
+      type: object
+      description: Usage breakdown by a dimension (course, assignment, provider, model).
+      properties:
+        id:
+          type: integer
+          nullable: true
+          description: ID of the entity (course or assignment)
+        name:
+          type: string
+          description: Name/label for this breakdown item
+        totalTokens:
+          type: integer
+        inputTokens:
+          type: integer
+        outputTokens:
+          type: integer
+        estimatedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+        requestCount:
+          type: integer
+      required:
+      - estimatedCost
+      - id
+      - inputTokens
+      - name
+      - outputTokens
+      - requestCount
+      - totalTokens
+    AIUsageBucket:
+      type: object
+      description: A single time bucket in usage aggregation.
+      properties:
+        period:
+          type: string
+          format: date-time
+          description: Start of the time bucket
+        totalTokens:
+          type: integer
+          description: Total tokens used in this bucket
+        inputTokens:
+          type: integer
+          description: Total input tokens in this bucket
+        outputTokens:
+          type: integer
+          description: Total output tokens in this bucket
+        estimatedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Total estimated cost in USD
+        requestCount:
+          type: integer
+          description: Number of API calls in this bucket
+      required:
+      - estimatedCost
+      - inputTokens
+      - outputTokens
+      - period
+      - requestCount
+      - totalTokens
+    AIUsageSummary:
+      type: object
+      description: Aggregated usage summary with time-series data and breakdowns.
+      properties:
+        totalTokens:
+          type: integer
+          description: Grand total tokens in the range
+        inputTokens:
+          type: integer
+          description: Grand total input tokens
+        outputTokens:
+          type: integer
+          description: Grand total output tokens
+        estimatedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+        requestCount:
+          type: integer
+          description: Total number of requests
+        timeSeries:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIUsageBucket'
+          description: Usage data bucketed by time
+        breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIUsageBreakdown'
+          description: Usage breakdown by dimension
+        granularity:
+          $ref: '#/components/schemas/GranularityEnum'
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+      required:
+      - breakdown
+      - endDate
+      - estimatedCost
+      - granularity
+      - inputTokens
+      - outputTokens
+      - requestCount
+      - startDate
+      - timeSeries
+      - totalTokens
     ActivateCipResponse:
       type: object
       properties:
@@ -9421,6 +9747,16 @@ components:
           type: boolean
       required:
       - success
+    AiCoursePolicyEnum:
+      enum:
+      - all
+      - selected
+      - none
+      type: string
+      description: |-
+        * `all` - All courses
+        * `selected` - Selected courses only
+        * `none` - Disabled
     AiProviderEnum:
       enum:
       - gemini
@@ -10455,16 +10791,22 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
+        aiUseOwnSettings:
+          type: boolean
         aiEnabled:
           type: boolean
           readOnly: true
         aiCommentsEnabled:
           type: boolean
           readOnly: true
+        orgAiAvailable:
+          type: boolean
+          readOnly: true
       required:
       - aiCommentsEnabled
       - aiEnabled
       - id
+      - orgAiAvailable
     CourseFile:
       type: object
       description: |-
@@ -11184,6 +11526,16 @@ components:
       required:
       - expires_at
       - token
+    GranularityEnum:
+      enum:
+      - hourly
+      - daily
+      - monthly
+      type: string
+      description: |-
+        * `hourly` - hourly
+        * `daily` - daily
+        * `monthly` - monthly
     HandleValidationResponse:
       type: object
       properties:
@@ -11435,6 +11787,50 @@ components:
       - id
       - name
       - shortname
+    OrganizationAISettings:
+      type: object
+      description: Serializer for organization-level AI configuration.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        aiProvider:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/AiProviderEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        aiApiKey:
+          type: string
+          writeOnly: true
+          nullable: true
+        aiBaseUrl:
+          type: string
+          nullable: true
+        aiModel:
+          type: string
+          nullable: true
+        aiDisabled:
+          type: boolean
+        aiCommentsDisabled:
+          type: boolean
+        aiCoursePolicy:
+          $ref: '#/components/schemas/AiCoursePolicyEnum'
+        aiEnabledCourseIds:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+        aiEnabled:
+          type: boolean
+          readOnly: true
+        aiCommentsEnabled:
+          type: boolean
+          readOnly: true
+      required:
+      - aiCommentsEnabled
+      - aiEnabled
+      - aiEnabledCourseIds
+      - id
     OverallEnum:
       enum:
       - ok
@@ -12076,10 +12472,15 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
+        aiUseOwnSettings:
+          type: boolean
         aiEnabled:
           type: boolean
           readOnly: true
         aiCommentsEnabled:
+          type: boolean
+          readOnly: true
+        orgAiAvailable:
           type: boolean
           readOnly: true
     PatchedCourseFile:
@@ -12327,6 +12728,39 @@ components:
           nullable: true
         sendWelcomeEmail:
           type: boolean
+    PatchedOrganizationAISettingsUpdate:
+      type: object
+      description: Serializer for updating organization AI settings including enabled
+        courses.
+      properties:
+        aiProvider:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/AiProviderEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        aiApiKey:
+          type: string
+          writeOnly: true
+          nullable: true
+        aiBaseUrl:
+          type: string
+          nullable: true
+        aiModel:
+          type: string
+          nullable: true
+        aiDisabled:
+          type: boolean
+        aiCommentsDisabled:
+          type: boolean
+        aiCoursePolicy:
+          $ref: '#/components/schemas/AiCoursePolicyEnum'
+        aiEnabledCourseIds:
+          type: array
+          items:
+            type: integer
+          writeOnly: true
+          description: List of course IDs to enable for org AI (used when aiCoursePolicy
+            is 'selected')
     PatchedRubricCategory:
       type: object
       properties:

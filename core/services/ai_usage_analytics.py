@@ -1,0 +1,153 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+"""
+AI Usage Analytics Service
+
+Provides aggregated AI usage data for organizations, courses, assignments,
+and platform-wide views. Supports multiple time granularities (hourly, daily, monthly).
+"""
+
+from datetime import timedelta
+from decimal import Decimal
+from typing import Optional, Literal
+
+from django.db.models import Sum, Count, Q
+from django.db.models.functions import TruncHour, TruncDay, TruncMonth
+from django.utils import timezone
+
+from core.models import AIUsageRecord
+
+
+GranularityType = Literal['hourly', 'daily', 'monthly']
+
+
+def _get_default_date_range(granularity: GranularityType):
+    """Return sensible default date ranges based on granularity."""
+    now = timezone.now()
+    if granularity == 'hourly':
+        return now - timedelta(hours=48), now
+    elif granularity == 'daily':
+        return now - timedelta(days=30), now
+    else:  # monthly
+        return now - timedelta(days=365), now
+
+
+def _get_trunc_function(granularity: GranularityType):
+    """Return the appropriate Django truncation function for time bucketing."""
+    if granularity == 'hourly':
+        return TruncHour
+    elif granularity == 'daily':
+        return TruncDay
+    else:
+        return TruncMonth
+
+
+def get_usage_summary(
+    queryset=None,
+    granularity: GranularityType = 'daily',
+    start_date=None,
+    end_date=None,
+    breakdown_field: Optional[str] = None,
+    breakdown_name_field: Optional[str] = None,
+):
+    """
+    Build an aggregated usage summary from AIUsageRecord queryset.
+
+    Args:
+        queryset: Pre-filtered AIUsageRecord queryset. If None, uses all records.
+        granularity: 'hourly', 'daily', or 'monthly'
+        start_date: Start of the range (inclusive). Defaults based on granularity.
+        end_date: End of the range (inclusive). Defaults to now.
+        breakdown_field: Foreign key field name to break down by (e.g., 'course', 'assignment')
+        breakdown_name_field: Dot-separated path to the name field for breakdown labels
+                              (e.g., 'course__name', 'assignment__name')
+
+    Returns:
+        dict with keys: totalTokens, inputTokens, outputTokens, estimatedCost,
+                        requestCount, timeSeries, breakdown, granularity, startDate, endDate
+    """
+    if queryset is None:
+        queryset = AIUsageRecord.objects.all()
+
+    default_start, default_end = _get_default_date_range(granularity)
+    start_date = start_date or default_start
+    end_date = end_date or default_end
+
+    # Apply date filter
+    queryset = queryset.filter(created__gte=start_date, created__lte=end_date)
+
+    # Grand totals
+    totals = queryset.aggregate(
+        total_tokens=Sum('total_tokens'),
+        input_tokens=Sum('input_tokens'),
+        output_tokens=Sum('output_tokens'),
+        estimated_cost=Sum('estimated_cost'),
+        request_count=Count('id'),
+    )
+
+    # Time series
+    trunc_fn = _get_trunc_function(granularity)
+    time_series_qs = (
+        queryset
+        .annotate(period=trunc_fn('created'))
+        .values('period')
+        .annotate(
+            totalTokens=Sum('total_tokens'),
+            inputTokens=Sum('input_tokens'),
+            outputTokens=Sum('output_tokens'),
+            estimatedCost=Sum('estimated_cost'),
+            requestCount=Count('id'),
+        )
+        .order_by('period')
+    )
+
+    time_series = [
+        {
+            'period': entry['period'],
+            'totalTokens': entry['totalTokens'] or 0,
+            'inputTokens': entry['inputTokens'] or 0,
+            'outputTokens': entry['outputTokens'] or 0,
+            'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+            'requestCount': entry['requestCount'] or 0,
+        }
+        for entry in time_series_qs
+    ]
+
+    # Breakdown
+    breakdown = []
+    if breakdown_field and breakdown_name_field:
+        breakdown_qs = (
+            queryset
+            .values(f'{breakdown_field}_id', breakdown_name_field)
+            .annotate(
+                totalTokens=Sum('total_tokens'),
+                inputTokens=Sum('input_tokens'),
+                outputTokens=Sum('output_tokens'),
+                estimatedCost=Sum('estimated_cost'),
+                requestCount=Count('id'),
+            )
+            .order_by('-totalTokens')
+        )
+
+        for entry in breakdown_qs:
+            breakdown.append({
+                'id': entry[f'{breakdown_field}_id'],
+                'name': entry[breakdown_name_field] or 'Unknown',
+                'totalTokens': entry['totalTokens'] or 0,
+                'inputTokens': entry['inputTokens'] or 0,
+                'outputTokens': entry['outputTokens'] or 0,
+                'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+                'requestCount': entry['requestCount'] or 0,
+            })
+
+    return {
+        'totalTokens': totals['total_tokens'] or 0,
+        'inputTokens': totals['input_tokens'] or 0,
+        'outputTokens': totals['output_tokens'] or 0,
+        'estimatedCost': str(totals['estimated_cost'] or Decimal('0')),
+        'requestCount': totals['request_count'] or 0,
+        'timeSeries': time_series,
+        'breakdown': breakdown,
+        'granularity': granularity,
+        'startDate': start_date,
+        'endDate': end_date,
+    }

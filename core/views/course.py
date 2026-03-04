@@ -16,7 +16,7 @@ from core.views.template import SuperUserListProtectedViewSet
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import serializers
@@ -31,6 +31,7 @@ from core.permissions.helpers import (
 from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub, isSuperGrader
+from core.serializers.ai_usage import AIUsageSummarySerializer
 
 from core.pagination import LargeObjectsPagination
 
@@ -169,6 +170,64 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             serializer.is_valid(raise_exception=True)
             self.perform_update(serializer)
             return Response(serializer.data)
+
+    @extend_schema(
+        responses={200: AIUsageSummarySerializer},
+        parameters=[
+            OpenApiParameter(name='granularity', required=False, type=str,
+                             description="Time bucket granularity: 'hourly', 'daily', or 'monthly'",
+                             enum=['hourly', 'daily', 'monthly']),
+            OpenApiParameter(name='startDate', required=False, type=str,
+                             description="Start date (ISO 8601)"),
+            OpenApiParameter(name='endDate', required=False, type=str,
+                             description="End date (ISO 8601)"),
+        ],
+    )
+    @action(detail=True, methods=["GET"])
+    def aiUsage(self, request, pk=None):
+        """
+        Returns AI usage analytics for the course.
+        Includes time-series data and per-assignment breakdown.
+        Only accessible by course admins.
+        """
+        user = request.user
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+
+        course = self.get_object()
+
+        if not isCourseAdmin(user, course):
+            return returnForbidden()
+
+        from core.services.ai_usage_analytics import get_usage_summary
+        from core.models import AIUsageRecord
+        from django.utils.dateparse import parse_datetime
+
+        granularity = request.query_params.get('granularity', 'daily')
+        if granularity not in ('hourly', 'daily', 'monthly'):
+            granularity = 'daily'
+
+        start_date = None
+        end_date = None
+        start_str = request.query_params.get('startDate', '').strip()
+        end_str = request.query_params.get('endDate', '').strip()
+        if start_str:
+            start_date = parse_datetime(start_str)
+        if end_str:
+            end_date = parse_datetime(end_str)
+
+        queryset = AIUsageRecord.objects.filter(course=course)
+
+        summary = get_usage_summary(
+            queryset=queryset,
+            granularity=granularity,
+            start_date=start_date,
+            end_date=end_date,
+            breakdown_field='assignment',
+            breakdown_name_field='assignment__name',
+        )
+
+        return Response(summary)
 
     @extend_schema(responses=CourseRosterSerializer)
     @action(detail=True, methods=["GET", "PATCH"])

@@ -122,6 +122,51 @@ class Organization(BaseModel):
   sso_config = JSONField(default=dict, blank=True, help_text=("JSON configuration for the SSO provider."))
   send_welcome_email = models.BooleanField(default=True, help_text=("If False, suppresses welcome/added-to-course emails for users in this organization."))
 
+  # AI Configuration at organization level
+  AI_PROVIDER_CHOICES = [
+      ('gemini', 'Google Gemini'),
+      ('openai', 'OpenAI'),
+      ('ollama', 'Ollama (Self-hosted)'),
+      ('custom', 'Custom Provider'),
+  ]
+  AI_COURSE_POLICY_CHOICES = [
+      ('all', 'All courses'),
+      ('selected', 'Selected courses only'),
+      ('none', 'Disabled'),
+  ]
+  ai_provider = models.CharField(
+      max_length=32, blank=True, null=True, choices=AI_PROVIDER_CHOICES,
+      help_text="AI provider for the organization"
+  )
+  ai_api_key = EncryptedCharField(
+      max_length=512, blank=True, null=True,
+      help_text="API key for AI provider (stored encrypted)"
+  )
+  ai_base_url = models.URLField(
+      blank=True, null=True,
+      help_text="Base URL for Ollama or custom provider"
+  )
+  ai_model = models.CharField(
+      max_length=64, blank=True, null=True,
+      help_text="Default model name (e.g., gemini-1.5-flash, gpt-4)"
+  )
+  ai_disabled = models.BooleanField(
+      default=False,
+      help_text="If True, all AI features are disabled for this organization"
+  )
+  ai_comments_disabled = models.BooleanField(
+      default=False,
+      help_text="If True, AI comment generation is disabled at the organization level"
+  )
+  ai_course_policy = models.CharField(
+      max_length=16, default='none', choices=AI_COURSE_POLICY_CHOICES,
+      help_text="Controls which courses can use the organization's AI configuration: 'all', 'selected', or 'none'"
+  )
+  ai_enabled_courses = models.ManyToManyField(
+      'Course', blank=True, related_name='ai_enabled_by_organizations',
+      help_text="Courses explicitly enabled for the organization's AI configuration (used when ai_course_policy is 'selected')"
+  )
+
   class Meta:
     ordering = ('name',)
 
@@ -318,6 +363,10 @@ class Course(BaseModel):
   ai_comments_disabled = models.BooleanField(
       default=False,
       help_text="If True, AI comment generation is disabled even if AI is globally enabled"
+  )
+  ai_use_own_settings = models.BooleanField(
+      default=False,
+      help_text="If True, course uses its own AI settings instead of the organization's configuration"
   )
 
   class Meta:
@@ -1755,3 +1804,80 @@ class MaintenanceBanner(models.Model):
     def __str__(self):
         status = "ACTIVE" if self.active else "inactive"
         return f"MaintenanceBanner [{status}]"
+
+
+class AIUsageRecord(BaseModel):
+  """Tracks individual AI API calls for usage reporting and cost estimation."""
+  if TYPE_CHECKING:
+    id: int
+
+  REQUEST_TYPE_CHOICES = [
+      ('comment_generation', 'Comment Generation'),
+      ('code_review', 'Code Review'),
+      ('feedback', 'Feedback'),
+      ('other', 'Other'),
+  ]
+
+  organization = models.ForeignKey(
+      Organization, on_delete=models.SET_NULL, null=True, blank=True,
+      related_name='ai_usage_records',
+      help_text="The organization associated with this usage record"
+  )
+  course = models.ForeignKey(
+      'Course', on_delete=models.SET_NULL, null=True, blank=True,
+      related_name='ai_usage_records',
+      help_text="The course associated with this usage record"
+  )
+  assignment = models.ForeignKey(
+      'Assignment', on_delete=models.SET_NULL, null=True, blank=True,
+      related_name='ai_usage_records',
+      help_text="The assignment associated with this usage record"
+  )
+  user = models.ForeignKey(
+      User, on_delete=models.SET_NULL, null=True, blank=True,
+      related_name='ai_usage_records',
+      help_text="The user who triggered this AI request"
+  )
+  provider = models.CharField(
+      max_length=32, help_text="AI provider used (e.g., openai, gemini)"
+  )
+  model = models.CharField(
+      max_length=64, help_text="Model name used for this request"
+  )
+  request_type = models.CharField(
+      max_length=32, choices=REQUEST_TYPE_CHOICES, default='other',
+      help_text="Type of AI request"
+  )
+  input_tokens = models.PositiveIntegerField(
+      default=0, help_text="Number of input/prompt tokens"
+  )
+  output_tokens = models.PositiveIntegerField(
+      default=0, help_text="Number of output/completion tokens"
+  )
+  total_tokens = models.PositiveIntegerField(
+      default=0, help_text="Total tokens (input + output)"
+  )
+  estimated_cost = models.DecimalField(
+      max_digits=10, decimal_places=6, default=Decimal('0'),
+      help_text="Estimated cost in USD for this API call"
+  )
+  status = models.CharField(
+      max_length=16, default='success',
+      help_text="Status of the request: success, error"
+  )
+  error_message = models.TextField(
+      blank=True, null=True,
+      help_text="Error message if the request failed"
+  )
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [
+        models.Index(fields=['organization', 'created']),
+        models.Index(fields=['course', 'created']),
+        models.Index(fields=['assignment', 'created']),
+        models.Index(fields=['created']),
+    ]
+
+  def __str__(self):
+    return f"AIUsage [{self.provider}/{self.model}] {self.total_tokens} tokens"

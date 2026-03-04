@@ -21,9 +21,12 @@ Usage:
 
 import logging
 import re
+from decimal import Decimal
 from typing import Optional, Literal
 from dataclasses import dataclass
 from core.models import Course, Assignment, SubmissionFile
+
+from django.contrib.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,9 @@ class GenerationResult:
     text: str
     success: bool
     error: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
 
 
 class AIService:
@@ -76,10 +82,59 @@ Context:
     def __init__(self, course: Course, assignment: Optional[Assignment] = None):
         self.course = course
         self.assignment = assignment
-        self.provider = course.ai_provider
-        self.api_key = course.ai_api_key
-        self.base_url = course.ai_base_url
-        self.model = course.ai_model or self._get_default_model()
+
+        # Resolve effective AI config: course-own settings or org-level
+        use_own = course.ai_use_own_settings or not course.ai_provider
+        if use_own and course.ai_provider:
+            # Course explicitly uses its own key
+            self.provider = course.ai_provider
+            self.api_key = course.ai_api_key
+            self.base_url = course.ai_base_url
+            self.model = course.ai_model or self._get_default_model()
+        elif not use_own and course.organization:
+            # Try to inherit from org
+            org = course.organization
+            if (
+                org.ai_provider
+                and org.ai_api_key
+                and not org.ai_disabled
+                and self._org_allows_course(org, course)
+            ):
+                self.provider = org.ai_provider
+                self.api_key = org.ai_api_key
+                self.base_url = org.ai_base_url
+                self.model = org.ai_model or self._get_default_model_for(org.ai_provider)
+            else:
+                # Org not available, fall back to course fields (may be empty)
+                self.provider = course.ai_provider
+                self.api_key = course.ai_api_key
+                self.base_url = course.ai_base_url
+                self.model = course.ai_model or self._get_default_model()
+        else:
+            # Default: use course fields
+            self.provider = course.ai_provider
+            self.api_key = course.ai_api_key
+            self.base_url = course.ai_base_url
+            self.model = course.ai_model or self._get_default_model()
+
+    @staticmethod
+    def _org_allows_course(org, course: Course) -> bool:
+        """Check if the org's course policy allows this course to use the org AI key."""
+        if org.ai_course_policy == 'all':
+            return True
+        if org.ai_course_policy == 'selected':
+            return org.ai_enabled_courses.filter(pk=course.pk).exists()
+        return False
+
+    def _get_default_model_for(self, provider: str) -> str:
+        """Get default model for a given provider string."""
+        defaults = {
+            'gemini': 'gemini-2.5-flash',
+            'openai': 'gpt-4o-mini',
+            'ollama': 'llama3.2',
+            'custom': 'default',
+        }
+        return defaults.get(provider, 'default')
         
     def _get_default_model(self) -> str:
         """Get default model for the configured provider."""
@@ -95,7 +150,83 @@ Context:
     def is_configured(self) -> bool:
         """Check if AI is properly configured for this course."""
         return bool(self.provider and self.api_key)
-    
+
+    # ------------------------------------------------------------------
+    # Cost estimation & usage recording
+    # ------------------------------------------------------------------
+
+    # Rates: (input $/1M tokens, output $/1M tokens)
+    TOKEN_RATES: dict[str, tuple[float, float]] = {
+        # Gemini
+        'gemini-2.5-flash': (0.15, 0.60),
+        'gemini-2.5-pro': (1.25, 10.00),
+        'gemini-2.0-flash': (0.10, 0.40),
+        'gemini-1.5-flash': (0.075, 0.30),
+        'gemini-1.5-pro': (1.25, 5.00),
+        # OpenAI
+        'gpt-4o': (2.50, 10.00),
+        'gpt-4o-mini': (0.15, 0.60),
+        'gpt-4.1': (2.00, 8.00),
+        'gpt-4.1-mini': (0.40, 1.60),
+        'gpt-4.1-nano': (0.10, 0.40),
+        'o3-mini': (1.10, 4.40),
+    }
+
+    @staticmethod
+    def estimate_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float:
+        """
+        Estimate the cost of an AI API call in USD.
+        Returns 0 for unknown models / self-hosted providers.
+        """
+        rates = AIService.TOKEN_RATES.get(model)
+        if not rates:
+            return 0.0
+        input_cost = (input_tokens / 1_000_000) * rates[0]
+        output_cost = (output_tokens / 1_000_000) * rates[1]
+        return float(Decimal(str(input_cost + output_cost)).quantize(Decimal('0.000001')))
+
+    def record_usage(
+        self,
+        result: 'GenerationResult',
+        user: User,
+        request_type: str = 'comment_generation',
+    ) -> None:
+        """
+        Persist an AIUsageRecord for the generation that just completed.
+
+        Parameters
+        ----------
+        result : GenerationResult
+            The result returned by ``generate_comment`` or ``generate_test_script``.
+        user : User
+            The Django user who triggered the generation.
+        request_type : str
+            One of ``'comment_generation'``, ``'test_generation'``, ``'code_review'``, etc.
+        """
+        try:
+            from core.models import AIUsageRecord
+
+            AIUsageRecord.objects.create(
+                organization=self.course.organization,
+                course=self.course,
+                assignment=self.assignment,
+                user=user,
+                provider=self.provider or '',
+                model=self.model or '',
+                request_type=request_type,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                total_tokens=result.total_tokens,
+                estimated_cost=self.estimate_cost(
+                    self.provider or '', self.model or '',
+                    result.input_tokens, result.output_tokens,
+                ),
+                status='success' if result.success else 'error',
+                error_message=result.error if not result.success else None,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to record AI usage: {e}")
+
     def get_system_prompt(self, context: GenerationContext) -> str:
         """Build the system prompt with context."""
         if self.assignment and self.assignment.ai_system_prompt:
@@ -185,15 +316,21 @@ Context:
             # Call the appropriate provider
             if self.provider == 'gemini':
                 logger.info(f"Calling Gemini with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text = await self._call_gemini(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_gemini(system_prompt, user_prompt)
             elif self.provider == 'openai':
-                text = await self._call_openai(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_openai(system_prompt, user_prompt)
             elif self.provider == 'ollama':
-                text = await self._call_ollama(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_ollama(system_prompt, user_prompt)
             else:
-                text = await self._call_portkey(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_portkey(system_prompt, user_prompt)
 
-            return GenerationResult(text=text, success=True)
+            return GenerationResult(
+                text=text,
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+            )
 
         except Exception as e:
             error_msg = self._parse_error(e)
@@ -484,17 +621,23 @@ Based on the context (logic to test) and the example harness above, generate the
 
             # Call the appropriate provider
             if self.provider == 'gemini':
-                text = await self._call_gemini(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_gemini(system_prompt, user_prompt)
             elif self.provider == 'openai':
-                text = await self._call_openai(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_openai(system_prompt, user_prompt)
             elif self.provider == 'ollama':
-                text = await self._call_ollama(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_ollama(system_prompt, user_prompt)
             else:
-                text = await self._call_portkey(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens = await self._call_portkey(system_prompt, user_prompt)
 
             text = self._normalize_generated_test_script(text, lang_key)
 
-            return GenerationResult(text=text, success=True)
+            return GenerationResult(
+                text=text,
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+            )
 
         except Exception as e:
             error_msg = self._parse_error(e)
@@ -542,8 +685,8 @@ Based on the context (logic to test) and the example harness above, generate the
             short_msg += "..."
         return f"AI generation failed: {short_msg}"
     
-    async def _call_gemini(self, system_prompt: str, user_prompt: str) -> str:
-        """Call Google Gemini API using the new google.genai package."""
+    async def _call_gemini(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
+        """Call Google Gemini API. Returns (text, input_tokens, output_tokens, total_tokens)."""
         from google import genai
         from google.genai import types
         client = genai.Client(api_key=self.api_key)
@@ -555,10 +698,13 @@ Based on the context (logic to test) and the example harness above, generate the
                 system_instruction=system_prompt,
             ),
         )
-        return response.text
+        input_tokens = getattr(response.usage_metadata, 'prompt_token_count', 0) or 0
+        output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
+        total_tokens = getattr(response.usage_metadata, 'total_token_count', 0) or (input_tokens + output_tokens)
+        return response.text, input_tokens, output_tokens, total_tokens
     
-    async def _call_openai(self, system_prompt: str, user_prompt: str) -> str:
-        """Call OpenAI API."""
+    async def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
+        """Call OpenAI API. Returns (text, input_tokens, output_tokens, total_tokens)."""
         from openai import AsyncOpenAI
         
         client = AsyncOpenAI(api_key=self.api_key)
@@ -569,10 +715,14 @@ Based on the context (logic to test) and the example harness above, generate the
                 {"role": "user", "content": user_prompt},
             ],
         )
-        return response.choices[0].message.content
+        usage = response.usage
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+        total_tokens = usage.total_tokens if usage else (input_tokens + output_tokens)
+        return response.choices[0].message.content, input_tokens, output_tokens, total_tokens
     
-    async def _call_ollama(self, system_prompt: str, user_prompt: str) -> str:
-        """Call Ollama API (self-hosted)."""
+    async def _call_ollama(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
+        """Call Ollama API (self-hosted). Returns (text, input_tokens, output_tokens, total_tokens)."""
         import httpx
         
         base_url = self.base_url or "http://localhost:11434"
@@ -588,10 +738,13 @@ Based on the context (logic to test) and the example harness above, generate the
                 timeout=60.0,
             )
             response.raise_for_status()
-            return response.json()["response"]
+            data = response.json()
+            input_tokens = data.get('prompt_eval_count', 0) or 0
+            output_tokens = data.get('eval_count', 0) or 0
+            return data["response"], input_tokens, output_tokens, input_tokens + output_tokens
     
-    async def _call_portkey(self, system_prompt: str, user_prompt: str) -> str:
-        """Call custom provider via Portkey gateway."""
+    async def _call_portkey(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
+        """Call custom provider via Portkey gateway. Returns (text, input_tokens, output_tokens, total_tokens)."""
         import httpx
         
         base_url = self.base_url or "https://api.portkey.ai/v1"
@@ -612,7 +765,12 @@ Based on the context (logic to test) and the example harness above, generate the
                 timeout=60.0,
             )
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
+            data = response.json()
+            usage = data.get('usage', {})
+            input_tokens = usage.get('prompt_tokens', 0) or 0
+            output_tokens = usage.get('completion_tokens', 0) or 0
+            total_tokens = usage.get('total_tokens', 0) or (input_tokens + output_tokens)
+            return data["choices"][0]["message"]["content"], input_tokens, output_tokens, total_tokens
 
 
 def build_context_from_file(

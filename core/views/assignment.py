@@ -876,6 +876,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     """
     from asgiref.sync import async_to_sync
     from core.services.ai_service import AIService
+
     
     user = self.request.user
     assignment = self.get_object()
@@ -886,7 +887,8 @@ class AssignmentViewSet(ListProtectedViewSet):
         return returnForbidden()
         
     # Check AI configuration
-    if not course.ai_provider or not course.ai_api_key or course.ai_disabled:
+    service = AIService(course, assignment)
+    if not service.is_configured or course.ai_disabled:
         return Response(
             {'error': 'AI is not configured/enabled for this course.'},
             status=status.HTTP_400_BAD_REQUEST
@@ -988,7 +990,6 @@ class AssignmentViewSet(ListProtectedViewSet):
         except Exception as e:
             logger.warning(f"Failed to extract target code: {e}")
 
-    service = AIService(course, assignment)
     try:
         # Generate script
         result = async_to_sync(service.generate_test_script)(
@@ -999,6 +1000,9 @@ class AssignmentViewSet(ListProtectedViewSet):
             language=language,
             rubric_text=rubric_text
         )
+
+        # Record AI usage
+        service.record_usage(result, user, request_type='test_generation')
         
         if result.success:
             return Response({'script': result.text})

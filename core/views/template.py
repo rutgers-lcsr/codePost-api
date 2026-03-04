@@ -38,13 +38,17 @@ class SuperUserListProtectedViewSet(ListProtectedViewSet):
     # mixins.ListModelMixin
     if user.is_superuser:
       queryset = self.filter_queryset(self.get_queryset())
-      paginator = ListPagination()
-      page = paginator.paginate_queryset(queryset, request)
+
+      # Use the viewset's pagination_class if one is set (e.g. UserViewSet).
+      # ViewSets without pagination_class (e.g. OrganizationViewSet,
+      # CourseViewSet) return all results as a plain array, which keeps the
+      # OpenAPI schema in sync with the actual response format.
+      page = self.paginate_queryset(queryset)
       if page is not None:
         serializer = self.get_serializer(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
+        return self.get_paginated_response(serializer.data)
 
-      # Should never get here
-      return returnNotAuthorized()
+      serializer = self.get_serializer(queryset, many=True)
+      return Response(serializer.data)
     else:
       return super().list(request)

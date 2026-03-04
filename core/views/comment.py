@@ -30,6 +30,7 @@ def _format_points_str(point_delta) -> str:
     else:
         return "Points: 0"
 
+
 class CommentViewSet(ListProtectedViewSet):
     """
     list:
@@ -147,7 +148,10 @@ class CommentViewSet(ListProtectedViewSet):
         course = file.submission.assignment.course
         assignment = file.submission.assignment
 
-        if not course.ai_provider or not course.ai_api_key or course.ai_disabled or course.ai_comments_disabled:
+        # Build service early to resolve org vs course AI settings
+        service = AIService(course, assignment)
+
+        if not service.is_configured or course.ai_disabled or course.ai_comments_disabled:
             return Response(
                 {'error': 'AI is not available. Please ask your instructor if you think this is a problem.'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -195,8 +199,10 @@ class CommentViewSet(ListProtectedViewSet):
         context.rubric_context = request_context.get('rubric_context', '')
         
         # Generate comment
-        service = AIService(course, assignment)
         result = async_to_sync(service.generate_comment)(context)
+
+        # Record AI usage
+        service.record_usage(result, user, request_type='comment_generation')
 
         if result.success:
             return Response({'text': result.text})

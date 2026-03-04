@@ -10,6 +10,12 @@ from rest_framework import status
 from django.contrib.auth.models import User
 from core.serializers.user import UserSerializer
 from core.permissions.helpers import returnForbidden, returnNotFound
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from core.serializers.ai_usage import (
+    OrganizationAISettingsSerializer,
+    OrganizationAISettingsUpdateSerializer,
+    AIUsageSummarySerializer,
+)
 
 
 
@@ -38,7 +44,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
   permission_classes = (IsAuthenticated, OrganizationPermissions)
 
   def get_permissions(self):
-    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics']:
+    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage']:
       return [IsAuthenticated()]
     return super().get_permissions()
 
@@ -256,3 +262,87 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         'total_submissions': total_submissions,
         'submissions_this_month': submissions_this_month,
     })
+
+  @extend_schema(
+    request=OrganizationAISettingsUpdateSerializer,
+    responses=OrganizationAISettingsSerializer,
+  )
+  @action(detail=True, methods=['GET', 'PATCH'])
+  def aiSettings(self, request, pk=None):
+    """
+    GET: Return the organization's AI configuration.
+    PATCH: Update the organization's AI configuration.
+    Only accessible by Org Staff or superuser.
+    """
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    if request.method == 'GET':
+        serializer = OrganizationAISettingsSerializer(organization, context={'request': request})
+        return Response(serializer.data)
+
+    elif request.method == 'PATCH':
+        serializer = OrganizationAISettingsUpdateSerializer(
+            organization, data=request.data, partial=True, context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        # Return full read serializer
+        read_serializer = OrganizationAISettingsSerializer(organization, context={'request': request})
+        return Response(read_serializer.data)
+
+  @extend_schema(
+    responses=AIUsageSummarySerializer,
+    parameters=[
+        OpenApiParameter(name='granularity', required=False, type=str,
+                         description="Time bucket granularity: 'hourly', 'daily', or 'monthly'",
+                         enum=['hourly', 'daily', 'monthly']),
+        OpenApiParameter(name='startDate', required=False, type=str,
+                         description="Start date (ISO 8601)"),
+        OpenApiParameter(name='endDate', required=False, type=str,
+                         description="End date (ISO 8601)"),
+    ],
+  )
+  @action(detail=True, methods=['GET'])
+  def aiUsage(self, request, pk=None):
+    """
+    Returns AI usage analytics for the organization.
+    Includes time-series data and per-course breakdown.
+    Only accessible by Org Staff or superuser.
+    """
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    from core.services.ai_usage_analytics import get_usage_summary
+    from core.models import AIUsageRecord
+    from django.utils.dateparse import parse_datetime
+
+    granularity = request.query_params.get('granularity', 'daily')
+    if granularity not in ('hourly', 'daily', 'monthly'):
+        granularity = 'daily'
+
+    start_date = None
+    end_date = None
+    start_str = request.query_params.get('startDate', '').strip()
+    end_str = request.query_params.get('endDate', '').strip()
+    if start_str:
+        start_date = parse_datetime(start_str)
+    if end_str:
+        end_date = parse_datetime(end_str)
+
+    queryset = AIUsageRecord.objects.filter(organization=organization)
+
+    summary = get_usage_summary(
+        queryset=queryset,
+        granularity=granularity,
+        start_date=start_date,
+        end_date=end_date,
+        breakdown_field='course',
+        breakdown_name_field='course__name',
+    )
+
+    return Response(summary)
