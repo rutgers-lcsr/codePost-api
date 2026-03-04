@@ -21,14 +21,15 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
   studentCount = serializers.SerializerMethodField()
   isRubricEditor = serializers.SerializerMethodField()
 
-  clone_from = serializers.IntegerField(write_only=True, required=False)
+  cloneFrom = serializers.IntegerField(source='clone_from', write_only=True, required=False)
+  expirationDate = serializers.DateTimeField(source='expiration_date', required=False, allow_null=True)
 
   class Meta:
     model = Course
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
               'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
-              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expiration_date', 'organization', 'studentsCanSeeGraders', 'studentCount', 'isRubricEditor', 'clone_from')
+              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expirationDate', 'organization', 'studentsCanSeeGraders', 'studentCount', 'isRubricEditor', 'cloneFrom')
     read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount', 'isRubricEditor')
     extra_kwargs = {
         'organization': {'required': False}

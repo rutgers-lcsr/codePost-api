@@ -13,7 +13,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from core.models import Organization, Course, Assignment, Section
-from core.serializers.dashboard import DashboardStatsSerializer
+from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer
 
 
 class DashboardViewSet(viewsets.ViewSet):
@@ -83,3 +83,43 @@ class DashboardViewSet(viewsets.ViewSet):
             'totalInactiveUsers': inactive_users,
             'activeUsers30d': active_users,
         })
+
+    @extend_schema(responses={200: AssignmentDeadlineSerializer(many=True)})
+    @action(detail=False, methods=['GET'])
+    def deadlines(self, request):
+        """
+        Returns all assignments with their due dates and late upload deadlines.
+        Useful for planning deployment windows.
+        """
+        assignments = (
+            Assignment.objects
+            .select_related('course')
+            .filter(course__archived=False)
+            .annotate(student_count=Count('course__students'))
+            .order_by('uploadDueDate')
+        )
+
+        results = []
+        for a in assignments:
+            due = a.uploadDueDate
+            late_deadline = None
+            if due and a.allowLateUploads and a.maxLateDays > 0:
+                late_deadline = due + timedelta(days=a.maxLateDays)
+
+            results.append({
+                'id': a.id,
+                'name': a.name,
+                'courseName': a.course.name,
+                'coursePeriod': a.course.period,
+                'courseId': a.course.id,
+                'uploadDueDate': due,
+                'lateUploadDeadline': late_deadline,
+                'maxLateDays': a.maxLateDays,
+                'allowLateUploads': a.allowLateUploads,
+                'allowStudentUpload': a.allowStudentUpload,
+                'regradeDeadline': a.regradeDeadline,
+                'studentCount': a.student_count,
+            })
+
+        serializer = AssignmentDeadlineSerializer(results, many=True)
+        return Response(serializer.data)

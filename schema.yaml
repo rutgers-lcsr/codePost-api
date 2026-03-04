@@ -143,7 +143,7 @@ paths:
                 $ref: '#/components/schemas/AssignmentDataSetUpdate'
           description: ''
     patch:
-      operationId: assignmentDataSets_partial_update
+      operationId: assignmentDataSets_partialUpdate
       description: |-
         ViewSet for managing assignment datasets
 
@@ -205,7 +205,7 @@ paths:
           description: No response body
   /assignmentDataSets/{id}/download/:
     get:
-      operationId: assignmentDataSets_download_retrieve
+      operationId: assignmentDataSets_downloadRetrieve
       description: |-
         Download the dataset file
 
@@ -233,7 +233,7 @@ paths:
           description: ''
   /assignmentDataSets/by_assignment/:
     get:
-      operationId: assignmentDataSets_by_assignment_retrieve
+      operationId: assignmentDataSets_byAssignmentRetrieve
       description: |-
         List datasets for a specific assignment
 
@@ -451,7 +451,7 @@ paths:
                 $ref: '#/components/schemas/AssignmentFile'
           description: ''
     patch:
-      operationId: assignmentFiles_partial_update
+      operationId: assignmentFiles_partialUpdate
       description: |-
         ViewSet for AssignmentFile objects.
 
@@ -728,7 +728,7 @@ paths:
                 $ref: '#/components/schemas/Assignment'
           description: ''
     patch:
-      operationId: assignments_partial_update
+      operationId: assignments_partialUpdate
       description: |-
         list:
         Return a list of all the assignments.
@@ -818,7 +818,7 @@ paths:
           description: No response body
   /assignments/{id}/beforeStudentUpload/:
     get:
-      operationId: assignments_beforeStudentUpload_retrieve
+      operationId: assignments_beforeStudentUploadRetrieve
       description: |-
         Get submission upload information
 
@@ -852,7 +852,7 @@ paths:
           description: ''
   /assignments/{id}/clone/:
     post:
-      operationId: assignments_clone_create
+      operationId: assignments_cloneCreate
       description: Clone an assignment to a course
       parameters:
       - in: path
@@ -889,7 +889,7 @@ paths:
           description: ''
   /assignments/{id}/comments/:
     get:
-      operationId: assignments_comments_list
+      operationId: assignments_commentsList
       description: |-
         Grab all custom comments applied to submissions for this assignment, possibly filtered by
         author
@@ -921,7 +921,7 @@ paths:
           description: ''
   /assignments/{id}/datasets/:
     get:
-      operationId: assignments_datasets_list
+      operationId: assignments_datasetsList
       description: |-
         Return all datasets for this assignment
 
@@ -951,7 +951,7 @@ paths:
           description: ''
   /assignments/{id}/download/:
     get:
-      operationId: assignments_download_retrieve
+      operationId: assignments_downloadRetrieve
       description: download all files for an assignment files as a zip
       parameters:
       - in: path
@@ -976,7 +976,7 @@ paths:
           description: ''
   /assignments/{id}/drawUnassigned/:
     get:
-      operationId: assignments_drawUnassigned_list
+      operationId: assignments_drawUnassignedList
       description: Get the next unassigned submission for this submission.
       parameters:
       - in: path
@@ -1003,7 +1003,7 @@ paths:
           description: ''
   /assignments/{id}/generateTest/:
     post:
-      operationId: assignments_generateTest_create
+      operationId: assignments_generateTestCreate
       description: |-
         Generate an AI-powered test script for a file in this assignment.
 
@@ -1047,7 +1047,7 @@ paths:
           description: ''
   /assignments/{id}/queueLength/:
     get:
-      operationId: assignments_queueLength_retrieve
+      operationId: assignments_queueLengthRetrieve
       description: Show the rubric for this assignment.
       parameters:
       - in: path
@@ -1072,7 +1072,7 @@ paths:
           description: ''
   /assignments/{id}/rubric/:
     get:
-      operationId: assignments_rubric_retrieve
+      operationId: assignments_rubricRetrieve
       description: Show the rubric for this assignment.
       parameters:
       - in: path
@@ -1097,7 +1097,7 @@ paths:
           description: ''
   /assignments/{id}/studentTests/:
     get:
-      operationId: assignments_studentTests_retrieve
+      operationId: assignments_studentTestsRetrieve
       description: |-
         list:
         Return a list of all the assignments.
@@ -1139,7 +1139,7 @@ paths:
           description: ''
   /assignments/{id}/studentUpload/:
     get:
-      operationId: assignments_studentUpload_retrieve
+      operationId: assignments_studentUploadRetrieve
       description: |-
         Upload of submission to an assignment
 
@@ -1167,7 +1167,7 @@ paths:
                 $ref: '#/components/schemas/AssignmentStudentUploadGetResponse'
           description: ''
     post:
-      operationId: assignments_studentUpload_create
+      operationId: assignments_studentUploadCreate
       description: |-
         Upload of submission to an assignment
 
@@ -1207,7 +1207,7 @@ paths:
                 $ref: '#/components/schemas/StudentSubmission'
           description: ''
     patch:
-      operationId: assignments_studentUpload_partial_update
+      operationId: assignments_studentUploadPartialUpdate
       description: |-
         Upload of submission to an assignment
 
@@ -1247,7 +1247,7 @@ paths:
           description: ''
   /assignments/{id}/submissionHistories/:
     get:
-      operationId: assignments_submissionHistories_list
+      operationId: assignments_submissionHistoriesList
       description: |-
         list:
         Return a list of all the assignments.
@@ -1301,7 +1301,7 @@ paths:
           description: ''
   /assignments/{id}/submissionTests/:
     get:
-      operationId: assignments_submissionTests_list
+      operationId: assignments_submissionTestsList
       description: |-
         Gets a paginated list of submission tests for an assignment.
         We use this for performance for large courses to fetch all submission tests.
@@ -1342,7 +1342,7 @@ paths:
           description: ''
   /assignments/{id}/submissions/:
     get:
-      operationId: assignments_submissions_list
+      operationId: assignments_submissionsList
       description: Return a (optionally filtered) list of submissions whose parent
         is the requested assignment.
       parameters:
@@ -1380,7 +1380,7 @@ paths:
           description: ''
   /auth/sso/callback/{provider}/:
     get:
-      operationId: auth_sso_callback_retrieve
+      operationId: auth_ssoCallbackRetrieve
       description: |-
         Handles the callback from the SSO provider.
         Validates ticket/code, creates session, redirects to frontend.
@@ -1403,7 +1403,7 @@ paths:
           description: Redirect to frontend with token
   /auth/sso/check/:
     get:
-      operationId: auth_sso_check_retrieve
+      operationId: auth_ssoCheckRetrieve
       description: |-
         Checks if the given email belongs to an SSO-enabled organization.
         Returns { "sso_enabled": true, "provider": "CAS", "org_id": 123 }
@@ -1425,7 +1425,7 @@ paths:
           description: ''
   /auth/sso/login/{provider}/:
     get:
-      operationId: auth_sso_login_retrieve
+      operationId: auth_ssoLoginRetrieve
       description: |-
         Redirects user to the SSO provider's login page.
         Requires 'email' query param to identify the organization (and thus the config),
@@ -1449,7 +1449,7 @@ paths:
           description: Redirect to SSO provider
   /autograder/environments/:
     get:
-      operationId: autograder_environments_list
+      operationId: autograder_environmentsList
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1470,7 +1470,7 @@ paths:
                   $ref: '#/components/schemas/Environment'
           description: ''
     post:
-      operationId: autograder_environments_create
+      operationId: autograder_environmentsCreate
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1500,9 +1500,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Environment'
           description: ''
-  /autograder/environments/{environment_id}/cleanup/:
+  /autograder/environments/{environmentId}/cleanup/:
     post:
-      operationId: autograder_environments_cleanup_create
+      operationId: autograder_environmentsCleanupCreate
       description: |-
         Cleanup old Docker images for environment.
 
@@ -1510,7 +1510,7 @@ paths:
         Body: {"keep_count": 2}  (optional, defaults to 3)
       parameters:
       - in: path
-        name: environment_id
+        name: environmentId
         schema:
           type: integer
         required: true
@@ -1539,9 +1539,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/EnvironmentCleanupResponse'
           description: ''
-  /autograder/environments/{environment_id}/convert-to-manual/:
+  /autograder/environments/{environmentId}/convert-to-manual/:
     post:
-      operationId: autograder_environments_convert_to_manual_create
+      operationId: autograder_environmentsConvertToManualCreate
       description: |-
         Convert auto-detect environment to manual configuration.
 
@@ -1549,7 +1549,7 @@ paths:
         Body: {"from_version": 2}  (optional, uses current if not specified)
       parameters:
       - in: path
-        name: environment_id
+        name: environmentId
         schema:
           type: integer
         required: true
@@ -1578,9 +1578,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/EnvironmentConvertToManualResponse'
           description: ''
-  /autograder/environments/{environment_id}/rollback/:
+  /autograder/environments/{environmentId}/rollback/:
     post:
-      operationId: autograder_environments_rollback_create
+      operationId: autograder_environmentsRollbackCreate
       description: |-
         Rollback environment to a previous image version.
 
@@ -1588,7 +1588,7 @@ paths:
         Body: {"version": 2}  (optional, defaults to previous version)
       parameters:
       - in: path
-        name: environment_id
+        name: environmentId
         schema:
           type: integer
         required: true
@@ -1617,16 +1617,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/EnvironmentRollbackResponse'
           description: ''
-  /autograder/environments/{environment_id}/status/:
+  /autograder/environments/{environmentId}/status/:
     get:
-      operationId: autograder_environments_status_retrieve
+      operationId: autograder_environmentsStatusRetrieve
       description: |-
         Get detailed environment status including version history.
 
         GET /autograder/environments/<id>/status/
       parameters:
       - in: path
-        name: environment_id
+        name: environmentId
         schema:
           type: integer
         required: true
@@ -1646,7 +1646,7 @@ paths:
           description: ''
   /autograder/environments/{id}/:
     get:
-      operationId: autograder_environments_retrieve
+      operationId: autograder_environmentsRetrieve
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1672,7 +1672,7 @@ paths:
                 $ref: '#/components/schemas/Environment'
           description: ''
     put:
-      operationId: autograder_environments_update
+      operationId: autograder_environmentsUpdate
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1710,7 +1710,7 @@ paths:
                 $ref: '#/components/schemas/Environment'
           description: ''
     patch:
-      operationId: autograder_environments_partial_update
+      operationId: autograder_environmentsPartialUpdate
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1747,7 +1747,7 @@ paths:
                 $ref: '#/components/schemas/Environment'
           description: ''
     delete:
-      operationId: autograder_environments_destroy
+      operationId: autograder_environmentsDestroy
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1770,7 +1770,7 @@ paths:
           description: No response body
   /autograder/environments/{id}/build/:
     patch:
-      operationId: autograder_environments_build_partial_update
+      operationId: autograder_environmentsBuildPartialUpdate
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1810,7 +1810,7 @@ paths:
           description: Async build dispatch failed
   /autograder/environments/{id}/build_status/:
     get:
-      operationId: autograder_environments_build_status_retrieve
+      operationId: autograder_environmentsBuildStatusRetrieve
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1843,7 +1843,7 @@ paths:
           description: ''
   /autograder/environments/{id}/dockerfile/:
     get:
-      operationId: autograder_environments_dockerfile_retrieve
+      operationId: autograder_environmentsDockerfileRetrieve
       description: |-
         list:
         Return a list of all the testFiles.
@@ -1870,7 +1870,7 @@ paths:
           description: ''
   /autograder/environments/{id}/eject/:
     get:
-      operationId: autograder_environments_eject_retrieve
+      operationId: autograder_environmentsEjectRetrieve
       description: |-
         Generates a "Reproduction Kit" for debugging locally.
         Returns the components needed to run tests exactly as the autograder does.
@@ -1897,7 +1897,7 @@ paths:
           description: ''
   /autograder/environments/{id}/preview/:
     post:
-      operationId: autograder_environments_preview_create
+      operationId: autograder_environmentsPreviewCreate
       description: |-
         Generate a preview of the Dockerfile based on provided parameters,
         without saving changes to the database.
@@ -1937,10 +1937,10 @@ paths:
           description: Preview generation failed
   /autograder/environments/{id}/run/:
     patch:
-      operationId: autograder_environments_run_partial_update
+      operationId: autograder_environmentsRunPartialUpdate
       description: |-
-        list:
-        Return a list of all the testFiles.
+        Run tests for a submission using the modern TestService architecture.
+        Dispatches run_test_task which calls TestService.run_suite().
       parameters:
       - in: path
         name: id
@@ -1981,7 +1981,7 @@ paths:
           description: Validation error
   /autograder/environments/{id}/runAll/:
     patch:
-      operationId: autograder_environments_runAll_partial_update
+      operationId: autograder_environmentsRunAllPartialUpdate
       description: |-
         list:
         Return a list of all the testFiles.
@@ -2019,7 +2019,7 @@ paths:
           description: ''
   /autograder/execute/code/:
     post:
-      operationId: autograder_execute_code_create
+      operationId: autograder_executeCodeCreate
       description: |-
         Execute a code snippet using the autograder executors.
 
@@ -2052,7 +2052,7 @@ paths:
           description: ''
   /autograder/execute/file/:
     post:
-      operationId: autograder_execute_file_create
+      operationId: autograder_executeFileCreate
       description: |-
         Execute a codePost file - use stream execution instead. This endpoint is used for testing file execution.
 
@@ -2100,7 +2100,7 @@ paths:
           description: ''
   /autograder/execute/file/async/:
     post:
-      operationId: autograder_execute_file_async_create
+      operationId: autograder_executeFileAsyncCreate
       description: |-
         Async file execution endpoint.
 
@@ -2135,7 +2135,7 @@ paths:
           description: ''
   /autograder/execute/file/cache/check/:
     get:
-      operationId: autograder_execute_file_cache_check_retrieve
+      operationId: autograder_executeFileCacheCheckRetrieve
       description: Check if cache exists for file
       tags:
       - autograder
@@ -2153,7 +2153,7 @@ paths:
           description: ''
   /autograder/execute/file/streaming/:
     post:
-      operationId: autograder_execute_file_streaming_create
+      operationId: autograder_executeFileStreamingCreate
       description: Handle streaming execution request
       tags:
       - autograder
@@ -2179,7 +2179,7 @@ paths:
           description: Server-Sent Events stream with ExecutionResult data
   /autograder/execute/notebook/:
     post:
-      operationId: autograder_execute_notebook_create
+      operationId: autograder_executeNotebookCreate
       description: |-
         Execute a full notebook payload.
 
@@ -2212,7 +2212,7 @@ paths:
           description: ''
   /autograder/execute/notebook-cell/:
     post:
-      operationId: autograder_execute_notebook_cell_create
+      operationId: autograder_executeNotebookCellCreate
       description: Execute a single notebook cell by wrapping it in a minimal notebook.
       tags:
       - autograder
@@ -2242,7 +2242,7 @@ paths:
           description: ''
   /autograder/shell/metrics/:
     get:
-      operationId: autograder_shell_metrics_retrieve
+      operationId: autograder_shellMetricsRetrieve
       description: |-
         Staff-only shell relay metrics from Redis.
         GET /autograder/shell/metrics/
@@ -2262,7 +2262,7 @@ paths:
           description: ''
   /autograder/tasks/{id}/:
     get:
-      operationId: autograder_tasks_retrieve
+      operationId: autograder_tasksRetrieve
       description: A simple ViewSet for retrieving task results
       parameters:
       - in: path
@@ -2286,7 +2286,7 @@ paths:
           description: ''
   /autograder/v2/run/:
     post:
-      operationId: autograder_v2_run_create
+      operationId: autograder_v2RunCreate
       description: |-
         API access to the Modern Testing Architecture.
         Runs a specific TestCase against a Submission.
@@ -2438,7 +2438,7 @@ paths:
                 $ref: '#/components/schemas/CommentTemplate'
           description: ''
     patch:
-      operationId: commentTemplates_partial_update
+      operationId: commentTemplates_partialUpdate
       parameters:
       - in: path
         name: id
@@ -2669,7 +2669,7 @@ paths:
                 $ref: '#/components/schemas/Comment'
           description: ''
     patch:
-      operationId: comments_partial_update
+      operationId: comments_partialUpdate
       description: |-
         list:
         Return a list of all the comments.
@@ -2759,7 +2759,7 @@ paths:
           description: No response body
   /comments/{id}/feedback/:
     patch:
-      operationId: comments_feedback_partial_update
+      operationId: comments_feedbackPartialUpdate
       description: |-
         list:
         Return a list of all the comments.
@@ -2812,7 +2812,7 @@ paths:
           description: ''
   /comments/generate/:
     post:
-      operationId: comments_generate_create
+      operationId: comments_generateCreate
       description: |-
         Generate an AI-powered comment suggestion.
 
@@ -3029,7 +3029,7 @@ paths:
                 $ref: '#/components/schemas/CourseFile'
           description: ''
     patch:
-      operationId: courseFiles_partial_update
+      operationId: courseFiles_partialUpdate
       description: |-
         ViewSet for CourseFile objects.
 
@@ -3306,7 +3306,7 @@ paths:
                 $ref: '#/components/schemas/Course'
           description: ''
     patch:
-      operationId: courses_partial_update
+      operationId: courses_partialUpdate
       description: |-
         list:
         Return a list of all the courses.
@@ -3396,7 +3396,7 @@ paths:
           description: No response body
   /courses/{id}/addToRoster/:
     patch:
-      operationId: courses_addToRoster_partial_update
+      operationId: courses_addToRosterPartialUpdate
       description: |-
         get:
         Show the roster for a course.
@@ -3437,7 +3437,7 @@ paths:
           description: ''
   /courses/{id}/aiSettings/:
     get:
-      operationId: courses_aiSettings_retrieve
+      operationId: courses_aiSettingsRetrieve
       description: |-
         get:
         Get AI configuration for the course.
@@ -3466,7 +3466,7 @@ paths:
                 $ref: '#/components/schemas/CourseAISettings'
           description: ''
     patch:
-      operationId: courses_aiSettings_partial_update
+      operationId: courses_aiSettingsPartialUpdate
       description: |-
         get:
         Get AI configuration for the course.
@@ -3486,13 +3486,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseAISettings'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseAISettings'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedCourse'
+              $ref: '#/components/schemas/PatchedCourseAISettings'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -3507,7 +3507,7 @@ paths:
           description: ''
   /courses/{id}/changeInviteCode/:
     patch:
-      operationId: courses_changeInviteCode_partial_update
+      operationId: courses_changeInviteCodePartialUpdate
       description: |-
         list:
         Return a list of all the courses.
@@ -3560,7 +3560,7 @@ paths:
           description: ''
   /courses/{id}/courseSettings/:
     get:
-      operationId: courses_courseSettings_retrieve
+      operationId: courses_courseSettingsRetrieve
       description: |-
         list:
         Return a list of all the courses.
@@ -3601,7 +3601,7 @@ paths:
                 $ref: '#/components/schemas/CourseSettings'
           description: ''
     patch:
-      operationId: courses_courseSettings_partial_update
+      operationId: courses_courseSettingsPartialUpdate
       description: |-
         list:
         Return a list of all the courses.
@@ -3654,7 +3654,7 @@ paths:
           description: ''
   /courses/{id}/deleteRubricCategory/:
     patch:
-      operationId: courses_deleteRubricCategory_partial_update
+      operationId: courses_deleteRubricCategoryPartialUpdate
       description: |-
         list:
         Return a list of all the courses.
@@ -3703,7 +3703,7 @@ paths:
           description: No response body
   /courses/{id}/removeFromRoster/:
     patch:
-      operationId: courses_removeFromRoster_partial_update
+      operationId: courses_removeFromRosterPartialUpdate
       description: |-
         get:
         Show the roster for a course.
@@ -3744,7 +3744,7 @@ paths:
           description: ''
   /courses/{id}/roster/:
     get:
-      operationId: courses_roster_retrieve
+      operationId: courses_rosterRetrieve
       description: |-
         get:
         Show the roster for a course.
@@ -3773,7 +3773,7 @@ paths:
                 $ref: '#/components/schemas/CourseRoster'
           description: ''
     patch:
-      operationId: courses_roster_partial_update
+      operationId: courses_rosterPartialUpdate
       description: |-
         get:
         Show the roster for a course.
@@ -3814,7 +3814,7 @@ paths:
           description: ''
   /courses/{id}/rosterMap/:
     get:
-      operationId: courses_rosterMap_retrieve
+      operationId: courses_rosterMapRetrieve
       description: |-
         list:
         Return a list of all the courses.
@@ -3855,7 +3855,7 @@ paths:
                 $ref: '#/components/schemas/CourseRosterMap'
           description: ''
     patch:
-      operationId: courses_rosterMap_partial_update
+      operationId: courses_rosterMapPartialUpdate
       description: |-
         list:
         Return a list of all the courses.
@@ -3908,7 +3908,7 @@ paths:
           description: ''
   /courses/{id}/sections/:
     get:
-      operationId: courses_sections_list
+      operationId: courses_sectionsList
       description: |-
         Gets a paginated list of sections for a course.
         We use this for performance for large courses to fetch sections in bulk.
@@ -3949,7 +3949,7 @@ paths:
           description: ''
   /courses/{id}/studentCaptions/:
     get:
-      operationId: courses_studentCaptions_retrieve
+      operationId: courses_studentCaptionsRetrieve
       description: |-
         list:
         Return a list of all the courses.
@@ -3990,7 +3990,7 @@ paths:
                 $ref: '#/components/schemas/CourseStudentCaptions'
           description: ''
     patch:
-      operationId: courses_studentCaptions_partial_update
+      operationId: courses_studentCaptionsPartialUpdate
       description: |-
         list:
         Return a list of all the courses.
@@ -4041,9 +4041,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourseStudentCaptions'
           description: ''
+  /dashboard/deadlines/:
+    get:
+      operationId: dashboard_deadlinesList
+      description: |-
+        Returns all assignments with their due dates and late upload deadlines.
+        Useful for planning deployment windows.
+      tags:
+      - dashboard
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AssignmentDeadline'
+          description: ''
   /dashboard/stats/:
     get:
-      operationId: dashboard_stats_retrieve
+      operationId: dashboard_statsRetrieve
       description: Returns aggregated platform statistics.
       tags:
       - dashboard
@@ -4270,7 +4292,7 @@ paths:
                 $ref: '#/components/schemas/File'
           description: ''
     patch:
-      operationId: files_partial_update
+      operationId: files_partialUpdate
       description: |-
         ViewSet for base File objects.
 
@@ -4394,7 +4416,7 @@ paths:
           description: No response body
   /logs/log/:
     post:
-      operationId: logs_log_create
+      operationId: logs_logCreate
       tags:
       - logs
       requestBody:
@@ -4422,7 +4444,7 @@ paths:
           description: ''
   /logs/logError/:
     post:
-      operationId: logs_logError_create
+      operationId: logs_logErrorCreate
       description: |-
         Request body includes: error, errorInfo.
 
@@ -4455,7 +4477,7 @@ paths:
           description: ''
   /logs/logHappiness/:
     post:
-      operationId: logs_logHappiness_create
+      operationId: logs_logHappinessCreate
       description: Notifies codePost of any happiness occurring on the frontend (by
         authenticated users).
       tags:
@@ -4662,7 +4684,7 @@ paths:
                 $ref: '#/components/schemas/Organization'
           description: ''
     patch:
-      operationId: organizations_partial_update
+      operationId: organizations_partialUpdate
       description: |-
         list:
         Return a list of all the organizations.
@@ -4752,7 +4774,7 @@ paths:
           description: No response body
   /organizations/{id}/analytics/:
     get:
-      operationId: organizations_analytics_retrieve
+      operationId: organizations_analyticsRetrieve
       description: Returns analytics for the organization.
       parameters:
       - in: path
@@ -4777,7 +4799,7 @@ paths:
           description: ''
   /organizations/{id}/demote_staff/:
     post:
-      operationId: organizations_demote_staff_create
+      operationId: organizations_demoteStaffCreate
       description: |-
         Demote a user from Organization Staff.
         Payload: { 'user_email': '...' }
@@ -4816,7 +4838,7 @@ paths:
           description: ''
   /organizations/{id}/promote_staff/:
     post:
-      operationId: organizations_promote_staff_create
+      operationId: organizations_promoteStaffCreate
       description: |-
         Promote a user to Organization Staff.
         Payload: { 'user_email': '...' }
@@ -4855,7 +4877,7 @@ paths:
           description: ''
   /organizations/{id}/remove_user/:
     post:
-      operationId: organizations_remove_user_create
+      operationId: organizations_removeUserCreate
       description: |-
         Remove a user from the organization.
         Payload: { 'user_email': '...' }
@@ -4894,7 +4916,7 @@ paths:
           description: ''
   /organizations/{id}/reset_user_password/:
     post:
-      operationId: organizations_reset_user_password_create
+      operationId: organizations_resetUserPasswordCreate
       description: |-
         Send password reset email to a user.
         Payload: { 'user_email': '...' }
@@ -4933,7 +4955,7 @@ paths:
           description: ''
   /organizations/{id}/users/:
     get:
-      operationId: organizations_users_retrieve
+      operationId: organizations_usersRetrieve
       description: |-
         Returns a list of all users in the organization.
         Only accessible by Org Staff.
@@ -4960,7 +4982,7 @@ paths:
           description: ''
   /organizations/{id}/verify_user/:
     post:
-      operationId: organizations_verify_user_create
+      operationId: organizations_verifyUserCreate
       description: |-
         Approve or Decline a pending user.
         Payload: { 'user_email': '...', 'action': 'approve' | 'decline' }
@@ -5019,7 +5041,7 @@ paths:
           description: ''
   /ott/generate/:
     get:
-      operationId: ott_generate_retrieve
+      operationId: ott_generateRetrieve
       description: |-
         Generate a one-time token for the authenticated course instructor.
 
@@ -5039,7 +5061,7 @@ paths:
                 $ref: '#/components/schemas/GenerateOTTResponse'
           description: ''
     post:
-      operationId: ott_generate_create
+      operationId: ott_generateCreate
       description: |-
         Generate a one-time token for the authenticated course instructor.
 
@@ -5072,7 +5094,7 @@ paths:
           description: ''
   /ott/validate/:
     get:
-      operationId: ott_validate_retrieve
+      operationId: ott_validateRetrieve
       description: |-
         Validate a one-time token and return the associated user data.
 
@@ -5092,7 +5114,7 @@ paths:
                 $ref: '#/components/schemas/User'
           description: ''
     post:
-      operationId: ott_validate_create
+      operationId: ott_validateCreate
       description: |-
         Validate a one-time token and return the associated user data.
 
@@ -5125,7 +5147,7 @@ paths:
           description: ''
   /registration/checkStatusNewAdminUser/:
     get:
-      operationId: registration_checkStatusNewAdminUser_retrieve
+      operationId: registration_checkStatusNewAdminUserRetrieve
       description: |-
         Allows the client to check on the status of a validation request for a given user.
 
@@ -5147,7 +5169,7 @@ paths:
           description: ''
   /registration/current_user/:
     get:
-      operationId: registration_current_user_retrieve
+      operationId: registration_currentUserRetrieve
       description: Determine the current user by their token, and return their data
       tags:
       - registration
@@ -5165,7 +5187,7 @@ paths:
           description: ''
   /registration/emailPasswordReset/:
     post:
-      operationId: registration_emailPasswordReset_create
+      operationId: registration_emailPasswordResetCreate
       tags:
       - registration
       requestBody:
@@ -5195,7 +5217,7 @@ paths:
           description: ''
   /registration/emailRegistration/:
     post:
-      operationId: registration_emailRegistration_create
+      operationId: registration_emailRegistrationCreate
       description: |-
         Request body includes: email.
 
@@ -5238,7 +5260,7 @@ paths:
           description: Email not on whitelist or invalid code
   /registration/graderToAdmin/:
     post:
-      operationId: registration_graderToAdmin_create
+      operationId: registration_graderToAdminCreate
       description: |-
         Allows a user who is only a grader to elevate their status to level of admin within their organization.
         The role elevation allows the admin to create new courses, but not join existing courses.
@@ -5254,7 +5276,7 @@ paths:
           description: No response body
   /registration/handleValidationResponse/:
     get:
-      operationId: registration_handleValidationResponse_retrieve
+      operationId: registration_handleValidationResponseRetrieve
       description: |-
         Function is used to respond to validation instructions from codePost admins (sent via URL).
 
@@ -5279,7 +5301,7 @@ paths:
           description: ''
   /registration/registerAndSetPassword/:
     post:
-      operationId: registration_registerAndSetPassword_create
+      operationId: registration_registerAndSetPasswordCreate
       description: |-
         Function takes a (uid, token) as authorization and, if authorization is valid, sets the associated
         user's password to the password payload.
@@ -5315,7 +5337,7 @@ paths:
           description: ''
   /registration/resetPassword/:
     post:
-      operationId: registration_resetPassword_create
+      operationId: registration_resetPasswordCreate
       tags:
       - registration
       requestBody:
@@ -5345,7 +5367,7 @@ paths:
           description: ''
   /registration/setCredentials/:
     post:
-      operationId: registration_setCredentials_create
+      operationId: registration_setCredentialsCreate
       description: |-
         If a user is logged in by hasn't yet set a usable password, they can use this endpoint to do so, as well
         as specify their organization.
@@ -5377,7 +5399,7 @@ paths:
           description: ''
   /registration/validateNewAdminUser/:
     post:
-      operationId: registration_validateNewAdminUser_create
+      operationId: registration_validateNewAdminUserCreate
       description: |-
         Function is used to trigger manual account validation in response to a user requesting their account
         be granted course creation privileges.
@@ -5412,7 +5434,7 @@ paths:
           description: ''
   /registration/verifyRegistrationToken/:
     post:
-      operationId: registration_verifyRegistrationToken_create
+      operationId: registration_verifyRegistrationTokenCreate
       description: |-
         Handle valid verify email links sent after account creation.
 
@@ -5449,7 +5471,7 @@ paths:
           description: ''
   /registration/verifyResetToken/:
     post:
-      operationId: registration_verifyResetToken_create
+      operationId: registration_verifyResetTokenCreate
       description: Handle valid verify email links sent after password reset requests.
       tags:
       - registration
@@ -5657,7 +5679,7 @@ paths:
                 $ref: '#/components/schemas/RubricCategory'
           description: ''
     patch:
-      operationId: rubricCategories_partial_update
+      operationId: rubricCategories_partialUpdate
       description: |-
         list:
         Return a list of all the rubric categories.
@@ -5924,7 +5946,7 @@ paths:
                 $ref: '#/components/schemas/RubricComment'
           description: ''
     patch:
-      operationId: rubricComments_partial_update
+      operationId: rubricComments_partialUpdate
       description: |-
         list:
         Return a list of all the rubric comments.
@@ -6014,7 +6036,7 @@ paths:
           description: No response body
   /rubricComments/{id}/comments/:
     get:
-      operationId: rubricComments_comments_retrieve
+      operationId: rubricComments_commentsRetrieve
       description: |-
         list:
         Return a list of all the rubric comments.
@@ -6056,7 +6078,7 @@ paths:
           description: ''
   /rubricComments/{id}/feedbackScore/:
     get:
-      operationId: rubricComments_feedbackScore_retrieve
+      operationId: rubricComments_feedbackScoreRetrieve
       description: |-
         list:
         Return a list of all the rubric comments.
@@ -6275,7 +6297,7 @@ paths:
                 $ref: '#/components/schemas/Section'
           description: ''
     patch:
-      operationId: sections_partial_update
+      operationId: sections_partialUpdate
       description: |-
         list:
         Return a list of all the sections.
@@ -6365,7 +6387,7 @@ paths:
           description: No response body
   /sections/{id}/submissions/:
     get:
-      operationId: sections_submissions_list
+      operationId: sections_submissionsList
       description: Grab submissions corresponding to students in a section
       parameters:
       - in: query
@@ -6594,7 +6616,7 @@ paths:
                 $ref: '#/components/schemas/SubmissionFile'
           description: ''
     patch:
-      operationId: submissionFiles_partial_update
+      operationId: submissionFiles_partialUpdate
       description: |-
         ViewSet for SubmissionFile objects.
 
@@ -6871,7 +6893,7 @@ paths:
                 $ref: '#/components/schemas/SubmissionTest'
           description: ''
     patch:
-      operationId: submissionTests_partial_update
+      operationId: submissionTests_partialUpdate
       description: |-
         list:
         Return a list of all the solutionFiles.
@@ -7138,7 +7160,7 @@ paths:
                 $ref: '#/components/schemas/Submission'
           description: ''
     patch:
-      operationId: submissions_partial_update
+      operationId: submissions_partialUpdate
       description: |-
         list:
         Return a list of all the submissions.
@@ -7228,7 +7250,7 @@ paths:
           description: No response body
   /submissions/{id}/checkPermission/:
     get:
-      operationId: submissions_checkPermission_retrieve
+      operationId: submissions_checkPermissionRetrieve
       description: |-
         list:
         Return a list of all the submissions.
@@ -7270,7 +7292,7 @@ paths:
           description: ''
   /submissions/{id}/deleteRegrade/:
     patch:
-      operationId: submissions_deleteRegrade_partial_update
+      operationId: submissions_deleteRegradePartialUpdate
       description: |-
         list:
         Return a list of all the submissions.
@@ -7323,7 +7345,7 @@ paths:
           description: ''
   /submissions/{id}/generatePartnerLink/:
     get:
-      operationId: submissions_generatePartnerLink_retrieve
+      operationId: submissions_generatePartnerLinkRetrieve
       description: |-
         list:
         Return a list of all the submissions.
@@ -7365,7 +7387,7 @@ paths:
           description: ''
   /submissions/{id}/history/:
     get:
-      operationId: submissions_history_list
+      operationId: submissions_historyList
       description: |-
         list:
         Return a list of all the submissions.
@@ -7408,7 +7430,7 @@ paths:
                   $ref: '#/components/schemas/SubmissionHistory'
           description: ''
     patch:
-      operationId: submissions_history_partial_update
+      operationId: submissions_historyPartialUpdate
       description: |-
         list:
         Return a list of all the submissions.
@@ -7463,7 +7485,7 @@ paths:
           description: ''
   /submissions/{id}/notifyStudents/:
     post:
-      operationId: submissions_notifyStudents_create
+      operationId: submissions_notifyStudentsCreate
       description: |-
         list:
         Return a list of all the submissions.
@@ -7517,7 +7539,7 @@ paths:
           description: ''
   /submissions/{id}/removePartner/:
     get:
-      operationId: submissions_removePartner_retrieve
+      operationId: submissions_removePartnerRetrieve
       description: |-
         list:
         Return a list of all the submissions.
@@ -7559,7 +7581,7 @@ paths:
           description: ''
   /submissions/{id}/submissionTests/:
     get:
-      operationId: submissions_submissionTests_list
+      operationId: submissions_submissionTestsList
       description: |-
         list:
         Return a list of all the submissions.
@@ -7603,7 +7625,7 @@ paths:
           description: ''
   /submissions/{id}/submitRegrade/:
     patch:
-      operationId: submissions_submitRegrade_partial_update
+      operationId: submissions_submitRegradePartialUpdate
       description: |-
         list:
         Return a list of all the submissions.
@@ -7656,7 +7678,7 @@ paths:
           description: ''
   /submissions/{id}/testResults/:
     get:
-      operationId: submissions_testResults_retrieve
+      operationId: submissions_testResultsRetrieve
       description: |-
         list:
         Return a list of all the submissions.
@@ -7698,7 +7720,7 @@ paths:
           description: ''
   /submissions/{id}/validatePartnerLink/:
     get:
-      operationId: submissions_validatePartnerLink_retrieve
+      operationId: submissions_validatePartnerLinkRetrieve
       description: |-
         list:
         Return a list of all the submissions.
@@ -7745,7 +7767,7 @@ paths:
           description: ''
   /submissions/{id}/validatePartnerLinkAndReturn/:
     get:
-      operationId: submissions_validatePartnerLinkAndReturn_retrieve
+      operationId: submissions_validatePartnerLinkAndReturnRetrieve
       description: |-
         list:
         Return a list of all the submissions.
@@ -7821,7 +7843,7 @@ paths:
           description: ''
   /system/activity/:
     get:
-      operationId: system_activity_retrieve
+      operationId: system_activityRetrieve
       parameters:
       - in: query
         name: category
@@ -7867,7 +7889,7 @@ paths:
           description: ''
   /system/banner/:
     get:
-      operationId: system_banner_retrieve
+      operationId: system_bannerRetrieve
       description: Returns the current maintenance banner configuration. No authentication
         required.
       tags:
@@ -7886,19 +7908,13 @@ paths:
                 $ref: '#/components/schemas/MaintenanceBannerResponse'
           description: ''
     patch:
-      operationId: system_banner_partial_update
+      operationId: system_bannerPartialUpdate
       description: Update the maintenance banner. Requires admin authentication.
       tags:
       - system
       requestBody:
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedMaintenanceBanner'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PatchedMaintenanceBanner'
-          multipart/form-data:
             schema:
               $ref: '#/components/schemas/PatchedMaintenanceBanner'
       security:
@@ -7915,7 +7931,7 @@ paths:
           description: ''
   /system/health/:
     get:
-      operationId: system_health_retrieve
+      operationId: system_healthRetrieve
       tags:
       - system
       security:
@@ -8109,7 +8125,7 @@ paths:
                 $ref: '#/components/schemas/TestCase'
           description: ''
     patch:
-      operationId: testCases_partial_update
+      operationId: testCases_partialUpdate
       description: |-
         list:
         Return a list of all the testcases.
@@ -8199,7 +8215,7 @@ paths:
           description: No response body
   /testCases/{id}/run/:
     post:
-      operationId: testCases_run_create
+      operationId: testCases_runCreate
       description: |-
         list:
         Return a list of all the testcases.
@@ -8429,7 +8445,7 @@ paths:
                 $ref: '#/components/schemas/TestCategory'
           description: ''
     patch:
-      operationId: testCategories_partial_update
+      operationId: testCategories_partialUpdate
       description: |-
         list:
         Return a list of all the testCategories.
@@ -8519,7 +8535,7 @@ paths:
           description: No response body
   /testCategories/preview-script/:
     post:
-      operationId: testCategories_preview_script_create
+      operationId: testCategories_previewScriptCreate
       description: Preview the tests that would be generated from a script.
       tags:
       - testCategories
@@ -8726,7 +8742,7 @@ paths:
                 $ref: '#/components/schemas/TestCategoryResource'
           description: ''
     patch:
-      operationId: testCategoryResources_partial_update
+      operationId: testCategoryResources_partialUpdate
       description: |-
         list:
         Return a list of all the testCategoryResources.
@@ -8816,7 +8832,7 @@ paths:
           description: No response body
   /tmp-script/:
     post:
-      operationId: tmp_script_create
+      operationId: tmpScript_create
       tags:
       - tmp-script
       security:
@@ -8833,7 +8849,7 @@ paths:
           description: ''
   /token-auth/:
     post:
-      operationId: token_auth_create
+      operationId: tokenAuth_create
       description: |-
         Takes a set of user credentials and returns a sliding JSON web token to
         prove the authentication of those credentials.
@@ -8860,7 +8876,7 @@ paths:
           description: ''
   /token-refresh/:
     post:
-      operationId: token_refresh_create
+      operationId: tokenRefresh_create
       description: |-
         Takes a sliding JSON web token and returns a new, refreshed version if the
         token's refresh period has not expired.
@@ -8887,7 +8903,7 @@ paths:
           description: ''
   /token-verify/:
     post:
-      operationId: token_verify_create
+      operationId: tokenVerify_create
       description: |-
         Takes a token and indicates if it is valid.  This view provides no
         information about a token's fitness for a particular use.
@@ -9042,7 +9058,7 @@ paths:
                 $ref: '#/components/schemas/User'
           description: ''
     patch:
-      operationId: users_partial_update
+      operationId: users_partialUpdate
       parameters:
       - in: path
         name: email
@@ -9096,7 +9112,7 @@ paths:
           description: No response body
   /users/{email}/email/:
     post:
-      operationId: users_email_create
+      operationId: users_emailCreate
       parameters:
       - in: path
         name: email
@@ -9132,7 +9148,7 @@ paths:
           description: ''
   /users/me/:
     get:
-      operationId: users_me_retrieve
+      operationId: users_meRetrieve
       tags:
       - users
       security:
@@ -9148,7 +9164,7 @@ paths:
                 $ref: '#/components/schemas/User'
           description: ''
     patch:
-      operationId: users_me_partial_update
+      operationId: users_mePartialUpdate
       tags:
       - users
       requestBody:
@@ -9176,7 +9192,7 @@ paths:
           description: ''
   /users/requestAPIToken/:
     post:
-      operationId: users_requestAPIToken_create
+      operationId: users_requestAPITokenCreate
       tags:
       - users
       requestBody:
@@ -9205,7 +9221,7 @@ paths:
           description: ''
   /users/user/:
     post:
-      operationId: users_user_create
+      operationId: users_userCreate
       description: |-
         Given an email address as a query parameter, return the user object
         for that email address. This is a non-standard use of a GET request,
@@ -9344,7 +9360,7 @@ paths:
                 $ref: '#/components/schemas/Webhook'
           description: ''
     patch:
-      operationId: webhooks_partial_update
+      operationId: webhooks_partialUpdate
       parameters:
       - in: path
         name: id
@@ -9594,6 +9610,10 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        runFilesOnSubmit:
+          type: boolean
+          description: If True, submission files will be automatically executed and
+            cached when a student submits.
         runTestsOnSubmit:
           type: boolean
           description: If True, autograder tests will automatically run when a student
@@ -9736,6 +9756,53 @@ components:
           type: boolean
       required:
       - name
+    AssignmentDeadline:
+      type: object
+      description: Serializer for assignment deadline data used by the deploy calendar.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        courseName:
+          type: string
+        coursePeriod:
+          type: string
+        courseId:
+          type: integer
+        uploadDueDate:
+          type: string
+          format: date-time
+          nullable: true
+        lateUploadDeadline:
+          type: string
+          format: date-time
+          nullable: true
+        maxLateDays:
+          type: integer
+        allowLateUploads:
+          type: boolean
+        allowStudentUpload:
+          type: boolean
+        regradeDeadline:
+          type: string
+          format: date-time
+          nullable: true
+        studentCount:
+          type: integer
+      required:
+      - allowLateUploads
+      - allowStudentUpload
+      - courseId
+      - courseName
+      - coursePeriod
+      - id
+      - lateUploadDeadline
+      - maxLateDays
+      - name
+      - regradeDeadline
+      - studentCount
+      - uploadDueDate
     AssignmentDownloadResponse:
       type: object
       properties:
@@ -10333,11 +10400,10 @@ components:
           items:
             type: integer
           readOnly: true
-        expiration_date:
+        expirationDate:
           type: string
           format: date-time
           nullable: true
-          description: The date when the course will be automatically deleted.
         organization:
           type: integer
           description: The related organization_id
@@ -10350,7 +10416,7 @@ components:
         isRubricEditor:
           type: boolean
           readOnly: true
-        clone_from:
+        cloneFrom:
           type: integer
           writeOnly: true
       required:
@@ -11356,21 +11422,15 @@ components:
         emailDomain:
           type: string
           nullable: true
-        sso_enabled:
+        ssoEnabled:
           type: boolean
-          description: If True, new users in this organization are automatically activated
-            and assume external authentication.
-        sso_provider:
+        ssoProvider:
           type: string
           nullable: true
-          description: The SSO provider (e.g. CAS, AZURE, OIDC, GOOGLE).
-          maxLength: 32
-        sso_config:
+        ssoConfig:
           nullable: true
-        send_welcome_email:
+        sendWelcomeEmail:
           type: boolean
-          description: If False, suppresses welcome/added-to-course emails for users
-            in this organization.
       required:
       - id
       - name
@@ -11677,6 +11737,10 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        runFilesOnSubmit:
+          type: boolean
+          description: If True, submission files will be automatically executed and
+            cached when a student submits.
         runTestsOnSubmit:
           type: boolean
           description: If True, autograder tests will automatically run when a student
@@ -11967,11 +12031,10 @@ components:
           items:
             type: integer
           readOnly: true
-        expiration_date:
+        expirationDate:
           type: string
           format: date-time
           nullable: true
-          description: The date when the course will be automatically deleted.
         organization:
           type: integer
           description: The related organization_id
@@ -11984,9 +12047,41 @@ components:
         isRubricEditor:
           type: boolean
           readOnly: true
-        clone_from:
+        cloneFrom:
           type: integer
           writeOnly: true
+    PatchedCourseAISettings:
+      type: object
+      description: Serializer for course AI configuration. Admin-only access.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        aiProvider:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/AiProviderEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        aiApiKey:
+          type: string
+          writeOnly: true
+          nullable: true
+        aiBaseUrl:
+          type: string
+          nullable: true
+        aiModel:
+          type: string
+          nullable: true
+        aiDisabled:
+          type: boolean
+        aiCommentsDisabled:
+          type: boolean
+        aiEnabled:
+          type: boolean
+          readOnly: true
+        aiCommentsEnabled:
+          type: boolean
+          readOnly: true
     PatchedCourseFile:
       type: object
       description: |-
@@ -12223,21 +12318,15 @@ components:
         emailDomain:
           type: string
           nullable: true
-        sso_enabled:
+        ssoEnabled:
           type: boolean
-          description: If True, new users in this organization are automatically activated
-            and assume external authentication.
-        sso_provider:
+        ssoProvider:
           type: string
           nullable: true
-          description: The SSO provider (e.g. CAS, AZURE, OIDC, GOOGLE).
-          maxLength: 32
-        sso_config:
+        ssoConfig:
           nullable: true
-        send_welcome_email:
+        sendWelcomeEmail:
           type: boolean
-          description: If False, suppresses welcome/added-to-course emails for users
-            in this organization.
     PatchedRubricCategory:
       type: object
       properties:

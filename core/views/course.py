@@ -136,7 +136,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         return Response(course.inviteCode)
 
-    @extend_schema(responses=CourseAISettingsSerializer)
+    @extend_schema(request=CourseAISettingsSerializer, responses=CourseAISettingsSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
     def aiSettings(self, request, pk=None):
         """

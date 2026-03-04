@@ -172,6 +172,10 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     'CAMELIZE_NAMES': True,
+    'POSTPROCESSING_HOOKS': [
+        'drf_spectacular.hooks.postprocess_schema_enums',
+        'codepost.schema_hooks.restore_underscore_operation_ids',
+    ],
     'TITLE': 'codePost API',
     'DESCRIPTION': """
 An API for administrators to mine course data and automate common tasks.

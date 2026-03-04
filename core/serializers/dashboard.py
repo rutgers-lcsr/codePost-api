@@ -18,3 +18,19 @@ class DashboardStatsSerializer(serializers.Serializer):
     avgStudentsPerCourse = serializers.FloatField()
     totalInactiveUsers = serializers.IntegerField()
     activeUsers30d = serializers.IntegerField()
+
+
+class AssignmentDeadlineSerializer(serializers.Serializer):
+    """Serializer for assignment deadline data used by the deploy calendar."""
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    courseName = serializers.CharField()
+    coursePeriod = serializers.CharField()
+    courseId = serializers.IntegerField()
+    uploadDueDate = serializers.DateTimeField(allow_null=True)
+    lateUploadDeadline = serializers.DateTimeField(allow_null=True)
+    maxLateDays = serializers.IntegerField()
+    allowLateUploads = serializers.BooleanField()
+    allowStudentUpload = serializers.BooleanField()
+    regradeDeadline = serializers.DateTimeField(allow_null=True)
+    studentCount = serializers.IntegerField()
