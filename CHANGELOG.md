@@ -12,6 +12,27 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ---
 
+## [3.2.0] — AI Settings & Usage Analytics
+
+### Added — AI Configuration
+
+- **Organization-level AI settings** — org admins can configure a shared AI provider, API key, base URL, and model for the entire organization.
+- **Course access policy** — org admins control which courses can inherit the org's AI key (`all`, `selected`, or `none`).
+- **Course AI inheritance** — courses can use the org's AI configuration or opt to use their own key with a single toggle (`aiUseOwnSettings`).
+- **AI usage tracking** — every AI API call (comment generation, test generation) records provider, model, token counts, estimated cost, and status.
+- **Usage analytics endpoints** — new API endpoints for course-level (`/courses/{id}/aiUsage/`), org-level (`/organizations/{id}/aiUsage/`), and platform-level (`/system/aiUsage/`) usage summaries with configurable granularity (hourly, daily, monthly).
+- **Cost estimation** — per-model USD cost estimates tracked for Gemini and OpenAI families.
+- **AI Settings & Usage docs page** — comprehensive documentation added to `/docs/ai-guide`.
+
+### Changed
+
+- `AIService.record_usage()` consolidates all usage recording logic in one place.
+- `AIService.estimate_cost()` provides static cost estimation for any provider/model combination.
+- `AIService.__init__` now resolves effective AI config from org-level when course inherits.
+- Course AI settings endpoint now returns `aiUseOwnSettings` and `orgAiAvailable` fields.
+
+---
+
 ## [3.1.1]
 
 ### Added
