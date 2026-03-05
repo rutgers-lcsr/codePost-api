@@ -17,11 +17,16 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
+            - name: Set up virtual environment
+              run: python3 -m venv .venv
+
             - name: Install dependencies
-              run: poetry install --no-interaction
+              run: |
+                  .venv/bin/pip install --upgrade pip
+                  .venv/bin/pip install -r requirements.txt
 
             - name: Run djlint on templates
-              run: poetry run djlint core/templates/ --lint
+              run: .venv/bin/djlint core/templates/ --lint
 
     typecheck:
         name: Type Check (Pyright)
@@ -29,11 +34,16 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
+            - name: Set up virtual environment
+              run: python3 -m venv .venv
+
             - name: Install dependencies
-              run: poetry install --no-interaction
+              run: |
+                  .venv/bin/pip install --upgrade pip
+                  .venv/bin/pip install -r requirements.txt
 
             - name: Run Pyright
-              run: poetry run pyright
+              run: .venv/bin/pyright
 
     test:
         name: Tests (pytest + coverage)
@@ -46,20 +56,25 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
+            - name: Set up virtual environment
+              run: python3 -m venv .venv
+
             - name: Install dependencies
-              run: poetry install --no-interaction
+              run: |
+                  .venv/bin/pip install --upgrade pip
+                  .venv/bin/pip install -r requirements.txt
 
             - name: Run migrations
-              run: poetry run python manage.py migrate --run-syncdb
+              run: .venv/bin/python manage.py migrate --run-syncdb
 
             - name: Run tests with coverage
-              run: poetry run coverage run -m pytest core/tests/ autograder/tests/ -v
+              run: .venv/bin/coverage run -m pytest core/tests/ autograder/tests/ -v
 
             - name: Generate coverage report
               run: |
-                  poetry run coverage report
-                  poetry run coverage xml -o coverage.xml
-                  poetry run coverage html -o htmlcov/
+                  .venv/bin/coverage report
+                  .venv/bin/coverage xml -o coverage.xml
+                  .venv/bin/coverage html -o htmlcov/
 
             - name: Upload coverage report
               if: always()
