@@ -31,7 +31,10 @@ from core.permissions.helpers import (
 from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub, isSuperGrader
-from core.serializers.ai_usage import AIUsageSummarySerializer
+import logging
+from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
+
+logger = logging.getLogger(__name__)
 
 from core.pagination import LargeObjectsPagination
 
@@ -228,6 +231,57 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         )
 
         return Response(summary)
+
+    @extend_schema(responses={200: AIProviderModelsListSerializer})
+    @action(detail=True, methods=["GET"])
+    def aiModels(self, request, pk=None):
+        """
+        GET: Return curated AI models for the course's effective provider.
+        Also queries the provider's API for live model listings using the
+        course's own credentials or inherited org credentials.
+        Only accessible by course admins.
+        """
+        import asyncio
+        from core.services.ai_service import AI_MODELS, list_provider_models, AIService
+
+        user = request.user
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+
+        course: Course = self.get_object()
+
+        if not isCourseAdmin(user, course):
+            return returnForbidden()
+
+        # Use AIService to resolve effective config (handles org inheritance)
+        svc = AIService(course)
+        provider = svc.provider
+        if not provider:
+            return Response({'providers': []})
+
+        # Build curated list
+        curated = AI_MODELS.get(provider, [])
+        result = {
+            'provider': provider,
+            'models': [
+                {'id': mid, 'name': name, 'isDefault': default}
+                for mid, name, default in curated
+            ],
+        }
+
+        # Query provider for live models using effective credentials
+        try:
+            live = asyncio.run(list_provider_models(
+                provider=provider,
+                api_key=svc.api_key or '',
+                base_url=svc.base_url or '',
+            ))
+            result['liveModels'] = live
+        except Exception as e:
+            logger.warning(f"Failed to list models from {provider}: {e}")
+            result['liveError'] = str(e)
+
+        return Response({'providers': [result]})
 
     @extend_schema(responses=CourseRosterSerializer)
     @action(detail=True, methods=["GET", "PATCH"])

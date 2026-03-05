@@ -3435,6 +3435,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourseRoster'
           description: ''
+  /courses/{id}/aiModels/:
+    get:
+      operationId: courses_aiModelsRetrieve
+      description: |-
+        GET: Return curated AI models for the course's effective provider.
+        Also queries the provider's API for live model listings using the
+        course's own credentials or inherited org credentials.
+        Only accessible by course admins.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIProviderModelsList'
+          description: ''
   /courses/{id}/aiSettings/:
     get:
       operationId: courses_aiSettingsRetrieve
@@ -4819,6 +4848,34 @@ paths:
       responses:
         '204':
           description: No response body
+  /organizations/{id}/aiModels/:
+    get:
+      operationId: organizations_aiModelsRetrieve
+      description: |-
+        GET: Return curated AI models for the org's configured provider.
+        Also queries the provider's API for live model listings using the org's stored credentials.
+        Only accessible by Org Staff or superuser.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIProviderModelsList'
+          description: ''
   /organizations/{id}/aiSettings/:
     get:
       operationId: organizations_aiSettingsRetrieve
@@ -8047,6 +8104,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/SystemActivityResponse'
           description: ''
+  /system/aiModels/:
+    get:
+      operationId: system_aiModelsRetrieve
+      description: |-
+        GET: Return the curated list of AI models per provider.
+        Optional query params: ?provider=X to filter by provider.
+        No credentials are required — this just returns the static list.
+      parameters:
+      - in: query
+        name: provider
+        schema:
+          type: string
+          enum:
+          - custom
+          - gemini
+          - ollama
+          - openai
+          - portkey
+        description: Filter to a single provider
+      tags:
+      - system
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIProviderModelsList'
+          description: ''
   /system/aiUsage/:
     get:
       operationId: system_aiUsageRetrieve
@@ -9619,6 +9709,59 @@ paths:
           description: No response body
 components:
   schemas:
+    AIModel:
+      type: object
+      description: A single AI model entry.
+      properties:
+        id:
+          type: string
+          description: Model identifier to pass to the provider API
+        name:
+          type: string
+          description: Human-readable display name
+        isDefault:
+          type: boolean
+          default: false
+          description: Whether this is the default model for the provider
+      required:
+      - id
+      - name
+    AIProviderModels:
+      type: object
+      description: Models available for a single provider.
+      properties:
+        provider:
+          type: string
+          description: Provider identifier (e.g. 'gemini', 'openai')
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIModel'
+          description: Curated list of known models for this provider
+        liveModels:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIModel'
+          description: Models fetched from the provider's API (only included when
+            credentials are supplied)
+        liveError:
+          type: string
+          nullable: true
+          description: Error message if querying the provider failed
+      required:
+      - models
+      - provider
+    AIProviderModelsList:
+      type: object
+      description: Response wrapper for the AI models endpoint.
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIProviderModels'
+          description: List of providers with their models
+      required:
+      - providers
     AIUsageBreakdown:
       type: object
       description: Usage breakdown by a dimension (course, assignment, provider, model).
@@ -9721,6 +9864,11 @@ components:
           items:
             $ref: '#/components/schemas/AIUsageBreakdown'
           description: Usage breakdown by dimension
+        modelBreakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIUsageBreakdown'
+          description: Usage breakdown by AI model
         granularity:
           $ref: '#/components/schemas/GranularityEnum'
         startDate:
@@ -9762,12 +9910,14 @@ components:
       - gemini
       - openai
       - ollama
+      - portkey
       - custom
       type: string
       description: |-
         * `gemini` - Google Gemini
         * `openai` - OpenAI
         * `ollama` - Ollama (Self-hosted)
+        * `portkey` - Portkey (Self-hosted)
         * `custom` - Custom Provider
     Assignment:
       type: object
@@ -10793,6 +10943,9 @@ components:
           type: boolean
         aiUseOwnSettings:
           type: boolean
+        aiTokenRates:
+          description: 'Custom per-model token rates. JSON: {"model-name": {"input":
+            0.15, "output": 0.60}}'
         aiEnabled:
           type: boolean
           readOnly: true
@@ -10802,9 +10955,25 @@ components:
         orgAiAvailable:
           type: boolean
           readOnly: true
+        hasApiKey:
+          type: boolean
+          readOnly: true
+        apiKeyHint:
+          type: string
+          nullable: true
+          readOnly: true
+        defaultTokenRates:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+          readOnly: true
       required:
       - aiCommentsEnabled
       - aiEnabled
+      - apiKeyHint
+      - defaultTokenRates
+      - hasApiKey
       - id
       - orgAiAvailable
     CourseFile:
@@ -11820,16 +11989,35 @@ components:
           items:
             type: integer
           readOnly: true
+        aiTokenRates:
+          description: 'Custom per-model token rates. JSON: {"model-name": {"input":
+            0.15, "output": 0.60}}'
         aiEnabled:
           type: boolean
           readOnly: true
         aiCommentsEnabled:
           type: boolean
           readOnly: true
+        hasApiKey:
+          type: boolean
+          readOnly: true
+        apiKeyHint:
+          type: string
+          nullable: true
+          readOnly: true
+        defaultTokenRates:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+          readOnly: true
       required:
       - aiCommentsEnabled
       - aiEnabled
       - aiEnabledCourseIds
+      - apiKeyHint
+      - defaultTokenRates
+      - hasApiKey
       - id
     OverallEnum:
       enum:
@@ -12474,6 +12662,9 @@ components:
           type: boolean
         aiUseOwnSettings:
           type: boolean
+        aiTokenRates:
+          description: 'Custom per-model token rates. JSON: {"model-name": {"input":
+            0.15, "output": 0.60}}'
         aiEnabled:
           type: boolean
           readOnly: true
@@ -12482,6 +12673,19 @@ components:
           readOnly: true
         orgAiAvailable:
           type: boolean
+          readOnly: true
+        hasApiKey:
+          type: boolean
+          readOnly: true
+        apiKeyHint:
+          type: string
+          nullable: true
+          readOnly: true
+        defaultTokenRates:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
           readOnly: true
     PatchedCourseFile:
       type: object
@@ -12761,6 +12965,9 @@ components:
           writeOnly: true
           description: List of course IDs to enable for org AI (used when aiCoursePolicy
             is 'selected')
+        aiTokenRates:
+          description: 'Custom per-model token rates. JSON: {"model-name": {"input":
+            0.15, "output": 0.60}}'
     PatchedRubricCategory:
       type: object
       properties:

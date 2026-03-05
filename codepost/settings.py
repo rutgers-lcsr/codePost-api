@@ -85,7 +85,7 @@ HOSTNAME = os.environ.get("HOSTNAME", socket.gethostname())
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 CLIENT_URL = os.environ.get("CLIENT_URL", "http://localhost:3000")
 DEBUG = os.environ.get("DEBUG", "FALSE").upper() == "TRUE"
-TESTING = len(sys.argv) > 1 and sys.argv[1] == "test"
+TESTING = os.environ.get("TESTING", "FALSE").upper() == "TRUE" or (len(sys.argv) > 1 and sys.argv[1] == "test")
 ADMINS = [
     ("LCSR Codepost Team", "mk1800@rutgers.edu"),
 ]

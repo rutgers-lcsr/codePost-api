@@ -28,7 +28,145 @@ from core.models import Course, Assignment, SubmissionFile
 
 from django.contrib.auth.models import User
 
+
+# -----------------------------------------------------------------------
+# Curated list of models per provider.
+# Each entry: (model_id, display_label, is_default)
+# -----------------------------------------------------------------------
+AI_MODELS: dict[str, list[tuple[str, str, bool]]] = {
+    'gemini': [
+        ('gemini-2.5-flash', 'Gemini 2.5 Flash', True),
+        ('gemini-2.5-pro', 'Gemini 2.5 Pro', False),
+        ('gemini-2.0-flash', 'Gemini 2.0 Flash', False),
+        ('gemini-1.5-flash', 'Gemini 1.5 Flash', False),
+        ('gemini-1.5-pro', 'Gemini 1.5 Pro', False),
+    ],
+    'openai': [
+        ('gpt-4o-mini', 'GPT-4o Mini', True),
+        ('gpt-4o', 'GPT-4o', False),
+        ('gpt-4.1', 'GPT-4.1', False),
+        ('gpt-4.1-mini', 'GPT-4.1 Mini', False),
+        ('gpt-4.1-nano', 'GPT-4.1 Nano', False),
+        ('o3-mini', 'o3 Mini', False),
+    ],
+    'ollama': [
+        ('llama3.2', 'Llama 3.2', True),
+        ('llama3.1', 'Llama 3.1', False),
+        ('mistral', 'Mistral', False),
+        ('codellama', 'Code Llama', False),
+        ('deepseek-coder-v2', 'DeepSeek Coder V2', False),
+        ('qwen2.5-coder', 'Qwen 2.5 Coder', False),
+        ('phi3', 'Phi-3', False),
+    ],
+    'portkey': [
+        ('default', 'Default (gateway-configured)', True),
+    ],
+    'custom': [
+        ('default', 'Default', True),
+    ],
+}
+
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------
+# Provider model listing (queries the provider's API for available models)
+# -----------------------------------------------------------------------
+
+async def list_provider_models(
+    provider: str,
+    api_key: str = '',
+    base_url: str = '',
+) -> list[dict[str, str]]:
+    """
+    Query a provider's API for available models.
+    Returns a list of dicts: [{'id': '...', 'name': '...'}]
+    Raises on network/auth errors.
+    """
+    if provider == 'gemini':
+        return await _list_gemini_models(api_key)
+    elif provider == 'openai':
+        return await _list_openai_models(api_key)
+    elif provider == 'ollama':
+        return await _list_ollama_models(base_url)
+    elif provider == 'portkey':
+        return await _list_portkey_models(api_key, base_url)
+    return []
+
+
+async def _list_gemini_models(api_key: str) -> list[dict[str, str]]:
+    """List models from Google Gemini API."""
+    from google import genai
+    client = genai.Client(api_key=api_key)
+    models = []
+    pager = await client.aio.models.list()
+    async for m in pager:
+        model_id = m.name or ''
+        # The API returns "models/gemini-2.5-flash" — strip the prefix
+        if model_id.startswith('models/'):
+            model_id = model_id[len('models/'):]
+        display_name = m.display_name or model_id
+        # Only include generative models (skip embedding/retrieval models)
+        if hasattr(m, 'supported_generation_methods') and m.supported_generation_methods:
+            if 'generateContent' not in m.supported_generation_methods:
+                continue
+        models.append({'id': model_id, 'name': display_name})
+    return models
+
+
+async def _list_openai_models(api_key: str) -> list[dict[str, str]]:
+    """List models from OpenAI API."""
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=api_key)
+    response = await client.models.list()
+    models = []
+    for m in response.data:
+        models.append({'id': m.id, 'name': m.id})
+    # Sort alphabetically
+    models.sort(key=lambda x: x['id'])
+    return models
+
+
+async def _list_ollama_models(base_url: str) -> list[dict[str, str]]:
+    """List locally installed models from Ollama."""
+    import httpx
+    url = (base_url or 'http://localhost:11434').rstrip('/')
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{url}/api/tags", timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+    models = []
+    for m in data.get('models', []):
+        model_name = m.get('name', '')
+        # Strip ":latest" suffix for cleaner display
+        display = model_name.replace(':latest', '') if model_name.endswith(':latest') else model_name
+        models.append({'id': model_name, 'name': display})
+    return models
+
+
+async def _list_portkey_models(api_key: str, base_url: str) -> list[dict[str, str]]:
+    """List models from Portkey gateway (OpenAI-compatible /v1/models)."""
+    import httpx
+    url = (base_url or 'https://api.portkey.ai/v1').rstrip('/')
+    if url.endswith('/v1'):
+        endpoint = f"{url}/models"
+    else:
+        endpoint = f"{url}/v1/models"
+
+    headers: dict[str, str] = {}
+    if api_key:
+        headers['x-portkey-api-key'] = api_key
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(endpoint, headers=headers, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+    models = []
+    for m in data.get('data', []):
+        model_id = m.get('id', '')
+        models.append({'id': model_id, 'name': model_id})
+    models.sort(key=lambda x: x['id'])
+    return models
 
 
 @dataclass
@@ -84,19 +222,18 @@ Context:
         self.assignment = assignment
 
         # Resolve effective AI config: course-own settings or org-level
-        use_own = course.ai_use_own_settings or not course.ai_provider
-        if use_own and course.ai_provider:
+        if course.ai_use_own_settings and course.ai_provider:
             # Course explicitly uses its own key
             self.provider = course.ai_provider
             self.api_key = course.ai_api_key
             self.base_url = course.ai_base_url
             self.model = course.ai_model or self._get_default_model()
-        elif not use_own and course.organization:
+        elif not course.ai_use_own_settings and course.organization:
             # Try to inherit from org
             org = course.organization
             if (
                 org.ai_provider
-                and org.ai_api_key
+                and (org.ai_api_key or org.ai_provider in ('ollama', 'portkey'))
                 and not org.ai_disabled
                 and self._org_allows_course(org, course)
             ):
@@ -111,7 +248,8 @@ Context:
                 self.base_url = course.ai_base_url
                 self.model = course.ai_model or self._get_default_model()
         else:
-            # Default: use course fields
+            # Default: use course fields (ai_use_own_settings=True but no provider,
+            # or no organization attached)
             self.provider = course.ai_provider
             self.api_key = course.ai_api_key
             self.base_url = course.ai_base_url
@@ -128,27 +266,22 @@ Context:
 
     def _get_default_model_for(self, provider: str) -> str:
         """Get default model for a given provider string."""
-        defaults = {
-            'gemini': 'gemini-2.5-flash',
-            'openai': 'gpt-4o-mini',
-            'ollama': 'llama3.2',
-            'custom': 'default',
-        }
-        return defaults.get(provider, 'default')
+        models = AI_MODELS.get(provider, [])
+        for model_id, _, is_default in models:
+            if is_default:
+                return model_id
+        return 'default'
         
     def _get_default_model(self) -> str:
         """Get default model for the configured provider."""
-        defaults = {
-            'gemini': 'gemini-2.5-flash',
-            'openai': 'gpt-4o-mini',
-            'ollama': 'llama3.2',
-            'custom': 'default',
-        }
-        return defaults.get(self.provider, 'default')
+        return self._get_default_model_for(self.provider)
     
     @property
     def is_configured(self) -> bool:
         """Check if AI is properly configured for this course."""
+        if self.provider in ('ollama', 'portkey'):
+            # Ollama and Portkey (self-hosted) only need provider + base_url
+            return bool(self.provider and self.base_url)
         return bool(self.provider and self.api_key)
 
     # ------------------------------------------------------------------
@@ -173,17 +306,40 @@ Context:
     }
 
     @staticmethod
-    def estimate_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float:
+    def estimate_cost(provider: str, model: str, input_tokens: int, output_tokens: int,
+                      custom_rates: dict | None = None) -> float:
         """
         Estimate the cost of an AI API call in USD.
-        Returns 0 for unknown models / self-hosted providers.
+
+        Rate lookup order:
+          1. ``custom_rates`` dict  (org/course overrides merged by caller)
+          2. ``TOKEN_RATES``        (hardcoded defaults)
+          3. Falls back to 0.0 for unknown models / self-hosted providers.
+
+        ``custom_rates`` format: ``{"model-name": {"input": 0.15, "output": 0.60}, ...}``
         """
-        rates = AIService.TOKEN_RATES.get(model)
+        rates = None
+        if custom_rates and model in custom_rates:
+            r = custom_rates[model]
+            if isinstance(r, dict) and 'input' in r and 'output' in r:
+                rates = (float(r['input']), float(r['output']))
+        if not rates:
+            rates = AIService.TOKEN_RATES.get(model)
         if not rates:
             return 0.0
         input_cost = (input_tokens / 1_000_000) * rates[0]
         output_cost = (output_tokens / 1_000_000) * rates[1]
         return float(Decimal(str(input_cost + output_cost)).quantize(Decimal('0.000001')))
+
+    def _get_merged_rates(self) -> dict | None:
+        """Merge custom token rates: course overrides org overrides."""
+        rates: dict = {}
+        org = self.course.organization if self.course else None
+        if org and org.ai_token_rates:
+            rates.update(org.ai_token_rates)
+        if self.course and self.course.ai_token_rates:
+            rates.update(self.course.ai_token_rates)
+        return rates or None
 
     def record_usage(
         self,
@@ -220,6 +376,7 @@ Context:
                 estimated_cost=self.estimate_cost(
                     self.provider or '', self.model or '',
                     result.input_tokens, result.output_tokens,
+                    custom_rates=self._get_merged_rates(),
                 ),
                 status='success' if result.success else 'error',
                 error_message=result.error if not result.success else None,
@@ -315,14 +472,19 @@ Context:
 
             # Call the appropriate provider
             if self.provider == 'gemini':
-                logger.info(f"Calling Gemini with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
+                logger.debug(f"Calling Gemini ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
                 text, input_tokens, output_tokens, total_tokens = await self._call_gemini(system_prompt, user_prompt)
             elif self.provider == 'openai':
+                logger.debug(f"Calling OpenAI ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
                 text, input_tokens, output_tokens, total_tokens = await self._call_openai(system_prompt, user_prompt)
             elif self.provider == 'ollama':
+                logger.debug(f"Calling Ollama ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
                 text, input_tokens, output_tokens, total_tokens = await self._call_ollama(system_prompt, user_prompt)
-            else:
+            elif self.provider in ('portkey', 'custom'):
+                logger.debug(f"Calling Portkey/Custom ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
                 text, input_tokens, output_tokens, total_tokens = await self._call_portkey(system_prompt, user_prompt)
+            else:
+                raise ValueError(f"Unknown AI provider: {self.provider}")
 
             return GenerationResult(
                 text=text,
@@ -626,8 +788,10 @@ Based on the context (logic to test) and the example harness above, generate the
                 text, input_tokens, output_tokens, total_tokens = await self._call_openai(system_prompt, user_prompt)
             elif self.provider == 'ollama':
                 text, input_tokens, output_tokens, total_tokens = await self._call_ollama(system_prompt, user_prompt)
-            else:
+            elif self.provider in ('portkey', 'custom'):
                 text, input_tokens, output_tokens, total_tokens = await self._call_portkey(system_prompt, user_prompt)
+            else:
+                raise ValueError(f"Unknown AI provider: {self.provider}")
 
             text = self._normalize_generated_test_script(text, lang_key)
 
@@ -744,17 +908,33 @@ Based on the context (logic to test) and the example harness above, generate the
             return data["response"], input_tokens, output_tokens, input_tokens + output_tokens
     
     async def _call_portkey(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
-        """Call custom provider via Portkey gateway. Returns (text, input_tokens, output_tokens, total_tokens)."""
+        """Call Portkey AI gateway (self-hosted or cloud). Returns (text, input_tokens, output_tokens, total_tokens).
+        
+        Portkey is an AI Gateway that proxies requests to underlying providers.
+        When self-hosted, it typically only needs a base URL (API key is optional).
+        Uses x-portkey-api-key header for gateway auth, not Authorization.
+        The endpoint is OpenAI-compatible: POST /v1/chat/completions.
+        """
         import httpx
         
-        base_url = self.base_url or "https://api.portkey.ai/v1"
+        base_url = (self.base_url or "https://api.portkey.ai/v1").rstrip('/')
+        # Ensure the URL doesn't already end with /v1 when we append the path
+        if base_url.endswith('/v1'):
+            url = f"{base_url}/chat/completions"
+        else:
+            url = f"{base_url}/v1/chat/completions"
+
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+        }
+        # API key is optional for self-hosted Portkey gateways
+        if self.api_key:
+            headers["x-portkey-api-key"] = self.api_key
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
+                url,
+                headers=headers,
                 json={
                     "model": self.model,
                     "messages": [

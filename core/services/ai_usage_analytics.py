@@ -48,6 +48,8 @@ def get_usage_summary(
     end_date=None,
     breakdown_field: Optional[str] = None,
     breakdown_name_field: Optional[str] = None,
+    breakdown_extra_fields: Optional[list[str]] = None,
+    breakdown_name_formatter=None,
 ):
     """
     Build an aggregated usage summary from AIUsageRecord queryset.
@@ -60,6 +62,11 @@ def get_usage_summary(
         breakdown_field: Foreign key field name to break down by (e.g., 'course', 'assignment')
         breakdown_name_field: Dot-separated path to the name field for breakdown labels
                               (e.g., 'course__name', 'assignment__name')
+        breakdown_extra_fields: Additional fields to include in the breakdown query
+                                (e.g., ['course__period'])
+        breakdown_name_formatter: Optional callable(entry) -> str to format the breakdown name.
+                                  Receives the raw query entry dict. If not provided, uses
+                                  breakdown_name_field value directly.
 
     Returns:
         dict with keys: totalTokens, inputTokens, outputTokens, estimatedCost,
@@ -115,9 +122,12 @@ def get_usage_summary(
     # Breakdown
     breakdown = []
     if breakdown_field and breakdown_name_field:
+        values_fields = [f'{breakdown_field}_id', breakdown_name_field]
+        if breakdown_extra_fields:
+            values_fields.extend(breakdown_extra_fields)
         breakdown_qs = (
             queryset
-            .values(f'{breakdown_field}_id', breakdown_name_field)
+            .values(*values_fields)
             .annotate(
                 totalTokens=Sum('total_tokens'),
                 inputTokens=Sum('input_tokens'),
@@ -129,15 +139,45 @@ def get_usage_summary(
         )
 
         for entry in breakdown_qs:
+            if breakdown_name_formatter:
+                name = breakdown_name_formatter(entry)
+            else:
+                name = entry[breakdown_name_field] or 'Unknown'
             breakdown.append({
                 'id': entry[f'{breakdown_field}_id'],
-                'name': entry[breakdown_name_field] or 'Unknown',
+                'name': name,
                 'totalTokens': entry['totalTokens'] or 0,
                 'inputTokens': entry['inputTokens'] or 0,
                 'outputTokens': entry['outputTokens'] or 0,
                 'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
                 'requestCount': entry['requestCount'] or 0,
             })
+
+    # Model breakdown — always computed, grouped by the model field
+    model_breakdown_qs = (
+        queryset
+        .values('model')
+        .annotate(
+            totalTokens=Sum('total_tokens'),
+            inputTokens=Sum('input_tokens'),
+            outputTokens=Sum('output_tokens'),
+            estimatedCost=Sum('estimated_cost'),
+            requestCount=Count('id'),
+        )
+        .order_by('-totalTokens')
+    )
+    model_breakdown = [
+        {
+            'id': None,
+            'name': entry['model'] or 'Unknown',
+            'totalTokens': entry['totalTokens'] or 0,
+            'inputTokens': entry['inputTokens'] or 0,
+            'outputTokens': entry['outputTokens'] or 0,
+            'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+            'requestCount': entry['requestCount'] or 0,
+        }
+        for entry in model_breakdown_qs
+    ]
 
     return {
         'totalTokens': totals['total_tokens'] or 0,
@@ -147,6 +187,7 @@ def get_usage_summary(
         'requestCount': totals['request_count'] or 0,
         'timeSeries': time_series,
         'breakdown': breakdown,
+        'modelBreakdown': model_breakdown,
         'granularity': granularity,
         'startDate': start_date,
         'endDate': end_date,

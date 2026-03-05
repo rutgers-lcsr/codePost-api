@@ -1,4 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
+import logging
+
 from core.models import Organization
 from core.serializers.organization import OrganizationSerializer
 from core.views.template import SuperUserListProtectedViewSet
@@ -15,7 +17,10 @@ from core.serializers.ai_usage import (
     OrganizationAISettingsSerializer,
     OrganizationAISettingsUpdateSerializer,
     AIUsageSummarySerializer,
+    AIProviderModelsListSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -44,7 +49,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
   permission_classes = (IsAuthenticated, OrganizationPermissions)
 
   def get_permissions(self):
-    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage']:
+    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage', 'aiModels']:
       return [IsAuthenticated()]
     return super().get_permissions()
 
@@ -294,6 +299,52 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         return Response(read_serializer.data)
 
   @extend_schema(
+    responses=AIProviderModelsListSerializer,
+  )
+  @action(detail=True, methods=['GET'])
+  def aiModels(self, request, pk=None):
+    """
+    GET: Return curated AI models for the org's configured provider.
+    Also queries the provider's API for live model listings using the org's stored credentials.
+    Only accessible by Org Staff or superuser.
+    """
+    import asyncio
+    from core.services.ai_service import AI_MODELS, list_provider_models
+
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    provider = organization.ai_provider
+    if not provider:
+        return Response({'providers': []})
+
+    # Build curated list
+    curated = AI_MODELS.get(provider, [])
+    result = {
+        'provider': provider,
+        'models': [
+            {'id': mid, 'name': name, 'isDefault': default}
+            for mid, name, default in curated
+        ],
+    }
+
+    # Query provider for live models
+    try:
+        live = asyncio.run(list_provider_models(
+            provider=provider,
+            api_key=organization.ai_api_key or '',
+            base_url=organization.ai_base_url or '',
+        ))
+        result['liveModels'] = live
+    except Exception as e:
+        logger.warning(f"Failed to list models from {provider}: {e}")
+        result['liveError'] = str(e)
+
+    return Response({'providers': [result]})
+
+  @extend_schema(
     responses=AIUsageSummarySerializer,
     parameters=[
         OpenApiParameter(name='granularity', required=False, type=str,
@@ -343,6 +394,12 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         end_date=end_date,
         breakdown_field='course',
         breakdown_name_field='course__name',
+        breakdown_extra_fields=['course__period'],
+        breakdown_name_formatter=lambda entry: (
+            f"{entry['course__name'] or 'Unknown'} ({entry['course__period']})"
+            if entry.get('course__period')
+            else entry['course__name'] or 'Unknown'
+        ),
     )
 
     return Response(summary)

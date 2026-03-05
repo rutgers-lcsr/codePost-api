@@ -13,6 +13,10 @@ def _build_service() -> AIService:
         ai_api_key='test-key',
         ai_base_url=None,
         ai_model='gpt-4o-mini',
+        ai_use_own_settings=True,
+        ai_disabled=False,
+        ai_comments_disabled=False,
+        organization=None,
     )
     return AIService(course=cast(Course, course), assignment=None)
 
@@ -24,8 +28,8 @@ def _run(coro):
 def test_generate_test_script_java_strips_wrapper_class_and_imports():
     service = _build_service()
 
-    async def _fake_openai(self, system_prompt: str, user_prompt: str) -> str:
-        return """```java
+    async def _fake_openai(self, system_prompt: str, user_prompt: str):
+        return ("""```java
 import java.util.regex.Pattern;
 
 public class StudentTests {
@@ -39,7 +43,7 @@ public class StudentTests {
         return new Object[] {5.0, \"ok\"};
     }
 }
-```"""
+```""", 100, 200, 300)
 
     service._call_openai = MethodType(_fake_openai, service)
 
@@ -70,8 +74,8 @@ public double testOnly() {
 }
 """
 
-    async def _fake_openai(self, system_prompt: str, user_prompt: str) -> str:
-        return raw
+    async def _fake_openai(self, system_prompt: str, user_prompt: str):
+        return (raw, 50, 100, 150)
 
     service._call_openai = MethodType(_fake_openai, service)
 
@@ -92,12 +96,12 @@ public double testOnly() {
 def test_generate_test_script_non_java_only_strips_markdown_fences():
     service = _build_service()
 
-    async def _fake_openai(self, system_prompt: str, user_prompt: str) -> str:
-        return """```python
+    async def _fake_openai(self, system_prompt: str, user_prompt: str):
+        return ("""```python
 @test(\"x\", points=1)
 def test_x():
     assert 1 == 1
-```"""
+```""", 80, 120, 200)
 
     service._call_openai = MethodType(_fake_openai, service)
 

@@ -68,6 +68,7 @@ class AIUsageSummarySerializer(serializers.Serializer):
   requestCount = serializers.IntegerField(help_text="Total number of requests")
   timeSeries = AIUsageBucketSerializer(many=True, help_text="Usage data bucketed by time")
   breakdown = AIUsageBreakdownSerializer(many=True, help_text="Usage breakdown by dimension")
+  modelBreakdown = AIUsageBreakdownSerializer(many=True, required=False, help_text="Usage breakdown by AI model")
   granularity = serializers.ChoiceField(choices=['hourly', 'daily', 'monthly'])
   startDate = serializers.DateTimeField()
   endDate = serializers.DateTimeField()
@@ -98,8 +99,15 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
   aiEnabledCourseIds = serializers.PrimaryKeyRelatedField(
     source='ai_enabled_courses', many=True, read_only=True
   )
+  aiTokenRates = serializers.JSONField(
+    source='ai_token_rates', required=False, default=dict,
+    help_text='Custom per-model token rates. JSON: {"model-name": {"input": 0.15, "output": 0.60}}',
+  )
   aiEnabled = serializers.SerializerMethodField()
   aiCommentsEnabled = serializers.SerializerMethodField()
+  hasApiKey = serializers.SerializerMethodField()
+  apiKeyHint = serializers.SerializerMethodField()
+  defaultTokenRates = serializers.SerializerMethodField()
 
   class Meta:
     model = Organization
@@ -113,19 +121,59 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
       'aiCommentsDisabled',
       'aiCoursePolicy',
       'aiEnabledCourseIds',
+      'aiTokenRates',
       'aiEnabled',
       'aiCommentsEnabled',
+      'hasApiKey',
+      'apiKeyHint',
+      'defaultTokenRates',
     )
+
+  @staticmethod
+  def _provider_is_configured(provider, api_key):
+    """Check if a provider has the credentials it needs. Portkey/Ollama only need a URL, not an API key."""
+    if provider in ('ollama', 'portkey'):
+      return bool(provider)
+    return bool(provider and api_key)
 
   @extend_schema_field(serializers.BooleanField)
   def get_aiEnabled(self, obj):
     """Returns True if AI is configured and enabled for this organization."""
-    return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled)
+    return self._provider_is_configured(obj.ai_provider, obj.ai_api_key) and not obj.ai_disabled
 
   @extend_schema_field(serializers.BooleanField)
   def get_aiCommentsEnabled(self, obj):
     """Returns True if AI comments are available at the org level."""
-    return bool(obj.ai_provider and obj.ai_api_key and not obj.ai_disabled and not obj.ai_comments_disabled)
+    return self._provider_is_configured(obj.ai_provider, obj.ai_api_key) and not obj.ai_disabled and not obj.ai_comments_disabled
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_hasApiKey(self, obj):
+    """Returns True if an API key has been saved for this organization."""
+    return bool(obj.ai_api_key)
+
+  @extend_schema_field(serializers.CharField(allow_null=True))
+  def get_apiKeyHint(self, obj):
+    """Returns a masked preview of the API key, e.g. 'sk-…abc1'."""
+    return self._mask_key(obj.ai_api_key)
+
+  @extend_schema_field(serializers.DictField(child=serializers.DictField()))
+  def get_defaultTokenRates(self, obj):
+    """Returns the hardcoded default token rates from AIService."""
+    from core.services.ai_service import AIService
+    return {
+      model: {'input': r[0], 'output': r[1]}
+      for model, r in AIService.TOKEN_RATES.items()
+    }
+
+  @staticmethod
+  def _mask_key(key):
+    """Return a masked version of the key showing first 3 and last 4 chars."""
+    if not key:
+      return None
+    k = str(key)
+    if len(k) <= 8:
+      return '••••' + k[-2:] if len(k) >= 2 else '••••••'
+    return k[:3] + '…' + k[-4:]
 
 
 class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
@@ -154,6 +202,10 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
     child=serializers.IntegerField(), required=False, write_only=True,
     help_text="List of course IDs to enable for org AI (used when aiCoursePolicy is 'selected')"
   )
+  aiTokenRates = serializers.JSONField(
+    source='ai_token_rates', required=False, default=dict,
+    help_text='Custom per-model token rates. JSON: {"model-name": {"input": 0.15, "output": 0.60}}',
+  )
 
   class Meta:
     model = Organization
@@ -166,6 +218,7 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
       'aiCommentsDisabled',
       'aiCoursePolicy',
       'aiEnabledCourseIds',
+      'aiTokenRates',
     )
 
   def update(self, instance, validated_data):
@@ -176,3 +229,27 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
       courses = Course.objects.filter(id__in=course_ids, organization=instance)
       instance.ai_enabled_courses.set(courses)
     return instance
+
+
+# ------------------------------------------------------------------
+# AI Models list serializers (for the /system/aiModels/ endpoint)
+# ------------------------------------------------------------------
+
+class AIModelSerializer(serializers.Serializer):
+  """A single AI model entry."""
+  id = serializers.CharField(help_text="Model identifier to pass to the provider API")
+  name = serializers.CharField(help_text="Human-readable display name")
+  isDefault = serializers.BooleanField(help_text="Whether this is the default model for the provider", default=False)
+
+
+class AIProviderModelsSerializer(serializers.Serializer):
+  """Models available for a single provider."""
+  provider = serializers.CharField(help_text="Provider identifier (e.g. 'gemini', 'openai')")
+  models = AIModelSerializer(many=True, help_text="Curated list of known models for this provider")
+  liveModels = AIModelSerializer(many=True, required=False, help_text="Models fetched from the provider's API (only included when credentials are supplied)")
+  liveError = serializers.CharField(required=False, allow_null=True, help_text="Error message if querying the provider failed")
+
+
+class AIProviderModelsListSerializer(serializers.Serializer):
+  """Response wrapper for the AI models endpoint."""
+  providers = AIProviderModelsSerializer(many=True, help_text="List of providers with their models")

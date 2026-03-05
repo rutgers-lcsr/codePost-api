@@ -137,7 +137,9 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
                 obj.ai_api_key = source_course.ai_api_key  # Secure copy of encrypted key
                 obj.ai_base_url = source_course.ai_base_url
                 obj.ai_model = source_course.ai_model
+                obj.ai_disabled = source_course.ai_disabled
                 obj.ai_comments_disabled = source_course.ai_comments_disabled
+                obj.ai_use_own_settings = source_course.ai_use_own_settings
                 
                 # Copy other settings if consistent with tooltips.tsx claim:
                 # "Cloning a course will copy all assignments (including rubrics) and course settings"
@@ -193,6 +195,13 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
   aiEnabled = serializers.SerializerMethodField()
   aiCommentsEnabled = serializers.SerializerMethodField()
   orgAiAvailable = serializers.SerializerMethodField()
+  hasApiKey = serializers.SerializerMethodField()
+  apiKeyHint = serializers.SerializerMethodField()
+  aiTokenRates = serializers.JSONField(
+    source='ai_token_rates', required=False, default=dict,
+    help_text='Custom per-model token rates. JSON: {"model-name": {"input": 0.15, "output": 0.60}}',
+  )
+  defaultTokenRates = serializers.SerializerMethodField()
   
   class Meta:
     model = Course
@@ -205,10 +214,21 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'aiDisabled',
       'aiCommentsDisabled',
       'aiUseOwnSettings',
+      'aiTokenRates',
       'aiEnabled',
       'aiCommentsEnabled',
       'orgAiAvailable',
+      'hasApiKey',
+      'apiKeyHint',
+      'defaultTokenRates',
     )
+
+  @staticmethod
+  def _provider_is_configured(provider, api_key):
+    """Check if a provider has the credentials it needs. Portkey/Ollama only need a URL, not an API key."""
+    if provider in ('ollama', 'portkey'):
+      return bool(provider)
+    return bool(provider and api_key)
 
   def _get_effective_ai_config(self, obj):
     """Returns the effective AI configuration for this course, considering org settings."""
@@ -221,7 +241,7 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       }
     # Check if org has AI enabled for this course
     org = obj.organization
-    if org and not org.ai_disabled and org.ai_provider and org.ai_api_key:
+    if org and not org.ai_disabled and org.ai_provider and self._provider_is_configured(org.ai_provider, org.ai_api_key):
       if org.ai_course_policy == 'all':
         return {
           'provider': org.ai_provider,
@@ -248,25 +268,56 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
   def get_aiEnabled(self, obj):
     """Returns True if AI is configured and enabled for this course (considering org settings)."""
     config = self._get_effective_ai_config(obj)
-    return bool(config['provider'] and config['api_key'] and not config['disabled'])
+    return self._provider_is_configured(config['provider'], config['api_key']) and not config['disabled']
 
   @extend_schema_field(serializers.BooleanField)
   def get_aiCommentsEnabled(self, obj):
     """Returns True if AI comments are available (considering org settings)."""
     config = self._get_effective_ai_config(obj)
-    return bool(config['provider'] and config['api_key'] and not config['disabled'] and not config['comments_disabled'])
+    return self._provider_is_configured(config['provider'], config['api_key']) and not config['disabled'] and not config['comments_disabled']
 
   @extend_schema_field(serializers.BooleanField)
   def get_orgAiAvailable(self, obj):
     """Returns True if the organization has AI configured and this course is eligible to use it."""
     org = obj.organization
-    if not org or org.ai_disabled or not org.ai_provider or not org.ai_api_key:
+    if not org or org.ai_disabled or not org.ai_provider or not self._provider_is_configured(org.ai_provider, org.ai_api_key):
       return False
     if org.ai_course_policy == 'all':
       return True
     if org.ai_course_policy == 'selected':
       return org.ai_enabled_courses.filter(pk=obj.pk).exists()
     return False
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_hasApiKey(self, obj):
+    """Returns True if an API key has been saved for the effective configuration."""
+    config = self._get_effective_ai_config(obj)
+    return bool(config['api_key'])
+
+  @extend_schema_field(serializers.CharField(allow_null=True))
+  def get_apiKeyHint(self, obj):
+    """Returns a masked preview of the effective API key, e.g. 'sk-…abc1'."""
+    config = self._get_effective_ai_config(obj)
+    return self._mask_key(config['api_key'])
+
+  @extend_schema_field(serializers.DictField(child=serializers.DictField()))
+  def get_defaultTokenRates(self, obj):
+    """Returns the hardcoded default token rates from AIService."""
+    from core.services.ai_service import AIService
+    return {
+      model: {'input': r[0], 'output': r[1]}
+      for model, r in AIService.TOKEN_RATES.items()
+    }
+
+  @staticmethod
+  def _mask_key(key):
+    """Return a masked version of the key showing first 3 and last 4 chars."""
+    if not key:
+      return None
+    k = str(key)
+    if len(k) <= 8:
+      return '••••' + k[-2:] if len(k) >= 2 else '••••••'
+    return k[:3] + '…' + k[-4:]
 
 
 class CourseRosterSerializer(ModelSerializerWithPOSTCheck):

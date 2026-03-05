@@ -1,0 +1,72 @@
+name: Perform Codepost Tests
+
+on:
+    push:
+        branches: [master, render]
+    pull_request:
+        branches: [master, render]
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    lint:
+        name: Lint (djlint)
+        runs-on: testing-codepost
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: poetry install --no-interaction
+
+            - name: Run djlint on templates
+              run: poetry run djlint core/templates/ --lint
+
+    typecheck:
+        name: Type Check (Pyright)
+        runs-on: testing-codepost
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: poetry install --no-interaction
+
+            - name: Run Pyright
+              run: poetry run pyright
+
+    test:
+        name: Tests (pytest + coverage)
+        runs-on: testing-codepost
+        env:
+            DEBUG: "TRUE"
+            TESTING: "TRUE"
+            CELERY_TASK_ALWAYS_EAGER: "TRUE"
+            DJANGO_SETTINGS_MODULE: codepost.settings
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: poetry install --no-interaction
+
+            - name: Run migrations
+              run: poetry run python manage.py migrate --run-syncdb
+
+            - name: Run tests with coverage
+              run: poetry run coverage run -m pytest core/tests/ autograder/tests/ -v
+
+            - name: Generate coverage report
+              run: |
+                  poetry run coverage report
+                  poetry run coverage xml -o coverage.xml
+                  poetry run coverage html -o htmlcov/
+
+            - name: Upload coverage report
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-report
+                  path: |
+                      coverage.xml
+                      htmlcov/
+                  retention-days: 7

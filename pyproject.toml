@@ -116,3 +116,8 @@ stripe = "^14.4.0"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "djangorestframework-stubs (>=3.16.8,<4.0.0)"
+]

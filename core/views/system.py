@@ -11,7 +11,7 @@ import time
 import shutil
 
 from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer, MaintenanceBannerSerializer, MaintenanceBannerResponseSerializer
-from core.serializers.ai_usage import AIUsageSummarySerializer
+from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
 
 
 from djangorestframework_camel_case.render import CamelCaseJSONRenderer
@@ -393,4 +393,42 @@ class SystemAIUsageView(APIView):
         )
 
         return Response(summary)
+
+
+class SystemAIModelsView(APIView):
+    """
+    GET: Return the curated list of AI models per provider.
+    Optional query params: ?provider=X to filter by provider.
+    No credentials are required — this just returns the static list.
+    """
+    permission_classes = [IsAuthenticated]
+    renderer_classes = [CamelCaseJSONRenderer]
+    parser_classes = [CamelCaseJSONParser]
+
+    @extend_schema(
+        responses={200: AIProviderModelsListSerializer},
+        parameters=[
+            OpenApiParameter(name='provider', required=False, type=str,
+                             description="Filter to a single provider",
+                             enum=['gemini', 'openai', 'ollama', 'portkey', 'custom']),
+        ],
+    )
+    def get(self, request):
+        from core.services.ai_service import AI_MODELS
+
+        provider_filter = request.query_params.get('provider', '').strip()
+
+        providers = {}
+        for prov, model_list in AI_MODELS.items():
+            if provider_filter and prov != provider_filter:
+                continue
+            providers[prov] = {
+                'provider': prov,
+                'models': [
+                    {'id': mid, 'name': name, 'isDefault': default}
+                    for mid, name, default in model_list
+                ],
+            }
+
+        return Response({'providers': list(providers.values())})
 

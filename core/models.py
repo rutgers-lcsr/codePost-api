@@ -127,6 +127,7 @@ class Organization(BaseModel):
       ('gemini', 'Google Gemini'),
       ('openai', 'OpenAI'),
       ('ollama', 'Ollama (Self-hosted)'),
+      ('portkey', 'Portkey (Self-hosted)'),
       ('custom', 'Custom Provider'),
   ]
   AI_COURSE_POLICY_CHOICES = [
@@ -165,6 +166,10 @@ class Organization(BaseModel):
   ai_enabled_courses = models.ManyToManyField(
       'Course', blank=True, related_name='ai_enabled_by_organizations',
       help_text="Courses explicitly enabled for the organization's AI configuration (used when ai_course_policy is 'selected')"
+  )
+  ai_token_rates = JSONField(
+      default=dict, blank=True,
+      help_text='Custom per-model token rates. JSON object mapping model names to {"input": <$/1M tokens>, "output": <$/1M tokens>}'
   )
 
   class Meta:
@@ -328,6 +333,7 @@ class Course(BaseModel):
       ('gemini', 'Google Gemini'),
       ('openai', 'OpenAI'),
       ('ollama', 'Ollama (Self-hosted)'),
+      ('portkey', 'Portkey (Self-hosted)'),
       ('custom', 'Custom Provider'),
   ]
   ai_provider = models.CharField(
@@ -367,6 +373,10 @@ class Course(BaseModel):
   ai_use_own_settings = models.BooleanField(
       default=False,
       help_text="If True, course uses its own AI settings instead of the organization's configuration"
+  )
+  ai_token_rates = JSONField(
+      default=dict, blank=True,
+      help_text='Custom per-model token rates. JSON object mapping model names to {"input": <$/1M tokens>, "output": <$/1M tokens>}'
   )
 
   class Meta:

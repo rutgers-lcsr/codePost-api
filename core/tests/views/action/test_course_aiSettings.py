@@ -64,7 +64,11 @@ class TestPermissions_Course_aiSettings(APITestCase):
       'aiEnabled',
       'aiCommentsEnabled',
       'aiUseOwnSettings',
+      'aiTokenRates',
       'orgAiAvailable',
+      'hasApiKey',
+      'apiKeyHint',
+      'defaultTokenRates',
     }
     self.assertEqual(set(patch_response.data.keys()), expected_keys)
     self.assertEqual(patch_response.data['aiProvider'], 'openai')
