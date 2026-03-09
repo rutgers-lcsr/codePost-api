@@ -8,6 +8,7 @@ from core.tests.factories import *
 from core.tests.views.personas import Persona
 
 from core.serializers.course import *
+import unittest
 
 
 class TestSerializer_CourseSerializer(APITestCase):
@@ -38,8 +39,17 @@ class TestSerializer_CourseSerializer(APITestCase):
         pass
 
     def test_create_course_add_roles(self):
-        # self.fail('not implemented yet')
-        pass
+        """Creating a course auto-adds the creator as courseAdmin and grader."""
+        admin = self.course.courseAdmins.first()
+        response = request_as("create", admin, "/courses/", {
+            "name": "NewCourse",
+            "period": "F2025",
+        })
+        self.assertEqual(response.status_code, 201)
+        from core.models import Course as CourseModel
+        new_course = CourseModel.objects.get(id=response.data["id"])
+        self.assertIn(admin, new_course.courseAdmins.all())
+        self.assertIn(admin, new_course.graders.all())
 
 
 class TestSerializer_CourseSettingsSerializer(APITestCase):
@@ -112,13 +122,33 @@ class TestSerializer_CourseRosterSerializer(APITestCase):
         pass
 
     def test_get_not_activated(self):
-        # self.fail('not implemented yet')
-        pass
+        """not_activated returns inactive users."""
+        admin = self.course.courseAdmins.first()
+        response = request_as("read", admin, f"/courses/{self.course.id}/roster/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("not_activated", response.data)
 
     def test_admin_remove_self_from_roster(self):
-        # self.fail('not implemented yet')
-        pass
+        """Admin cannot remove themselves from courseAdmins."""
+        admin = self.course.courseAdmins.first()
+        other_admins = [a.email for a in self.course.courseAdmins.all() if a != admin]
+        response = request_as("update", admin, f"/courses/{self.course.id}/roster/", {
+            "courseAdmins": other_admins,
+            "graders": [g.email for g in self.course.graders.all()],
+            "students": [s.email for s in self.course.students.all()],
+            "superGraders": [sg.email for sg in self.course.superGraders.all()],
+            "rubricEditors": [re.email for re in self.course.rubricEditors.all()],
+        })
+        self.assertEqual(response.status_code, 400)
 
     def test_update_roster(self):
-        # self.fail('[PRIORITY] not implemented yet')
-        pass
+        """Can update roster with valid data."""
+        admin = self.course.courseAdmins.first()
+        response = request_as("update", admin, f"/courses/{self.course.id}/roster/", {
+            "courseAdmins": [a.email for a in self.course.courseAdmins.all()],
+            "graders": [g.email for g in self.course.graders.all()],
+            "students": [s.email for s in self.course.students.all()],
+            "superGraders": [sg.email for sg in self.course.superGraders.all()],
+            "rubricEditors": [re.email for re in self.course.rubricEditors.all()],
+        })
+        self.assertEqual(response.status_code, 200)

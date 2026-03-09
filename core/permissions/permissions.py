@@ -320,7 +320,7 @@ class FilePermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-      logger.info(f"FilePermissions: Checking permissions for File object ({obj.id}) of type {type(obj)}")
+      logger.debug(f"FilePermissions: Checking permissions for File object ({obj.id}) of type {type(obj)}")
       
       # Handle polymorphic file types - check for child model attributes
       # Django MTI may pass the base File object, so we need to check for the child model relationship
@@ -331,7 +331,7 @@ class FilePermissions(TemplatePermission):
       if isinstance(obj, SubmissionFile) or hasattr(obj, 'submissionfile'):
         try:
           submission_file = obj if isinstance(obj, SubmissionFile) else obj.submissionfile
-          logger.info(f"FilePermissions: Delegating to SubmissionPermissions for submission {submission_file.submission.id}")
+          logger.debug(f"FilePermissions: Delegating to SubmissionPermissions for submission {submission_file.submission.id}")
           return SubmissionPermissions().has_object_permission(request, view, submission_file.submission)
         except AttributeError as e:
           logger.warning(f"FilePermissions: Failed to access submissionfile for File {obj.id}: {e}")
@@ -341,7 +341,7 @@ class FilePermissions(TemplatePermission):
       if isinstance(obj, AssignmentFile) or hasattr(obj, 'assignmentfile'):
         try:
           assignment_file = obj if isinstance(obj, AssignmentFile) else obj.assignmentfile
-          logger.info(f"FilePermissions: Delegating to AssignmentPermissions for assignment {assignment_file.assignment.id}")
+          logger.debug(f"FilePermissions: Delegating to AssignmentPermissions for assignment {assignment_file.assignment.id}")
           return AssignmentPermissions().has_object_permission(request, view, assignment_file.assignment)
         except AttributeError as e:
           logger.warning(f"FilePermissions: Failed to access assignmentfile for File {obj.id}: {e}")
@@ -351,7 +351,7 @@ class FilePermissions(TemplatePermission):
       if isinstance(obj, CourseFile) or hasattr(obj, 'coursefile'):
         try:
           course_file = obj if isinstance(obj, CourseFile) else obj.coursefile
-          logger.info(f"FilePermissions: Delegating to CourseFilePermissions for course {course_file.course.id}")
+          logger.debug(f"FilePermissions: Delegating to CourseFilePermissions for course {course_file.course.id}")
           return CourseFilePermissions().has_object_permission(request, view, course_file.course)
         except AttributeError as e:
           logger.warning(f"FilePermissions: Failed to access coursefile for File {obj.id}: {e}")

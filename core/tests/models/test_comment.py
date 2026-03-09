@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from core.tests.utils import request_as, setUpBase
 from core.tests.factories import *
 from core.tests.views.personas import Persona
+import unittest
 
 
 class TestModel_Comment(APITestCase):
@@ -17,10 +18,12 @@ class TestModel_Comment(APITestCase):
     # Fields
     ########################################
 
+    @unittest.skip('Not implemented yet')
     def test_maximum_pointDelta(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_required_fields(self):
         # self.fail('not implemented yet')
         pass
@@ -33,6 +36,7 @@ class TestModel_Comment(APITestCase):
     # Functions
     ########################################
 
+    @unittest.skip('Not implemented yet')
     def test_pointDelta_with_rubricComment(self):
         # self.fail('not implemented yet')
         pass

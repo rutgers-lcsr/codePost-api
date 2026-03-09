@@ -101,7 +101,7 @@ class CommentFactory(factory.django.DjangoModelFactory):
   text = "new comment"
   pointDelta = 2
   author = factory.SubFactory(GraderFactory)
-  file = factory.SubFactory('core.tests.factories.user.FileFactory')
+  file = factory.SubFactory('core.tests.factories.FileFactory')
   startLine = 0
   endLine = 0
   startChar = 1
@@ -123,7 +123,7 @@ class SubmissionFileFactory(factory.django.DjangoModelFactory):
 
   }
 }"""
-  submission = factory.SubFactory('core.tests.factories.user.SubmissionFactory')
+  submission = factory.SubFactory('core.tests.factories.SubmissionFactory')
 
 
 @factory.django.mute_signals(post_save)
@@ -149,7 +149,7 @@ class SubmissionFactory(factory.django.DjangoModelFactory):
   class Meta:
     model = Submission
 
-  assignment = factory.SubFactory('core.tests.factories.user.AssignmentFactory')
+  assignment = factory.SubFactory('core.tests.factories.AssignmentFactory')
   files = factory.RelatedFactory(SubmissionFileFactory, 'submission')
 
 
@@ -160,7 +160,7 @@ class SectionFactory(factory.django.DjangoModelFactory):
     model = Section
 
   name = "P01"
-  course = factory.SubFactory('core.tests.factories.user.CourseFactory')
+  course = factory.SubFactory('core.tests.factories.CourseFactory')
 
 
 @factory.django.mute_signals(post_save)
@@ -171,7 +171,7 @@ class RubricCommentFactory(factory.django.DjangoModelFactory):
 
   text = "Missing a semicolon"
   pointDelta = 1
-  category = factory.SubFactory('core.tests.factories.user.RubricCategoryFactory')
+  category = factory.SubFactory('core.tests.factories.RubricCategoryFactory')
 
 
 @factory.django.mute_signals(post_save)
@@ -181,7 +181,7 @@ class RubricCategoryFactory(factory.django.DjangoModelFactory):
     model = RubricCategory
 
   name = "General"
-  assignment = factory.SubFactory('core.tests.factories.user.AssignmentFactory')
+  assignment = factory.SubFactory('core.tests.factories.AssignmentFactory')
   rubricComments = factory.RelatedFactory(RubricCommentFactory, 'category')
 
 
@@ -195,10 +195,41 @@ class AssignmentFactory(factory.django.DjangoModelFactory):
   name = 'Hello World'
   points = 20
   isReleased = False
-  course = factory.SubFactory('core.tests.factories.user.CourseFactory')
+  course = factory.SubFactory('core.tests.factories.CourseFactory')
 
   submissions = factory.RelatedFactory(SubmissionFactory, 'assignment')
   rubricCategories = factory.RelatedFactory(RubricCategoryFactory, 'assignment')
+
+
+@factory.django.mute_signals(post_save)
+class TestCategoryFactory(factory.django.DjangoModelFactory):
+
+  class Meta:
+    model = TestCategory
+
+  name = "Test Category"
+  assignment = factory.SubFactory(AssignmentFactory)
+
+
+@factory.django.mute_signals(post_save)
+class AssignmentDataSetFactory(factory.django.DjangoModelFactory):
+
+  class Meta:
+    model = AssignmentDataSet
+
+  name = "dataset.csv"
+  assignment = factory.SubFactory(AssignmentFactory)
+  file = "path/to/dataset.csv"
+
+
+@factory.django.mute_signals(post_save)
+class AssignmentFileFactory(factory.django.DjangoModelFactory):
+
+  class Meta:
+    model = AssignmentFile
+
+  name = "test.txt"
+  assignment = factory.SubFactory(AssignmentFactory)
 
 
 @factory.django.mute_signals(post_save)

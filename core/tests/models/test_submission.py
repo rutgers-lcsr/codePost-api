@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from core.tests.utils import request_as, setUpBase
 from core.tests.factories import *
 from core.tests.views.personas import Persona
+import unittest
 
 
 class TestModel_Submission(APITestCase):
@@ -17,6 +18,7 @@ class TestModel_Submission(APITestCase):
     # Fields
     ########################################
 
+    @unittest.skip('Not implemented yet')
     def test_min_grade(self):
         # self.fail('not implemented yet')
         pass
@@ -29,26 +31,32 @@ class TestModel_Submission(APITestCase):
     # Functions
     ########################################
 
+    @unittest.skip('Not implemented yet')
     def test_did_call_calculate_grade_if_frozen(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_did_call_calculate_grade_if_finalized(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_did_call_calculate_grade_if_frozen_and_finalized(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_calculate_grade_getCurrentFiles_with_path(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_calculate_grade_getCurrentFiles_without_path(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_calculate_grade_parameterized(self):
         # self.fail('not implemented yet')
         pass

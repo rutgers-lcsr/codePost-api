@@ -25,7 +25,7 @@ def request_as(method, user, endpoint, payload=None):
     return client.patch(endpoint, payload, format='json')
   elif method == 'delete':
     return client.delete(endpoint)
-  return
+  raise ValueError(f"Unknown request method: '{method}'. Expected 'create', 'read', 'list', 'update', or 'delete'.")
 
 
 def setUpBase(self):
@@ -180,15 +180,15 @@ def setUpBase(self):
 
 SUPERUSER_USERNAME = 'admin@admin.io'
 SUPERUSER_EMAIL = 'admin@admin.io'
-SUPERUSER_PASSSWORD = 'rootabega'
+SUPERUSER_PASSWORD = 'rootabega'
 
 
 def setUpClient(self):
-  self.superuser = User.objects.create_superuser(SUPERUSER_USERNAME, SUPERUSER_EMAIL, SUPERUSER_PASSSWORD)
+  self.superuser = User.objects.create_superuser(SUPERUSER_USERNAME, SUPERUSER_EMAIL, SUPERUSER_PASSWORD)
   self.superuser.profile.canCreateCourses = True
   self.superuser.profile.canModifyRosters = True
   self.superuser.save()
-  self.client.login(username=SUPERUSER_USERNAME, password=SUPERUSER_PASSSWORD)
+  self.client.login(username=SUPERUSER_USERNAME, password=SUPERUSER_PASSWORD)
 
 
 def setUpOrganization(self):

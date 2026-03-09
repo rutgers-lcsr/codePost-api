@@ -10,6 +10,7 @@ from core.tests.views.personas import Persona
 from core.serializers.comment import *
 
 from parameterized import parameterized, parameterized_class
+import unittest
 
 
 class TestSerializer_CommentSerializer(APITestCase):
@@ -83,9 +84,19 @@ class TestSerializer_CommentSerializer(APITestCase):
 
         self.assertTrue(serializer.is_valid())
 
-    def test_color_hexadecimal(self):
-        # self.fail('not implemented yet')
-        pass
+    def test_color_hexadecimal_valid(self):
+        """Valid hex color passes validation."""
+        color_data = self.serializer_data.copy()
+        color_data["color"] = "#FF0000"
+        color_data["endLine"] = 0
+        serializer = CommentSerializer(data=color_data, context={"request": type("Req", (), {"user": self.course.courseAdmins.first()})})
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_color_hexadecimal_invalid(self):
+        """Invalid hex color fails validation."""
+        self.serializer_data["color"] = "not-a-color"
+        serializer = CommentSerializer(data=self.serializer_data, context={"request": type("Req", (), {"user": self.course.courseAdmins.first()})})
+        self.assertFalse(serializer.is_valid())
 
     def test_set_comment_author(self):
         # set grader from other course

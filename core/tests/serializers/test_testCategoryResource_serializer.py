@@ -1,49 +1,13 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 import pytest
-import factory
-from core.models import TestCategoryResource, AssignmentDataSet, AssignmentFile, TestCategory, Assignment, Course, Organization
+from core.models import TestCategoryResource
 from core.serializers.testCategoryResource import TestCategoryResourceSerializer
 from core.serializers.assignmentDataSet import AssignmentDataSetCreateSerializer
-
-class OrganizationFactory(factory.django.DjangoModelFactory):
-    class Meta:
-        model = Organization
-    name = "Test Org"
-    shortname = "testorg"
-
-class CourseFactory(factory.django.DjangoModelFactory):
-    class Meta:
-        model = Course
-    name = "Test Course"
-    period = "F2023"
-    organization = factory.SubFactory(OrganizationFactory)
-
-class AssignmentFactory(factory.django.DjangoModelFactory):
-    class Meta:
-        model = Assignment
-    name = "Test Assignment"
-    course = factory.SubFactory(CourseFactory)
-    points = 100
-    isReleased = True
-
-class TestCategoryFactory(factory.django.DjangoModelFactory):
-    class Meta:
-        model = TestCategory
-    name = "Test Category"
-    assignment = factory.SubFactory(AssignmentFactory)
-
-class AssignmentDataSetFactory(factory.django.DjangoModelFactory):
-    class Meta:
-        model = AssignmentDataSet
-    name = "dataset.csv"
-    assignment = factory.SubFactory(AssignmentFactory)
-    file = "path/to/dataset.csv"
-
-class AssignmentFileFactory(factory.django.DjangoModelFactory):
-    class Meta:
-        model = AssignmentFile
-    name = "test.txt"
-    assignment = factory.SubFactory(AssignmentFactory)
+from core.tests.factories import (
+    AssignmentFactory,
+    TestCategoryFactory,
+    AssignmentFileFactory,
+)
 
 @pytest.mark.django_db
 def test_create_resource_with_camelCase_targetPath():

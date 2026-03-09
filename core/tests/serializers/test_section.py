@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from core.tests.utils import request_as, setUpBase
 from core.tests.factories import *
 from core.tests.views.personas import Persona
+import unittest
 
 
 class TestSerializer_SectionSerializer(APITestCase):
@@ -33,5 +34,28 @@ class TestSerializer_SectionSerializer(APITestCase):
         pass
 
     def test_add_leaders_and_students(self):
-        # self.fail('[PRIORITY] not implemented yet')
-        pass
+        """Section serializer validates that leaders are graders and students are enrolled."""
+        admin = self.course.courseAdmins.first()
+        grader = self.course.graders.first()
+        student = self.course.students.first()
+        response = request_as("create", admin, "/sections/", {
+            "course": self.course.id,
+            "name": "NewSection",
+            "leaders": [grader.email],
+            "students": [student.email],
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertIn(grader.email, response.data["leaders"])
+        self.assertIn(student.email, response.data["students"])
+
+    def test_add_non_grader_as_leader_fails(self):
+        """Trying to add a student as a section leader should fail."""
+        admin = self.course.courseAdmins.first()
+        student = self.course.students.first()
+        response = request_as("create", admin, "/sections/", {
+            "course": self.course.id,
+            "name": "BadSection",
+            "leaders": [student.email],
+            "students": [],
+        })
+        self.assertIn(response.status_code, [400, 403])

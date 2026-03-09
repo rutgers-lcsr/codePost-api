@@ -8,6 +8,7 @@ from core.tests.factories import *
 from core.tests.views.personas import Persona
 
 from core.serializers.assignment import *
+import unittest
 
 
 class TestSerializer_AssignmentSerializer(APITestCase):
@@ -41,12 +42,31 @@ class TestSerializer_AssignmentSerializer(APITestCase):
         pass
 
     def test_anonymous_grading_course_setting_overridden(self):
-        # self.fail('not implemented yet')
-        pass
+        """When anonymousGrading is explicitly set, course default is ignored."""
+        self.course.anonymousGradingDefault = True
+        self.course.save()
+        self.serializer_data["anonymousGrading"] = False
+        admin = self.course.courseAdmins.first()
+        response = request_as("create", admin, "/assignments/", {
+            **self.serializer_data,
+            "course": self.course.id,
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.data["anonymousGrading"])
 
     def test_anonymous_grading_course_setting_not_overridden(self):
-        # self.fail('not implemented yet')
-        pass
+        """When anonymousGrading is not set, course default applies."""
+        self.course.anonymousGradingDefault = True
+        self.course.save()
+        admin = self.course.courseAdmins.first()
+        response = request_as("create", admin, "/assignments/", {
+            "name": "NewAsg",
+            "points": 50,
+            "isReleased": False,
+            "course": self.course.id,
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["anonymousGrading"])
 
 
 class TestSerializer_AssignmentSerializerWithStatistics(APITestCase):

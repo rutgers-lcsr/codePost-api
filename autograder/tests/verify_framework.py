@@ -6,7 +6,7 @@ import django
 from django.conf import settings
 
 # Setup Django environment
-sys.path.append('/staff/users/mk1800/Development/codePost-api')
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "codepost.settings")
 django.setup()
 

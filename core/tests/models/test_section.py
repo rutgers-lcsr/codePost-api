@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from core.tests.utils import request_as, setUpBase
 from core.tests.factories import *
 from core.tests.views.personas import Persona
+import unittest
 
 
 class TestModel_Section(APITestCase):
@@ -21,14 +22,17 @@ class TestModel_Section(APITestCase):
     # Unique Together
     ########################################
 
+    @unittest.skip('Not implemented yet')
     def test_create_section_same_name_same_course(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_create_section_same_name_different_course(self):
         # self.fail('not implemented yet')
         pass
 
+    @unittest.skip('Not implemented yet')
     def test_create_section_same_name_same_course_case_sensitive(self):
         # self.fail('not implemented yet')
         pass

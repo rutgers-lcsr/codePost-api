@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from core.tests.utils import request_as, setUpBase
 from core.tests.factories import *
 from core.tests.views.personas import Persona
+import unittest
 
 
 class TestModel_Assignment(APITestCase):
@@ -99,6 +100,7 @@ class TestModel_Assignment(APITestCase):
     # Functions
     ########################################
 
+    @unittest.skip('Not implemented yet')
     def test_calculate_average_and_median(self):
         # self.fail('not implemented yet')
         pass
