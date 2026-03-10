@@ -42,6 +42,7 @@ jobs:
             - name: Notify database deployment success
               run: echo "Database deployment to production server successful!"
     deploy:
+        needs: [deploy_data]
         environment: production
         runs-on: production-api
         env:
@@ -60,7 +61,7 @@ jobs:
             WORKER_SHELL_SHARED_SECRET: ${{ secrets.WORKER_SHELL_SHARED_SECRET }}
         steps:
             - name: Checkout code
-              uses: actions/checkout@v2
+              uses: actions/checkout@v5
 
             - name: Set up Certs
               run: |
@@ -74,10 +75,10 @@ jobs:
                   API_URL=${{ vars.API_URL }}
                   CLIENT_URL=${{ vars.CLIENT_URL }}
                   SECRET_KEY=${{ secrets.SECRET_KEY }}
-                  FIELD_ENCRYPTION_KEY= ${{secrets.FIELD_ENCRYPTION_KEY}}
+                  FIELD_ENCRYPTION_KEY=${{ secrets.FIELD_ENCRYPTION_KEY }}
                   DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
                   DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-                  API_USER=${{ secrets.API_USER }}
+                  API_USER=${{ vars.API_USER }}
                   API_PASSWORD=${{ secrets.API_PASSWORD }}
                   EMAIL_HOST=${{ vars.EMAIL_HOST }}
                   DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
@@ -98,6 +99,7 @@ jobs:
             - name: Notify deployment success
               run: echo "Deployment to production server successful!"
     deploy_workers:
+        needs: [deploy]
         environment: production
         runs-on: production-workers
         env:
@@ -125,8 +127,9 @@ jobs:
                   SECRET_KEY=${{ secrets.SECRET_KEY }}
                   DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
                   DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-                  API_USER=${{ vars.API_USER }}   
+                  API_USER=${{ vars.API_USER }}
                   API_PASSWORD=${{ secrets.API_PASSWORD }}
+                  FIELD_ENCRYPTION_KEY=${{ secrets.FIELD_ENCRYPTION_KEY }}
                   EMAIL_HOST=${{ vars.EMAIL_HOST }}
                   DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
                   NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}
