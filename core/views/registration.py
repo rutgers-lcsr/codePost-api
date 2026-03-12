@@ -47,7 +47,7 @@ from core.serializers.registration import (
     ResetPasswordResponseSerializer,
 )
 
-from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, NewAdminActivationEmail, NewAdminRequestEmail, PasswordResetEmail, UserAddedToCourseEmail
+from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, ExistingOrgAdminRequestEmail, NewAdminActivationEmail, NewAdminRequestEmail, NewOrgAdminRequestEmail, PasswordResetEmail, PendingConfirmationEmail, UserAddedToCourseEmail
 
 from core.permissions.helpers import (
     returnNotAuthorized,
@@ -336,6 +336,7 @@ def validateNewAdminUser(request):
     Currently Vurnable to abuse, any user can call this endpoint and create an admin account. 
     """
     action_id = []
+    is_new_org = False
 
     form = CreateAdminForm(request.data)  # organization, email
     if form.is_valid():
@@ -372,7 +373,7 @@ def validateNewAdminUser(request):
                     message=json.dumps(
                         {
                             "user": user.email,
-                            "old_organization": user.profile.organization.shortname,
+                            "old_organization": user.profile.organization.shortname if user.profile.organization else "",
                             "new_organization": rawName,
                             "shortname": shortnameFromForm,
                             "email": user.email,
@@ -411,22 +412,21 @@ def validateNewAdminUser(request):
             # create it
             except Organization.DoesNotExist:
                 org = Organization.objects.create(
-                    name=shortnameFromForm, shortname=shortnameFromForm
+                    name=rawName, shortname=shortnameFromForm
                 )
                 user.profile.organization = org
                 user.save()
                 action_id.append(2)
+                is_new_org = True
 
-        # From now on, we can assume user exist and organization matches specified
-        # org
+        # From now on, we can assume user exists and organization matches specified org
 
         if user.is_active and user.profile.canModifyRosters:
             action_id.append(1)
             # If user already exists and has been validated, then email them
-         
+
             AdminAlreadyEmail(user=user).send_email()
 
-        
             logEvent(
                 "Admin Already Exists",
                 level=logging.WARNING,
@@ -438,26 +438,61 @@ def validateNewAdminUser(request):
                     }
                 ),
             )
-           
 
             return Response(
-                {"success": True, "action_id": ".".join(map(str, action_id))},
+                {"success": True, "action_id": ".".join(map(str, action_id)), "is_new_org": False, "pending": False},
                 status=status.HTTP_200_OK,
             )
         else:
             action_id.append(2)
-            # Figure out if we can automatically approve this user
-            # email_ends_with_edu = user.email[-4:] == ".edu"
+
+            # Set user as pending validation — do NOT auto-activate
             user.profile.pendingValidation = True
-            user.profile.canModifyRosters = True
+            user.profile.canModifyRosters = False
             user.save()
 
-            NewAdminRequestEmail(
+            if is_new_org:
+                # NEW ORG: Email CodePost staff only
+                NewOrgAdminRequestEmail(
+                    user=user
+                ).send_email(organization_name=org.name)
+
+                logEvent(
+                    "New Org Admin Request",
+                    level=logging.INFO,
+                    message=json.dumps(
+                        {
+                            "user": user.email,
+                            "organization": org.name,
+                            "is_new_org": True,
+                        }
+                    ),
+                )
+            else:
+                # EXISTING ORG: Email Org Staff + CodePost staff
+                ExistingOrgAdminRequestEmail(
+                    user=user
+                ).send_email(organization_name=org.name)
+
+                logEvent(
+                    "Existing Org Admin Request",
+                    level=logging.INFO,
+                    message=json.dumps(
+                        {
+                            "user": user.email,
+                            "organization": org.name,
+                            "is_new_org": False,
+                        }
+                    ),
+                )
+
+            # Send confirmation email to the requesting user
+            PendingConfirmationEmail(
                 user=user
-            ).send_email(organization_name=org.name)
+            ).send_email(organization_name=org.name, is_new_org=is_new_org)
 
             return Response(
-                {"success": True, "action_id": ".".join(map(str, action_id))},
+                {"success": True, "action_id": ".".join(map(str, action_id)), "is_new_org": is_new_org, "pending": True},
                 status=status.HTTP_200_OK,
             )
     else:
@@ -507,8 +542,8 @@ def handleValidationResponse(request):
                 if isValid:
                     if form.cleaned_data["activate"]:
                         # granting privilege
-
-                        approve_new_admin_user(user)
+                        org = user.profile.organization
+                        approve_new_admin_user(user, org_name=org.name if org else "")
 
                     else:
                         # denying privilege
@@ -524,7 +559,7 @@ def handleValidationResponse(request):
                             message=json.dumps(
                                 {
                                     "user": user.email,
-                                    "organization": user.profile.organization.name,
+                                    "organization": user.profile.organization.name if user.profile.organization else "",
                                 }
                             ),
                         )
@@ -581,7 +616,7 @@ def checkStatusNewAdminUser(request):
             return Response(
                 {"pending": isPending, "status": isActivated}, status=status.HTTP_200_OK
             )
-        except:
+        except User.DoesNotExist:
             return Response(
                 {"pending": False, "status": False}, status=status.HTTP_200_OK
             )
@@ -596,13 +631,17 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
     user.profile.canModifyRosters = True
     user.profile.canCreateCourses = True
     user.profile.pendingValidation = False
+    user.is_active = True
     user.save()
+    user.profile.save()
 
     # send registration email
+    org = user.profile.organization
+    resolved_org_name = org_name or (org.name if org else "Unknown")
 
     NewAdminActivationEmail(
         user=user
-    ).send_email(organization_name=org_name)
+    ).send_email(organization_name=resolved_org_name)
 
     logEvent(
         "Admin New Request Approved",
@@ -610,13 +649,13 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
         message=json.dumps(
             {
                 "user": user.email,
-                "organization": user.profile.organization.name,
-                "shortname": user.profile.organization.shortname,
+                "organization": org.name if org else "",
+                "shortname": org.shortname if org else "",
             }
         ),
     )
 
-    meta = {auto_approved: auto_approved}
+    meta = {"auto_approved": auto_approved}
 
     Event.objects.create(
         category="registration",

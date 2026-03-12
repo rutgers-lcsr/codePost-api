@@ -39,6 +39,8 @@ events = [
     "Admin New Request Error",
     "Admin New Request Denied",
     "Admin New Request Approved",
+    "New Org Admin Request",
+    "Existing Org Admin Request",
     "Generate One-Time Token",
     "CIP Activation",
     "Webhook Error",

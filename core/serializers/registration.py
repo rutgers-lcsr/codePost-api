@@ -56,6 +56,8 @@ class ValidateNewAdminUserRequestSerializer(serializers.Serializer):
 class ValidateNewAdminUserResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     action_id = serializers.CharField()
+    is_new_org = serializers.BooleanField(required=False)
+    pending = serializers.BooleanField(required=False)
 
 
 class HandleValidationResponseSerializer(serializers.Serializer):

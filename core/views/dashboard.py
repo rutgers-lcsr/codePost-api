@@ -2,7 +2,9 @@
 """
 Dashboard ViewSet for platform admin statistics.
 """
-from rest_framework import viewsets
+import json
+
+from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -14,6 +16,7 @@ from datetime import timedelta
 
 from core.models import Organization, Course, Assignment, Section
 from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer
+from core.serializers.user import UserSerializer
 
 
 class DashboardViewSet(viewsets.ViewSet):
@@ -123,3 +126,92 @@ class DashboardViewSet(viewsets.ViewSet):
 
         serializer = AssignmentDeadlineSerializer(results, many=True)
         return Response(serializer.data)
+
+    @extend_schema(responses={200: UserSerializer(many=True)})
+    @action(detail=False, methods=['GET'])
+    def pending_admins(self, request):
+        """
+        Returns all users with pendingValidation=True across all organizations.
+        Used by the SuperAdmin dashboard to manage pending admin requests.
+        """
+        pending_users = User.objects.filter(
+            profile__pendingValidation=True
+        ).select_related('profile', 'profile__organization').order_by('-profile__created')
+
+        serializer = UserSerializer(pending_users, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['POST'])
+    def approve_pending_admin(self, request):
+        """
+        Approve a pending admin request (superuser only).
+        Payload: { 'user_email': '...' }
+        """
+        from core.emails import NewAdminActivationEmail
+        from log.models import Event as LogEvent
+
+        email = request.data.get('user_email')
+        if not email:
+            return Response({'error': 'Missing user_email'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email, profile__pendingValidation=True)
+        except User.DoesNotExist:
+            return Response({'error': 'Pending user not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        org = user.profile.organization
+
+        user.profile.pendingValidation = False
+        user.profile.canCreateCourses = True
+        user.profile.canModifyRosters = True
+        user.is_active = True
+        user.save()
+        user.profile.save()
+
+        # Send activation email
+        NewAdminActivationEmail(user=user).send_email(
+            organization_name=org.name if org else "Unknown"
+        )
+
+        LogEvent.objects.create(
+            category="registration",
+            user=str(user),
+            description="Admin approved by staff",
+            meta=json.dumps({"approved_by": request.user.email}),
+        )
+
+        return Response({'status': 'approved'})
+
+    @action(detail=False, methods=['POST'])
+    def deny_pending_admin(self, request):
+        """
+        Deny a pending admin request (superuser only).
+        Payload: { 'user_email': '...' }
+        """
+        from core.utils import is_course_member
+        from log.models import Event as LogEvent
+
+        email = request.data.get('user_email')
+        if not email:
+            return Response({'error': 'Missing user_email'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email, profile__pendingValidation=True)
+        except User.DoesNotExist:
+            return Response({'error': 'Pending user not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        user.profile.pendingValidation = False
+        user.profile.save()
+
+        LogEvent.objects.create(
+            category="registration",
+            user=str(user),
+            description="Admin denied by staff",
+            meta=json.dumps({"denied_by": request.user.email}),
+        )
+
+        if not is_course_member(user):
+            user.delete()
+            return Response({'status': 'denied_and_deleted'})
+
+        return Response({'status': 'denied'})

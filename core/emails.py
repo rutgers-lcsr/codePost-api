@@ -79,8 +79,8 @@ class CodepostEmail(ABC):
         if self.user.email:
             return self.user.email
 
-        if self.user.organization and self.user.organization.email:
-            return self.user.organization.email
+        if self.user.profile.organization and self.user.profile.organization.email:
+            return self.user.profile.organization.email
 
         raise ValueError("User does not have an email address set.")
     
@@ -92,20 +92,22 @@ class CodepostEmail(ABC):
 
     def get_admin_emails(self):
         """
-        Returns a list of admin emails for the organization.
-        If the user is not part of an organization, it returns an empty list.
+        Returns a list of org staff emails for the organization, plus CodePost admins.
+        If the user is not part of an organization, it returns only CodePost admins.
         """
         CODEPOST_ADMINS = list(map(lambda x: x[1], ADMINS))
 
-        org:Organization = self.user.profile.organization.name
+        if not self.user or not self.user.profile.organization:
+            return CODEPOST_ADMINS
 
+        org_name = self.user.profile.organization.name
 
-        org_admins = User.objects.filter(
-            profile__organization__name=org,
-            profile__canCreateCourses=True
+        org_staff = User.objects.filter(
+            profile__organization__name=org_name,
+            profile__isOrgStaff=True
         ).values_list('email', flat=True)
 
-        return list(org_admins) + CODEPOST_ADMINS
+        return list(org_staff) + CODEPOST_ADMINS
 
     def get_codepost_admins(self):
         return list(map(lambda x: x[1], ADMINS))
@@ -184,8 +186,6 @@ class UserAddedToCourseEmail(CodepostEmail):
                 token=default_token_generator.make_token(self.user),
             )
 
-
-        print("context", context)
 
         html_content = render_to_string(self.template, context)
 
@@ -538,4 +538,86 @@ class PublishNewAssignmentEmail(CodepostEmail):
             to=[self.get_to_address()],
         )
         
+        return self.send(email)
+
+
+class NewOrgAdminRequestEmail(CodepostEmail):
+    """
+    Email sent to CodePost staff when a user requests to create a NEW organization
+    and become a course admin.
+    """
+    subject = "New Organization Admin Request on CodePost"
+    template = "emails/admin/new_org_admin_request_template.html"
+
+    def send_email(self, organization_name:str):
+        context = self.get_context(
+            organization=organization_name,
+            uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+            token=default_token_generator.make_token(self.user),
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=self.get_codepost_admins(),
+        )
+
+        return self.send(email)
+
+
+class ExistingOrgAdminRequestEmail(CodepostEmail):
+    """
+    Email sent to Org Staff AND CodePost staff when a user requests to become
+    a course admin in an EXISTING organization.
+    """
+    subject = "New Course Admin Request on CodePost"
+    template = "emails/admin/existing_org_admin_request_template.html"
+
+    def send_email(self, organization_name:str):
+        context = self.get_context(
+            organization=organization_name,
+            uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
+            token=default_token_generator.make_token(self.user),
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        # Send to both org staff and codepost admins
+        recipients = self.get_admin_emails()
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=recipients,
+        )
+
+        return self.send(email)
+
+
+class PendingConfirmationEmail(CodepostEmail):
+    """
+    Email sent to the user confirming their request has been received and is pending approval.
+    """
+    subject = "Your codePost Admin Request is Pending"
+    template = "emails/admin/pending_confirmation_template.html"
+
+    def send_email(self, organization_name:str, is_new_org:bool=False):
+        context = self.get_context(
+            organization=organization_name,
+            is_new_org=is_new_org,
+        )
+
+        html_content = render_to_string(self.template, context)
+
+        email = EmailMessage(
+            subject=self.subject,
+            body=html_content,
+            from_email=self.get_from_address(),
+            to=[self.get_to_address()],
+        )
+
         return self.send(email)

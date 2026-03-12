@@ -49,7 +49,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
   permission_classes = (IsAuthenticated, OrganizationPermissions)
 
   def get_permissions(self):
-    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage', 'aiModels']:
+    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage', 'aiModels', 'pending_admins', 'approve_admin', 'deny_admin']:
       return [IsAuthenticated()]
     return super().get_permissions()
 
@@ -68,6 +68,101 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     users = User.objects.filter(profile__organization=organization)
     serializer = UserSerializer(users, many=True, context={'request': request})
     return Response(serializer.data)
+
+  @action(detail=True, methods=['GET'])
+  def pending_admins(self, request, pk=None):
+    """
+    Returns a list of users with pendingValidation=True in this organization.
+    Only accessible by Org Staff or superuser.
+    """
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    pending_users = User.objects.filter(
+        profile__organization=organization,
+        profile__pendingValidation=True
+    )
+    serializer = UserSerializer(pending_users, many=True, context={'request': request})
+    return Response(serializer.data)
+
+  @action(detail=True, methods=['POST'])
+  def approve_admin(self, request, pk=None):
+    """
+    Approve a pending admin request. Grants canCreateCourses=True.
+    Payload: { 'user_email': '...' }
+    """
+    from core.emails import NewAdminActivationEmail
+
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    email = request.data.get('user_email')
+    if not email:
+        return Response({'error': 'Missing user_email'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(email=email, profile__organization=organization, profile__pendingValidation=True)
+    except User.DoesNotExist:
+        return returnNotFound('Pending user not found in this organization')
+
+    user.profile.pendingValidation = False
+    user.profile.canCreateCourses = True
+    user.profile.canModifyRosters = True
+    user.is_active = True
+    user.save()
+    user.profile.save()
+
+    # Send activation email to the user
+    NewAdminActivationEmail(user=user).send_email(organization_name=organization.name)
+
+    logger.info(f"Admin approved: {email} for org {organization.name} by {request.user.email}")
+
+    return Response({'status': 'approved'})
+
+  @action(detail=True, methods=['POST'])
+  def deny_admin(self, request, pk=None):
+    """
+    Deny a pending admin request.
+    Payload: { 'user_email': '...' }
+    """
+    from core.utils import is_course_member
+    from log.models import Event
+
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    email = request.data.get('user_email')
+    if not email:
+        return Response({'error': 'Missing user_email'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(email=email, profile__organization=organization, profile__pendingValidation=True)
+    except User.DoesNotExist:
+        return returnNotFound('Pending user not found in this organization')
+
+    user.profile.pendingValidation = False
+    user.profile.save()
+
+    Event.objects.create(
+        category="registration",
+        user=str(user),
+        description="Admin request denied",
+    )
+
+    logger.info(f"Admin denied: {email} for org {organization.name} by {request.user.email}")
+
+    # If user has no course memberships, delete them
+    if not is_course_member(user):
+        user.delete()
+        return Response({'status': 'denied_and_deleted'})
+
+    return Response({'status': 'denied'})
 
   @action(detail=True, methods=['POST'])
   def verify_user(self, request, pk=None):
@@ -94,6 +189,10 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         
     if action_type == 'approve':
         user.profile.pendingValidation = False
+        user.profile.canCreateCourses = True
+        user.profile.canModifyRosters = True
+        user.is_active = True
+        user.save()
         user.profile.save()
         return Response({'status': 'approved'})
         
