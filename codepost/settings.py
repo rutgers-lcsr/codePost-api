@@ -404,7 +404,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "core.middleware.csp_frame_ancestors_middleware",
 ]
 if DEBUG:
     MIDDLEWARE.append("core.middleware.dev_cors_middleware")
@@ -493,12 +493,9 @@ if not DEBUG:
 
 STATICFILES_DIRS = []
 
-# X-Frame-Options
-
-if DEBUG:
-    X_FRAME_OPTIONS = 'SAMEORIGIN'
-else:
-    X_FRAME_OPTIONS = 'SAMEORIGIN'
+# Clickjacking protection is handled by CSP frame-ancestors
+# in core.middleware.csp_frame_ancestors_middleware instead of
+# Django's XFrameOptionsMiddleware.
 
 
 
