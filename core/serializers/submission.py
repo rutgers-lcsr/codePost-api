@@ -209,6 +209,11 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
     if not can_view_feedback:
        ret['grade'] = None
 
+    # Hide draft responses from students — only show when the request is closed
+    if obj.questionIsOpen:
+      ret['questionResponse'] = ''
+      ret['responseDate'] = None
+
     return ret
 
   @extend_schema_field(SubmissionFileSerializer(many=True))

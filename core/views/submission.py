@@ -213,21 +213,30 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = Submission.objects.get(id=pk)
     course = submission.assignment.course
 
-    if not isStudentOfSub(user,submission) or not (submission.assignment.allowRegradeRequests) or not submission.isFinalized:
+    if not isStudentOfSub(user, submission):
       return returnForbidden()
 
+    if not submission.assignment.allowRegradeRequests:
+      raise serializers.ValidationError("Regrade requests are not enabled for this assignment.")
+
+    if not submission.isFinalized:
+      raise serializers.ValidationError("Your submission has not been graded yet. You can submit a regrade request after your submission has been graded.")
+
     if submission.questionResponder or submission.questionResponse:
-      raise serializers.ValidationError("Request is in review. Changed cannot be made.")
+      raise serializers.ValidationError("Your request is currently being reviewed by a grader. Changes cannot be made at this time.")
 
     if submission.assignment.regradeDeadline and now() > submission.assignment.regradeDeadline:
-      raise serializers.ValidationError("Regrade deadline has passed")
+      raise serializers.ValidationError("The regrade request deadline for this assignment has passed.")
 
     # Current design decision is to not allow students to update their regrade request after submit
     if submission.questionText:
-      raise serializers.ValidationError("Request has already been submitted.")
+      raise serializers.ValidationError("You have already submitted a regrade request for this submission.")
 
-    if not 'questionText' in request.data:
+    if 'questionText' not in request.data:
       raise serializers.ValidationError("questionText field is not provided.")
+
+    if not request.data['questionText'].strip():
+      raise serializers.ValidationError("questionText cannot be empty.")
 
     submission.questionIsOpen = True
     submission.questionText = request.data['questionText']
@@ -250,11 +259,17 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = Submission.objects.get(id=pk)
     course = submission.assignment.course
 
-    if not isStudentOfSub(user,submission) or not (submission.assignment.allowRegradeRequests) or not submission.isFinalized:
+    if not isStudentOfSub(user, submission):
       return returnForbidden()
 
+    if not submission.assignment.allowRegradeRequests:
+      raise serializers.ValidationError("Regrade requests are not enabled for this assignment.")
+
+    if not submission.isFinalized:
+      raise serializers.ValidationError("Your submission has not been graded yet.")
+
     if submission.questionResponder or submission.questionResponse:
-      raise serializers.ValidationError("Request is in review. Changed cannot be made.")
+      raise serializers.ValidationError("Your request is currently being reviewed by a grader. Changes cannot be made at this time.")
 
     submission.questionIsOpen = False
     submission.questionText = ''

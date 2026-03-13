@@ -520,10 +520,7 @@ class SubmissionTestPermissions(TemplatePermission):
     
     - POST/DELETE: Course admins only
     - PUT/PATCH: Course admins or staff of submission
-    - GET: Staff of submission, or students under specific conditions:
-      * Assignment is released AND submission is finalized, OR
-      * Assignment is in live feedback mode, OR
-      * Test case is explicitly exposed
+    - GET: Staff of submission, or students of the submission
     """
 
     def has_object_permission(self, request, view, obj: SubmissionTest):
@@ -532,24 +529,12 @@ class SubmissionTestPermissions(TemplatePermission):
         assignment = submission.assignment
         course = assignment.course
 
-        # GET: staff of submission, or students (under specific conditions)
+        # GET: staff of submission, or students of the submission
         if request.method == "GET":
-            # Staff can always view
             if isStaffOfSub(user, submission):
                 return True
-            
-            # Students can view if:
             if isStudentOfSub(user, submission):
-                # 1. Assignment released AND submission finalized
-                if assignment.isReleased and submission.isFinalized:
-                    return True
-                # 2. Live feedback mode is enabled
-                if assignment.liveFeedbackMode:
-                    return True
-                # 3. Test case is explicitly exposed
-                if obj.testCase.exposed:
-                    return True
-            
+                return True
             return False
 
         # PUT/PATCH: course admin or staff of submission
