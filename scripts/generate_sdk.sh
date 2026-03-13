@@ -5,7 +5,10 @@ set -e
 # Configuration
 API_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEMA_FILE="$API_DIR/schema.yaml"
-SDK_OUTPUT_DIR="$API_DIR/sdk_output"
+# Output directory relative to API_DIR (defaults to Python SDK workspace).
+# Override during migration by setting CODEPOST_SDK_OUT.
+SDK_OUTPUT_DIR_DEFAULT="$API_DIR/../codepost-python"
+SDK_OUTPUT_DIR="${CODEPOST_SDK_OUT:-$SDK_OUTPUT_DIR_DEFAULT}"
 VENV_PYTHON="$API_DIR/.venv/bin/python"
 
 # Ensure we are in the API directory
