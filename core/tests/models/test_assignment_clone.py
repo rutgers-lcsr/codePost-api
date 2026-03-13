@@ -146,7 +146,7 @@ class CourseCloneTests(TestCase):
         setattr(request, "auth", "a" * 40)
 
         serializer = CourseSerializer(
-            data={"name": "Cloned", "period": "S2027", "clone_from": self.source_course.id},
+            data={"name": "Cloned", "period": "S2027", "cloneFrom": self.source_course.id},
             context={"request": request},
         )
         self.assertTrue(serializer.is_valid(), serializer.errors)
