@@ -95,7 +95,7 @@ class BaseTestCases:
           ("list", persona),
       ])
 
-    @parameterized.expand(actions, testcase_func_name=custom_name_func)
+    @parameterized.expand(actions, name_func=custom_name_func)
     def test_permission(self, method, persona):
       if not (method in self.permissions and persona in self.permissions[method]):
         self.skipTest('permission test not requested')

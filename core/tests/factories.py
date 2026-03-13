@@ -203,6 +203,7 @@ class AssignmentFactory(factory.django.DjangoModelFactory):
 
 @factory.django.mute_signals(post_save)
 class TestCategoryFactory(factory.django.DjangoModelFactory):
+  __test__ = False
 
   class Meta:
     model = TestCategory

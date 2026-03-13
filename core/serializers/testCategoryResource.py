@@ -6,6 +6,8 @@ from core.serializers.file import AssignmentFileSerializer
 from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
 
 class TestCategoryResourceSerializer(ModelSerializerWithPOSTCheck):
+    __test__ = False
+
     targetPath = serializers.CharField(source='target_path')
     # Nested read-only fields for detailed display
     fileDetails = AssignmentFileSerializer(source='file', read_only=True)

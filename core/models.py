@@ -1206,6 +1206,8 @@ class Comment(BaseModel):
 ############################## Autograder #####################################################
 
 class TestCategory(BaseModel):
+  __test__ = False
+
   if TYPE_CHECKING:
     id: int
     assignment: Assignment
@@ -1243,6 +1245,8 @@ testCase_status_types = (
 
 
 class TestCase(BaseModel):
+  __test__ = False
+
   if TYPE_CHECKING:
     id: int
     testCategory: TestCategory
@@ -1548,6 +1552,8 @@ def save_user_profile(sender, instance, **kwargs):
 
 
 class TestCategoryResource(BaseModel):
+  __test__ = False
+
   if TYPE_CHECKING:
     id: int
     category: models.ForeignKey[TestCategory, TestCategory]
