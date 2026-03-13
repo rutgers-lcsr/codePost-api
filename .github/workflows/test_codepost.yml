@@ -74,7 +74,7 @@ jobs:
               run: |
                   poetry run coverage report
                   poetry run coverage xml -o coverage.xml
-                  poetry run coverage html -o htmlcov/
+                  poetry run coverage html -d htmlcov/
 
             - name: Upload coverage report
               if: always()
