@@ -1,4 +1,10 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
+from django.db.models.signals import post_save
+import factory
+
+from core.models import SubmissionFile
+
+
 @factory.django.mute_signals(post_save)
 class SubmissionFileFactory(factory.django.DjangoModelFactory):
   

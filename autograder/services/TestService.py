@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import TestCase, Submission, SubmissionTest, File, CachedExecutionResult
+from core.models import TestCase, TestCategory, Submission, SubmissionTest, File, CachedExecutionResult
 from autograder.services.executors import get_executor_class, ExecutionResult, Executor
 
 logger = logging.getLogger(__name__)

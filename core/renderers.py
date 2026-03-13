@@ -44,6 +44,7 @@ class CustomRenderer(DocumentationRenderer):
     }
 
   def render(self, data, accepted_media_type=None, renderer_context=None):
+    renderer_context = renderer_context or {}
     if isinstance(data, coreapi.Document):
       template = loader.get_template(self.template)
       context = self.get_context(data, renderer_context['request'])

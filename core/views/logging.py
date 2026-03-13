@@ -45,6 +45,11 @@ def logError(request):
   errorDetail = request.data.get('errorDetail', '')
   url = request.data.get('url', '')
   screenshot = request.data.get('screenshot', '')
+  category = request.data.get('category', 'UI Error')
+
+  VALID_CATEGORIES = {'UI Error', 'Bug Report', 'Display Issue', 'Performance', 'Data Issue', 'Other'}
+  if category not in VALID_CATEGORIES:
+    category = 'UI Error'
 
   loginas = "{}/loginAs?email={}".format(settings.CLIENT_URL, user)
 
@@ -63,7 +68,7 @@ def logError(request):
     if DEBUG:
       logging.warning(meta)
 
-    Event.objects.create(category="UI Error", user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
+    Event.objects.create(category=category, user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
   except:
     pass
   return Response({'success': True}, status=status.HTTP_200_OK)

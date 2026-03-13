@@ -865,7 +865,7 @@ Based on the context (logic to test) and the example harness above, generate the
         input_tokens = getattr(response.usage_metadata, 'prompt_token_count', 0) or 0
         output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
         total_tokens = getattr(response.usage_metadata, 'total_token_count', 0) or (input_tokens + output_tokens)
-        return response.text, input_tokens, output_tokens, total_tokens
+        return response.text or "", input_tokens, output_tokens, total_tokens
     
     async def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
         """Call OpenAI API. Returns (text, input_tokens, output_tokens, total_tokens)."""
@@ -883,7 +883,7 @@ Based on the context (logic to test) and the example harness above, generate the
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
         total_tokens = usage.total_tokens if usage else (input_tokens + output_tokens)
-        return response.choices[0].message.content, input_tokens, output_tokens, total_tokens
+        return response.choices[0].message.content or "", input_tokens, output_tokens, total_tokens
     
     async def _call_ollama(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
         """Call Ollama API (self-hosted). Returns (text, input_tokens, output_tokens, total_tokens)."""

@@ -33,7 +33,7 @@ class TestSerializer_FileSerializer(APITestCase):
         pass
 
 
-class TestSerializer_FileSerializer(APITestCase):
+class TestSerializer_FileSerializer2(APITestCase):
 
     def setUp(self):
         setUpBase(self)

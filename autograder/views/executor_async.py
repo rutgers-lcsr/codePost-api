@@ -8,7 +8,7 @@ from drf_spectacular.utils import extend_schema
 
 from core.models import File, CachedExecutionResult
 from core.permissions.permissions import FileExecutionPermissions
-from core.permissions.helpers import isStaffOfSub, isCourseStaff
+from core.permissions.helpers import isStaffOfSub, isCourseStaff, isCourseAdmin, returnForbidden
 from autograder.tasks import run_file_task
 from autograder.serializers.execution import (
     AsyncExecutionRequestSerializer,

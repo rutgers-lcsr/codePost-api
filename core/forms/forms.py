@@ -15,7 +15,7 @@ class IDForm(forms.Form):
         strip=True,
         help_text=_("Enter ID to proceed."),
     )
-class ChangePasswordForm(forms.Form):
+class SimpleChangePasswordForm(forms.Form):
   uid = forms.CharField()
   token = forms.CharField(min_length=20, strip=True)
   password = forms.CharField(

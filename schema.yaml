@@ -4226,6 +4226,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/DashboardStats'
           description: ''
+  /dev-auth/login-as/:
+    post:
+      operationId: devAuth_loginAsCreate
+      description: |-
+        Auto-login as a specific role for development purposes.
+        Only available when DEBUG=True.
+      tags:
+      - dev-auth
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
   /files/:
     get:
       operationId: files_list
@@ -11992,6 +12008,9 @@ components:
           type: string
         screenshot:
           type: string
+        category:
+          type: string
+          default: UI Error
     LogHappinessRequest:
       type: object
       properties:

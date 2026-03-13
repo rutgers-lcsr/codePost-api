@@ -2,15 +2,37 @@
     "typeCheckingMode": "basic",
     "reportMissingTypeStubs": false,
     "reportIncompatibleMethodOverride": false,
-    "reportGeneralTypeIssues": false,
     "reportUnknownMemberType": false,
     "reportUnknownVariableType": false,
     "reportUnknownArgumentType": false,
     "reportOperatorIssue": false,
 
+    // Django-stubs limitations: reverse relations, queryset optionality, factory_boy stubs
+    "reportAttributeAccessIssue": "warning",
+    "reportOptionalMemberAccess": "warning",
+    "reportPrivateImportUsage": false,
+    "reportGeneralTypeIssues": "warning",
+
+    // Django/DRF serializer & model field type mismatches — mostly stubs gaps
+    "reportArgumentType": "warning",
+    "reportAssignmentType": "warning",
+    "reportCallIssue": "warning",
+
     "stubPath": "typings",
     "include": ["**/*.py"],
-    "exclude": ["**/migrations", "**/node_modules", "**/venv", "**/.venv", "**/.git", "**/.pytest_cache", "**/__pycache__"],
+    "exclude": [
+        "**/migrations",
+        "**/node_modules",
+        "**/venv",
+        "**/.venv",
+        "**/.git",
+        "**/.pytest_cache",
+        "**/__pycache__",
+        "sdk_output",
+        "sdk_test_output",
+        "examples",
+        "util"
+    ],
     "venvPath": ".",
     "venv": ".venv"
 }

@@ -44,6 +44,6 @@ def _make_pkg_resources_shim():
 def install_pkg_resources_shim():
     """Install a pkg_resources shim if the real one is not available."""
     try:
-        import pkg_resources  # noqa: F401
+        import pkg_resources  # noqa: F401  # type: ignore[reportMissingImports]
     except ImportError:
         sys.modules["pkg_resources"] = _make_pkg_resources_shim()

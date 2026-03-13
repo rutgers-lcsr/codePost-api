@@ -4,7 +4,7 @@ import json
 import time
 from typing import List, Dict, Optional, Tuple
 from django.db.models import Count
-from core.models import Submission, Environment, SubmissionFile
+from core.models import Submission, Environment, SubmissionFile, Assignment
 from log.models import Event
 from core.services.file_handlers.factory import FileHandlerFactory
 
@@ -17,7 +17,7 @@ class Autodetector:
     """
 
     @staticmethod
-    def detect_from_files(files: List[Dict], assignment=None) -> Optional[Tuple[str, str]]:
+    def detect_from_files(files: List[Dict], assignment=None) -> Optional[Tuple[str, str | None]]:
         """
         Detects language and requirements from a list of file dicts.
         Args:
@@ -124,7 +124,7 @@ class Autodetector:
             return True
 
     @staticmethod
-    def detect_and_update(submission: Optional[Submission] = None, assignment: Optional = None, force: bool = False) -> bool:
+    def detect_and_update(submission: Optional[Submission] = None, assignment: Optional["Assignment"] = None, force: bool = False) -> bool:
         """
         Analyzes ALL submission files for the assignment (and assignment files) and updates the environment.
         Can be run with just an assignment (scans assignment files only/mostly).

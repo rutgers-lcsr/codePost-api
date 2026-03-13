@@ -17,13 +17,13 @@ class ModelSerializerWithPOSTCheck(serializers.ModelSerializer):
       forConstructor = {}
       for field_name in POST_permissions_fields:
         forConstructor[field_name] = self.validated_data[field_name]
-      return thisModel(**forConstructor)
+      return thisModel(**forConstructor)  # type: ignore[reportOptionalCall]
 
-    return thisModel(**self.validated_data)
+    return thisModel(**self.validated_data)  # type: ignore[reportOptionalCall]
 
   def genProposedFields(self, data):
     toRet = {}
-    fields = getattr(self.Meta, 'fields', None)
+    fields = getattr(self.Meta, 'fields', None) or []
     for field in fields:
       if field in data:
         toRet[field] = data[field]

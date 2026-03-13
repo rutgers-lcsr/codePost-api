@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 import logging
-from core.models import Assignment, Environment
+from core.models import Assignment, Environment, Submission
 from autograder.services.autodetector import Autodetector
 from autograder.run import BuildEnvironment
 from log.models import Event

@@ -48,7 +48,7 @@ class SubmissionShareTokenGenerator:
             # with:
             #   return False
             if not constant_time_compare(
-                self._make_token_with_timestamp(sumission, ts, legacy=True),
+                self._make_token_with_timestamp(submission, ts, legacy=True),
                 token,
             ):
                 return False

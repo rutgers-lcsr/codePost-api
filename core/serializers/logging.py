@@ -7,6 +7,7 @@ class LogErrorRequestSerializer(serializers.Serializer):
     errorDetail = serializers.CharField(required=False, allow_blank=True)
     url = serializers.CharField(required=False, allow_blank=True)
     screenshot = serializers.CharField(required=False, allow_blank=True)
+    category = serializers.CharField(required=False, default='UI Error')
 
 
 class LogHappinessRequestSerializer(serializers.Serializer):
