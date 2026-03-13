@@ -1346,6 +1346,16 @@ paths:
       description: Return a (optionally filtered) list of submissions whose parent
         is the requested assignment.
       parameters:
+      - in: query
+        name: compact
+        schema:
+          type: string
+        description: If set to '1', return submissions without nested file data.
+      - in: query
+        name: grader
+        schema:
+          type: string
+        description: Filter submissions by grader email.
       - in: path
         name: id
         schema:
@@ -1364,6 +1374,11 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: student
+        schema:
+          type: string
+        description: Filter submissions by student email.
       tags:
       - assignments
       security:
@@ -4117,6 +4132,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourseStudentCaptions'
           description: ''
+  /dashboard/approve_pending_admin/:
+    post:
+      operationId: dashboard_approvePendingAdminCreate
+      description: |-
+        Approve a pending admin request (superuser only).
+        Payload: { 'user_email': '...' }
+      tags:
+      - dashboard
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
   /dashboard/deadlines/:
     get:
       operationId: dashboard_deadlinesList
@@ -4138,6 +4169,44 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AssignmentDeadline'
+          description: ''
+  /dashboard/deny_pending_admin/:
+    post:
+      operationId: dashboard_denyPendingAdminCreate
+      description: |-
+        Deny a pending admin request (superuser only).
+        Payload: { 'user_email': '...' }
+      tags:
+      - dashboard
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /dashboard/pending_admins/:
+    get:
+      operationId: dashboard_pendingAdminsList
+      description: |-
+        Returns all users with pendingValidation=True across all organizations.
+        Used by the SuperAdmin dashboard to manage pending admin requests.
+      tags:
+      - dashboard
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
           description: ''
   /dashboard/stats/:
     get:
@@ -5014,6 +5083,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/Organization'
           description: ''
+  /organizations/{id}/approve_admin/:
+    post:
+      operationId: organizations_approveAdminCreate
+      description: |-
+        Approve a pending admin request. Grants canCreateCourses=True.
+        Payload: { 'user_email': '...' }
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Organization'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Organization'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Organization'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
   /organizations/{id}/demote_staff/:
     post:
       operationId: organizations_demoteStaffCreate
@@ -5041,6 +5149,72 @@ paths:
             schema:
               $ref: '#/components/schemas/Organization'
         required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /organizations/{id}/deny_admin/:
+    post:
+      operationId: organizations_denyAdminCreate
+      description: |-
+        Deny a pending admin request.
+        Payload: { 'user_email': '...' }
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Organization'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Organization'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Organization'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+          description: ''
+  /organizations/{id}/pending_admins/:
+    get:
+      operationId: organizations_pendingAdminsRetrieve
+      description: |-
+        Returns a list of users with pendingValidation=True in this organization.
+        Only accessible by Org Staff or superuser.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -14731,6 +14905,10 @@ components:
           type: boolean
         action_id:
           type: string
+        is_new_org:
+          type: boolean
+        pending:
+          type: boolean
       required:
       - action_id
       - success

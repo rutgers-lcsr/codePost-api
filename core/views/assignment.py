@@ -31,7 +31,7 @@ from rest_framework.decorators import action, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from core.pagination import DefaultPagination, LargeObjectsPagination
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 from core.serializers.actionResponses import (
   AssignmentQueueLengthResponseSerializer,
@@ -387,7 +387,17 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 # Optional arguments: username, grader
 # If neither specified, returns full list of submissions for this assignment
-  @extend_schema(responses=SubmissionSerializer(many=True))
+  @extend_schema(
+    parameters=[
+      OpenApiParameter(name="grader", required=False, type=str, location=OpenApiParameter.QUERY,
+                       description="Filter submissions by grader email."),
+      OpenApiParameter(name="student", required=False, type=str, location=OpenApiParameter.QUERY,
+                       description="Filter submissions by student email."),
+      OpenApiParameter(name="compact", required=False, type=str, location=OpenApiParameter.QUERY,
+                       description="If set to '1', return submissions without nested file data."),
+    ],
+    responses=SubmissionSerializer(many=True),
+  )
   @action(detail=True, pagination_class=DefaultPagination)
   def submissions(self, request, pk=None):
     """
