@@ -1,17 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-import django
-
-try:
-    from django.apps import apps as django_apps
-except ImportError:
-    django_apps = None
+from django.apps import apps as django_apps
 from django.core.exceptions import ImproperlyConfigured
 from django.conf import settings
-
-if django.VERSION >= (2, 0,):
-    get_model_kwargs = {'require_ready': False}
-else:
-    get_model_kwargs = {}
 
 
 def get_module(path):
@@ -21,10 +11,7 @@ def get_module(path):
 
         slugify = get_module('django.template.defaultfilters.slugify')
     """
-    try:
-        from importlib import import_module
-    except ImportError as e:
-        from django.utils.importlib import import_module
+    from importlib import import_module
 
     try:
         mod_name, func_name = path.rsplit('.', 1)
@@ -52,7 +39,7 @@ def get_hook_model():
     if django_apps:
         model_label = (model_label or 'webhooks.Hook').replace('.models.', '.')
         try:
-            return django_apps.get_model(model_label, **get_model_kwargs)
+            return django_apps.get_model(model_label, require_ready=False)
         except ValueError:
             raise ImproperlyConfigured("HOOK_CUSTOM_MODEL must be of the form 'app_label.model_name'")
         except LookupError:
@@ -117,10 +104,10 @@ def find_and_fire_hook(event_name, instance, user_override=None, payload_overrid
 
 def distill_model_event(
         instance,
-        model=False,
-        action=False,
+        model: str | None = None,
+        action: str | None = None,
         user_override=None,
-        event_name=False,
+        event_name: str | None = None,
         trust_event_name=False,
         payload_override=None,
         updated_fields=None,
@@ -141,7 +128,7 @@ def distill_model_event(
     """
     from webhooks.models import get_event_actions_config, HOOK_EVENTS
 
-    if event_name is False and (model is False or action is False):
+    if event_name is None and (model is None or action is None):
         raise TypeError(
             'distill_model_event() requires either `event_name` argument or '
             'both `model` and `action` arguments.'

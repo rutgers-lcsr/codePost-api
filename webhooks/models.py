@@ -24,9 +24,10 @@ from webhooks.utils import distill_model_event, get_hook_model, get_module, find
 if getattr(settings, 'HOOK_CUSTOM_MODEL', None) is None:
     settings.HOOK_CUSTOM_MODEL = 'webhooks.Hook'
 
-HOOK_EVENTS = getattr(settings, 'HOOK_EVENTS', None)
-if HOOK_EVENTS is None:
+_HOOK_EVENTS = getattr(settings, 'HOOK_EVENTS', None)
+if _HOOK_EVENTS is None:
     raise Exception('You need to define settings.HOOK_EVENTS!')
+HOOK_EVENTS: dict[str, str | None] = _HOOK_EVENTS
 
 _HOOK_EVENT_ACTIONS_CONFIG = None
 
@@ -69,6 +70,7 @@ class AbstractHook(models.Model):
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
+    id: int  # provided by Django on concrete subclasses
     # user = models.ForeignKey(AUTH_USER_MODEL, related_name='%(class)ss', on_delete=models.CASCADE)
     event = models.CharField('Event', max_length=64, db_index=True)
     target = models.URLField('Target URL', max_length=255)
