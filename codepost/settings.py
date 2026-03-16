@@ -188,52 +188,48 @@ An API for administrators to mine course data and automate common tasks.
 pip install git+https://github.com/rutgers-lcsr/codepost-python.git
 ```
 
-### Basic Usage
+### Basic Usage (Python SDK)
 
 ```python
-import codepost_api_client as codepost
+from codepost import CodePost, Comment
 
-# Configure the client
-config = codepost.Configuration(
-    host="https://codepost-api.cs.rutgers.edu",
-    api_key={"tokenAuth": "Token YOUR_API_KEY"}
+client = CodePost(api_key="YOUR_API_KEY")
+
+# Create a course with kwargs shorthand
+course = client.courses.create(name="CS101", period="Fall 2026")
+
+# Create an assignment
+assignment = client.assignments.create(
+    name="Homework 1",
+    course=course.id,
+    points=100,
 )
 
-# Use the API
-with codepost.ApiClient(config) as client:
-    courses_api = codepost.CoursesApi(client)
-    assignments_api = codepost.AssignmentsApi(client)
-    
-    # 1. List all courses
-    print("--- Courses ---")
-    courses = courses_api.courses_list()
-    for course in courses:
-        print(f"ID: {course.id} | {course.name} ({course.period})")
-        
-    if courses:
-        my_course_id = courses[0].id
-        
-        # 2. List assignments for a course
-        # Note: Course object contains list of assignment IDs
-        course_data = courses_api.courses_retrieve(my_course_id)
-        
-        print(f"--- Assignments for Course {my_course_id} ---")
-        for assignment_id in course_data.assignments:
-            # Fetch full assignment details
-            assignment = assignments_api.assignments_retrieve(assignment_id)
-            print(f"ID: {assignment.id} | {assignment.name}")
+# Create submission + upload files in one call
+submission = client.submissions.create_with_files(
+    assignment=assignment.id,
+    students=["student@example.com"],
+    files=[
+        {"name": "main.py", "data": "print('hello')", "extension": ".py"},
+    ],
+)
 
-    # 3. Create a new Course
-    new_course = codepost.Course(name="CS101", period="Fall 2026")
-    created_course = courses_api.courses_create(new_course)
-    print(f"Created Course: {created_course.id}")
-
-    # 4. Create an Assignment
-    new_assignment = codepost.Assignment(
-        name="Homework 1", 
-        course=created_course.id
+# Add inline feedback
+file_id = client.submissions.retrieve(submission.id).files[0].id
+client.comments.create(
+    Comment(
+        file=file_id,
+        text="Nice work",
+        start_line=1,
+        end_line=1,
+        point_delta=1,
     )
-    created_assignment = assignments_api.assignments_create(new_assignment)
+)
+
+# Finalize and export grades
+client.submissions.bulk_finalize([submission.id], grader="ta@example.com")
+rows = client.assignments.submissions.export_grades(assignment_id=assignment.id)
+print(rows[0])
 ```
 
 See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for more examples.

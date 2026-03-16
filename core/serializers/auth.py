@@ -18,3 +18,9 @@ class ValidateOTTRequestSerializer(serializers.Serializer):
 class JwtOttResponseSerializer(serializers.Serializer):
     token = serializers.CharField()
     expires_at = serializers.IntegerField()
+
+
+class ImpersonateRequestSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False)
+    email = serializers.EmailField(required=False)
+    never_expire = serializers.BooleanField(required=False, default=False)

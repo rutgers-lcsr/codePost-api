@@ -2,29 +2,63 @@ openapi: 3.0.3
 info:
   title: codePost API
   version: 3.0.0
-  description: "\nAn API for administrators to mine course data and automate common
-    tasks.\n\n## Quick Start\n\n### Installation\n\n```bash\npip install git+https://github.com/rutgers-lcsr/codepost-python.git\n```\n\n###
-    Basic Usage\n\n```python\nimport codepost_api_client as codepost\n\n# Configure
-    the client\nconfig = codepost.Configuration(\n    host=\"https://codepost-api.cs.rutgers.edu\",\n
-    \   api_key={\"tokenAuth\": \"Token YOUR_API_KEY\"}\n)\n\n# Use the API\nwith
-    codepost.ApiClient(config) as client:\n    courses_api = codepost.CoursesApi(client)\n
-    \   assignments_api = codepost.AssignmentsApi(client)\n    \n    # 1. List all
-    courses\n    print(\"--- Courses ---\")\n    courses = courses_api.courses_list()\n
-    \   for course in courses:\n        print(f\"ID: {course.id} | {course.name} ({course.period})\")\n
-    \       \n    if courses:\n        my_course_id = courses[0].id\n        \n        #
-    2. List assignments for a course\n        # Note: Course object contains list
-    of assignment IDs\n        course_data = courses_api.courses_retrieve(my_course_id)\n
-    \       \n        print(f\"--- Assignments for Course {my_course_id} ---\")\n
-    \       for assignment_id in course_data.assignments:\n            # Fetch full
-    assignment details\n            assignment = assignments_api.assignments_retrieve(assignment_id)\n
-    \           print(f\"ID: {assignment.id} | {assignment.name}\")\n\n    # 3. Create
-    a new Course\n    new_course = codepost.Course(name=\"CS101\", period=\"Fall 2026\")\n
-    \   created_course = courses_api.courses_create(new_course)\n    print(f\"Created
-    Course: {created_course.id}\")\n\n    # 4. Create an Assignment\n    new_assignment
-    = codepost.Assignment(\n        name=\"Homework 1\", \n        course=created_course.id\n
-    \   )\n    created_assignment = assignments_api.assignments_create(new_assignment)\n```\n\nSee
-    the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for
-    more examples.\n"
+  description: |2
+
+    An API for administrators to mine course data and automate common tasks.
+
+    ## Quick Start
+
+    ### Installation
+
+    ```bash
+    pip install git+https://github.com/rutgers-lcsr/codepost-python.git
+    ```
+
+    ### Basic Usage (Python SDK)
+
+    ```python
+    from codepost import CodePost, Comment
+
+    client = CodePost(api_key="YOUR_API_KEY")
+
+    # Create a course with kwargs shorthand
+    course = client.courses.create(name="CS101", period="Fall 2026")
+
+    # Create an assignment
+    assignment = client.assignments.create(
+      name="Homework 1",
+      course=course.id,
+      points=100,
+    )
+
+    # Create submission + upload files in one call
+    submission = client.submissions.create_with_files(
+      assignment=assignment.id,
+      students=["student@example.com"],
+      files=[
+        {"name": "main.py", "data": "print('hello')", "extension": ".py"},
+      ],
+    )
+
+    # Add inline feedback
+    file_id = client.submissions.retrieve(submission.id).files[0].id
+    client.comments.create(
+      Comment(
+        file=file_id,
+        text="Nice work",
+        start_line=1,
+        end_line=1,
+        point_delta=1,
+      )
+    )
+
+    # Finalize and export grades
+    client.submissions.bulk_finalize([submission.id], grader="ta@example.com")
+    rows = client.assignments.submissions.export_grades(assignment_id=assignment.id)
+    print(rows[0])
+    ```
+
+    See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for more examples.
 paths:
   /assignmentDataSets/:
     get:
@@ -4140,6 +4174,18 @@ paths:
         Payload: { 'user_email': '...' }
       tags:
       - dashboard
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PendingAdminActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PendingAdminActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PendingAdminActionRequest'
+        required: true
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -4147,7 +4193,11 @@ paths:
       - cookieAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingAdminActionResponse'
+          description: ''
   /dashboard/deadlines/:
     get:
       operationId: dashboard_deadlinesList
@@ -4178,6 +4228,18 @@ paths:
         Payload: { 'user_email': '...' }
       tags:
       - dashboard
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PendingAdminActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PendingAdminActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PendingAdminActionRequest'
+        required: true
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -4185,7 +4247,11 @@ paths:
       - cookieAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingAdminActionResponse'
+          description: ''
   /dashboard/pending_admins/:
     get:
       operationId: dashboard_pendingAdminsList
@@ -4551,6 +4617,17 @@ paths:
         students or graders in courses they administer.
       tags:
       - impersonate
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImpersonateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ImpersonateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ImpersonateRequest'
       security:
       - tokenAuth: []
       - jwtAuth: []
@@ -4558,7 +4635,11 @@ paths:
       - cookieAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
   /logs/log/:
     post:
       operationId: logs_logCreate
@@ -8264,6 +8345,12 @@ paths:
         schema:
           type: string
         description: Filter events created on or after this ISO 8601 datetime
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: 'Filter by event type: ''audit'' for login/security events, ''activity''
+          for system events'
       tags:
       - system
       security:
@@ -11905,6 +11992,17 @@ components:
       - detail
       - label
       - status
+    ImpersonateRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        never_expire:
+          type: boolean
+          default: false
     JWT:
       type: object
       properties:
@@ -13703,6 +13801,21 @@ components:
           type: string
           readOnly: true
           nullable: true
+    PendingAdminActionRequest:
+      type: object
+      properties:
+        user_email:
+          type: string
+          format: email
+      required:
+      - user_email
+    PendingAdminActionResponse:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+      - status
     RegisterAndSetPasswordRequest:
       type: object
       properties:

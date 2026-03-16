@@ -22,6 +22,7 @@ from core.serializers.auth import (
   GenerateOTTResponseSerializer,
   ValidateOTTRequestSerializer,
   JwtOttResponseSerializer,
+  ImpersonateRequestSerializer,
 )
 @extend_schema(responses={200: UserSerializer})
 @api_view(['GET'])
@@ -87,7 +88,8 @@ class ImpersonateView(APIView):
   students or graders in courses they administer.
   """
   permission_classes = [IsAuthenticated]
-  
+
+  @extend_schema(request=ImpersonateRequestSerializer, responses={200: UserSerializer})
   def post(self, request, *args, **kwargs):
 
     username = (request.data.get('username') or '').strip()
@@ -119,7 +121,8 @@ class ImpersonateView(APIView):
     logEvent(
         event="Become User",
         message=f"User {request.user.username} is becoming {user.username}",
-        level=logging.INFO
+        level=logging.INFO,
+        event_type='audit'
     )
     
     # Set the user in the request
@@ -186,7 +189,8 @@ def generate_one_time_token(request):
   logEvent(
       event="Generate One-Time Token",
       message=f"User {request.user.username} is generating a one-time token for {user.username}, from {request.META.get('REMOTE_ADDR', 'unknown')}, {request.META.get('HTTP_USER_AGENT', 'unknown')}",
-      level=logging.INFO
+      level=logging.INFO,
+      event_type='audit'
   )
 
   # remove previous tokens

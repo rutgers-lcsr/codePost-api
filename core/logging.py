@@ -50,13 +50,14 @@ events = [
 ]
 
 
-def logEvent(event: str, level=logging.INFO, message: str=None, skip_email: bool=False):
+def logEvent(event: str, level=logging.INFO, message: str=None, skip_email: bool=False, event_type: str='activity'):
     """
     Log an event to Loki.
     :param event: The event to log.
     :param level: The logging level (default is INFO).
     :param message: The message to log (default is None).
     :param skip_email: Whether to skip sending an email notification (default is False).
+    :param event_type: The type of event — 'audit' for login/security events, 'activity' for system events (default is 'activity').
     """
     try:
         logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ def logEvent(event: str, level=logging.INFO, message: str=None, skip_email: bool
 
         message = message or f"Event {event} logged."
 
-        Event.objects.create(category=event, user=None, description=message, courseID=None, meta=json.dumps({
+        Event.objects.create(category=event, type=event_type, user=None, description=message, courseID=None, meta=json.dumps({
             "event": event,
             "message": message,
             "api-error": 'true',

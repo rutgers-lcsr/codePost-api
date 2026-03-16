@@ -15,7 +15,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from core.models import Organization, Course, Assignment, Section
-from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer
+from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer
 from core.serializers.user import UserSerializer
 
 
@@ -141,6 +141,7 @@ class DashboardViewSet(viewsets.ViewSet):
         serializer = UserSerializer(pending_users, many=True, context={'request': request})
         return Response(serializer.data)
 
+    @extend_schema(request=PendingAdminActionRequestSerializer, responses={200: PendingAdminActionResponseSerializer})
     @action(detail=False, methods=['POST'])
     def approve_pending_admin(self, request):
         """
@@ -182,6 +183,7 @@ class DashboardViewSet(viewsets.ViewSet):
 
         return Response({'status': 'approved'})
 
+    @extend_schema(request=PendingAdminActionRequestSerializer, responses={200: PendingAdminActionResponseSerializer})
     @action(detail=False, methods=['POST'])
     def deny_pending_admin(self, request):
         """

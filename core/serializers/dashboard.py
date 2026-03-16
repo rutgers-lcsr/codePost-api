@@ -34,3 +34,11 @@ class AssignmentDeadlineSerializer(serializers.Serializer):
     allowStudentUpload = serializers.BooleanField()
     regradeDeadline = serializers.DateTimeField(allow_null=True)
     studentCount = serializers.IntegerField()
+
+
+class PendingAdminActionRequestSerializer(serializers.Serializer):
+    user_email = serializers.EmailField()
+
+
+class PendingAdminActionResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()

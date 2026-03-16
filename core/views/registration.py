@@ -150,6 +150,7 @@ def emailRegistration(request):
                         "inviteCode": form.cleaned_data["token"],
                     }
                 ),
+                event_type='audit',
             )
 
             return Response(
@@ -379,6 +380,7 @@ def validateNewAdminUser(request):
                             "email": user.email,
                         }
                     ),
+                    event_type='audit',
                 )
                 
 
@@ -437,6 +439,7 @@ def validateNewAdminUser(request):
                         "shortname": shortnameFromForm,
                     }
                 ),
+                event_type='audit',
             )
 
             return Response(
@@ -467,6 +470,7 @@ def validateNewAdminUser(request):
                             "is_new_org": True,
                         }
                     ),
+                    event_type='audit',
                 )
             else:
                 # EXISTING ORG: Email Org Staff + CodePost staff
@@ -484,6 +488,7 @@ def validateNewAdminUser(request):
                             "is_new_org": False,
                         }
                     ),
+                    event_type='audit',
                 )
 
             # Send confirmation email to the requesting user
@@ -505,6 +510,7 @@ def validateNewAdminUser(request):
                     "action_id": ".".join(map(str, action_id)),
                 }
             ),
+            event_type='audit',
         )
      
         return Response(
@@ -562,6 +568,7 @@ def handleValidationResponse(request):
                                     "organization": user.profile.organization.name if user.profile.organization else "",
                                 }
                             ),
+                            event_type='audit',
                         )
                      
 
@@ -653,6 +660,7 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
                 "shortname": org.shortname if org else "",
             }
         ),
+        event_type='audit',
     )
 
     meta = {"auto_approved": auto_approved}

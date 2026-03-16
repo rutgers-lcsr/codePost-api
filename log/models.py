@@ -7,10 +7,16 @@ from typing import TYPE_CHECKING
 
 
 class Event(models.Model):
+    EVENT_TYPE_CHOICES = [
+        ('audit', 'Audit'),
+        ('activity', 'Activity'),
+    ]
+
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
 
     category = models.CharField(max_length=255, default="uncategorized")
+    type = models.CharField(max_length=20, choices=EVENT_TYPE_CHOICES, default='activity', db_index=True)
     description = models.CharField(max_length=255)
     courseID = models.IntegerField(null=True)
     user = models.CharField(max_length=255, null=True)

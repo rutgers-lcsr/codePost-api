@@ -44,5 +44,6 @@ def activate_cip(request):
             student.is_active = True
             student.save()
     logEvent("CIP Activation",
-             message=f"CIP activated by {user.email} for course {course.name}")
+             message=f"CIP activated by {user.email} for course {course.name}",
+             event_type='audit')
     return Response({'success': True}, status=status.HTTP_200_OK)

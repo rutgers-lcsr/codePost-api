@@ -213,6 +213,8 @@ class SystemActivityView(APIView):
             OpenApiParameter(name="pageSize", required=False, type=int, location=OpenApiParameter.QUERY),
             OpenApiParameter(name="category", required=False, type=str, location=OpenApiParameter.QUERY,
                              description="Filter by event category (exact match)"),
+            OpenApiParameter(name="type", required=False, type=str, location=OpenApiParameter.QUERY,
+                             description="Filter by event type: 'audit' for login/security events, 'activity' for system events"),
             OpenApiParameter(name="search", required=False, type=str, location=OpenApiParameter.QUERY,
                              description="Search across description, user, and meta fields"),
             OpenApiParameter(name="startDate", required=False, type=str, location=OpenApiParameter.QUERY,
@@ -232,6 +234,10 @@ class SystemActivityView(APIView):
         category = request.query_params.get('category', '').strip()
         if category:
             events = events.filter(category=category)
+
+        event_type = request.query_params.get('type', '').strip()
+        if event_type in ('audit', 'activity'):
+            events = events.filter(type=event_type)
 
         search = request.query_params.get('search', '').strip()
         if search:
