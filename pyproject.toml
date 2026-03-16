@@ -112,6 +112,17 @@ pillow = "^12.1.0"
 pytest-django = "^4.12.0"
 pytest-xdist = "^3.8.0"
 stripe = "^14.4.0"
+python-semantic-release = "^9.0.0"
+
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:tool.poetry.version"]
+branch = "master"
+commit_message = "chore(release): {version}"
+changelog_file = "CHANGELOG.md"
+build_command = ""
+upload_to_pypi = false
+tag_format = "v{version}"
 
 
 [build-system]

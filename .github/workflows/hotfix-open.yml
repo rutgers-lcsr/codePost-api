@@ -1,0 +1,56 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+name: Open Hotfix Branch
+
+on:
+    workflow_dispatch:
+        inputs:
+            description:
+                description: "Brief description of the hotfix"
+                required: true
+
+concurrency:
+    group: hotfix-api
+    cancel-in-progress: false
+
+jobs:
+    create-hotfix:
+        name: Create Hotfix Branch
+        runs-on: testing-codepost
+        permissions:
+            contents: write
+            pull-requests: write
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: master
+                  fetch-depth: 0
+
+            - name: Determine hotfix version
+              id: version
+              run: |
+                  LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+                  VERSION=${LATEST_TAG#v}
+                  IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+                  NEXT_PATCH=$((PATCH + 1))
+                  HOTFIX_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+                  echo "version=$HOTFIX_VERSION" >> "$GITHUB_OUTPUT"
+
+            - name: Create hotfix branch
+              run: |
+                  git checkout -b hotfix/${{ steps.version.outputs.version }}
+                  git push origin hotfix/${{ steps.version.outputs.version }}
+
+            - name: Create draft pull request
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh pr create \
+                    --base master \
+                    --head hotfix/${{ steps.version.outputs.version }} \
+                    --title "fix: ${{ github.event.inputs.description }}" \
+                    --body "## Hotfix ${{ steps.version.outputs.version }}
+
+                  ${{ github.event.inputs.description }}
+
+                  **After merging**, a backmerge PR to \`development\` will be created automatically." \
+                    --draft

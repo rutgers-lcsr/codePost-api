@@ -3,7 +3,7 @@ name: Deploy to Development Server
 on:
     push:
         branches:
-            - render
+            - development
 
 jobs:
     deploy_data:

@@ -1,0 +1,62 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+name: Create Release Branch
+
+on:
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "Release version (e.g., 3.3.0). Leave empty to auto-detect from latest tag."
+                required: false
+
+concurrency:
+    group: release-branch-api
+    cancel-in-progress: false
+
+jobs:
+    create-release:
+        name: Create Release Branch
+        runs-on: testing-codepost
+        permissions:
+            contents: write
+            pull-requests: write
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: development
+                  fetch-depth: 0
+
+            - name: Determine version
+              id: version
+              run: |
+                  if [ -n "${{ github.event.inputs.version }}" ]; then
+                    echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+                  else
+                    LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+                    VERSION=${LATEST_TAG#v}
+                    IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+                    NEXT_MINOR=$((MINOR + 1))
+                    echo "version=${MAJOR}.${NEXT_MINOR}.0" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Create release branch
+              run: |
+                  git checkout -b release/${{ steps.version.outputs.version }}
+                  git push origin release/${{ steps.version.outputs.version }}
+
+            - name: Create pull request
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh pr create \
+                    --base master \
+                    --head release/${{ steps.version.outputs.version }} \
+                    --title "release: v${{ steps.version.outputs.version }}" \
+                    --body "## Release ${{ steps.version.outputs.version }}
+
+                  Created from \`development\` branch.
+
+                  **Checklist:**
+                  - [ ] Final testing on this branch
+                  - [ ] Review CHANGELOG
+
+                  **After merging**, semantic-release will create the tag and GitHub Release, and a backmerge PR to \`development\` will be created automatically."
