@@ -103,6 +103,15 @@ def main() -> int:
     api_url = prompt_with_default("API_URL", "https://api.yourdomain.com", args.non_interactive)
     client_url = prompt_with_default("CLIENT_URL", "https://yourdomain.com", args.non_interactive)
 
+    # Derive nginx server name from the URLs
+    import re
+    api_domain = re.sub(r"https?://", "", api_url).split("/")[0].split(":")[0]
+    client_domain = re.sub(r"https?://", "", client_url).split("/")[0].split(":")[0]
+    default_nginx = f"localhost {api_domain} {client_domain}"
+    nginx_server_name = prompt_with_default(
+        "NGINX_SERVER_NAME (space-separated domains for nginx)", default_nginx, args.non_interactive
+    )
+
     email_host = prompt_with_default("EMAIL_HOST", "smtp.yourprovider.com", args.non_interactive)
     default_email_from = prompt_with_default(
         "DEFAULT_EMAIL_FROM", "no-reply@yourdomain.com", args.non_interactive
@@ -158,6 +167,9 @@ API_PASSWORD={api_password}
 # URLs (Important for CORS and emails)
 API_URL={api_url}
 CLIENT_URL={client_url}
+
+# Nginx (space-separated domains served by the reverse proxy)
+NGINX_SERVER_NAME={nginx_server_name}
 
 # Email Settings
 EMAIL_HOST={email_host}

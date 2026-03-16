@@ -352,11 +352,11 @@ else:
     OVERRIDE_EMAIL = None
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "mx.farside.rutgers.edu")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
 EMAIL_PORT = 25
 EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
-DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "codepost@cs.rutgers.edu")
+DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "no-reply@localhost")
 EMAIL_SUBJECT_PREFIX = "[Codepost] "
 
 
