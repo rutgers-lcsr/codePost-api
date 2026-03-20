@@ -16,7 +16,7 @@ jobs:
         runs-on: testing-codepost
         if: github.event_name == 'pull_request'
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
               with:
                   fetch-depth: 0
 
@@ -30,7 +30,7 @@ jobs:
         name: Lint (djlint)
         runs-on: testing-codepost
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - name: Install Poetry
               run: |
@@ -47,7 +47,7 @@ jobs:
         name: Type Check (Pyright)
         runs-on: testing-codepost
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - name: Install Poetry
               run: |
@@ -69,7 +69,7 @@ jobs:
             CELERY_TASK_ALWAYS_EAGER: "TRUE"
             DJANGO_SETTINGS_MODULE: codepost.settings
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - name: Install Poetry
               run: |
