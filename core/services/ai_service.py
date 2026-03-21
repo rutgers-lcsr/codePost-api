@@ -19,13 +19,18 @@ Usage:
     )
 """
 
+from __future__ import annotations
+
 from encodings.base64_codec import base64_decode
 import logging
 import re
 from decimal import Decimal
-from typing import Optional, Literal
+from typing import TYPE_CHECKING, Optional, Literal
 from dataclasses import dataclass
 from core.models import Course, Assignment, SubmissionFile
+
+if TYPE_CHECKING:
+    import pymupdf
 
 from django.contrib.auth.models import User
 
@@ -958,7 +963,7 @@ REGION_COMMENT_MARKER = 1_000_000
 
 
 def _extract_pdf_selection(
-    doc: 'pymupdf.Document',
+    doc: pymupdf.Document,
     selected_pages: list[int],
     start_char: int | None,
     end_char: int | None,
