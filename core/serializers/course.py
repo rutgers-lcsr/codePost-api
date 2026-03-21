@@ -60,7 +60,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     if not self.context.get('request'):
       return []
     
-    user = self.context.get('request').user
+    user = self.context.get('request').user  # type: ignore[union-attr]  # request is always present in this context
 
     if (user.is_active):
         if (isCourseStaff(user, obj)):
@@ -426,7 +426,7 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
     # NOTE: if self.instance is null, this statement will generate a 500 error. Leaving as-is for now; since we do not post
     # to this endpoint, self.instance should always be defined. If we decide this serializer is post-able in the future,
     # we will need to gate this block with <if self.instance>
-    for section in self.instance.sections.all():
+    for section in self.instance.sections.all():  # type: ignore[union-attr]  # instance is always set for PATCH
       if 'graders' in newData:
         for sectionLeader in section.leaders.all():
           if sectionLeader not in newFields['graders']:

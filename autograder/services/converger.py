@@ -360,6 +360,8 @@ class JavaConverger(BaseConverger):
         if root is not None:
             # Append to existing
             deps_elem = root.find('dependencies')
+            if deps_elem is None:
+                deps_elem = ET.SubElement(root, 'dependencies')
             for group_id, artifact_id, version, scope in new_deps:
                 dep = ET.SubElement(deps_elem, 'dependency')
                 ET.SubElement(dep, 'groupId').text = group_id
@@ -542,7 +544,7 @@ class Converger:
         try:
             from autograder.run import RunSubmission
             for sub_id in submission_ids:
-                RunSubmission.delay(sub_id)
+                RunSubmission.delay(sub_id)  # type: ignore[operator]  # celery .delay() untyped
                 logger.info(f"Converger: Queued rerun for submission {sub_id}")
         except Exception as e:
             logger.error(f"Converger: Failed to queue reruns: {e}")

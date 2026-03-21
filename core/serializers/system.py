@@ -5,7 +5,7 @@ from rest_framework import serializers
 class HealthCheckSerializer(serializers.Serializer):
     """Result of a single health probe."""
     status = serializers.ChoiceField(choices=['ok', 'warning', 'error'])
-    label = serializers.CharField()
+    label = serializers.CharField()  # type: ignore[assignment]  # DRF field overrides base property
     detail = serializers.CharField(allow_null=True, allow_blank=True)
     latency_ms = serializers.FloatField(allow_null=True, required=False)
 

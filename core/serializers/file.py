@@ -147,7 +147,7 @@ class FileValidationSerializerWithoutSubmission(serializers.Serializer):
     Validate file data without creating a submission.
     """
     name = serializers.CharField(max_length=250, required=True)
-    data = serializers.CharField(required=True, trim_whitespace=False, allow_blank=True)
+    data = serializers.CharField(required=True, trim_whitespace=False, allow_blank=True)  # type: ignore[assignment]  # DRF field overrides base property
     extension = serializers.CharField(max_length=36, required=True)
     path = serializers.CharField(max_length=500, allow_null=True, allow_blank=True, required=False)
 

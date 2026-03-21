@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from datetime import timedelta
 from django.http import HttpResponseRedirect
-from django.contrib.auth.models import User
+from core.models import User
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -66,10 +66,10 @@ class JWTSerializer(serializers.TokenObtainSlidingSerializer):
     
     self.context['request'].user = self.user
     # raise Exception(f"{self.user} {self.user.profile}")
-    data['user'] = UserSerializer(self.user, context=self.context).data
-    data['user']['token'] = data['token']
+    data['user'] = UserSerializer(self.user, context=self.context).data  # type: ignore[assignment]  # JWT token data dict
+    data['user']['token'] = data['token']  # type: ignore[index]  # dict-like access on ReturnDict
 
-    update_last_login(None, self.user)
+    update_last_login(None, self.user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
     return data
 
 
@@ -136,7 +136,7 @@ class ImpersonateView(APIView):
     data = serializer.data
     data['token'] = str(token)
 
-    update_last_login(None, user)
+    update_last_login(None, user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
     return Response(data)
 
 
@@ -240,7 +240,7 @@ def validate_one_time_token(request):
   data = serializer.data
   data['token'] = str(jwt_token)
   
-  update_last_login(None, user)
+  update_last_login(None, user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
   
   return Response(data)
 

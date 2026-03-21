@@ -7,6 +7,7 @@ Datasets are mounted into execution containers at specified paths (e.g., ~/share
 """
 
 import logging
+from typing import cast
 
 from django.http import FileResponse, Http404
 from rest_framework import status, viewsets
@@ -14,7 +15,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 
-from core.models import Assignment, AssignmentDataSet
+from core.models import Assignment, AssignmentDataSet, User
 from core.permissions.helpers import (
     isAuthenticated,
     isCourseAdmin,
@@ -54,7 +55,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Filter datasets based on user permissions"""
-        user = self.request.user
+        user = cast(User, self.request.user)
         
         if not isAuthenticated(user):
             return AssignmentDataSet.objects.none()
@@ -104,7 +105,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
             
             logger.info(
                 f"[AssignmentDataSet] Created dataset '{dataset.name}' "
-                f"for assignment {assignment.id} by user {request.user.username}"
+                f"for assignment {assignment.id} by user {cast(User, request.user).username}"
             )
             
             # Return full representation
@@ -151,7 +152,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
             
             logger.info(
                 f"[AssignmentDataSet] Updated dataset {dataset.id} "
-                f"by user {request.user.username}"
+                f"by user {cast(User, request.user).username}"
             )
             
             # Return full representation
@@ -187,7 +188,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         
         logger.info(
             f"[AssignmentDataSet] Deleted dataset {dataset_id} ('{dataset_name}') "
-            f"by user {request.user.username}"
+            f"by user {cast(User, request.user).username}"
         )
         
         return Response(status=status.HTTP_204_NO_CONTENT)

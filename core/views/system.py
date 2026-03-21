@@ -268,7 +268,7 @@ class SystemActivityView(APIView):
         data = []
         for event in page:
             data.append({
-                "id": event.id,
+                "id": event.id,  # type: ignore[attr-defined]  # Django auto-created pk
                 "category": event.category,
                 "description": event.description,
                 "created": event.created,

@@ -9,7 +9,7 @@ from core.permissions.permissions import OrganizationPermissions
 from rest_framework.decorators import permission_classes as api_permission_classes, action
 from rest_framework.response import Response
 from rest_framework import status
-from django.contrib.auth.models import User
+from core.models import User
 from core.serializers.user import UserSerializer
 from core.permissions.helpers import returnForbidden, returnNotFound
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -316,7 +316,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     # Send password reset email
     try:
         reset_email = PasswordResetEmail(user)
-        reset_email.send()
+        reset_email.send_email()
         return Response({'status': 'reset_email_sent'})
     except Exception as e:
         return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -387,15 +387,14 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         serializer = OrganizationAISettingsSerializer(organization, context={'request': request})
         return Response(serializer.data)
 
-    elif request.method == 'PATCH':
-        serializer = OrganizationAISettingsUpdateSerializer(
-            organization, data=request.data, partial=True, context={'request': request}
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        # Return full read serializer
-        read_serializer = OrganizationAISettingsSerializer(organization, context={'request': request})
-        return Response(read_serializer.data)
+    serializer = OrganizationAISettingsUpdateSerializer(
+        organization, data=request.data, partial=True, context={'request': request}
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    # Return full read serializer
+    read_serializer = OrganizationAISettingsSerializer(organization, context={'request': request})
+    return Response(read_serializer.data)
 
   @extend_schema(
     responses=AIProviderModelsListSerializer,

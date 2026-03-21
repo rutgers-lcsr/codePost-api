@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from core.forms.forms import IDForm
 from core.models import Course, RubricCategory
-from django.contrib.auth.models import User
+from core.models import User
 from core.serializers.course import (
     CourseSerializer,
     CourseRosterSerializer,
@@ -166,13 +166,13 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if request.method == "GET":
             serializer = CourseAISettingsSerializer(course, context={"request": request})
             return Response(serializer.data)
-        elif request.method == "PATCH":
-            serializer = CourseAISettingsSerializer(
-                course, data=request.data, partial=True, context={"request": request}
-            )
-            serializer.is_valid(raise_exception=True)
-            self.perform_update(serializer)
-            return Response(serializer.data)
+
+        serializer = CourseAISettingsSerializer(
+            course, data=request.data, partial=True, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
 
     @extend_schema(
         responses={200: AIUsageSummarySerializer},
@@ -304,7 +304,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             serializer = CourseRosterSerializer(course, context={"request": request})
             return Response(serializer.data)
 
-        elif request.method == "PATCH":
+        else:
             # Pre-filter fields for any users who do not exist yet
             # Create these users so serializer doesn't raise a DoesNotExist
             # error for any of them

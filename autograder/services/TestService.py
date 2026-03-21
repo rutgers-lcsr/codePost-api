@@ -239,7 +239,7 @@ class TestService:
         return annotated
 
     @staticmethod
-    def run_suite(submission_id: int, test_case_ids: Optional[List[int]] = None, user_id: str = None, file_overrides: Dict[int, str] = None) -> List[Dict[str, Any]]:
+    def run_suite(submission_id: int, test_case_ids: Optional[List[int]] = None, user_id: Optional[str] = None, file_overrides: Optional[Dict[int, str]] = None) -> List[Dict[str, Any]]:
         file_overrides = TestService._sanitize_overrides(file_overrides)
         """
         Runs a suite of tests for a submission.
@@ -269,12 +269,13 @@ class TestService:
             # 3. Group by Category
             category_map = {} # category_id -> list of Reference TestCase objects
             for test in target_tests:
-                if test.testCategory_id not in category_map:
-                    category_map[test.testCategory_id] = {
+                cat_id = test.testCategory_id  # type: ignore[attr-defined]  # Django FK _id accessor
+                if cat_id not in category_map:
+                    category_map[cat_id] = {
                         'category': test.testCategory,
                         'tests': []
                     }
-                category_map[test.testCategory_id]['tests'].append(test)
+                category_map[cat_id]['tests'].append(test)
 
             # 4. Execute per Category
             all_results = []
@@ -373,6 +374,9 @@ class TestService:
                     if not target_file_obj:
                          # Fallback to test case logic if not found (or if explicit target is missing from submission)
                          target_file_obj = TestService._get_target_file(submission, representative_test)
+
+                    if not target_file_obj:
+                        continue
 
                     # Run execution
                     exec_result_dict = TestService._run_ephemeral_execution(
@@ -512,7 +516,7 @@ class TestService:
                                  
                                  if raw_test_results:
                                      # Show available results
-                                     available_names = [r.get('name') for r in raw_test_results]
+                                     available_names = [r.get('name', '') for r in raw_test_results]
                                      error_msg += f"Available Results: {', '.join(available_names)}\n"
                                  else:
                                      error_msg += "No test results returned by script.\n"
@@ -568,7 +572,7 @@ class TestService:
             return [{"success": False, "error": str(e)}]
 
     @staticmethod
-    def run_test(test_case_id: int, submission_id: int, user_id: str = None, file_overrides: Dict[int, str] = None) -> Dict[str, Any]:
+    def run_test(test_case_id: int, submission_id: int, user_id: Optional[str] = None, file_overrides: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
         file_overrides = TestService._sanitize_overrides(file_overrides)
         """
         Orchestrates the running of a single test case against a submission.
@@ -603,7 +607,7 @@ class TestService:
             # Script tests depend on the injected testCode, so they cannot use the generic file cache.
             # Hybrid Logic: If test case is a script test (injects code) or uses category resources, run ephemeral execution.
             # Script tests depend on the injected testCode, so they cannot use the generic file cache.
-            if test_case.type == 'script' or (hasattr(test_case, 'testCategory') and test_case.testCategory.resources.exists()):
+            if test_case.type == 'script' or (hasattr(test_case, 'testCategory') and test_case.testCategory.resources.exists()):  # type: ignore[attr-defined]  # Django reverse relation
                  # Pass test_function to run ONLY this test
                  execution_result = TestService._run_ephemeral_execution(target_file, test_case, user_id, file_overrides=file_overrides, test_function=test_case.functionName)
             else:
@@ -850,7 +854,7 @@ class TestService:
         return files.first() if files.exists() else None
 
     @staticmethod
-    def _get_or_run_execution(file: File, user_id: str = None) -> Dict[str, Any]:
+    def _get_or_run_execution(file: File, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Retrieves cached result or runs the executor.
         Returns a dict resembling ExecutionResult but with a 'cached' flag.
@@ -898,7 +902,7 @@ class TestService:
         }
 
     @staticmethod
-    def _run_ephemeral_execution(file: File, test_case: TestCase, user_id: str = None, file_overrides: Dict[int, str] = None, test_function: str = "__DEFAULT__") -> Dict[str, Any]:
+    def _run_ephemeral_execution(file: 'File', test_case: 'TestCase', user_id: Optional[str] = None, file_overrides: Optional[Dict[int, str]] = None, test_function: Optional[str] = "__DEFAULT__") -> Dict[str, Any]:
         """
         Runs an ephemeral execution for a specific test case (with specific input/dataset).
         Does NOT save to the global cache (to avoid polluting it with test-specific runs).
@@ -915,7 +919,7 @@ class TestService:
         if hasattr(test_case, 'testCategory'):
             # Fetch all resources linked to this category
             # Each resource has a target_path and either a file or a dataset
-            category_resources = test_case.testCategory.resources.all()
+            category_resources = test_case.testCategory.resources.all()  # type: ignore[attr-defined]  # Django reverse relation
             for res in category_resources:
                 resource_entry = {
                     'target_path': res.target_path

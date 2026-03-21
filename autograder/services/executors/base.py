@@ -115,18 +115,23 @@ class Notebook(TypedDict):
 
 
 class FileLike(Protocol):
-    """Protocol for file-like objects used by executors."""
+    """Protocol for file-like objects used by executors.
+    
+    Intentionally uses Any for field types to accommodate both
+    Django model fields (CharField descriptors) and plain str attributes
+    on mock/dummy file objects.
+    """
 
-    id: int
-    name: str
-    extension: str
-    data: str
-    path: Optional[str]
+    id: Any
+    name: Any
+    extension: Any
+    data: Any
+    path: Any
 
-    def get_file_info(self):
+    def get_file_info(self) -> Any:
         ...
 
-    def get_course(self):
+    def get_course(self) -> Any:
         ...
 
 

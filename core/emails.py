@@ -15,14 +15,13 @@ from codepost.settings import (
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
-from django.contrib.auth.models import User
 from django import forms
 
 import logging
 from core.handlers.submission_version_handler import SubmissionVersionHandler
 from core.handlers.submission_version_handler import SubmissionVersionHandler
 from core.logging import log_debug, logEvent
-from core.models import Assignment, Organization, Submission
+from core.models import Assignment, Organization, Submission, User
 
 from core.tests.views.results import submission
 
@@ -142,7 +141,7 @@ class CodepostAPIErrorEmail(CodepostEmail):
         html_content = render_to_string(self.template, context)
 
         email = EmailMessage(
-            subject=self.error_message,
+            subject=self.subject,
             body=html_content,
             from_email=self.get_from_address(),
             to=self.get_codepost_admins(),
@@ -157,6 +156,7 @@ class UserAddedToCourseEmail(CodepostEmail):
         """
         Sends an email to the user notifying them that they have been added to a course.
         """
+        assert self.user is not None
         
         # Check if organization desires to suppress welcome emails
         # force_send can override this (e.g. if Course.emailNewUsers is explicitly set)
@@ -204,6 +204,7 @@ class UserSignupEmail(CodepostEmail):
         """
         Sends a welcome email to the user after they sign up.
         """
+        assert self.user is not None
         if self.user.is_active:
             context = self.get_context()
         else:
@@ -250,6 +251,7 @@ class AdminChangeOrganizationEmail(CodepostEmail):
         """
         Sends an email to the user notifying them that their organization has changed.
         """
+        assert self.user is not None
         context = self.get_context(
             uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
             token=default_token_generator.make_token(self.user),
@@ -275,6 +277,7 @@ class PasswordResetEmail(CodepostEmail):
         """
         Sends a password reset email to the user.
         """
+        assert self.user is not None
         context = self.get_context(
             uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
             token=default_token_generator.make_token(self.user),
@@ -298,6 +301,7 @@ class NewAdminRequestEmail(CodepostEmail):
         """
         Sends an email to the CodePost team notifying them of a new admin request.
         """
+        assert self.user is not None
         context = self.get_context(
             organization=organization_name,
             uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
@@ -322,6 +326,7 @@ class NewAdminActivationEmail(CodepostEmail):
         """
         Sends an email to the user notifying them that they have been activated as an admin.
         """
+        assert self.user is not None
         context = self.get_context(
             organization=organization_name,
             uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
@@ -370,6 +375,7 @@ class StudentUploadReceiptEmail(CodepostEmail):
         """
         Sends an email to the user notifying them of a student upload receipt.
         """
+        assert self.user is not None
         tz = pytz.timezone(submission.assignment.course.timezone)
         dateUploaded = submission.dateUploaded.astimezone(tz)
 
@@ -380,11 +386,7 @@ class StudentUploadReceiptEmail(CodepostEmail):
         zip_name = "{}_{}_{}.zip".format(self.get_to_address(), submission.id, dateUploaded.strftime("%Y-%m-%d_%H-%M-%S"))
         
         attachments = [
-            {
-                "content": files,
-                "filename": zip_name,
-                "type": "application/zip"
-            }
+            (zip_name, files, "application/zip")
         ]
         context = self.get_context(
             assignment_name=submission.assignment.name,
@@ -414,7 +416,7 @@ class StudentPartnersAddedEmail(CodepostEmail):
         Sends an email to the user notifying them that partners have been added.
         """
 
-        partner_emails = ", ".join(list(submission.partners.all().values_list('email', flat=True)))
+        partner_emails = ", ".join(list(submission.students.all().values_list('email', flat=True)))
 
         context = self.get_context(
             new_partner_email=new_partner_email,
@@ -550,6 +552,7 @@ class NewOrgAdminRequestEmail(CodepostEmail):
     template = "emails/admin/new_org_admin_request_template.html"
 
     def send_email(self, organization_name:str):
+        assert self.user is not None
         context = self.get_context(
             organization=organization_name,
             uid=urlsafe_base64_encode(force_bytes(self.user.pk)),
@@ -577,6 +580,7 @@ class ExistingOrgAdminRequestEmail(CodepostEmail):
     template = "emails/admin/existing_org_admin_request_template.html"
 
     def send_email(self, organization_name:str):
+        assert self.user is not None
         context = self.get_context(
             organization=organization_name,
             uid=urlsafe_base64_encode(force_bytes(self.user.pk)),

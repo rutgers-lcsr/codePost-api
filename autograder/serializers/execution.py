@@ -143,7 +143,7 @@ class NotebookExecuteResultSerializer(serializers.Serializer):
         choices=['execute_result'],
         help_text="Output type identifier"
     )
-    data = serializers.DictField(
+    data = serializers.DictField(  # type: ignore[assignment]  # DRF field overrides base property
         help_text="MIME-type keyed output data (e.g., {'text/plain': '...', 'image/png': '...'})"
     )
     metadata = serializers.DictField(
@@ -163,7 +163,7 @@ class NotebookDisplayDataSerializer(serializers.Serializer):
         choices=['display_data'],
         help_text="Output type identifier"
     )
-    data = serializers.DictField(
+    data = serializers.DictField(  # type: ignore[assignment]  # DRF field overrides base property
         help_text="MIME-type keyed display data"
     )
     metadata = serializers.DictField(
@@ -205,7 +205,7 @@ class NotebookCellOutputSerializer(serializers.Serializer):
     name = serializers.CharField(required=False, help_text="Stream name for stream outputs")
     text = serializers.CharField(required=False, help_text="Text content for stream outputs")
     # Result/Display fields  
-    data = serializers.DictField(required=False, help_text="MIME-type keyed data")
+    data = serializers.DictField(required=False, help_text="MIME-type keyed data")  # type: ignore[assignment]  # DRF field overrides base property
     metadata = serializers.DictField(required=False, help_text="Output metadata")
     execution_count = serializers.IntegerField(required=False, allow_null=True)
     # Error fields
@@ -228,7 +228,7 @@ class NotebookCellSerializer(serializers.Serializer):
         choices=['code', 'markdown', 'raw'],
         help_text="Type of cell"
     )
-    source = serializers.CharField(
+    source = serializers.CharField(  # type: ignore[assignment]  # DRF field overrides base property
         help_text="Cell source content"
     )
     outputs = NotebookCellOutputSerializer(

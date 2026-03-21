@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework import serializers
 
 from core.permissions.permissions import UserPermissions
-from django.contrib.auth.models import User
+from core.models import User
 from core.serializers.user import UserSerializer
 from rest_framework.decorators import action
 
@@ -137,13 +137,19 @@ class UserViewSet(SuperUserListProtectedViewSet):
       case 'add_admin':
         UserAddedToCourseEmail(user_to_email).send_email(course.name, course.period, 'admin')
       case 'publish_assignment':
+        if not assignment:
+          return returnForbidden()
         PublishNewAssignmentEmail(user_to_email).send_email(assignment=assignment)
       case 'grader_reminder':
+        if not assignment:
+          return returnForbidden()
         # is the user a grader for the course?
         if not course in user_to_email.grader_courses.all():
           return returnForbidden()
         GraderReminderEmail(user_to_email).send_email(assignment=assignment)
       case 'regrades_reminder':
+        if not assignment:
+          return returnForbidden()
         # is the user a grader for the course?
         if not course in user_to_email.grader_courses.all():
           return returnForbidden()

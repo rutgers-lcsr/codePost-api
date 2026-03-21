@@ -66,9 +66,9 @@ class RunTestView(GenericAPIView):
                  return Response({"error": "Invalid file_overrides keys, must be integer file IDs"}, status=status.HTTP_400_BAD_REQUEST)
 
         if test_id:
-            task = run_test_task.delay(submission_id, test_id=test_id, user_id=request.user.id, file_overrides=file_overrides)
+            task = run_test_task.delay(submission_id, test_id=test_id, user_id=request.user.id, file_overrides=file_overrides)  # type: ignore[operator]  # celery .delay() untyped
         else:
-            task = run_test_task.delay(submission_id, user_id=request.user.id, file_overrides=file_overrides)
+            task = run_test_task.delay(submission_id, user_id=request.user.id, file_overrides=file_overrides)  # type: ignore[operator]  # celery .delay() untyped
 
         from autograder.serializers.execution import AsyncTaskResponseSerializer
         response_payload = {

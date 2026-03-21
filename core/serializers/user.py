@@ -62,7 +62,7 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
       return None
 
     # do not return token if the requestor is not the user themselves or a superuser
-    user = self.context.get('request').user
+    user = self.context.get('request').user  # type: ignore[union-attr]  # request always present
     if not user.is_authenticated:
       return None
     if not (user.is_superuser or user.id == obj.id):

@@ -101,8 +101,8 @@ API_HOST = urlparse(API_URL).netloc.split(':')[0]
 
 #################### Authentication And Host settings ##############################
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "your secret key")
-if SECRET_KEY == "your secret key":
+SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key-for-dev-only-must-be-at-least-32-bytes")
+if SECRET_KEY == "your-secret-key-for-dev-only-must-be-at-least-32-bytes":
     # Secret key is used for cryptographic signing and should be kept secret in production.
     logger.warning(
         "insecure_secret_key",

@@ -153,7 +153,7 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
   new_assignment.liveFeedbackMode = False
 
   # Reset dates
-  new_assignment.uploadDueDate = None
+  new_assignment.uploadDueDate = None  # type: ignore[assignment]  # Django DateTimeField accepts None
   new_assignment.regradeDeadline = None
 
   # Reset stats
@@ -285,7 +285,7 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
         timeout=testCase.timeout,
       )
 
-    for resource in original_testCategory.resources.all():
+    for resource in original_testCategory.resources.all():  # type: ignore[attr-defined]  # Django reverse relation
       cloned_file = assignment_file_map.get(resource.file_id) if resource.file_id else None
       cloned_dataset = dataset_map.get(resource.dataset_id) if resource.dataset_id else None
 

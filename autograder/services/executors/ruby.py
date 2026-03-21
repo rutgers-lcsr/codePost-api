@@ -105,7 +105,7 @@ class RubyExecutor(Executor):
                 stderr=stderr,
                 err=None if success else f"Exit Code: {result.get('StatusCode')}",
                 execution_time=execution_time,
-                system_logs=""
+                system_logs=None
             )
         except Exception as e:
             container.kill()

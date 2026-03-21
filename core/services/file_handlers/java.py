@@ -51,10 +51,10 @@ class JavaHandler(BaseFileHandler):
         packages = set()
         try:
              import javalang
-             tree = javalang.parse.parse(code)
-             for path, node in tree.filter(javalang.tree.Import):
-                 if node.path:
-                     packages.add(node.path)
+             tree = javalang.parse.parse(code)  # type: ignore[attr-defined]  # javalang untyped
+             for path, node in tree.filter(javalang.tree.Import):  # type: ignore[attr-defined]  # javalang untyped
+                 if node.path:  # type: ignore[attr-defined]  # javalang untyped
+                     packages.add(node.path)  # type: ignore[attr-defined]  # javalang untyped
         except ImportError:
             # Fallback regex if javalang not installed
             matches = re.findall(r'import\s+([\w\.]+);', code)

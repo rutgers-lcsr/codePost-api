@@ -9,7 +9,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
-from django.contrib.auth.models import User
+from core.models import User
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import timedelta
@@ -121,7 +121,7 @@ class DashboardViewSet(viewsets.ViewSet):
                 'allowLateUploads': a.allowLateUploads,
                 'allowStudentUpload': a.allowStudentUpload,
                 'regradeDeadline': a.regradeDeadline,
-                'studentCount': a.student_count,
+                'studentCount': a.student_count,  # type: ignore[attr-defined]  # Django annotation
             })
 
         serializer = AssignmentDeadlineSerializer(results, many=True)

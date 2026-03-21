@@ -28,7 +28,7 @@ class MockFile:
         # Wait, regex match.group(1) on 'file.pdf' returns '.pdf'.
         # '.pdf'.endswith('pdf') is True.
         
-        if not any(self.extension.lower().endswith(ext) for ext in BINARY_EXTENSIONS):
+        if self.extension and not any(self.extension.lower().endswith(ext) for ext in BINARY_EXTENSIONS):
             if '\\r\\n' in self.data:
                 self.data = self.data.replace("\\r\\n", "\\n")
         

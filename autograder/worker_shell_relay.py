@@ -136,8 +136,8 @@ class WorkerShellRelay:
     async def register_loop(self):
         while True:
             try:
-                await self.redis_async.sadd("shell:workers", self.worker_id)
-                await self.redis_async.hset(
+                await self.redis_async.sadd("shell:workers", self.worker_id)  # type: ignore[misc]  # redis async stubs
+                await self.redis_async.hset(  # type: ignore[misc]  # redis async stubs
                     f"shell:worker:{self.worker_id}",
                     mapping={"last_seen": str(time.time())},
                 )
@@ -229,8 +229,8 @@ class WorkerShellRelay:
         )
 
         try:
-            await self.redis_async.sadd(METRICS_ACTIVE_KEY, session_id)
-            await self.redis_async.hset(
+            await self.redis_async.sadd(METRICS_ACTIVE_KEY, session_id)  # type: ignore[misc]  # redis async stubs
+            await self.redis_async.hset(  # type: ignore[misc]  # redis async stubs
                 METRICS_SESSIONS_KEY,
                 session_id,
                 json.dumps(
@@ -293,9 +293,9 @@ class WorkerShellRelay:
         if session.staging_dir:
             _cleanup_staging_dir(session.staging_dir)
         try:
-            await self.redis_async.srem(METRICS_ACTIVE_KEY, session_id)
-            await self.redis_async.hdel(METRICS_SESSIONS_KEY, session_id)
-            await self.redis_async.delete(f"{METRICS_LAST_ACTIVITY_PREFIX}{session_id}")
+            await self.redis_async.srem(METRICS_ACTIVE_KEY, session_id)  # type: ignore[misc]  # redis async stubs
+            await self.redis_async.hdel(METRICS_SESSIONS_KEY, session_id)  # type: ignore[misc]  # redis async stubs
+            await self.redis_async.delete(f"{METRICS_LAST_ACTIVITY_PREFIX}{session_id}")  # type: ignore[misc]  # redis async stubs
         except Exception as e:
             logger.error(f"Shell metrics cleanup failed: {e}")
         await _apublish(self.redis_async, _out_channel(session_id), {"type": "closed"})

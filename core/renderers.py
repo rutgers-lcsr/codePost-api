@@ -8,7 +8,7 @@ import copy
 import json
 import collections
 
-import settings
+import settings  # type: ignore[import-untyped]  # project settings module
 
 class CustomRenderer(DocumentationRenderer):
   media_type = 'text/html'
@@ -55,6 +55,6 @@ class CustomRenderer(DocumentationRenderer):
           "data": data,
           "request": renderer_context['request'],
           "response": renderer_context['response'],
-          "debug": settings.DEBUG,
+          "debug": settings.DEBUG,  # type: ignore[attr-defined]  # Django settings module
       }
       return template.render(context, request=renderer_context['request'])

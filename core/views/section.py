@@ -54,6 +54,9 @@ class SectionViewSet(ListProtectedViewSet):
     aid = self.request.query_params.get('assignment', None)
     course = section.course
 
+    if not aid:
+        return returnForbidden()
+
     try:
         assignment = Assignment.objects.get(id=int(aid))
     except Assignment.DoesNotExist:

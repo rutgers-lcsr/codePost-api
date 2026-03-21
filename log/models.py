@@ -64,10 +64,11 @@ class TrackedAutograderRun(models.Model):
     )
 
     def __str__(self):
+        assignment_info = self.assignment.course.organization if self.assignment else "N/A"  # type: ignore[union-attr]
         return (
-            f"{self.id} {self.assignment.course.organization} (COMPLETED)"
+            f"{self.pk} {assignment_info} (COMPLETED)"
             if self.duration
-            else f"{self.id} {self.assignment.course.organization} (IN PROGRESS)"
+            else f"{self.pk} {assignment_info} (IN PROGRESS)"
         )
 
     def save(self, *args, **kwargs):

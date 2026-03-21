@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 import json
-from typing import Dict, Type
+from typing import Any, Dict, Type
 import logging
 
 from core.models import File
@@ -37,7 +37,7 @@ class FileHandlerFactory:
     }
 
     @classmethod
-    def get_handler(cls, file_obj: 'File') -> BaseFileHandler:
+    def get_handler(cls, file_obj: Any) -> BaseFileHandler:
         """
         Factory method to return the appropriate FileHandler based on file extension or content inference. Will use the extension field if available, but will also attempt to infer from the file name if extension is missing. If no specific handler is found, returns a DefaultHandler.
         """

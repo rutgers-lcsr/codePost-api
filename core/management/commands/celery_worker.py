@@ -21,6 +21,6 @@ class Command(BaseCommand):
         app.autodiscover_tasks()
 
         app.start(
-            concurrency=options["concurrency"],
-            loglevel=options["loglevel"],
+            concurrency=options["concurrency"],  # type: ignore[call-arg]
+            loglevel=options["loglevel"],  # type: ignore[call-arg]
         )

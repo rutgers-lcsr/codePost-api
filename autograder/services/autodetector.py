@@ -2,7 +2,7 @@
 import logging
 import json
 import time
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from django.db.models import Count
 from core.models import Submission, Environment, SubmissionFile, Assignment
 from log.models import Event
@@ -17,7 +17,7 @@ class Autodetector:
     """
 
     @staticmethod
-    def detect_from_files(files: List[Dict], assignment=None) -> Optional[Tuple[str, str | None]]:
+    def detect_from_files(files: List[Any], assignment: Any = None) -> Optional[Tuple[str, str | None]]:
         """
         Detects language and requirements from a list of file dicts.
         Args:
@@ -63,7 +63,7 @@ class Autodetector:
         if not language_counts:
             return None
 
-        detected_language_hint = max(language_counts, key=language_counts.get)
+        detected_language_hint = max(language_counts, key=lambda k: language_counts[k])
         
         # Gather requirements from files matching the detected language
         requirements = set()
@@ -228,12 +228,12 @@ class Autodetector:
                     pass
             
             if detected_kernels:
-                dominant_kernel = max(detected_kernels, key=detected_kernels.get)
+                dominant_kernel = max(detected_kernels, key=lambda k: detected_kernels[k])
                 language_counts[dominant_kernel] = language_counts.get(dominant_kernel, 0) + ipynb_count
 
         detected_language_hint = None
         if language_counts:
-            detected_language_hint = max(language_counts, key=language_counts.get)
+            detected_language_hint = max(language_counts, key=lambda k: language_counts[k])
         elif environment.language:
              # Fallback to existing environment language if no submissions
              detected_language_hint = environment.language

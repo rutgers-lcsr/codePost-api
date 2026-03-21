@@ -374,7 +374,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
                     extra={"error": f"{type(e).__name__}: {e}"},
                 )
             try:
-                user, _ = token_auth.authenticate_credentials(token.encode("utf-8"))
+                user, _ = token_auth.authenticate_credentials(token.encode("utf-8"))  # type: ignore[arg-type]  # DRF accepts bytes at runtime
                 return user
             except Exception as e:
                 logger.warning(
@@ -553,8 +553,8 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         if not client:
             return
         try:
-            await client.sadd(METRICS_ACTIVE_KEY, self.session_id)
-            await client.hset(
+            await client.sadd(METRICS_ACTIVE_KEY, self.session_id)  # type: ignore[misc]  # redis async stubs
+            await client.hset(  # type: ignore[misc]  # redis async stubs
                 METRICS_SESSIONS_KEY,
                 self.session_id,
                 json.dumps(
@@ -579,9 +579,9 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         if not client:
             return
         try:
-            await client.srem(METRICS_ACTIVE_KEY, self.session_id)
-            await client.hdel(METRICS_SESSIONS_KEY, self.session_id)
-            await client.delete(f"{METRICS_LAST_ACTIVITY_PREFIX}{self.session_id}")
+            await client.srem(METRICS_ACTIVE_KEY, self.session_id)  # type: ignore[misc]  # redis async stubs
+            await client.hdel(METRICS_SESSIONS_KEY, self.session_id)  # type: ignore[misc]  # redis async stubs
+            await client.delete(f"{METRICS_LAST_ACTIVITY_PREFIX}{self.session_id}")  # type: ignore[misc]  # redis async stubs
         except Exception:
             pass
 
@@ -594,7 +594,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         # Load session metadata from Redis.
         if not self.redis_client:
             return None
-        data = await self.redis_client.hgetall(self._session_key(session_id))
+        data = await self.redis_client.hgetall(self._session_key(session_id))  # type: ignore[misc]  # redis async stubs
         return data or None
 
     async def _save_session(self, session_id: str, mapping: dict, ttl_seconds: int) -> None:
@@ -602,20 +602,20 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         if not self.redis_client:
             return
         key = self._session_key(session_id)
-        await self.redis_client.hset(key, mapping=mapping)
-        await self.redis_client.expire(key, ttl_seconds)
+        await self.redis_client.hset(key, mapping=mapping)  # type: ignore[misc]  # redis async stubs
+        await self.redis_client.expire(key, ttl_seconds)  # type: ignore[misc]  # redis async stubs
 
     async def _select_worker(self) -> Optional[str]:
         # Pick an active worker based on recent heartbeats.
         if not self.redis_client:
             return None
-        worker_ids = await self.redis_client.smembers("shell:workers")
+        worker_ids = await self.redis_client.smembers("shell:workers")  # type: ignore[misc]  # redis async stubs
         if not worker_ids:
             return None
         now_ts = time.time()
         candidates = []
         for worker_id in worker_ids:
-            data = await self.redis_client.hgetall(f"shell:worker:{worker_id}")
+            data = await self.redis_client.hgetall(f"shell:worker:{worker_id}")  # type: ignore[misc]  # redis async stubs
             try:
                 last_seen = float(data.get("last_seen", "0"))
             except Exception:

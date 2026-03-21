@@ -26,7 +26,7 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   dataSets = serializers.SerializerMethodField('get_datasets')
   fileTemplates = serializers.SerializerMethodField('get_file_templates')
 
-  lateDeductions = serializers.JSONField(default=[])
+  lateDeductions = serializers.JSONField(default=[])  # type: ignore[arg-type]  # DRF accepts list as default
 
   @extend_schema_field(serializers.IntegerField(allow_null=True))
   def get_max_test_runs(self, obj):

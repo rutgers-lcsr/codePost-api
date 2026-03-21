@@ -200,7 +200,7 @@ class RExecutor(Executor):
                 err=None if success else f"Exit Code: {result.get('StatusCode')}",
                 execution_time=execution_time,
                 output_data=output_data,
-                system_logs="",
+                system_logs=None,
                 tests=test_results,
             )
 

@@ -2,12 +2,13 @@
 from celery import shared_task
 from core.models import File, User, CachedExecutionResult
 from autograder.services.executors import Executor
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
 @shared_task(time_limit=300, soft_time_limit=250)  # Set time limits for the task
-def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: bool = False, test_code: str = None, example_code: str = None, code_override: str = None):
+def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: bool = False, test_code: Optional[str] = None, example_code: Optional[str] = None, code_override: Optional[str] = None):
     try:
         file_obj = File.objects.get(pk=file_id)
         user = User.objects.get(pk=user_id)
@@ -49,13 +50,13 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
         return {"error": str(e), "success": False}
 
 @shared_task(time_limit=600, soft_time_limit=550)  # Set time limits for the task
-def run_test_task(submission_id: int, test_id: int = None, user_id: int = None, file_overrides: dict = None):
+def run_test_task(submission_id: int, test_id: Optional[int] = None, user_id: Optional[int] = None, file_overrides: Optional[dict] = None):
     try:
         from autograder.services.TestService import TestService
         
         if test_id:
             # Run single test
-            result = TestService.run_test(test_id, submission_id, user_id=user_id, file_overrides=file_overrides)
+            result = TestService.run_test(test_id, submission_id, user_id=str(user_id) if user_id else None, file_overrides=file_overrides)
             success = bool(result.get('success', False))
             return {
                 "success": success,
@@ -64,7 +65,7 @@ def run_test_task(submission_id: int, test_id: int = None, user_id: int = None, 
             }
         else:
             # Run all tests (suite)
-            results = TestService.run_suite(submission_id, user_id=user_id, file_overrides=file_overrides)
+            results = TestService.run_suite(submission_id, user_id=str(user_id) if user_id else None, file_overrides=file_overrides)
             success = all(r.get("success", True) for r in results)
             return {
                 "success": success,

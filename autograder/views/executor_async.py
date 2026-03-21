@@ -79,9 +79,9 @@ class ExecuteFileAsyncView(GenericAPIView):
                 is_staff = isCourseStaff(request.user, course)
         
         # Check permission for code overrides (editing submissions)
-        if is_staff and code_override:
+        if is_staff and code_override and assignment:
             if not request.user.is_superuser and not isCourseAdmin(request.user, assignment.course):
-                if not assignment.gradersCanEditSubmissions:
+                if assignment.gradersCanEditSubmissions is not None and not assignment.gradersCanEditSubmissions:
                     return returnForbidden()
         
         # Students cannot force execute and must have cached result
@@ -101,7 +101,7 @@ class ExecuteFileAsyncView(GenericAPIView):
                 )
 
         # Dispatch task
-        task = run_file_task.delay(
+        task = run_file_task.delay(  # type: ignore[operator]  # celery .delay() untyped
             file_id, request.user.id, timeout, force_execute, 
             test_code=test_code, example_code=example_code, code_override=code_override
         )

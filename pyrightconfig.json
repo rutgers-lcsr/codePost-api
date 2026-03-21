@@ -31,7 +31,11 @@
         "sdk_output",
         "sdk_test_output",
         "examples",
-        "util"
+        "util",
+        "**/tests",
+        "**/testUtils",
+        "conftest.py",
+        "tests"
     ],
     "venvPath": ".",
     "venv": ".venv"

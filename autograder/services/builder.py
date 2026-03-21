@@ -144,7 +144,7 @@ class Builder:
             
             logs = ""
             for chunk in log_generator:
-                logs += chunk.decode('utf-8')
+                logs += chunk.decode('utf-8')  # type: ignore[union-attr]  # Docker stream returns bytes
                 
             if "VERIFICATION SUCCESS" in logs:
                 logger.info(f"[Builder] Verification passed for {image_tag}")

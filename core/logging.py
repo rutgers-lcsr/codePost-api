@@ -50,7 +50,7 @@ events = [
 ]
 
 
-def logEvent(event: str, level=logging.INFO, message: str=None, skip_email: bool=False, event_type: str='activity'):
+def logEvent(event: str, level=logging.INFO, message: str | None=None, skip_email: bool=False, event_type: str='activity'):
     """
     Log an event to Loki.
     :param event: The event to log.

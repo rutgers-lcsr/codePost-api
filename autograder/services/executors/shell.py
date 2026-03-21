@@ -107,7 +107,7 @@ class ShellExecutor(Executor):
         executor.add_pre_script(container)
 
         sock = container.attach_socket(params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1})
-        sock._sock.setblocking(True)
+        sock._sock.setblocking(True)  # type: ignore[attr-defined]  # Docker socket internal
 
         return executor, volumes, docker_env, temp_staging_dir, container, sock
 

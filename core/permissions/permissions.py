@@ -8,7 +8,7 @@ Permissions are organized by domain area for easier navigation and maintenance.
 Reference: https://stackoverflow.com/questions/36553197/permission-checks-in-drf-viewsets-are-not-working-right
 """
 
-from core.models import Assignment, AssignmentFile, CourseFile, SubmissionFile, SubmissionTest
+from core.models import Assignment, AssignmentFile, CourseFile, SubmissionFile, SubmissionTest, User
 from core.permissions.helpers import (
     hasCourseCreationPrivilege,
     isAuthenticated,
@@ -22,7 +22,9 @@ from core.permissions.helpers import (
 )
 from core.permissions.template import TemplatePermission
 from rest_framework import permissions
+from rest_framework.request import Request
 from codepost.settings import logger
+from typing import cast
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -52,7 +54,7 @@ class OrganizationPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
 
         # DELETE is prohibited - use terminal/admin console only
         if request.method == "DELETE":
@@ -75,7 +77,7 @@ class UserPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
 
         # DELETE is prohibited - use terminal/admin console only
         if request.method == "DELETE":
@@ -100,7 +102,7 @@ class CoursePermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj
 
         # DELETE is prohibited - use terminal/admin console only
@@ -131,13 +133,13 @@ class BillingPermissions(permissions.BasePermission):
     """
 
     def has_permission(self, request, view):
-        if view.action in ['create_checkout_session', 'details', 'request_waiver']:
+        if getattr(view, 'action', None) in ['create_checkout_session', 'details', 'request_waiver']:
             return isAuthenticated(request.user)
         return False
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
-        if view.action in ['create_checkout_session', 'details', 'request_waiver']:
+        user = cast(User, request.user)
+        if getattr(view, 'action', None) in ['create_checkout_session', 'details', 'request_waiver']:
             return isAuthenticated(user) and isCourseAdmin(user, obj)
         return False
 
@@ -156,7 +158,7 @@ class SectionPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj.course
 
         # GET: superuser or course staff
@@ -176,7 +178,7 @@ class AssignmentPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj.course
 
         # GET: superuser, course staff, or course members (if visible)
@@ -205,7 +207,7 @@ class RubricCategoryPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         assignment = obj.assignment
         course = assignment.course
 
@@ -239,7 +241,7 @@ class RubricCommentPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
 
         # Handle both Assignment objects and RubricComment objects
         if type(obj) == Assignment:
@@ -280,7 +282,7 @@ class SubmissionPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj.assignment.course
         assignment = obj.assignment
 
@@ -370,7 +372,7 @@ class CourseFilePermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj
 
         # GET: superuser or course member
@@ -394,7 +396,7 @@ class FileExecutionPermissions(TemplatePermission):
     """
     
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         if isinstance(obj, SubmissionFile) or hasattr(obj, 'submissionfile'):
             submission = obj if isinstance(obj, SubmissionFile) else obj.submissionfile.submission
             
@@ -426,7 +428,7 @@ class CommentPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         submission = obj.file.submission
 
         # GET: inherit submission permissions
@@ -463,7 +465,7 @@ class TestCasePermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj.testCategory.assignment.course
 
         # GET: course staff
@@ -483,7 +485,7 @@ class TestCategoryPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj.assignment.course
 
         # GET: course staff
@@ -503,7 +505,7 @@ class TestCategoryResourcePermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj):
-        user = request.user
+        user = cast(User, request.user)
         course = obj.category.assignment.course
 
         # GET: course staff
@@ -524,7 +526,7 @@ class SubmissionTestPermissions(TemplatePermission):
     """
 
     def has_object_permission(self, request, view, obj: SubmissionTest):
-        user = request.user
+        user = cast(User, request.user)
         submission = obj.submission
         assignment = submission.assignment
         course = assignment.course

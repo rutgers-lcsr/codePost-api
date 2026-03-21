@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from core.logging import logEvent
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
@@ -18,7 +18,7 @@ from core.serializers.testCategory import TestCategorySerializer
 from core.serializers.file import FileValidationSerializerWithoutSubmission, SubmissionFileStudentUploadSerializer
 
 
-from django.contrib.auth.models import User
+from core.models import User
 from django.core.exceptions import ObjectDoesNotExist
 
 from core.models import Section, SubmissionHistory, Comment
@@ -198,7 +198,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     author = self.request.query_params.get('author', None)
 
     if author:
-      if (self.request.user.email == author) or isCourseAdmin(user, course) or isSuperGrader(user, course):
+      if (cast(User, self.request.user).email == author) or isCourseAdmin(user, course) or isSuperGrader(user, course):
         comments = Comment.objects.filter(file__submission__assignment=assignment,
                                           author__email=author, rubricComment=None)
       else:
@@ -750,7 +750,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         submission = otherSubs[0]
       else:
         submission = Submission.objects.create(assignment=assignment)
-        submission.students.add(user)
+        submission.students.add(cast(User, user))
         submission.save()
         
       # Don't allow submission if the submission is finalized, unless we are in LiveFeedbackMode
@@ -792,7 +792,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         handler.handle()
       except Exception as e:
         logEvent("Late Submission Error",
-                 message=f"Error handling late submission: {e} for submission by user {user.email}", level=logging.ERROR)
+                 message=f"Error handling late submission: {e} for submission by user {cast(User, user).email}", level=logging.ERROR)
 
 
       ###############################################################
@@ -807,7 +807,7 @@ class AssignmentViewSet(ListProtectedViewSet):
             # send_email_student_uploaded_submission(student.email, submission)
           except Exception as e:
             logEvent("API Error",
-                     message=f"Error emailing student receipt: {e} for submission by user {user.email}", level=logging.ERROR)
+                     message=f"Error emailing student receipt: {e} for submission by user {cast(User, user).email}", level=logging.ERROR)
       
 
       serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
@@ -1006,13 +1006,13 @@ class AssignmentViewSet(ListProtectedViewSet):
             context_file_content=context_content, 
             context_filename=context_name,
             target_filename=target_filename,
-            target_code=target_code,
+            target_code=target_code or '',
             language=language,
             rubric_text=rubric_text
         )
 
         # Record AI usage
-        service.record_usage(result, user, request_type='test_generation')
+        service.record_usage(result, cast(User, user), request_type='test_generation')
         
         if result.success:
             return Response({'script': result.text})

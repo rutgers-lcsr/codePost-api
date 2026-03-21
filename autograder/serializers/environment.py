@@ -6,7 +6,7 @@ from core.models import Environment
 
 
 class EnvironmentSerializer(ModelSerializerWithPOSTCheck):
-  dockerRunInstructions = serializers.JSONField(default=[])
+  dockerRunInstructions = serializers.JSONField(default=[])  # type: ignore[arg-type]  # DRF accepts list as default
   
   # Map snake_case model fields to camelCase API fields
   autoDetect = serializers.BooleanField(source='auto_detect', required=False)

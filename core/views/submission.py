@@ -24,7 +24,7 @@ from core.permissions.permissions import SubmissionPermissions
 from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, isStudentOfSub, isStaffOfSub, canViewUnanonymizedSubmissions, isSectionLeaderOfStudent, isSuperGrader
 
-from django.contrib.auth.models import User
+from core.models import User
 from rest_framework import serializers
 from django.utils.timezone import now
 
@@ -193,7 +193,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     histories = submissionHistories.filter(student=studentParam) if studentParam is not None else submissionHistories
     if (request.method == "PATCH") and 'hasViewed' in request.data:
-        newFields = {"student": studentParam.email, "hasViewed": request.data['hasViewed']}
+        newFields = {"student": studentParam.email, "hasViewed": request.data['hasViewed']}  # type: ignore[union-attr]  # studentParam checked above
 
         serializer = SubmissionHistorySerializer(histories[0], newFields, many=False, context={"request": request})
         serializer.is_valid(raise_exception=True)

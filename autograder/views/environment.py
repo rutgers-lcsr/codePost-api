@@ -268,7 +268,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
                         "Number of allowable test runs for this submission has hit the max."
                     )
 
-            x = run_test_task.delay(
+            x = run_test_task.delay(  # type: ignore[operator]  # celery .delay() untyped
                 submission.id,
                 user_id=request.user.id,
                 file_overrides=fileOverrides,
@@ -382,10 +382,10 @@ class EnvironmentViewSet(ListProtectedViewSet):
                 "id": t.id,
                 "description": t.description,
                 "type": t.type,
-                "command": t.command, # meaningful for CLI tests
-                "input": t.input,
-                "expectedOutput": t.expectedOutput,
-                "fileName": t.fileName,
+                "command": t.command,  # type: ignore[attr-defined]  # Django model fields
+                "input": t.input,  # type: ignore[attr-defined]  # Django model fields
+                "expectedOutput": t.expectedOutput,  # type: ignore[attr-defined]  # Django model fields
+                "fileName": t.fileName,  # type: ignore[attr-defined]  # Django model fields
                 # "targetCellId": t.targetCellId # Future: support notebook
             })
 

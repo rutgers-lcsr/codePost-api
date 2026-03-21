@@ -65,6 +65,6 @@ class CourseFileViewSet(ListProtectedViewSet):
             return returnForbidden()
         
         # Filter course files by course
-        queryset = self.queryset.filter(course=course)
+        queryset = self.get_queryset().filter(course=course)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)

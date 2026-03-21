@@ -53,7 +53,7 @@ class PasswordMatchForm(forms.Form):
       return password2
 
   def _post_clean(self):
-      super()._post_clean()
+      super()._post_clean()  # type: ignore[attr-defined]  # Django internal method
       # Validate the password after self.instance is updated with form data
       # by super().
       password = self.cleaned_data.get('password2')

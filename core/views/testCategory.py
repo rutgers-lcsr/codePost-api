@@ -50,11 +50,11 @@ class TestCategoryViewSet(ListProtectedViewSet):
         # Format for UI preview (aligning with what update_test_cases produces)
         preview_data = []
         for test in parsed_tests:
-            fname = test.get('functionName')
+            fname = test.get('functionName', '')
             name = test.get('name', fname)
             
             # Replicate the humanizing logic from update_test_cases
-            if name == fname:
+            if name == fname and fname:
                 name = fname.replace('_', ' ').title()
                 
             preview_data.append({

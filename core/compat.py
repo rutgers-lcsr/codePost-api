@@ -37,7 +37,7 @@ def _make_pkg_resources_shim():
                 )
                 yield wrapper
 
-    mod.iter_entry_points = iter_entry_points
+    mod.iter_entry_points = iter_entry_points  # type: ignore[attr-defined]  # intentional monkey-patch
     return mod
 
 

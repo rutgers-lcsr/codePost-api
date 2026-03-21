@@ -122,6 +122,9 @@ class ExecuteFileView(GenericAPIView):
             return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
 
         # Permission Check
+        if not assignment:
+            return Response({"error": "No assignment found for file"}, status=status.HTTP_404_NOT_FOUND)
+
         if code_override:
             # If overriding code, check if user has edit permissions
             allowed = False

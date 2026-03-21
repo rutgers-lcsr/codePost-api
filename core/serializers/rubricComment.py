@@ -42,7 +42,7 @@ class RubricCommentSerializer(ModelSerializerWithPOSTCheck):
         same_name_set = RubricComment.objects.filter(name=newData['name'], category__assignment=proposedFields['category'].assignment)
         conflicts = same_name_set
         if self.instance:
-            conflicts = list(filter(lambda x: x.id != self.instance.id, same_name_set))
+            conflicts = list(filter(lambda x: x.id != self.instance.id, same_name_set))  # type: ignore[union-attr]  # instance set during update
 
         if len(conflicts) > 0:
             raise serializers.ValidationError("Name is already used by another rubric comment within this assignment.")

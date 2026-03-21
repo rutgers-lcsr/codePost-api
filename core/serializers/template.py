@@ -49,7 +49,7 @@ class ModelSerializerWithPOSTCheck(serializers.ModelSerializer):
 
   def validate(self, data):
     try:
-      course = self.instance.course
+      course = self.instance.course  # type: ignore[union-attr]  # instance always set during validate
     except:
       course = None
 
