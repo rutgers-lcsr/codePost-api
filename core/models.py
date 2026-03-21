@@ -675,6 +675,9 @@ class FileTemplate(BaseModel):
 class File(BaseModel):
   if TYPE_CHECKING:
     id: int
+    data: models.TextField[str, str]
+    name: models.CharField[str, str]
+    extension: models.CharField[str, str]
   
   name = models.CharField(max_length=250, help_text=("The name of the file."))
   data = models.TextField(help_text=("The data in a file. should be utf-8 encoded text."), default="", null=False)

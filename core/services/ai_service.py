@@ -19,6 +19,7 @@ Usage:
     )
 """
 
+from encodings.base64_codec import base64_decode
 import logging
 import re
 from decimal import Decimal
@@ -953,10 +954,69 @@ Based on the context (logic to test) and the example harness above, generate the
             return data["choices"][0]["message"]["content"], input_tokens, output_tokens, total_tokens
 
 
+REGION_COMMENT_MARKER = 1_000_000
+
+
+def _extract_pdf_selection(
+    doc: 'pymupdf.Document',
+    selected_pages: list[int],
+    start_char: int | None,
+    end_char: int | None,
+) -> str:
+    """Extract text from a PDF based on the comment selection type.
+    
+    Handles three modes:
+    - Region selection (start_char >= 1,000,000): decodes bounding box percentages
+      and extracts text from that rectangular area on the page.
+    - Text selection (start_char/end_char provided): extracts the full page as
+      markdown (character offsets from the browser text layer may not match pymupdf).
+    - Page-level (no char info): extracts the full selected pages as markdown.
+    """
+    import pymupdf
+    import pymupdf4llm as pdf_utils
+
+    has_chars = start_char is not None and end_char is not None
+
+    # Region-based selection: decode bounding box and extract text from that area
+    if has_chars and start_char is not None and end_char is not None and start_char >= REGION_COMMENT_MARKER and end_char >= REGION_COMMENT_MARKER:
+        s = start_char - REGION_COMMENT_MARKER
+        e = end_char - REGION_COMMENT_MARKER
+        left_pct = s // 101
+        top_pct = s % 101
+        right_pct = e // 101
+        bottom_pct = e % 101
+
+        parts = []
+        for page_idx in selected_pages:
+            if page_idx < 0 or page_idx >= len(doc):
+                continue
+            page = doc[page_idx]
+            rect = page.rect
+            clip = pymupdf.Rect(
+                rect.x0 + (left_pct / 100) * rect.width,
+                rect.y0 + (top_pct / 100) * rect.height,
+                rect.x0 + (right_pct / 100) * rect.width,
+                rect.y0 + (bottom_pct / 100) * rect.height,
+            )
+            text = page.get_textbox(clip).strip()
+            if text:
+                parts.append(text)
+
+        if parts:
+            return "\n\n".join(parts)
+        # Fall through to full-page extraction if region extraction yielded nothing
+        # (e.g. scanned PDF without OCR)
+
+    # Text selection or page-level: extract full selected pages as markdown
+    return str(pdf_utils.to_markdown(doc, pages=selected_pages))
+
+
 def build_context_from_file(
     file: SubmissionFile,
     start_line: int,
     end_line: int,
+    start_char: int | None = None,
+    end_char: int | None = None,
 ) -> GenerationContext:
     """
     Build generation context from a submission file.
@@ -964,7 +1024,11 @@ def build_context_from_file(
     Args:
         file: The SubmissionFile being commented on
         start_line: Start line of selection (0-indexed). For notebooks, this is the cell index.
+                    For PDFs, this is the 1-based page number.
         end_line: End line of selection (0-indexed). For notebooks, this is the cell index.
+                  For PDFs, this is the 1-based page number.
+        start_char: Optional character offset or encoded region start (for PDFs).
+        end_char: Optional character offset or encoded region end (for PDFs).
         
     Returns:
         GenerationContext with populated fields
@@ -1008,6 +1072,36 @@ def build_context_from_file(
              # Fallback to treating as text if json parse fails
              selected_content = "Error: Could not parse notebook content."
              file_content_markdown = file.data
+    elif file.name.endswith('.pdf'):
+        import pymupdf
+        import pymupdf4llm as pdf_utils
+        
+        prefix = "data:application/pdf;base64,"
+        if file.data.startswith(prefix):
+            try:
+                base64_data = file.data[len(prefix):]
+                pdf_bytes, _ = base64_decode(base64_data.encode())  # Validate base64
+            except Exception:
+                selected_content = "Error: Could not decode PDF content."
+                pdf_bytes = b""
+        else: 
+            pdf_bytes = file.data
+        
+        # Frontend sends 1-based page numbers as start_line/end_line for PDFs.
+        # pymupdf4llm.to_markdown accepts 0-based page numbers via the `pages` param.
+        selected_pages = list(range(start_line - 1, end_line))  # convert 1-based to 0-based
+        
+        stream = pdf_bytes if isinstance(pdf_bytes, bytes) else pdf_bytes.encode()
+        doc = pymupdf.open(stream=stream, filetype="pdf")
+        
+        # Try to extract precise selection based on start_char/end_char
+        selected_content = _extract_pdf_selection(
+            doc, selected_pages, start_char, end_char
+        )
+        
+        # Convert entire PDF to markdown for full file content
+        file_content_markdown = str(pdf_utils.to_markdown(doc))
+        doc.close()
     else:
         # Standard text file handling
         lines = file.data.split('\n')
@@ -1016,6 +1110,14 @@ def build_context_from_file(
         end_idx = max(0, min(end_line, len(lines) - 1)) if lines else 0
         
         selected_lines = lines[start_idx:end_idx + 1]
+        
+        # Narrow to character offsets within the selected lines if provided.
+        # start_char/end_char are 0-indexed offsets within their respective lines.
+        if start_char is not None and selected_lines:
+            selected_lines[0] = selected_lines[0][start_char:]
+        if end_char is not None and selected_lines:
+            selected_lines[-1] = selected_lines[-1][:end_char]
+        
         selected_content = '\n'.join(selected_lines)
         file_content_markdown = file.data
 

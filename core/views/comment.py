@@ -1,4 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
+from drf_spectacular.utils import extend_schema
+
 from core.models import Comment
 from core.serializers.comment import CommentSerializer, CommentBasicSerializer
 from core.views.template import ListProtectedViewSet
@@ -94,6 +96,22 @@ class CommentViewSet(ListProtectedViewSet):
             return Response(CommentBasicSerializer(comment).data)
 
     @action(detail=False, methods=['POST'])
+    @extend_schema(
+        request={
+            'type': 'object',
+            'properties': {
+                'file_id': {'type': 'integer'},
+                'start_line': {'type': 'integer'},
+                'end_line': {'type': 'integer'},
+                'start_char': {'type': 'integer'},
+                'end_char': {'type': 'integer'},
+                'rubric_comment_id': {'type': 'integer'},
+                'existing_text': {'type': 'string'},
+                'points': {'type': 'number'},
+            }
+        }
+    )
+
     def generate(self, request):
         """
         Generate an AI-powered comment suggestion. 
@@ -105,7 +123,10 @@ class CommentViewSet(ListProtectedViewSet):
         - start_line: int (required) - Start line of selection (0-indexed)
         - end_line: int (required) - End line of selection (0-indexed)
         - rubric_comment_id: int (optional) - ID of linked RubricComment
+        - start_char: int (optional) - Start character offset for selection
+        - end_char: int (optional) - End character offset for selection
         - existing_text: str (optional) - Grader's draft text to improve
+        - points: float (optional) - Points override for rubric comment (can be used without rubric_comment_id for manual adjustments)
         """
         from asgiref.sync import async_to_sync
         from rest_framework import status
@@ -121,6 +142,8 @@ class CommentViewSet(ListProtectedViewSet):
         file_id = request.data.get('file_id')
         start_line = request.data.get('start_line')
         end_line = request.data.get('end_line')
+        start_char = request.data.get('start_char')
+        end_char = request.data.get('end_char')
         rubric_comment_id = request.data.get('rubric_comment_id')
         existing_text = request.data.get('existing_text', '')
         points_override = request.data.get('points')
@@ -162,6 +185,8 @@ class CommentViewSet(ListProtectedViewSet):
             file=file,
             start_line=start_line,
             end_line=end_line,
+            start_char=start_char,
+            end_char=end_char,
         )
         
         # Add supplementary context
