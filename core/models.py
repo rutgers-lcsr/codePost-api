@@ -1259,7 +1259,7 @@ class TestCase(BaseModel):
                                    related_name="testCases", help_text=("The related testCategory__id."))
   sortKey = models.IntegerField(default=0, help_text=(
       "Integer to specify the order of a Assignment's Tests."))
-  description = models.CharField(max_length=48, help_text=("Test description."))
+  description = models.CharField(max_length=255, help_text=("Test description."))
   type = models.CharField(max_length=25, choices=testTypes)
   pointsFail = models.DecimalField(max_digits=5, decimal_places=2, default=0, help_text=(
       "The points assigned to a failed test."))
@@ -1672,14 +1672,13 @@ def save_submission_from_test_delete(sender, instance, **kwargs):
 @receiver(post_save, sender=TestCategory)
 def update_test_cases_from_script(sender, instance, **kwargs):
     """Parse test script and update TestCases on save."""
-    # Avoid circular imports or start-up issues
+    import logging
+    _logger = logging.getLogger(__name__)
     try:
         from autograder.services.TestParsingService import TestParsingService
         TestParsingService.update_test_cases(instance)
     except Exception as e:
-        # Logging here would be good, but for now just pass to avoid breaking save
-        # in case of migration/startup issues
-        pass
+        _logger.exception(f"Failed to update test cases for TestCategory {instance.pk}: {e}")
 
 
 @receiver(pre_save, sender=Submission)

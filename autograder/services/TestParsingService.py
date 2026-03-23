@@ -277,11 +277,21 @@ class TestParsingService:
         except Exception:
             language = None
 
+        logger.info(f"[TestParsingService] Syncing test cases for TestCategory {test_category.pk} (language={language})")
         parsed_tests = TestParsingService.parse_script(test_category, language=language)
-        
+        logger.info(f"[TestParsingService] Parsed {len(parsed_tests)} tests from script")
+
+        if not parsed_tests:
+            logger.warning(f"[TestParsingService] No tests parsed for TestCategory {test_category.pk}. "
+                           f"Script empty={not test_category.testScript}")
+            return
+
         # Get existing tests (keyed by functionName to match script source)
         current_tests = {t.functionName: t for t in test_category.testCases.all() if t.functionName}
         parsed_fnames = set()
+
+        # Max length for the description CharField
+        desc_max_length = TestCase._meta.get_field('description').max_length or 255
         
         for test_data in parsed_tests:
             fname = test_data['functionName']
@@ -292,33 +302,40 @@ class TestParsingService:
             if description == fname:
                 description = fname.replace('_', ' ').title()
             
+            # Truncate description to model max_length
+            description = description[:desc_max_length]
             explanation = test_data.get('description', "")
 
-            if fname in current_tests:
-                # Update existing
-                t = current_tests[fname]
-                t.description = description
-                t.explanation = explanation
-                t.pointsPass = test_data.get('points', 0)
-                t.timeout = test_data.get('timeout', 30)
-                t.save()
-            else:
-                # Create new
-                TestCase.objects.create(
-                    testCategory=test_category,
-                    functionName=fname,
-                    description=description,
-                    explanation=explanation,
-                    pointsPass=test_data.get('points', 0),
-                    timeout=test_data.get('timeout', 30),
-                    type='script' # Default type for script-based tests
-                )
+            try:
+                if fname in current_tests:
+                    # Update existing
+                    t = current_tests[fname]
+                    t.description = description
+                    t.explanation = explanation
+                    t.pointsPass = test_data.get('points', 0)
+                    t.timeout = test_data.get('timeout', 30)
+                    t.save()
+                    logger.info(f"[TestParsingService] Updated test case: {fname}")
+                else:
+                    # Create new
+                    TestCase.objects.create(
+                        testCategory=test_category,
+                        functionName=fname,
+                        description=description,
+                        explanation=explanation,
+                        pointsPass=test_data.get('points', 0),
+                        timeout=test_data.get('timeout', 30),
+                        type='script' # Default type for script-based tests
+                    )
+                    logger.info(f"[TestParsingService] Created test case: {fname}")
+            except Exception as e:
+                logger.error(f"[TestParsingService] Failed to create/update test case '{fname}': {e}")
         
         # Delete obsolete tests
         # Tests that exist in DB (with functionName) but are NOT in the parsed script
         for fname, test_case in current_tests.items():
             if fname not in parsed_fnames:
-                logger.info(f"Removing obsolete test case: {fname} (ID: {test_case.pk})")
+                logger.info(f"[TestParsingService] Removing obsolete test case: {fname} (ID: {test_case.pk})")
                 test_case.delete()
         
         # Calculate total max points from parsed tests
@@ -326,3 +343,5 @@ class TestParsingService:
         
         # Update TestCategory maxPoints without triggering save signals
         TestCategory.objects.filter(pk=test_category.pk).update(maxPoints=total_points)
+        logger.info(f"[TestParsingService] Sync complete for TestCategory {test_category.pk}: "
+                    f"{len(parsed_tests)} tests, {total_points} total points")
