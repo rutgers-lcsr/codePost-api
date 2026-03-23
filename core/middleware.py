@@ -42,6 +42,19 @@ def csp_frame_ancestors_middleware(get_response):
     return middleware
 
 
+def no_cache_middleware(get_response):
+    """
+    Sets Cache-Control: no-store on all responses to prevent the browser from
+    caching authenticated API responses. Without this, switching identities
+    (e.g. impersonation) can silently serve stale data from the previous user.
+    """
+    def middleware(request):
+        response = get_response(request)
+        response["Cache-Control"] = "no-store"
+        return response
+    return middleware
+
+
 # https://www.fusionbox.com/blog/detail/create-react-app-and-django/624/
 def dev_cors_middleware(get_response):
     """

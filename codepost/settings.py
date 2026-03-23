@@ -401,6 +401,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "core.middleware.csp_frame_ancestors_middleware",
+    "core.middleware.no_cache_middleware",
 ]
 if DEBUG:
     MIDDLEWARE.append("core.middleware.dev_cors_middleware")
