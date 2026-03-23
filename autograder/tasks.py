@@ -55,13 +55,13 @@ def run_test_task(submission_id: int, test_id: Optional[int] = None, user_id: Op
         from autograder.services.TestService import TestService
         
         if test_id:
-            # Run single test
-            result = TestService.run_test(test_id, submission_id, user_id=str(user_id) if user_id else None, file_overrides=file_overrides)
-            success = bool(result.get('success', False))
+            # Route single test through run_suite for consistent crash handling
+            results = TestService.run_suite(submission_id, test_case_ids=[test_id], user_id=str(user_id) if user_id else None, file_overrides=file_overrides)
+            success = all(r.get("success", True) for r in results)
             return {
                 "success": success,
-                "result": result,
-                "error": result.get("error") if not success else None,
+                "result": results[0] if len(results) == 1 else results,
+                "error": None if success else "Test failed",
             }
         else:
             # Run all tests (suite)

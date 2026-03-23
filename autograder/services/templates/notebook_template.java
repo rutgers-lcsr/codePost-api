@@ -505,6 +505,12 @@ public class notebook_template {
 
                 } catch (Exception e) {
                     templateLog("Failed to run notebook tests: " + e.getMessage(), "ERROR");
+                    // Emit synthetic crash result so the backend knows the test script failed
+                    String errMsg = e.getMessage() != null ? e.getMessage().replace("\"", "\\\"").replace("\n", "\\n")
+                            : "Unknown error";
+                    System.out.println(
+                            "<<<TEST_RESULT_JSON_START>>>[{\"name\":\"Test Script Execution\",\"description\":\"\",\"message\":\"\",\"score\":0,\"max_score\":0,\"passed\":false,\"status\":\"error\",\"error\":\"Test script failed to load: "
+                                    + errMsg + "\",\"output\":\"\"}]<<<TEST_RESULT_JSON_END>>>");
                 }
             }
 

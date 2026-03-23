@@ -382,7 +382,14 @@ try:
         print(f"SCRIPT_DEBUG: {test_code[:500]}", file=sys.stderr)
         _exec_with_pseudo_file(test_code, "/work/test_script.py")
 except Exception as e:
-    print(f"Test Script Error:\n{traceback.format_exc()}", file=sys.stderr)
+    _test_script_tb = traceback.format_exc()
+    print(f"Test Script Error:\n{_test_script_tb}", file=sys.stderr)
+    # Emit a synthetic error result so the backend knows the script crashed
+    _crash_result = TestResult("Test Script Execution", 0)
+    _crash_result.status = "error"
+    _crash_result.passed = False
+    _crash_result.error = f"Test script failed to load:\n{_test_script_tb}"
+    print(_crash_result.to_json(), file=sys.stderr)
 
 
 # Filter tests if a specific test function is requested

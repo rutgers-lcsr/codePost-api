@@ -92,6 +92,23 @@ class TestService:
         if not combined:
             return None
 
+        # Detect test script crash (instructor-side error, not student code)
+        if 'Test Script Error' in combined:
+            first_line = next(
+                (
+                    line.strip()
+                    for line in combined.splitlines()
+                    if any(kw in line for kw in ('Error', 'Exception', 'Import', 'Module'))
+                    and 'Test Script Error' not in line
+                ),
+                'Test script failed to load.',
+            )
+            return (
+                'The test script itself crashed before tests could run. '
+                'This is likely an issue with the test script, not with student code.\n'
+                f"Root cause: {first_line}"
+            )
+
         # Prefer explicit student-code crash marker emitted by templates
         if 'Student Code Runtime Error' in combined and TestService._looks_like_syntax_or_compile_error(combined):
             first_line = next(
@@ -425,6 +442,11 @@ class TestService:
                         if r.get('name') == "Test Script Execution" and r.get('status') == 'error':
                             script_crashed = True
                             break
+
+                    # Fallback: if no results at all and stderr contains the crash marker,
+                    # treat it as a crash even if the synthetic result wasn't parsed
+                    if not script_crashed and not raw_test_results and 'Test Script Error:' in stderr_log:
+                        script_crashed = True
                     
                     should_sync = script_success and not script_crashed
                     
@@ -512,22 +534,35 @@ class TestService:
                         for test in category_tests:
                             if test.id not in processed_ids:
                                  # It was requested but we didn't get a result
-                                 error_msg = f"Test did not execute or name mismatch.\nExpected: {test.functionName} ({test.description})\n"
-                                 
-                                 if raw_test_results:
-                                     # Show available results
-                                     available_names = [r.get('name', '') for r in raw_test_results]
-                                     error_msg += f"Available Results: {', '.join(available_names)}\n"
+                                 if script_crashed:
+                                     error_msg = f"Test script failed to execute. Tests were not run.\nExpected: {test.functionName} ({test.description})\n"
+                                     # Include truncated stderr so the instructor sees the traceback
+                                     if stderr_log:
+                                         snippet = stderr_log[:2000]
+                                         if len(stderr_log) > 2000:
+                                             snippet += "\n... (truncated)"
+                                         error_msg += f"\nScript error output:\n{snippet}"
                                  else:
-                                     error_msg += "No test results returned by script.\n"
-
-                                 # Do not append category-wide raw logs here.
-                                 # They may contain unrelated syntax errors from other contexts/files,
-                                 # which can incorrectly label this specific test as a syntax issue.
-                                 error_msg += (
-                                     "\nCategory execution log omitted for this test-level error to avoid "
-                                     "cross-test contamination."
-                                 )
+                                     error_msg = f"Test did not execute or name mismatch.\nExpected: {test.functionName} ({test.description})\n"
+                                 
+                                     if raw_test_results:
+                                         # Show available results
+                                         available_names = [r.get('name', '') for r in raw_test_results]
+                                         error_msg += f"Available Results: {', '.join(available_names)}\n"
+                                         # Only omit logs when other results exist (contamination risk)
+                                         error_msg += (
+                                             "\nCategory execution log omitted for this test-level error to avoid "
+                                             "cross-test contamination."
+                                         )
+                                     else:
+                                         error_msg += "No test results returned by script.\n"
+                                         # No results at all — safe to include stderr since there's
+                                         # nothing to contaminate; the entire script produced no output
+                                         if stderr_log:
+                                             snippet = stderr_log[:2000]
+                                             if len(stderr_log) > 2000:
+                                                 snippet += "\n... (truncated)"
+                                             error_msg += f"\nExecution output:\n{snippet}"
 
                                  # Save error result to DB so frontend sees it
                                  TestService._save_test_result(

@@ -185,6 +185,7 @@ void assertTrue(bool condition, const std::string& msg = "Assertion failed") {
 int main(int argc, char** argv) {
     std::vector<TestResult> results;
     
+    try {
     for (const auto& test : TestRegistry::instance().tests) {
         TestResult res;
         res.name = test.name;
@@ -221,6 +222,27 @@ int main(int argc, char** argv) {
         std::cout.rdbuf(old);
         res.output = buffer.str();
         results.push_back(res);
+    }
+    } catch (const std::exception& e) {
+        std::cerr << "Test Script Error: " << e.what() << std::endl;
+        TestResult crash;
+        crash.name = "Test Script Execution";
+        crash.max_score = 0;
+        crash.score = 0;
+        crash.passed = false;
+        crash.status = "error";
+        crash.error = std::string("Test script failed to load: ") + e.what();
+        results.push_back(crash);
+    } catch (...) {
+        std::cerr << "Test Script Error: Unknown error" << std::endl;
+        TestResult crash;
+        crash.name = "Test Script Execution";
+        crash.max_score = 0;
+        crash.score = 0;
+        crash.passed = false;
+        crash.status = "error";
+        crash.error = "Test script failed to load: Unknown error";
+        results.push_back(crash);
     }
     
     std::cout << "<<<TEST_RESULT_JSON_START>>>[";
