@@ -17,7 +17,7 @@ class JavaExecutor(Executor):
     LANGUAGE = "java-17"
     EXECUTABLE_EXTENSIONS = [".java"]
     DOCKER_IMAGE = "eclipse-temurin:17-jdk"
-    TEMPLATE = "template.java"
+    TEMPLATE = "TestRunner.java"
 
     @classmethod
     def is_executable(cls, file_name: Optional[str] = None, extension: Optional[str] = None, code: Optional[str] = None) -> bool:

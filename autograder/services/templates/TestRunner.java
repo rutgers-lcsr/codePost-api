@@ -4,6 +4,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -181,9 +182,17 @@ public class TestRunner {
                         } catch (ExecutionException ee) {
                             result.passed = false;
                             result.score = 0;
-                            result.status = "failed";
                             Throwable cause = ee.getCause();
+                            // Unwrap RuntimeException wrapper from the lambda
+                            if (cause instanceof RuntimeException && cause.getCause() != null) {
+                                cause = cause.getCause();
+                            }
                             result.error = cause != null ? cause.toString() : ee.toString();
+                            if (cause instanceof AssertionError) {
+                                result.status = "failed";
+                            } else {
+                                result.status = "error";
+                            }
                         }
 
                         exec.shutdownNow();

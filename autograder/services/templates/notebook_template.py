@@ -448,7 +448,10 @@ except Exception as e:
         "score": 0,
         "max_score": 0,
         "error": f"Failed to run test script: {str(e)}\n{traceback.format_exc()}",
-        "status": "error"
+        "status": "error",
+        "message": "",
+        "output": "",
+        "description": ""
     })
 
 # Output results as JSON

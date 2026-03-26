@@ -96,6 +96,12 @@ local({
 # ==========================================
 # TEST FRAMEWORK (R Script)
 # ==========================================
+assertion_error <- function(message) {
+    cond <- simpleCondition(message, call = sys.call(-1))
+    class(cond) <- c("assertion_error", "error", "condition")
+    stop(cond)
+}
+
 test_results <- list()
 
 run_test <- function(name, points, description = NULL, fn = NULL, timeout = 30) {
@@ -113,7 +119,8 @@ run_test <- function(name, points, description = NULL, fn = NULL, timeout = 30) 
         score = 0,
         passed = FALSE,
         status = "failed",
-        error = ""
+        error = "",
+        output = ""
     )
 
     if (isTRUE(STUDENT_CODE_SYNTAX_INVALID)) {
@@ -170,7 +177,14 @@ run_test <- function(name, points, description = NULL, fn = NULL, timeout = 30) 
         }
     }, error = function(e) {
         result$error <<- conditionMessage(e)
-        result$status <<- if (grepl("time limit|timed out|timeout", tolower(conditionMessage(e)))) "error" else "failed"
+        if (inherits(e, "assertion_error")) {
+            result$status <<- "failed"
+        } else if (grepl("time limit|timed out|timeout", tolower(conditionMessage(e)))) {
+            result$status <<- "error"
+            result$message <<- "Test timed out"
+        } else {
+            result$status <<- "error"
+        }
     })
 
     test_results <<- c(test_results, list(result))
@@ -190,18 +204,22 @@ output_test_results <- function() {
         cat('<<<TEST_RESULT_JSON_END>>>')
     }
 }
-
 # Execute test code if provided
-test_code <- "#{TEST_CODE}"
-if (nchar(trimws(test_code)) > 0) {
-    tryCatch({
-        eval(parse(text = test_code), envir = globalenv())
-    }, error = function(e) {
-        run_test("Test Script Execution", 0, function() {
-            stop(paste("Failed to run test script:", conditionMessage(e)))
-        })
-    })
-}
+tryCatch({
+#{TEST_CODE}
+}, error = function(e) {
+    test_results <<- c(test_results, list(list(
+        name = "Test Script Execution",
+        max_score = 0,
+        description = NULL,
+        message = "",
+        score = 0,
+        passed = FALSE,
+        status = "error",
+        error = paste("Failed to run test script:", conditionMessage(e)),
+        output = ""
+    )))
+})
 
 # Output test results
 output_test_results()

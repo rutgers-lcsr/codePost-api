@@ -40,6 +40,13 @@ from core.serializers.actionResponses import (
   BeforeStudentUploadResponseSerializer,
   AssignmentDownloadResponseSerializer,
   AssignmentStudentUploadGetResponseSerializer,
+  AssignmentAnalyticsResponseSerializer,
+)
+from core.services.assignment_analytics import (
+  get_grade_distribution,
+  get_grader_workload,
+  get_grading_timeline,
+  get_test_results_summary,
 )
 
 
@@ -1050,3 +1057,34 @@ class AssignmentViewSet(ListProtectedViewSet):
     # Return the newly created assignment data so frontend can navigate to it
     serializer = AssignmentSerializer(copied_assignment, context={'request': request})
     return Response(serializer.data)
+
+  @extend_schema(
+    responses=AssignmentAnalyticsResponseSerializer,
+    parameters=[
+      OpenApiParameter(name='buckets', type=int, location=OpenApiParameter.QUERY, required=False, description='Number of grade distribution buckets (1-100, default 10)'),
+    ],
+  )
+  @action(detail=True, methods=["GET"])
+  def analytics(self, request, pk=None):
+    """
+    Return aggregated analytics for this assignment:
+    grade distribution, grader workload, grading timeline, and test results.
+    """
+    user = self.request.user
+    assignment = self.get_object()
+    course = assignment.course
+
+    if not isCourseAdmin(user, course):
+      return returnForbidden()
+
+    try:
+      num_buckets = int(request.query_params.get('buckets', 10))
+    except (TypeError, ValueError):
+      num_buckets = 10
+
+    return Response({
+      'gradeDistribution': get_grade_distribution(assignment, num_buckets=num_buckets),
+      'graderWorkload': get_grader_workload(assignment),
+      'gradingTimeline': get_grading_timeline(assignment),
+      'testResults': get_test_results_summary(assignment),
+    })

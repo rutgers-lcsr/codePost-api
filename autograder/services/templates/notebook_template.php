@@ -16,6 +16,9 @@ $STUDENT_CODE_SYNTAX_INVALID = false;
 $STUDENT_CODE_SYNTAX_ERROR_MSG = "";
 
 // ============= Tester Framework =============
+// PHP 7+ provides a built-in AssertionError class (extends Error).
+// No custom declaration needed.
+
 class Tester {
     private static $results = [];
     
@@ -40,7 +43,8 @@ class Tester {
             "score" => 0.0,
             "passed" => false,
             "status" => "failed",
-            "error" => ""
+            "error" => "",
+            "output" => ""
         ];
 
         try {
@@ -90,11 +94,21 @@ class Tester {
                 $result["score"] = $points;
                 $result["status"] = "passed";
             }
+        } catch (AssertionError $e) {
+            $result["error"] = $e->getMessage();
+            $result["status"] = "failed";
         } catch (Throwable $e) {
             $result["error"] = $e->getMessage();
-            $result["status"] = stripos($result["error"], "timed out") !== false ? "error" : "failed";
+            $result["status"] = "error";
+            if (stripos($e->getMessage(), "timed out") !== false) {
+                $result["message"] = "Test timed out";
+            }
         }
         
+        self::$results[] = $result;
+    }
+    
+    public static function addResult(array $result): void {
         self::$results[] = $result;
     }
     
@@ -183,9 +197,17 @@ if (!empty($TEST_CODE_B64)) {
         try {
             eval($test_code);
         } catch (Throwable $e) {
-            Tester::test("Test Script Execution", 0, function() use ($e) {
-                throw new Exception("Failed to run test script: " . $e->getMessage());
-            });
+            Tester::addResult([
+                "name" => "Test Script Execution",
+                "max_score" => 0,
+                "description" => null,
+                "message" => "",
+                "score" => 0,
+                "passed" => false,
+                "status" => "error",
+                "error" => "Failed to run test script: " . $e->getMessage(),
+                "output" => ""
+            ]);
         }
     }
 }

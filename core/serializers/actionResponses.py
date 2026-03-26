@@ -69,3 +69,41 @@ class TestCaseRunRequestSerializer(serializers.Serializer):
 
 class TestCaseRunResponseSerializer(serializers.Serializer):
     task = serializers.CharField()
+
+
+# ============================================================================
+# Assignment Analytics
+# ============================================================================
+
+class AssignmentAnalyticsGradeDistributionSerializer(serializers.Serializer):
+    bucketMin = serializers.FloatField()
+    bucketMax = serializers.FloatField()
+    count = serializers.IntegerField()
+
+
+class AssignmentAnalyticsGraderWorkloadSerializer(serializers.Serializer):
+    grader = serializers.CharField()
+    finalized = serializers.IntegerField()
+    unfinalized = serializers.IntegerField()
+    total = serializers.IntegerField()
+
+
+class AssignmentAnalyticsGradingTimelineSerializer(serializers.Serializer):
+    period = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class AssignmentAnalyticsTestResultsSerializer(serializers.Serializer):
+    testCaseDescription = serializers.CharField()
+    testCategoryName = serializers.CharField()
+    passed = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    errored = serializers.IntegerField()
+    total = serializers.IntegerField()
+
+
+class AssignmentAnalyticsResponseSerializer(serializers.Serializer):
+    gradeDistribution = AssignmentAnalyticsGradeDistributionSerializer(many=True)
+    graderWorkload = AssignmentAnalyticsGraderWorkloadSerializer(many=True)
+    gradingTimeline = AssignmentAnalyticsGradingTimelineSerializer(many=True)
+    testResults = AssignmentAnalyticsTestResultsSerializer(many=True)

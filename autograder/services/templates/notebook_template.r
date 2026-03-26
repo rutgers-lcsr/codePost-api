@@ -310,6 +310,12 @@ end_time <- Sys.time()
 execution_time <- as.numeric(difftime(end_time, start_time, units = "secs"))
 
 # ============= Tester Framework =============
+assertion_error <- function(message) {
+    cond <- simpleCondition(message, call = sys.call(-1))
+    class(cond) <- c("assertion_error", "error", "condition")
+    stop(cond)
+}
+
 test_results <- list()
 
 run_test <- function(name, points, description, fn = NULL, timeout = 30) {
@@ -327,7 +333,8 @@ run_test <- function(name, points, description, fn = NULL, timeout = 30) {
         score = 0,
         passed = FALSE,
         status = "failed",
-        error = ""
+        error = "",
+        output = ""
     )
 
     tryCatch({
@@ -370,7 +377,14 @@ run_test <- function(name, points, description, fn = NULL, timeout = 30) {
         }
     }, error = function(e) {
         result$error <<- conditionMessage(e)
-        result$status <<- if (grepl("time limit|timed out|timeout", tolower(conditionMessage(e)))) "error" else "failed"
+        if (inherits(e, "assertion_error")) {
+            result$status <<- "failed"
+        } else if (grepl("time limit|timed out|timeout", tolower(conditionMessage(e)))) {
+            result$status <<- "error"
+            result$message <<- "Test timed out"
+        } else {
+            result$status <<- "error"
+        }
     })
 
     test_results <<- c(test_results, list(result))
@@ -392,9 +406,17 @@ if (nchar(test_code_b64) > 0) {
             eval(parse(text = test_code), envir = cell_env)
         }
     }, error = function(e) {
-        run_test("Test Script Execution", 0, function() {
-            stop(paste("Failed to run test script:", conditionMessage(e)))
-        })
+        test_results <<- c(test_results, list(list(
+            name = "Test Script Execution",
+            max_score = 0,
+            description = NULL,
+            message = "",
+            score = 0,
+            passed = FALSE,
+            status = "error",
+            error = paste("Failed to run test script:", conditionMessage(e)),
+            output = ""
+        )))
     })
 }
 

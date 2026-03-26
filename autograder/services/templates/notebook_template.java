@@ -153,7 +153,7 @@ public class notebook_template {
                             "public TestResult(String n, double m, String d) { name=n; max_score=m; description=d; message=\"\"; score=0; passed=false; status=\"failed\"; output=\"\"; } }");
 
             // Define Assertions (polyfilled for simple use)
-            jshell.eval("void assertTrue(boolean cond, String msg) { if (!cond) throw new RuntimeException(msg); }");
+            jshell.eval("void assertTrue(boolean cond, String msg) { if (!cond) throw new AssertionError(msg); }");
 
             int executionCount = 0;
 
@@ -323,10 +323,10 @@ public class notebook_template {
                             .map(s -> ((TypeDeclSnippet) s).name())
                             .forEach(name -> {
                                 if (Arrays.asList("Tester", "Tests", "Main").contains(name)) {
-                                    _classChecks.append("try { Class<?> c = " + name + ".class; ");
-                                    _classChecks.append("_sb.append(\"Found: \" + c.getName() + \" \"); ");
+                                    _classChecks.append("try { _targetArr[0] = " + name + ".class; ");
+                                    _classChecks.append("_sb.append(\"Found: \" + _targetArr[0].getName() + \" \"); ");
                                     _classChecks.append(
-                                            "if(_target==null) _target=c; } catch(Throwable t){ _sb.append(\"Err:\"+t+\" \"); } ");
+                                            "} catch(Throwable t){ _sb.append(\"Err:\"+t+\" \"); } ");
                                 }
                             });
 
@@ -342,17 +342,19 @@ public class notebook_template {
                             + (studentCodeSyntaxInvalid ? "true" : "false") + ";");
                     jshell.eval("String CODEPOST_STUDENT_SYNTAX_ERROR_MSG = \"" + escapedSyntaxMsg + "\";");
 
-                    jshell.eval("   java.util.function.Supplier<String> __runTests = () -> { " +
+                    List<SnippetEvent> supplierEvents = jshell.eval("   java.util.function.Supplier<String> __runTests = () -> { " +
                             "       StringBuilder _sb = new StringBuilder(); " +
-                            "       List<TestResult> _results = new ArrayList<>(); Class<?> _target = null; " +
+                            "       List<TestResult> _results = new ArrayList<>(); Class<?>[] _targetArr = new Class<?>[]{null}; " +
                             " " + _classChecks.toString() + " " +
+                            "   Class<?> _target = _targetArr[0]; " +
                             "   _sb.append(\"Target: \" + (_target==null?\"null\":_target.getName()) + \" \"); " +
                             "   if (_target != null) { " +
                             "       _sb.append(\"DEBUG: Target=\" + _target.getName() + \" Methods=\" + _target.getDeclaredMethods().length + \" \"); "
                             +
-                            "       Object _instance = null; " +
-                            "       try { _instance = _target.getDeclaredConstructor().newInstance(); } catch(Throwable t) {} "
+                            "       Object[] _instArr = new Object[]{null}; " +
+                            "       try { _instArr[0] = _target.getDeclaredConstructor().newInstance(); } catch(Throwable t) {} "
                             +
+                            "       final Object _instance = _instArr[0]; " +
                             "       for (Method _m : _target.getDeclaredMethods()) { " +
                             "           if (_m.isAnnotationPresent(Test.class)) { " +
                             "               Test _ann = _m.getAnnotation(Test.class); " +
@@ -409,8 +411,10 @@ public class notebook_template {
                             "                   _tr.error = \"Test timed out after \" + _ann.timeout() + \"s\"; _tr.status = \"error\"; _future.cancel(true); "
                             +
                             "               } catch (Throwable _t) { " +
-                            "                   _tr.error = _t.getCause() != null ? _t.getCause().getMessage() : _t.getMessage(); "
-                            +
+                            "                   Throwable _cause = _t.getCause() != null ? _t.getCause() : _t; " +
+                            "                   _tr.error = _cause.getMessage(); " +
+                            "                   if (_cause instanceof AssertionError) { _tr.status = \"failed\"; } " +
+                            "                   else { _tr.status = \"error\"; } " +
                             "               } finally { _exec.shutdownNow(); } " +
                             "               _results.add(_tr); " +
                             "           } " +
@@ -432,12 +436,23 @@ public class notebook_template {
                             "       _sb.append(\"\\\"status\\\":\\\"\" + _r.status + \"\\\",\"); " +
                             "       String err = _r.error==null ? \"\" : _r.error.replaceAll(\"[^a-zA-Z0-9 .,:;!?()_\\\\-=\\\\[\\\\]]\", \"?\"); "
                             +
-                            "       _sb.append(\"\\\"error\\\":\\\"\" + err + \"\\\"}\"); " +
+                            "       _sb.append(\"\\\"error\\\":\\\"\" + err + \"\\\",\"); " +
+                            "       String out = _r.output==null ? \"\" : _r.output.replaceAll(\"[^a-zA-Z0-9 .,:;!?()_\\\\-=\\\\[\\\\]\\\\n]\", \"?\"); "
+                            +
+                            "       _sb.append(\"\\\"output\\\":\\\"\" + out + \"\\\"}\"); " +
                             "       if (_i < _results.size()-1) _sb.append(\",\"); " +
                             "   } " +
                             "   _sb.append(\"]<<<TEST_RESULT_JSON_END>>>\"); " +
                             "       return _sb.toString(); " +
                             "   }; ");
+
+                    for (SnippetEvent se : supplierEvents) {
+                        if (se.status() == Status.REJECTED) {
+                            templateLog("__runTests definition REJECTED: " + se.snippet().source().substring(0, Math.min(200, se.snippet().source().length())), "ERROR");
+                            jshell.diagnostics(se.snippet())
+                                    .forEach(d -> templateLog("  Diagnostic: " + d.getMessage(Locale.getDefault()), "ERROR"));
+                        }
+                    }
 
                     // Reset captured stream for test output
                     jshellOut.reset();

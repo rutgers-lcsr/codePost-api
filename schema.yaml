@@ -26,30 +26,30 @@ info:
 
     # Create an assignment
     assignment = client.assignments.create(
-      name="Homework 1",
-      course=course.id,
-      points=100,
+        name="Homework 1",
+        course=course.id,
+        points=100,
     )
 
     # Create submission + upload files in one call
     submission = client.submissions.create_with_files(
-      assignment=assignment.id,
-      students=["student@example.com"],
-      files=[
-        {"name": "main.py", "data": "print('hello')", "extension": ".py"},
-      ],
+        assignment=assignment.id,
+        students=["student@example.com"],
+        files=[
+            {"name": "main.py", "data": "print('hello')", "extension": ".py"},
+        ],
     )
 
     # Add inline feedback
     file_id = client.submissions.retrieve(submission.id).files[0].id
     client.comments.create(
-      Comment(
-        file=file_id,
-        text="Nice work",
-        start_line=1,
-        end_line=1,
-        point_delta=1,
-      )
+        Comment(
+            file=file_id,
+            text="Nice work",
+            start_line=1,
+            end_line=1,
+            point_delta=1,
+        )
     )
 
     # Finalize and export grades
@@ -850,6 +850,38 @@ paths:
       responses:
         '204':
           description: No response body
+  /assignments/{id}/analytics/:
+    get:
+      operationId: assignments_analyticsRetrieve
+      description: |-
+        Return aggregated analytics for this assignment:
+        grade distribution, grader workload, grading timeline, and test results.
+      parameters:
+      - in: query
+        name: buckets
+        schema:
+          type: integer
+        description: Number of grade distribution buckets (1-100, default 10)
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentAnalyticsResponse'
+          description: ''
   /assignments/{id}/beforeStudentUpload/:
     get:
       operationId: assignments_beforeStudentUploadRetrieve
@@ -2872,7 +2904,10 @@ paths:
         - start_line: int (required) - Start line of selection (0-indexed)
         - end_line: int (required) - End line of selection (0-indexed)
         - rubric_comment_id: int (optional) - ID of linked RubricComment
+        - start_char: int (optional) - Start character offset for selection
+        - end_char: int (optional) - End character offset for selection
         - existing_text: str (optional) - Grader's draft text to improve
+        - points: float (optional) - Points override for rubric comment (can be used without rubric_comment_id for manual adjustments)
       tags:
       - comments
       requestBody:
@@ -9089,6 +9124,45 @@ paths:
       responses:
         '204':
           description: No response body
+  /testCategories/{id}/sync-tests/:
+    post:
+      operationId: testCategories_syncTestsCreate
+      description: |-
+        Manually trigger test case sync from the category's testScript.
+        Use this if test cases were not created automatically on save.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this test category.
+        required: true
+      tags:
+      - testCategories
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestCategory'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TestCategory'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TestCategory'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestCategory'
+          description: ''
   /testCategories/preview-script/:
     post:
       operationId: testCategories_previewScriptCreate
@@ -10382,6 +10456,93 @@ components:
       - points
       - rubricCategories
       - testCategories
+    AssignmentAnalyticsGradeDistribution:
+      type: object
+      properties:
+        bucketMin:
+          type: number
+          format: double
+        bucketMax:
+          type: number
+          format: double
+        count:
+          type: integer
+      required:
+      - bucketMax
+      - bucketMin
+      - count
+    AssignmentAnalyticsGraderWorkload:
+      type: object
+      properties:
+        grader:
+          type: string
+        finalized:
+          type: integer
+        unfinalized:
+          type: integer
+        total:
+          type: integer
+      required:
+      - finalized
+      - grader
+      - total
+      - unfinalized
+    AssignmentAnalyticsGradingTimeline:
+      type: object
+      properties:
+        period:
+          type: string
+        count:
+          type: integer
+      required:
+      - count
+      - period
+    AssignmentAnalyticsResponse:
+      type: object
+      properties:
+        gradeDistribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsGradeDistribution'
+        graderWorkload:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsGraderWorkload'
+        gradingTimeline:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsGradingTimeline'
+        testResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsTestResults'
+      required:
+      - gradeDistribution
+      - graderWorkload
+      - gradingTimeline
+      - testResults
+    AssignmentAnalyticsTestResults:
+      type: object
+      properties:
+        testCaseDescription:
+          type: string
+        testCategoryName:
+          type: string
+        passed:
+          type: integer
+        failed:
+          type: integer
+        errored:
+          type: integer
+        total:
+          type: integer
+      required:
+      - errored
+      - failed
+      - passed
+      - testCaseDescription
+      - testCategoryName
+      - total
     AssignmentClone:
       type: object
       properties:
@@ -13573,7 +13734,7 @@ components:
         description:
           type: string
           description: Test description.
-          maxLength: 48
+          maxLength: 255
         type:
           $ref: '#/components/schemas/TypeEnum'
         pointsFail:
@@ -14639,7 +14800,7 @@ components:
         description:
           type: string
           description: Test description.
-          maxLength: 48
+          maxLength: 255
         type:
           $ref: '#/components/schemas/TypeEnum'
         pointsFail:
@@ -14745,7 +14906,7 @@ components:
         description:
           type: string
           description: Test description.
-          maxLength: 48
+          maxLength: 255
         pointsFail:
           type: number
           format: double

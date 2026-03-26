@@ -64,7 +64,8 @@ async function runTestCase(testCase) {
         score: 0,
         passed: false,
         status: "failed",
-        error: ""
+        error: "",
+        output: ""
     };
 
     if (STUDENT_CODE_SYNTAX_INVALID) {
@@ -116,7 +117,14 @@ async function runTestCase(testCase) {
         }
     } catch (e) {
         result.error = e && (e.message || String(e));
-        result.status = result.error && result.error.includes("timed out") ? "error" : "failed";
+        if (e && e.code === 'ERR_ASSERTION') {
+            result.status = "failed";
+        } else {
+            result.status = "error";
+            if (result.error && result.error.includes("timed out")) {
+                result.message = "Test timed out";
+            }
+        }
     }
 
     testResults.push(result);
@@ -160,8 +168,16 @@ function outputTestResults() {
                 eval(testCode);
             }
         } catch (e) {
-            test("Test Script Execution", 0, () => {
-                throw new Error("Failed to run test script: " + (e.message || e));
+            testResults.push({
+                name: "Test Script Execution",
+                max_score: 0,
+                description: "",
+                message: "",
+                score: 0,
+                passed: false,
+                status: "error",
+                error: "Failed to run test script: " + (e.message || e),
+                output: ""
             });
         }
     }

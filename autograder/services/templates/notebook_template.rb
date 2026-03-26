@@ -115,6 +115,8 @@ end
 # ============================================
 # Tester Framework for Ruby Notebooks
 # ============================================
+class AssertionError < StandardError; end
+
 $test_results = []
 
 # Define run_test at top level so it is a private method of Object
@@ -139,7 +141,8 @@ def run_test(name, points, description=nil, timeout=30, &block)
     "score" => 0,
     "passed" => false,
     "status" => "failed",
-    "error" => ""
+    "error" => "",
+    "output" => ""
   }
 
   begin
@@ -167,9 +170,16 @@ def run_test(name, points, description=nil, timeout=30, &block)
       result["score"] = points
       result["status"] = "passed"
     end
+  rescue Timeout::Error => e
+    result["error"] = e.message
+    result["status"] = "error"
+    result["message"] = "Test timed out"
+  rescue AssertionError => e
+    result["error"] = e.message
+    result["status"] = "failed"
   rescue Exception => e
     result["error"] = e.message
-    result["status"] = e.is_a?(Timeout::Error) ? "error" : "failed"
+    result["status"] = "error"
   end
   
   $test_results << result
@@ -201,8 +211,11 @@ if !TEST_CODE_B64.empty?
         "max_score" => 0,
         "score" => 0,
         "passed" => false,
-        "status" => "failed",
-        "error" => "Failed to run test script: #{e.message}"
+        "status" => "error",
+        "error" => "Failed to run test script: #{e.message}",
+        "output" => "",
+        "description" => "",
+        "message" => ""
     }
   end
 end

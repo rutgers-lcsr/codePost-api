@@ -50,6 +50,14 @@ struct TestResult {
 
 const int DEFAULT_TIMEOUT_SECONDS = 30;
 
+// Custom assertion exception (matches Python's AssertionError behavior)
+class AssertionFailure : public std::exception {
+    std::string msg_;
+public:
+    explicit AssertionFailure(const std::string& msg) : msg_(msg) {}
+    const char* what() const noexcept override { return msg_.c_str(); }
+};
+
 struct PartialResult {
     double score;
     std::string message;
@@ -157,6 +165,10 @@ public:
 // TEST_TIMEOUT(TestName, Points, TimeoutSeconds) { ... }
 // TEST_DESC(TestName, Points, "Description") { ... }
 // TEST_DESC_TIMEOUT(TestName, Points, "Description", TimeoutSeconds) { ... }
+//
+// For partial credit, return a numeric value or PartialResult from the test body.
+// A void test that completes without throwing is a full pass.
+// Throw AssertionFailure to mark as "failed", or any other exception for "error".
 #define TEST(name, points) TEST_DESC_TIMEOUT(name, points, "", DEFAULT_TIMEOUT_SECONDS)
 
 #define TEST_TIMEOUT(name, points, timeout) TEST_DESC_TIMEOUT(name, points, "", timeout)
@@ -164,17 +176,29 @@ public:
 #define TEST_DESC(name, points, description) TEST_DESC_TIMEOUT(name, points, description, DEFAULT_TIMEOUT_SECONDS)
 
 #define TEST_DESC_TIMEOUT(name, points, description, timeout) \
-    auto _test_func_##name(); \
+    void _test_func_##name(); \
     struct _test_reg_##name { \
         _test_reg_##name() { \
             TestRegistry::instance().register_test(#name, points, description, timeout, _test_func_##name); \
         } \
     } _test_reg_inst_##name; \
-    auto _test_func_##name()
+    void _test_func_##name()
+
+// For tests that return partial credit scores
+#define TEST_PARTIAL(name, points) TEST_PARTIAL_DESC_TIMEOUT(name, points, "", DEFAULT_TIMEOUT_SECONDS)
+
+#define TEST_PARTIAL_DESC_TIMEOUT(name, points, description, timeout) \
+    PartialResult _test_func_##name(); \
+    struct _test_reg_##name { \
+        _test_reg_##name() { \
+            TestRegistry::instance().register_test(#name, points, description, timeout, _test_func_##name); \
+        } \
+    } _test_reg_inst_##name; \
+    PartialResult _test_func_##name()
 
 // Assertion Helper
 void assertTrue(bool condition, const std::string& msg = "Assertion failed") {
-    if (!condition) throw std::runtime_error(msg);
+    if (!condition) throw AssertionFailure(msg);
 }
 
 // Injected Test Code
@@ -213,10 +237,15 @@ int main(int argc, char** argv) {
             } else {
                 future.get();
             }
+        } catch (const AssertionFailure& e) {
+            res.error = e.what();
+            res.status = "failed";
         } catch (const std::exception& e) {
             res.error = e.what();
+            res.status = "error";
         } catch (...) {
             res.error = "Unknown Error";
+            res.status = "error";
         }
         
         std::cout.rdbuf(old);
@@ -232,6 +261,9 @@ int main(int argc, char** argv) {
         crash.passed = false;
         crash.status = "error";
         crash.error = std::string("Test script failed to load: ") + e.what();
+        crash.message = "";
+        crash.output = "";
+        crash.description = "";
         results.push_back(crash);
     } catch (...) {
         std::cerr << "Test Script Error: Unknown error" << std::endl;
@@ -242,6 +274,9 @@ int main(int argc, char** argv) {
         crash.passed = false;
         crash.status = "error";
         crash.error = "Test script failed to load: Unknown error";
+        crash.message = "";
+        crash.output = "";
+        crash.description = "";
         results.push_back(crash);
     }
     

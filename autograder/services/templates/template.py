@@ -250,7 +250,6 @@ class TestCase:
             result.status = "failed"
             result.error = str(e)
             result.output = stdout_capture.getvalue()
-            result.output = stdout_capture.getvalue()
         except TimeoutError as e:
             result.passed = False
             result.score = 0
