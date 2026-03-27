@@ -92,6 +92,7 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
   )
   aiDisabled = serializers.BooleanField(source='ai_disabled', required=False)
   aiCommentsDisabled = serializers.BooleanField(source='ai_comments_disabled', required=False)
+  aiChatDisabled = serializers.BooleanField(source='ai_chat_disabled', required=False)
   aiCoursePolicy = serializers.ChoiceField(
     source='ai_course_policy', choices=Organization.AI_COURSE_POLICY_CHOICES,
     required=False
@@ -105,6 +106,7 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
   )
   aiEnabled = serializers.SerializerMethodField()
   aiCommentsEnabled = serializers.SerializerMethodField()
+  aiChatEnabled = serializers.SerializerMethodField()
   hasApiKey = serializers.SerializerMethodField()
   apiKeyHint = serializers.SerializerMethodField()
   defaultTokenRates = serializers.SerializerMethodField()
@@ -119,11 +121,13 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
       'aiModel',
       'aiDisabled',
       'aiCommentsDisabled',
+      'aiChatDisabled',
       'aiCoursePolicy',
       'aiEnabledCourseIds',
       'aiTokenRates',
       'aiEnabled',
       'aiCommentsEnabled',
+      'aiChatEnabled',
       'hasApiKey',
       'apiKeyHint',
       'defaultTokenRates',
@@ -145,6 +149,11 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
   def get_aiCommentsEnabled(self, obj):
     """Returns True if AI comments are available at the org level."""
     return self._provider_is_configured(obj.ai_provider, obj.ai_api_key) and not obj.ai_disabled and not obj.ai_comments_disabled
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_aiChatEnabled(self, obj):
+    """Returns True if AI chat assistant is available at the org level."""
+    return self._provider_is_configured(obj.ai_provider, obj.ai_api_key) and not obj.ai_disabled and not obj.ai_chat_disabled
 
   @extend_schema_field(serializers.BooleanField)
   def get_hasApiKey(self, obj):
@@ -194,6 +203,7 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
   )
   aiDisabled = serializers.BooleanField(source='ai_disabled', required=False)
   aiCommentsDisabled = serializers.BooleanField(source='ai_comments_disabled', required=False)
+  aiChatDisabled = serializers.BooleanField(source='ai_chat_disabled', required=False)
   aiCoursePolicy = serializers.ChoiceField(
     source='ai_course_policy', choices=Organization.AI_COURSE_POLICY_CHOICES,
     required=False
@@ -216,6 +226,7 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
       'aiModel',
       'aiDisabled',
       'aiCommentsDisabled',
+      'aiChatDisabled',
       'aiCoursePolicy',
       'aiEnabledCourseIds',
       'aiTokenRates',

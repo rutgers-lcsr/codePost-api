@@ -7,9 +7,15 @@ description: Backend API patterns for codePost Django development
 # codePost API Infrastructure Guide
 
 ## Tech Stack
+
 Django 5.2 + Python 3.12 | DRF 3.16 | Celery 5.5 + Redis | MariaDB | Poetry | pytest + factory_boy
 
+## virtual environments
+
+Use ./.venv/ for Python virtual environment. Activate with `source .venv/bin/activate`. if available
+
 ## Project Layout
+
 ```
 codePost-api/
 ├── codepost/           # Django settings, urls.py, wsgi.py
@@ -24,6 +30,7 @@ codePost-api/
 All inherit `BaseModel` → provides `created`, `modified` fields.
 
 **Hierarchy**:
+
 ```
 Organization → Course → Assignment → Submission → Files/Comments
                       → TestCategory → TestCase
@@ -33,13 +40,14 @@ Organization → Course → Assignment → Submission → Files/Comments
 **File Types** (polymorphic): `SubmissionFile`, `AssignmentFile`, `CourseFile` all inherit `File`
 
 ### Model Pattern
+
 ```python
 class MyModel(BaseModel):
     name = models.CharField(max_length=64, help_text="Description")
-    
+
     class Meta:
         ordering = ('name',)
-    
+
     def __str__(self):
         return self.name
 ```
@@ -54,7 +62,7 @@ from core.serializers.template import ModelSerializerWithPOSTCheck
 class MySerializer(ModelSerializerWithPOSTCheck):
     computed = serializers.SerializerMethodField()
     user = serializers.SlugRelatedField(slug_field='email', queryset=User.objects.all())
-    
+
     class Meta:
         model = MyModel
         fields = ('id', 'name', 'computed', 'user')
@@ -63,6 +71,7 @@ class MySerializer(ModelSerializerWithPOSTCheck):
 ```
 
 **Serializer Types**:
+
 - `ModelSerializer` - Standard CRUD
 - `AnonymousSerializer` - Hides student identities for grading
 - `StudentSerializer` - Limited view for students
@@ -76,12 +85,12 @@ class MyViewSet(viewsets.ModelViewSet):
     queryset = MyModel.objects.all()
     serializer_class = MySerializer
     permission_classes = [MyPermissions]
-    
+
     def get_serializer_class(self):
         if isStudent(self.request.user, course):
             return StudentSerializer
         return MySerializer
-    
+
     @action(detail=True, methods=['post'])
     def custom_action(self, request, pk=None):
         obj = self.get_object()
@@ -134,6 +143,7 @@ RunSubmission.delay(submission_id)
 ```
 
 **Key Tasks**:
+
 - `RunSubmission` - Execute/cache submission files
 - `BuildEnvironment` - Build Docker image for autograder
 - `RunAll` - Run all tests on all submissions
@@ -152,13 +162,14 @@ class CourseFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Course
         django_get_or_create = ('name', 'period', 'organization')
-    
+
     name = "cs101"
     period = "s2020"
     organization = factory.SubFactory(OrganizationFactory)
 ```
 
 **Test Structure**:
+
 ```
 core/tests/
 ├── factories.py      # All factory definitions

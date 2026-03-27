@@ -159,6 +159,10 @@ class Organization(BaseModel):
       default=False,
       help_text="If True, AI comment generation is disabled at the organization level"
   )
+  ai_chat_disabled = models.BooleanField(
+      default=False,
+      help_text="If True, AI chat assistant is disabled at the organization level"
+  )
   ai_course_policy = models.CharField(
       max_length=16, default='none', choices=AI_COURSE_POLICY_CHOICES,
       help_text="Controls which courses can use the organization's AI configuration: 'all', 'selected', or 'none'"
@@ -369,6 +373,10 @@ class Course(BaseModel):
   ai_comments_disabled = models.BooleanField(
       default=False,
       help_text="If True, AI comment generation is disabled even if AI is globally enabled"
+  )
+  ai_chat_disabled = models.BooleanField(
+      default=False,
+      help_text="If True, AI chat assistant is disabled even if AI is globally enabled"
   )
   ai_use_own_settings = models.BooleanField(
       default=False,
@@ -1875,6 +1883,9 @@ class AIUsageRecord(BaseModel):
   total_tokens = models.PositiveIntegerField(
       default=0, help_text="Total tokens (input + output)"
   )
+  cached_tokens = models.PositiveIntegerField(
+      default=0, help_text="Number of input tokens served from provider cache (reduced cost)"
+  )
   estimated_cost = models.DecimalField(
       max_digits=10, decimal_places=6, default=Decimal('0'),
       help_text="Estimated cost in USD for this API call"
@@ -1899,3 +1910,107 @@ class AIUsageRecord(BaseModel):
 
   def __str__(self):
     return f"AIUsage [{self.provider}/{self.model}] {self.total_tokens} tokens"
+
+
+###############################################################################
+# Chat Conversations (Agentic Grading Assistant)
+###############################################################################
+
+class ChatConversation(BaseModel):
+  """A chat conversation thread between a grader and the AI assistant."""
+  if TYPE_CHECKING:
+    id: int
+
+  submission = models.ForeignKey(
+      'Submission', on_delete=models.CASCADE,
+      related_name='chat_conversations',
+      help_text="The submission this conversation is about",
+  )
+  assignment = models.ForeignKey(
+      'Assignment', on_delete=models.CASCADE,
+      related_name='chat_conversations',
+      help_text="The assignment this conversation belongs to",
+  )
+  user = models.ForeignKey(
+      User, on_delete=models.CASCADE,
+      related_name='chat_conversations',
+      help_text="The grader who owns this conversation",
+  )
+  title = models.CharField(
+      max_length=200, blank=True, default='',
+      help_text="Title for this conversation (auto-generated or user-set)",
+  )
+  summary = models.TextField(
+      blank=True, default='',
+      help_text="Rolling summary of older messages for context window management",
+  )
+
+  class Meta:
+    ordering = ('-modified',)
+    indexes = [
+        models.Index(fields=['submission', 'user']),
+        models.Index(fields=['assignment', 'user']),
+    ]
+
+  def __str__(self):
+    return f"Chat [{self.id}] {self.user} on Submission {self.submission_id}"
+
+
+class ChatMessage(BaseModel):
+  """A single message in a chat conversation."""
+  if TYPE_CHECKING:
+    id: int
+
+  ROLE_CHOICES = [
+      ('user', 'User'),
+      ('assistant', 'Assistant'),
+      ('tool_call', 'Tool Call'),
+      ('tool_result', 'Tool Result'),
+      ('summary', 'Summary'),
+  ]
+
+  TOOL_STATUS_CHOICES = [
+      ('pending', 'Pending'),
+      ('approved', 'Approved'),
+      ('rejected', 'Rejected'),
+  ]
+
+  conversation = models.ForeignKey(
+      ChatConversation, on_delete=models.CASCADE,
+      related_name='messages',
+      help_text="The conversation this message belongs to",
+  )
+  role = models.CharField(
+      max_length=16, choices=ROLE_CHOICES,
+      help_text="Who sent this message",
+  )
+  content = models.TextField(
+      blank=True, default='',
+      help_text="The message text content",
+  )
+  tool_name = models.CharField(
+      max_length=64, blank=True, null=True,
+      help_text="Name of the tool (for tool_call/tool_result roles)",
+  )
+  tool_args = models.JSONField(
+      blank=True, null=True,
+      help_text="JSON arguments for the tool call",
+  )
+  tool_status = models.CharField(
+      max_length=16, choices=TOOL_STATUS_CHOICES,
+      blank=True, null=True,
+      help_text="Whether the tool call was approved or rejected by the user",
+  )
+  token_count = models.PositiveIntegerField(
+      default=0,
+      help_text="Number of tokens in this message",
+  )
+
+  class Meta:
+    ordering = ('created',)
+    indexes = [
+        models.Index(fields=['conversation', 'created']),
+    ]
+
+  def __str__(self):
+    return f"ChatMsg [{self.role}] in Conversation {self.conversation_id}"

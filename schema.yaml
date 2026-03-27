@@ -2397,6 +2397,189 @@ paths:
               schema:
                 $ref: '#/components/schemas/TestExecutionResult'
           description: ''
+  /chatConversations/:
+    get:
+      operationId: chatConversations_list
+      description: List chat conversations for a submission.
+      parameters:
+      - in: query
+        name: submission
+        schema:
+          type: integer
+        required: true
+      tags:
+      - chatConversations
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatConversationList'
+          description: ''
+    post:
+      operationId: chatConversations_create
+      description: Create a new chat conversation.
+      tags:
+      - chatConversations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatConversationCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChatConversationCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChatConversationCreate'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversationCreate'
+          description: ''
+  /chatConversations/{id}/:
+    get:
+      operationId: chatConversations_retrieve
+      description: Retrieve a conversation with all messages.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - chatConversations
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversationDetail'
+          description: ''
+    put:
+      operationId: chatConversations_update
+      description: |-
+        CRUD endpoints for chat conversations in the grading assistant.
+
+        list:
+        List conversations for a submission (query param `?submission=ID`).
+
+        create:
+        Start a new conversation for a submission.
+
+        retrieve:
+        Get a conversation with its full message history.
+
+        partial_update:
+        Update a conversation title.
+
+        destroy:
+        Delete a conversation and all its messages.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - chatConversations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatConversationList'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChatConversationList'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChatConversationList'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversationList'
+          description: ''
+    patch:
+      operationId: chatConversations_partialUpdate
+      description: Update a conversation (e.g., rename).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - chatConversations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedChatConversationList'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedChatConversationList'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedChatConversationList'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversationList'
+          description: ''
+    delete:
+      operationId: chatConversations_destroy
+      description: Delete a conversation.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - chatConversations
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /commentTemplates/:
     get:
       operationId: commentTemplates_list
@@ -11038,6 +11221,181 @@ components:
       - detail
       - label
       - status
+    ChatConversationCreate:
+      type: object
+      description: Serializer for creating a new conversation.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          description: The submission this conversation is about
+        title:
+          type: string
+          description: Title for this conversation (auto-generated or user-set)
+          maxLength: 200
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - id
+      - modified
+      - submission
+    ChatConversationDetail:
+      type: object
+      description: Full serializer for retrieving a conversation with messages.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          description: The submission this conversation is about
+        assignment:
+          type: integer
+          readOnly: true
+          description: The assignment this conversation belongs to
+        title:
+          type: string
+          description: Title for this conversation (auto-generated or user-set)
+          maxLength: 200
+        summary:
+          type: string
+          readOnly: true
+          description: Rolling summary of older messages for context window management
+        messageCount:
+          type: integer
+          readOnly: true
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assignment
+      - created
+      - id
+      - messageCount
+      - messages
+      - modified
+      - submission
+      - summary
+    ChatConversationList:
+      type: object
+      description: Lightweight serializer for listing conversations (no messages).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          description: The submission this conversation is about
+        assignment:
+          type: integer
+          readOnly: true
+          description: The assignment this conversation belongs to
+        title:
+          type: string
+          description: Title for this conversation (auto-generated or user-set)
+          maxLength: 200
+        summary:
+          type: string
+          readOnly: true
+          description: Rolling summary of older messages for context window management
+        messageCount:
+          type: integer
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assignment
+      - created
+      - id
+      - messageCount
+      - modified
+      - submission
+      - summary
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/RoleEnum'
+          readOnly: true
+          description: |-
+            Who sent this message
+
+            * `user` - User
+            * `assistant` - Assistant
+            * `tool_call` - Tool Call
+            * `tool_result` - Tool Result
+            * `summary` - Summary
+        content:
+          type: string
+          readOnly: true
+          description: The message text content
+        tool_name:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Name of the tool (for tool_call/tool_result roles)
+        tool_args:
+          readOnly: true
+          nullable: true
+          description: JSON arguments for the tool call
+        tool_status:
+          readOnly: true
+          nullable: true
+          description: |-
+            Whether the tool call was approved or rejected by the user
+
+            * `pending` - Pending
+            * `approved` - Approved
+            * `rejected` - Rejected
+          oneOf:
+          - $ref: '#/components/schemas/ToolStatusEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        token_count:
+          type: integer
+          readOnly: true
+          description: Number of tokens in this message
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - content
+      - created
+      - id
+      - role
+      - token_count
+      - tool_args
+      - tool_name
+      - tool_status
     CheckSSOAvailabilityResponse:
       type: object
       properties:
@@ -11363,6 +11721,8 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
+        aiChatDisabled:
+          type: boolean
         aiUseOwnSettings:
           type: boolean
         aiTokenRates:
@@ -11372,6 +11732,9 @@ components:
           type: boolean
           readOnly: true
         aiCommentsEnabled:
+          type: boolean
+          readOnly: true
+        aiChatEnabled:
           type: boolean
           readOnly: true
         orgAiAvailable:
@@ -11391,6 +11754,7 @@ components:
             additionalProperties: {}
           readOnly: true
       required:
+      - aiChatEnabled
       - aiCommentsEnabled
       - aiEnabled
       - apiKeyHint
@@ -12418,6 +12782,8 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
+        aiChatDisabled:
+          type: boolean
         aiCoursePolicy:
           $ref: '#/components/schemas/AiCoursePolicyEnum'
         aiEnabledCourseIds:
@@ -12434,6 +12800,9 @@ components:
         aiCommentsEnabled:
           type: boolean
           readOnly: true
+        aiChatEnabled:
+          type: boolean
+          readOnly: true
         hasApiKey:
           type: boolean
           readOnly: true
@@ -12448,6 +12817,7 @@ components:
             additionalProperties: {}
           readOnly: true
       required:
+      - aiChatEnabled
       - aiCommentsEnabled
       - aiEnabled
       - aiEnabledCourseIds
@@ -12836,6 +13206,39 @@ components:
             for tests/helpers).
         isTestResource:
           type: boolean
+    PatchedChatConversationList:
+      type: object
+      description: Lightweight serializer for listing conversations (no messages).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          description: The submission this conversation is about
+        assignment:
+          type: integer
+          readOnly: true
+          description: The assignment this conversation belongs to
+        title:
+          type: string
+          description: Title for this conversation (auto-generated or user-set)
+          maxLength: 200
+        summary:
+          type: string
+          readOnly: true
+          description: Rolling summary of older messages for context window management
+        messageCount:
+          type: integer
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
     PatchedComment:
       type: object
       properties:
@@ -13096,6 +13499,8 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
+        aiChatDisabled:
+          type: boolean
         aiUseOwnSettings:
           type: boolean
         aiTokenRates:
@@ -13105,6 +13510,9 @@ components:
           type: boolean
           readOnly: true
         aiCommentsEnabled:
+          type: boolean
+          readOnly: true
+        aiChatEnabled:
           type: boolean
           readOnly: true
         orgAiAvailable:
@@ -13391,6 +13799,8 @@ components:
         aiDisabled:
           type: boolean
         aiCommentsDisabled:
+          type: boolean
+        aiChatDisabled:
           type: boolean
         aiCoursePolicy:
           $ref: '#/components/schemas/AiCoursePolicyEnum'
@@ -14023,6 +14433,20 @@ components:
       required:
       - isValid
       - success
+    RoleEnum:
+      enum:
+      - user
+      - assistant
+      - tool_call
+      - tool_result
+      - summary
+      type: string
+      description: |-
+        * `user` - User
+        * `assistant` - Assistant
+        * `tool_call` - Tool Call
+        * `tool_result` - Tool Result
+        * `summary` - Summary
     RubricCategory:
       type: object
       properties:
@@ -15070,6 +15494,16 @@ components:
           writeOnly: true
       required:
       - token
+    ToolStatusEnum:
+      enum:
+      - pending
+      - approved
+      - rejected
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `approved` - Approved
+        * `rejected` - Rejected
     TypeEnum:
       enum:
       - io

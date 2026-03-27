@@ -87,6 +87,7 @@ def get_usage_summary(
         total_tokens=Sum('total_tokens'),
         input_tokens=Sum('input_tokens'),
         output_tokens=Sum('output_tokens'),
+        cached_tokens=Sum('cached_tokens'),
         estimated_cost=Sum('estimated_cost'),
         request_count=Count('id'),
     )
@@ -183,6 +184,7 @@ def get_usage_summary(
         'totalTokens': totals['total_tokens'] or 0,
         'inputTokens': totals['input_tokens'] or 0,
         'outputTokens': totals['output_tokens'] or 0,
+        'cachedTokens': totals['cached_tokens'] or 0,
         'estimatedCost': str(totals['estimated_cost'] or Decimal('0')),
         'requestCount': totals['request_count'] or 0,
         'timeSeries': time_series,

@@ -16,10 +16,14 @@ django_asgi_app = get_asgi_application()
 
 # Import routing after Django is initialized to avoid AppRegistryNotReady
 import autograder.routing  # noqa: E402
+import core.routing  # noqa: E402
 
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        "websocket": URLRouter(autograder.routing.websocket_urlpatterns),
+        "websocket": URLRouter(
+            autograder.routing.websocket_urlpatterns
+            + core.routing.websocket_urlpatterns
+        ),
     }
 )

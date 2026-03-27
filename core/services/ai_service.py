@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 from encodings.base64_codec import base64_decode
+import hashlib
 import logging
 import re
 from decimal import Decimal
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 # -----------------------------------------------------------------------
 AI_MODELS: dict[str, list[tuple[str, str, bool]]] = {
     'gemini': [
+        ('gemini-3-pro-preview', 'Gemini 3 Pro (Preview)', True),
         ('gemini-2.5-flash', 'Gemini 2.5 Flash', True),
         ('gemini-2.5-pro', 'Gemini 2.5 Pro', False),
         ('gemini-2.0-flash', 'Gemini 2.0 Flash', False),
@@ -194,6 +196,7 @@ class GenerationResult:
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cached_tokens: int = 0
 
 
 class AIService:
@@ -292,9 +295,21 @@ Context:
     # Cost estimation & usage recording
     # ------------------------------------------------------------------
 
+    # TTL (in seconds) for Gemini explicit context caches
+    GEMINI_CACHE_TTL = 300  # 5 minutes
+
+    # Provider-specific discount on cached input tokens (fraction of full input rate)
+    # Gemini: cached tokens billed at 25% of full input price (75% discount)
+    # OpenAI: cached tokens billed at 50% of full input price (50% discount)
+    CACHED_TOKEN_RATE: dict[str, float] = {
+        'gemini': 0.25,
+        'openai': 0.50,
+    }
+
     # Rates: (input $/1M tokens, output $/1M tokens)
     TOKEN_RATES: dict[str, tuple[float, float]] = {
         # Gemini
+        'gemini-3-pro-preview': (2.00, 12.00),
         'gemini-2.5-flash': (0.15, 0.60),
         'gemini-2.5-pro': (1.25, 10.00),
         'gemini-2.0-flash': (0.10, 0.40),
@@ -311,7 +326,8 @@ Context:
 
     @staticmethod
     def estimate_cost(provider: str, model: str, input_tokens: int, output_tokens: int,
-                      custom_rates: dict | None = None) -> float:
+                      custom_rates: dict | None = None,
+                      cached_tokens: int = 0) -> float:
         """
         Estimate the cost of an AI API call in USD.
 
@@ -321,6 +337,9 @@ Context:
           3. Falls back to 0.0 for unknown models / self-hosted providers.
 
         ``custom_rates`` format: ``{"model-name": {"input": 0.15, "output": 0.60}, ...}``
+
+        When ``cached_tokens`` > 0, the cached portion of input tokens is billed
+        at the provider's discounted rate (see ``CACHED_TOKEN_RATE``).
         """
         rates = None
         if custom_rates and model in custom_rates:
@@ -331,9 +350,14 @@ Context:
             rates = AIService.TOKEN_RATES.get(model)
         if not rates:
             return 0.0
-        input_cost = (input_tokens / 1_000_000) * rates[0]
+        # Split input tokens into non-cached and cached portions
+        effective_cached = min(cached_tokens, input_tokens)
+        non_cached_input = input_tokens - effective_cached
+        cache_discount = AIService.CACHED_TOKEN_RATE.get(provider, 1.0)
+        input_cost = (non_cached_input / 1_000_000) * rates[0]
+        cached_cost = (effective_cached / 1_000_000) * rates[0] * cache_discount
         output_cost = (output_tokens / 1_000_000) * rates[1]
-        return float(Decimal(str(input_cost + output_cost)).quantize(Decimal('0.000001')))
+        return float(Decimal(str(input_cost + cached_cost + output_cost)).quantize(Decimal('0.000001')))
 
     def _get_merged_rates(self) -> dict | None:
         """Merge custom token rates: course overrides org overrides."""
@@ -377,10 +401,12 @@ Context:
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
                 total_tokens=result.total_tokens,
+                cached_tokens=result.cached_tokens,
                 estimated_cost=self.estimate_cost(
                     self.provider or '', self.model or '',
                     result.input_tokens, result.output_tokens,
                     custom_rates=self._get_merged_rates(),
+                    cached_tokens=result.cached_tokens,
                 ),
                 status='success' if result.success else 'error',
                 error_message=result.error if not result.success else None,
@@ -477,16 +503,16 @@ Context:
             # Call the appropriate provider
             if self.provider == 'gemini':
                 logger.debug(f"Calling Gemini ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens = await self._call_gemini(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
             elif self.provider == 'openai':
                 logger.debug(f"Calling OpenAI ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens = await self._call_openai(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
             elif self.provider == 'ollama':
                 logger.debug(f"Calling Ollama ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens = await self._call_ollama(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
             elif self.provider in ('portkey', 'custom'):
                 logger.debug(f"Calling Portkey/Custom ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens = await self._call_portkey(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
             else:
                 raise ValueError(f"Unknown AI provider: {self.provider}")
 
@@ -496,6 +522,7 @@ Context:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
             )
 
         except Exception as e:
@@ -787,13 +814,13 @@ Based on the context (logic to test) and the example harness above, generate the
 
             # Call the appropriate provider
             if self.provider == 'gemini':
-                text, input_tokens, output_tokens, total_tokens = await self._call_gemini(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
             elif self.provider == 'openai':
-                text, input_tokens, output_tokens, total_tokens = await self._call_openai(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
             elif self.provider == 'ollama':
-                text, input_tokens, output_tokens, total_tokens = await self._call_ollama(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
             elif self.provider in ('portkey', 'custom'):
-                text, input_tokens, output_tokens, total_tokens = await self._call_portkey(system_prompt, user_prompt)
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
             else:
                 raise ValueError(f"Unknown AI provider: {self.provider}")
 
@@ -805,6 +832,7 @@ Based on the context (logic to test) and the example harness above, generate the
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
             )
 
         except Exception as e:
@@ -853,26 +881,76 @@ Based on the context (logic to test) and the example harness above, generate the
             short_msg += "..."
         return f"AI generation failed: {short_msg}"
     
-    async def _call_gemini(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
-        """Call Google Gemini API. Returns (text, input_tokens, output_tokens, total_tokens)."""
+    async def _get_or_create_gemini_cache(self, system_prompt: str) -> str | None:
+        """
+        Get or create a Gemini explicit context cache for the system prompt.
+        Returns the cache name if successful, None otherwise (falls back to uncached).
+        """
+        from django.core.cache import cache as django_cache
+        from google import genai
+        from google.genai import types
+
+        prompt_hash = hashlib.sha256(
+            f"{self.model}\n{system_prompt}".encode()
+        ).hexdigest()[:16]
+        cache_key = f"gemini_ctx:{prompt_hash}"
+
+        # Check Django cache for an existing Gemini cache reference
+        cache_name = django_cache.get(cache_key)
+        if cache_name:
+            return cache_name
+
+        # Create a new explicit cached content on Gemini's servers
+        try:
+            client = genai.Client(api_key=self.api_key)
+            cached = await client.aio.caches.create(
+                model=self.model,
+                config=types.CreateCachedContentConfig(
+                    system_instruction=system_prompt,
+                    ttl=f"{self.GEMINI_CACHE_TTL}s",
+                ),
+            )
+            # Store reference with a slightly shorter TTL to avoid stale refs
+            django_cache.set(cache_key, cached.name, timeout=self.GEMINI_CACHE_TTL - 30)
+            logger.debug(f"Created Gemini cache: {cached.name} for prompt hash {prompt_hash}")
+            return cached.name
+        except Exception as e:
+            # Explicit caching can fail (e.g., prompt too short, unsupported model).
+            # Fall back to implicit caching (Gemini 2.5+ does this automatically).
+            logger.debug(f"Gemini explicit cache creation skipped: {e}")
+            return None
+
+    async def _call_gemini(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
+        """Call Google Gemini API. Returns (text, input_tokens, output_tokens, total_tokens, cached_tokens)."""
         from google import genai
         from google.genai import types
         client = genai.Client(api_key=self.api_key)
-        
+
+        # Try explicit context caching for the system prompt
+        cache_name = await self._get_or_create_gemini_cache(system_prompt)
+
+        if cache_name:
+            config = types.GenerateContentConfig(
+                cached_content=cache_name,
+            )
+        else:
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt,
+            )
+
         response = await client.aio.models.generate_content(
             model=self.model,
             contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-            ),
+            config=config,
         )
         input_tokens = getattr(response.usage_metadata, 'prompt_token_count', 0) or 0
         output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
         total_tokens = getattr(response.usage_metadata, 'total_token_count', 0) or (input_tokens + output_tokens)
-        return response.text or "", input_tokens, output_tokens, total_tokens
+        cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
+        return response.text or "", input_tokens, output_tokens, total_tokens, cached_tokens
     
-    async def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
-        """Call OpenAI API. Returns (text, input_tokens, output_tokens, total_tokens)."""
+    async def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
+        """Call OpenAI API. Returns (text, input_tokens, output_tokens, total_tokens, cached_tokens)."""
         from openai import AsyncOpenAI
         
         client = AsyncOpenAI(api_key=self.api_key)
@@ -887,10 +965,14 @@ Based on the context (logic to test) and the example harness above, generate the
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
         total_tokens = usage.total_tokens if usage else (input_tokens + output_tokens)
-        return response.choices[0].message.content or "", input_tokens, output_tokens, total_tokens
+        # OpenAI automatically caches prompts >1024 tokens; extract cached count
+        cached_tokens = 0
+        if usage and hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
+            cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+        return response.choices[0].message.content or "", input_tokens, output_tokens, total_tokens, cached_tokens
     
-    async def _call_ollama(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
-        """Call Ollama API (self-hosted). Returns (text, input_tokens, output_tokens, total_tokens)."""
+    async def _call_ollama(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
+        """Call Ollama API (self-hosted). Returns (text, input_tokens, output_tokens, total_tokens, cached_tokens)."""
         import httpx
         
         base_url = self.base_url or "http://localhost:11434"
@@ -909,10 +991,10 @@ Based on the context (logic to test) and the example harness above, generate the
             data = response.json()
             input_tokens = data.get('prompt_eval_count', 0) or 0
             output_tokens = data.get('eval_count', 0) or 0
-            return data["response"], input_tokens, output_tokens, input_tokens + output_tokens
+            return data["response"], input_tokens, output_tokens, input_tokens + output_tokens, 0
     
-    async def _call_portkey(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int]:
-        """Call Portkey AI gateway (self-hosted or cloud). Returns (text, input_tokens, output_tokens, total_tokens).
+    async def _call_portkey(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
+        """Call Portkey AI gateway (self-hosted or cloud). Returns (text, input_tokens, output_tokens, total_tokens, cached_tokens).
         
         Portkey is an AI Gateway that proxies requests to underlying providers.
         When self-hosted, it typically only needs a base URL (API key is optional).
@@ -954,7 +1036,439 @@ Based on the context (logic to test) and the example harness above, generate the
             input_tokens = usage.get('prompt_tokens', 0) or 0
             output_tokens = usage.get('completion_tokens', 0) or 0
             total_tokens = usage.get('total_tokens', 0) or (input_tokens + output_tokens)
-            return data["choices"][0]["message"]["content"], input_tokens, output_tokens, total_tokens
+            return data["choices"][0]["message"]["content"], input_tokens, output_tokens, total_tokens, 0
+
+    # ------------------------------------------------------------------
+    # Streaming chat with tool calling
+    # ------------------------------------------------------------------
+
+    CHAT_SYSTEM_PROMPT = """You are an AI grading assistant embedded in the codePost code review console.
+You are helping a grader review a student's code submission.
+
+**Your capabilities:**
+- Read and analyze the student's submitted files
+- View autograder test results
+- Create inline comments on specific lines of code
+- Apply rubric comments from the assignment rubric
+- Navigate the grader to specific files and lines
+
+**Important rules:**
+- ALWAYS explain what you want to do before calling a tool
+- Be specific about line numbers and file names
+- When suggesting a comment, explain your reasoning first
+- Keep feedback constructive and educational
+- If you're unsure, ask the grader for clarification
+
+**Character-level precision (code/text files only):**
+For regular code and text files, prefer using start_char and end_char to highlight the specific
+expression, variable, or token the feedback is about, rather than highlighting the full line.
+- start_char is the 0-indexed character offset from the beginning of start_line.
+- end_char is the 0-indexed character offset from the beginning of end_line.
+- Example: to highlight `foo` in `x = foo + bar` (where `foo` starts at position 4 and ends at 7),
+  set start_char=4 and end_char=7.
+- If the feedback applies to an entire line or block, you may omit start_char and end_char.
+- Do NOT use start_char/end_char for notebook (.ipynb) or PDF files.
+
+**Notebook (.ipynb) files:**
+For Jupyter notebook files, line numbers work differently:
+- start_line and end_line are **0-indexed cell indices**, NOT line numbers within a cell.
+- Cell 1 in the UI corresponds to index 0, Cell 2 to index 1, etc.
+- When using read_file_contents on a notebook, the output will label each cell with its index.
+- To comment on a specific cell, set start_line to that cell's index (e.g., for Cell 3, use start_line=2).
+- Comments on notebooks target entire cells — you cannot target a specific line within a cell.
+
+**Context:**
+- Assignment: {assignment_name}
+- Submission ID: {submission_id}
+- Files: {file_list}
+{rubric_context}
+{existing_comments}
+{test_summary}
+"""
+
+    SUMMARIZE_PROMPT = (
+        "Summarize the following grading conversation concisely. "
+        "Preserve: key decisions made, comments added, rubric items applied, "
+        "pending issues, and any grading strategy discussed. "
+        "Be brief — this summary will be used as context for continuing the conversation."
+    )
+
+    # Threshold for automatic summarization (message count)
+    SUMMARIZE_THRESHOLD = 20
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict] | None = None,
+    ):
+        """
+        Stream a chat response with tool-calling support.
+
+        Yields dicts:
+          {"type": "token", "content": "..."}          — text delta
+          {"type": "tool_call", "name": "...", "args": {...}, "id": "..."}  — tool request
+          {"type": "done", "input_tokens": N, "output_tokens": N}          — completion
+          {"type": "error", "message": "..."}           — error
+
+        The caller is responsible for:
+          1. Handling tool calls (executing or asking user approval).
+          2. Re-invoking chat_stream with the tool result appended to messages.
+        """
+        if not self.is_configured:
+            yield {"type": "error", "message": "AI is not configured for this course."}
+            return
+
+        try:
+            if self.provider == 'gemini':
+                async for chunk in self._stream_gemini(messages, tools):
+                    yield chunk
+            elif self.provider == 'openai':
+                async for chunk in self._stream_openai(messages, tools):
+                    yield chunk
+            elif self.provider == 'ollama':
+                async for chunk in self._stream_ollama(messages, tools):
+                    yield chunk
+            elif self.provider in ('portkey', 'custom'):
+                async for chunk in self._stream_openai_compat(messages, tools):
+                    yield chunk
+            else:
+                yield {"type": "error", "message": f"Unknown AI provider: {self.provider}"}
+        except Exception as e:
+            error_msg = self._parse_error(e)
+            logger.error(f"Chat stream failed: {e}", exc_info=True)
+            yield {"type": "error", "message": error_msg}
+
+    async def summarize_conversation(self, messages: list[dict[str, str]]) -> str:
+        """Summarize a conversation into a compact paragraph for context window management."""
+        conversation_text = "\n".join(
+            f"[{m['role']}]: {m['content'][:500]}" for m in messages if m.get('content')
+        )
+        prompt = f"{self.SUMMARIZE_PROMPT}\n\n{conversation_text}"
+
+        try:
+            if self.provider == 'gemini':
+                text, *_ = await self._call_gemini(self.SUMMARIZE_PROMPT, conversation_text)
+            elif self.provider == 'openai':
+                text, *_ = await self._call_openai(self.SUMMARIZE_PROMPT, conversation_text)
+            elif self.provider == 'ollama':
+                text, *_ = await self._call_ollama(self.SUMMARIZE_PROMPT, conversation_text)
+            elif self.provider in ('portkey', 'custom'):
+                text, *_ = await self._call_portkey(self.SUMMARIZE_PROMPT, conversation_text)
+            else:
+                return ""
+            return text.strip()
+        except Exception as e:
+            logger.warning(f"Conversation summarization failed: {e}")
+            return ""
+
+    def build_chat_system_prompt(
+        self,
+        assignment_name: str,
+        submission_id: int,
+        file_list: str,
+        rubric_context: str = "",
+        existing_comments: str = "",
+        test_summary: str = "",
+    ) -> str:
+        """Build the system prompt for chat, filling in context."""
+        return self.CHAT_SYSTEM_PROMPT.format(
+            assignment_name=assignment_name,
+            submission_id=submission_id,
+            file_list=file_list,
+            rubric_context=f"- Rubric:\n{rubric_context}" if rubric_context else "",
+            existing_comments=f"- Existing comments:\n{existing_comments}" if existing_comments else "",
+            test_summary=f"- Test results:\n{test_summary}" if test_summary else "",
+        )
+
+    # ------------------------------------------------------------------
+    # Provider-specific streaming implementations
+    # ------------------------------------------------------------------
+
+    async def _stream_openai(self, messages: list[dict[str, str]], tools: list[dict] | None):
+        """Stream from OpenAI with tool calling."""
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=self.api_key)
+        kwargs: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        collected_tool_calls: dict[int, dict] = {}
+        input_tokens = 0
+        output_tokens = 0
+        cached_tokens = 0
+
+        stream = await client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            if chunk.usage:
+                input_tokens = chunk.usage.prompt_tokens or 0
+                output_tokens = chunk.usage.completion_tokens or 0
+                if hasattr(chunk.usage, 'prompt_tokens_details') and chunk.usage.prompt_tokens_details:
+                    cached_tokens = getattr(chunk.usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+
+            for choice in (chunk.choices or []):
+                delta = choice.delta
+                if delta.content:
+                    yield {"type": "token", "content": delta.content}
+
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in collected_tool_calls:
+                            collected_tool_calls[idx] = {
+                                "id": tc.id or "",
+                                "name": "",
+                                "args_str": "",
+                            }
+                        if tc.function:
+                            if tc.function.name:
+                                collected_tool_calls[idx]["name"] = tc.function.name
+                            if tc.function.arguments:
+                                collected_tool_calls[idx]["args_str"] += tc.function.arguments
+
+                if choice.finish_reason == "tool_calls":
+                    import json
+                    for _idx, tc_data in sorted(collected_tool_calls.items()):
+                        try:
+                            args = json.loads(tc_data["args_str"]) if tc_data["args_str"] else {}
+                        except json.JSONDecodeError:
+                            args = {}
+                        yield {
+                            "type": "tool_call",
+                            "id": tc_data["id"],
+                            "name": tc_data["name"],
+                            "args": args,
+                        }
+                    return  # Pause for tool execution
+
+        yield {"type": "done", "input_tokens": input_tokens, "output_tokens": output_tokens, "cached_tokens": cached_tokens}
+
+    async def _stream_gemini(self, messages: list[dict[str, str]], tools: list[dict] | None):
+        """Stream from Google Gemini with tool calling."""
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=self.api_key)
+
+        # Convert OpenAI-format messages to Gemini format
+        system_instruction = None
+        contents: list = []
+        for msg in messages:
+            role = msg["role"]
+            if role == "system":
+                system_instruction = msg["content"]
+            elif role == "user":
+                contents.append(types.Content(role="user", parts=[types.Part.from_text(text=msg["content"])]))
+            elif role == "assistant":
+                contents.append(types.Content(role="model", parts=[types.Part.from_text(text=msg["content"])]))
+            elif role == "tool":
+                contents.append(types.Content(role="user", parts=[types.Part.from_text(text=f"[Tool Result]: {msg['content']}")]))
+
+        # Convert OpenAI tool schemas to Gemini tool declarations
+        gemini_tools = None
+        if tools:
+            declarations = []
+            for t in tools:
+                func = t.get("function", {})
+                declarations.append(types.FunctionDeclaration(
+                    name=func["name"],
+                    description=func.get("description", ""),
+                    parameters=func.get("parameters"),
+                ))
+            gemini_tools = [types.Tool(function_declarations=declarations)]
+
+        # Try explicit context caching for the system instruction
+        cache_name = None
+        if system_instruction:
+            cache_name = await self._get_or_create_gemini_cache(system_instruction)
+
+        if cache_name:
+            config = types.GenerateContentConfig(
+                cached_content=cache_name,
+                tools=gemini_tools,
+                thinking_config=types.ThinkingConfig(thinking_budget=8000) if (self.model or '').startswith('gemini-2.5') else None,
+            )
+        else:
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                tools=gemini_tools,
+                thinking_config=types.ThinkingConfig(thinking_budget=8000) if (self.model or '').startswith('gemini-2.5') else None,
+            )
+
+        full_text = ""
+        input_tokens = 0
+        output_tokens = 0
+        cached_tokens = 0
+        is_thinking = False
+
+        async for chunk in await client.aio.models.generate_content_stream(
+            model=self.model,
+            contents=contents,
+            config=config,
+        ):
+            if chunk.usage_metadata:
+                input_tokens = getattr(chunk.usage_metadata, 'prompt_token_count', 0) or 0
+                output_tokens = getattr(chunk.usage_metadata, 'candidates_token_count', 0) or 0
+                cached_tokens = getattr(chunk.usage_metadata, 'cached_content_token_count', 0) or 0
+
+            if chunk.candidates:
+                for candidate in chunk.candidates:
+                    if candidate.content and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            # Thought tokens (Gemini 2.5 thinking mode) — signal UI but don't emit as content
+                            if getattr(part, 'thought', False):
+                                if not is_thinking:
+                                    is_thinking = True
+                                    yield {"type": "thinking"}
+                                continue
+                            if is_thinking and part.text:
+                                is_thinking = False
+                                yield {"type": "thinking_done"}
+                            if part.text:
+                                yield {"type": "token", "content": part.text}
+                                full_text += part.text
+                            if part.function_call:
+                                fc = part.function_call
+                                yield {
+                                    "type": "tool_call",
+                                    "id": fc.name,
+                                    "name": fc.name,
+                                    "args": dict(fc.args) if fc.args else {},
+                                }
+                                return  # Pause for tool execution
+
+        yield {"type": "done", "input_tokens": input_tokens, "output_tokens": output_tokens, "cached_tokens": cached_tokens}
+
+    async def _stream_ollama(self, messages: list[dict[str, str]], tools: list[dict] | None):
+        """Stream from Ollama (local). Tool calling via /api/chat endpoint."""
+        import httpx
+        import json
+
+        base_url = (self.base_url or "http://localhost:11434").rstrip("/")
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", f"{base_url}/api/chat", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    msg = data.get("message", {})
+
+                    # Tool calls
+                    if msg.get("tool_calls"):
+                        for tc in msg["tool_calls"]:
+                            func = tc.get("function", {})
+                            yield {
+                                "type": "tool_call",
+                                "id": func.get("name", ""),
+                                "name": func.get("name", ""),
+                                "args": func.get("arguments", {}),
+                            }
+                        return
+
+                    # Text content
+                    content = msg.get("content", "")
+                    if content:
+                        yield {"type": "token", "content": content}
+
+                    if data.get("done"):
+                        yield {
+                            "type": "done",
+                            "input_tokens": data.get("prompt_eval_count", 0) or 0,
+                            "output_tokens": data.get("eval_count", 0) or 0,
+                            "cached_tokens": 0,
+                        }
+                        return
+
+    async def _stream_openai_compat(self, messages: list[dict[str, str]], tools: list[dict] | None):
+        """Stream from Portkey/Custom (OpenAI-compatible). Reuses the OpenAI streaming logic."""
+        import httpx
+        import json
+
+        base_url = (self.base_url or "https://api.portkey.ai/v1").rstrip("/")
+        if base_url.endswith("/v1"):
+            url = f"{base_url}/chat/completions"
+        else:
+            url = f"{base_url}/v1/chat/completions"
+
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["x-portkey-api-key"] = self.api_key
+
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        collected_tool_calls: dict[int, dict] = {}
+        input_tokens = 0
+        output_tokens = 0
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if "usage" in data and data["usage"]:
+                        input_tokens = data["usage"].get("prompt_tokens", 0) or 0
+                        output_tokens = data["usage"].get("completion_tokens", 0) or 0
+
+                    for choice in data.get("choices", []):
+                        delta = choice.get("delta", {})
+                        if delta.get("content"):
+                            yield {"type": "token", "content": delta["content"]}
+
+                        for tc in delta.get("tool_calls", []):
+                            idx = tc.get("index", 0)
+                            if idx not in collected_tool_calls:
+                                collected_tool_calls[idx] = {"id": tc.get("id", ""), "name": "", "args_str": ""}
+                            func = tc.get("function", {})
+                            if func.get("name"):
+                                collected_tool_calls[idx]["name"] = func["name"]
+                            if func.get("arguments"):
+                                collected_tool_calls[idx]["args_str"] += func["arguments"]
+
+                        if choice.get("finish_reason") == "tool_calls":
+                            for _idx, tc_data in sorted(collected_tool_calls.items()):
+                                try:
+                                    args = json.loads(tc_data["args_str"]) if tc_data["args_str"] else {}
+                                except json.JSONDecodeError:
+                                    args = {}
+                                yield {"type": "tool_call", "id": tc_data["id"], "name": tc_data["name"], "args": args}
+                            return
+
+        yield {"type": "done", "input_tokens": input_tokens, "output_tokens": output_tokens, "cached_tokens": 0}
 
 
 REGION_COMMENT_MARKER = 1_000_000

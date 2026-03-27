@@ -50,6 +50,7 @@ from webhooks.view import WebhookViewSet
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
 from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView
+from core.views.chat import ChatConversationViewSet
 
 
 from django.http import HttpResponse
@@ -93,6 +94,7 @@ router.register(r'webhooks', WebhookViewSet)
 router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
 router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 router.register(r'commentTemplates', CommentTemplateViewSet, basename='commentTemplate')
+router.register(r'chatConversations', ChatConversationViewSet, basename='chatConversation')
 
 # router.register(r'billing', BillingViewSet, basename='billing')
 
