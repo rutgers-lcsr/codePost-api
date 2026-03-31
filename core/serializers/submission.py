@@ -141,6 +141,20 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
         raise serializers.ValidationError(
             "None of the submission students have enough late day credits remaining for the course.")
 
+      # Record late day usage audit event
+      try:
+        from core.services.audit import record_audit_event
+        for student in newFields['students']:
+          record_audit_event(
+              course=course,
+              event_type='late_day_used',
+              user=student,
+              assignment=newFields['assignment'],
+              meta={'credits_used': newFields['lateDayCreditsUsed']},
+          )
+      except Exception:
+        pass
+
     return newData
 
 

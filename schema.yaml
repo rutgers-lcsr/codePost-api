@@ -1067,6 +1067,32 @@ paths:
                 items:
                   $ref: '#/components/schemas/Submission'
           description: ''
+  /assignments/{id}/generateDescription/:
+    post:
+      operationId: assignments_generateDescriptionCreate
+      description: Generate or regenerate the AI description for this assignment.
+        Course admin only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateDescriptionResponse'
+          description: ''
   /assignments/{id}/generateTest/:
     post:
       operationId: assignments_generateTestCreate
@@ -2397,189 +2423,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/TestExecutionResult'
           description: ''
-  /chatConversations/:
-    get:
-      operationId: chatConversations_list
-      description: List chat conversations for a submission.
-      parameters:
-      - in: query
-        name: submission
-        schema:
-          type: integer
-        required: true
-      tags:
-      - chatConversations
-      security:
-      - tokenAuth: []
-      - jwtAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ChatConversationList'
-          description: ''
-    post:
-      operationId: chatConversations_create
-      description: Create a new chat conversation.
-      tags:
-      - chatConversations
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ChatConversationCreate'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/ChatConversationCreate'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/ChatConversationCreate'
-        required: true
-      security:
-      - tokenAuth: []
-      - jwtAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '201':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChatConversationCreate'
-          description: ''
-  /chatConversations/{id}/:
-    get:
-      operationId: chatConversations_retrieve
-      description: Retrieve a conversation with all messages.
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-        required: true
-      tags:
-      - chatConversations
-      security:
-      - tokenAuth: []
-      - jwtAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChatConversationDetail'
-          description: ''
-    put:
-      operationId: chatConversations_update
-      description: |-
-        CRUD endpoints for chat conversations in the grading assistant.
-
-        list:
-        List conversations for a submission (query param `?submission=ID`).
-
-        create:
-        Start a new conversation for a submission.
-
-        retrieve:
-        Get a conversation with its full message history.
-
-        partial_update:
-        Update a conversation title.
-
-        destroy:
-        Delete a conversation and all its messages.
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-        required: true
-      tags:
-      - chatConversations
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ChatConversationList'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/ChatConversationList'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/ChatConversationList'
-        required: true
-      security:
-      - tokenAuth: []
-      - jwtAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChatConversationList'
-          description: ''
-    patch:
-      operationId: chatConversations_partialUpdate
-      description: Update a conversation (e.g., rename).
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-        required: true
-      tags:
-      - chatConversations
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedChatConversationList'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PatchedChatConversationList'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/PatchedChatConversationList'
-      security:
-      - tokenAuth: []
-      - jwtAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChatConversationList'
-          description: ''
-    delete:
-      operationId: chatConversations_destroy
-      description: Delete a conversation.
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-        required: true
-      tags:
-      - chatConversations
-      security:
-      - tokenAuth: []
-      - jwtAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '204':
-          description: No response body
   /commentTemplates/:
     get:
       operationId: commentTemplates_list
@@ -3847,6 +3690,118 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AIUsageSummary'
+          description: ''
+  /courses/{id}/auditLog/:
+    get:
+      operationId: courses_auditLogList
+      description: Return paginated audit events for a course, filterable by student,
+        assignment, event type, and date range.
+      parameters:
+      - in: query
+        name: assignment
+        schema:
+          type: integer
+        description: Filter by assignment ID
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date-time
+        description: Filter events after this datetime
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date-time
+        description: Filter events before this datetime
+      - in: query
+        name: event_type
+        schema:
+          type: string
+        description: Filter by event type
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: student
+        schema:
+          type: string
+        description: Filter by student email
+      tags:
+      - courses
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCourseAuditEventList'
+          description: ''
+  /courses/{id}/auditLogExport/:
+    get:
+      operationId: courses_auditLogExportRetrieve
+      description: Export audit events for a course as CSV.
+      parameters:
+      - in: query
+        name: assignment
+        schema:
+          type: integer
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: event_type
+        schema:
+          type: string
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      - in: query
+        name: student
+        schema:
+          type: string
+      tags:
+      - courses
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            text/csv:
+              schema:
+                type: string
           description: ''
   /courses/{id}/changeInviteCode/:
     patch:
@@ -8033,6 +7988,84 @@ paths:
               schema:
                 $ref: '#/components/schemas/StudentSubmission'
           description: ''
+  /submissions/{id}/generateAIAssistance/:
+    post:
+      operationId: submissions_generateAIAssistanceCreate
+      description: Manually trigger or regenerate AI summary and suggested comments.
+        Staff only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Submission'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Submission'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Submission'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateAIAssistanceResponse'
+          description: ''
+  /submissions/{id}/generateFileSuggestions/:
+    post:
+      operationId: submissions_generateFileSuggestionsCreate
+      description: Generate AI-suggested comments for a specific file in this submission.
+        Runs synchronously. Staff only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateFileSuggestionsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GenerateFileSuggestionsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GenerateFileSuggestionsRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SuggestedComment'
+          description: ''
   /submissions/{id}/generatePartnerLink/:
     get:
       operationId: submissions_generatePartnerLinkRetrieve
@@ -8074,6 +8107,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SubmissionPartnerLinkResponse'
+          description: ''
+  /submissions/{id}/generateSummary/:
+    post:
+      operationId: submissions_generateSummaryCreate
+      description: Generate or regenerate the AI summary for this submission. Runs
+        synchronously. Staff only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionSummary'
           description: ''
   /submissions/{id}/history/:
     get:
@@ -8366,6 +8425,59 @@ paths:
               schema:
                 $ref: '#/components/schemas/StudentSubmission'
           description: ''
+  /submissions/{id}/suggestedComments/:
+    get:
+      operationId: submissions_suggestedCommentsList
+      description: List all pending AI-suggested comments for this submission. Staff
+        only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SuggestedComment'
+          description: ''
+  /submissions/{id}/summary/:
+    get:
+      operationId: submissions_summaryRetrieve
+      description: Get the AI-generated summary for this submission. Staff only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionSummary'
+          description: ''
   /submissions/{id}/testResults/:
     get:
       operationId: submissions_testResultsRetrieve
@@ -8530,6 +8642,284 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SubscribeToEmailListResponse'
+          description: ''
+  /suggestedComments/:
+    get:
+      operationId: suggestedComments_list
+      description: |-
+        AI-suggested comments for graders. Not visible to students.
+
+        retrieve:
+        Return a suggested comment.
+
+        delete:
+        Delete a suggested comment.
+      tags:
+      - suggestedComments
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SuggestedComment'
+          description: ''
+    post:
+      operationId: suggestedComments_create
+      description: |-
+        AI-suggested comments for graders. Not visible to students.
+
+        retrieve:
+        Return a suggested comment.
+
+        delete:
+        Delete a suggested comment.
+      tags:
+      - suggestedComments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedComment'
+          description: ''
+  /suggestedComments/{id}/:
+    get:
+      operationId: suggestedComments_retrieve
+      description: |-
+        AI-suggested comments for graders. Not visible to students.
+
+        retrieve:
+        Return a suggested comment.
+
+        delete:
+        Delete a suggested comment.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested comment.
+        required: true
+      tags:
+      - suggestedComments
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedComment'
+          description: ''
+    put:
+      operationId: suggestedComments_update
+      description: |-
+        AI-suggested comments for graders. Not visible to students.
+
+        retrieve:
+        Return a suggested comment.
+
+        delete:
+        Delete a suggested comment.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested comment.
+        required: true
+      tags:
+      - suggestedComments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedComment'
+          description: ''
+    patch:
+      operationId: suggestedComments_partialUpdate
+      description: |-
+        AI-suggested comments for graders. Not visible to students.
+
+        retrieve:
+        Return a suggested comment.
+
+        delete:
+        Delete a suggested comment.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested comment.
+        required: true
+      tags:
+      - suggestedComments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSuggestedComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSuggestedComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSuggestedComment'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedComment'
+          description: ''
+    delete:
+      operationId: suggestedComments_destroy
+      description: |-
+        AI-suggested comments for graders. Not visible to students.
+
+        retrieve:
+        Return a suggested comment.
+
+        delete:
+        Delete a suggested comment.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested comment.
+        required: true
+      tags:
+      - suggestedComments
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /suggestedComments/{id}/accept/:
+    post:
+      operationId: suggestedComments_acceptCreate
+      description: Accept this suggestion, creating a real Comment and marking the
+        suggestion as accepted.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested comment.
+        required: true
+      tags:
+      - suggestedComments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+          description: ''
+  /suggestedComments/{id}/reject/:
+    post:
+      operationId: suggestedComments_rejectCreate
+      description: Reject this suggestion.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested comment.
+        required: true
+      tags:
+      - suggestedComments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuggestedComment'
+      security:
+      - tokenAuth: []
+      - jwtAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedComment'
           description: ''
   /system/activity/:
     get:
@@ -10614,6 +11004,15 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        ai_description:
+          type: string
+          description: AI-generated description of the assignment used as context
+            for AI grading features. Editable by course admins, visible to graders.
+            Not shown to students.
+        ai_description_locked:
+          type: boolean
+          description: When True, prevents automatic regeneration of ai_description
+            from new submissions.
         runFilesOnSubmit:
           type: boolean
           description: If True, submission files will be automatically executed and
@@ -11221,181 +11620,6 @@ components:
       - detail
       - label
       - status
-    ChatConversationCreate:
-      type: object
-      description: Serializer for creating a new conversation.
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        submission:
-          type: integer
-          description: The submission this conversation is about
-        title:
-          type: string
-          description: Title for this conversation (auto-generated or user-set)
-          maxLength: 200
-        created:
-          type: string
-          format: date-time
-          readOnly: true
-        modified:
-          type: string
-          format: date-time
-          readOnly: true
-      required:
-      - created
-      - id
-      - modified
-      - submission
-    ChatConversationDetail:
-      type: object
-      description: Full serializer for retrieving a conversation with messages.
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        submission:
-          type: integer
-          description: The submission this conversation is about
-        assignment:
-          type: integer
-          readOnly: true
-          description: The assignment this conversation belongs to
-        title:
-          type: string
-          description: Title for this conversation (auto-generated or user-set)
-          maxLength: 200
-        summary:
-          type: string
-          readOnly: true
-          description: Rolling summary of older messages for context window management
-        messageCount:
-          type: integer
-          readOnly: true
-        messages:
-          type: array
-          items:
-            $ref: '#/components/schemas/ChatMessage'
-          readOnly: true
-        created:
-          type: string
-          format: date-time
-          readOnly: true
-        modified:
-          type: string
-          format: date-time
-          readOnly: true
-      required:
-      - assignment
-      - created
-      - id
-      - messageCount
-      - messages
-      - modified
-      - submission
-      - summary
-    ChatConversationList:
-      type: object
-      description: Lightweight serializer for listing conversations (no messages).
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        submission:
-          type: integer
-          description: The submission this conversation is about
-        assignment:
-          type: integer
-          readOnly: true
-          description: The assignment this conversation belongs to
-        title:
-          type: string
-          description: Title for this conversation (auto-generated or user-set)
-          maxLength: 200
-        summary:
-          type: string
-          readOnly: true
-          description: Rolling summary of older messages for context window management
-        messageCount:
-          type: integer
-          readOnly: true
-        created:
-          type: string
-          format: date-time
-          readOnly: true
-        modified:
-          type: string
-          format: date-time
-          readOnly: true
-      required:
-      - assignment
-      - created
-      - id
-      - messageCount
-      - modified
-      - submission
-      - summary
-    ChatMessage:
-      type: object
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        role:
-          allOf:
-          - $ref: '#/components/schemas/RoleEnum'
-          readOnly: true
-          description: |-
-            Who sent this message
-
-            * `user` - User
-            * `assistant` - Assistant
-            * `tool_call` - Tool Call
-            * `tool_result` - Tool Result
-            * `summary` - Summary
-        content:
-          type: string
-          readOnly: true
-          description: The message text content
-        tool_name:
-          type: string
-          readOnly: true
-          nullable: true
-          description: Name of the tool (for tool_call/tool_result roles)
-        tool_args:
-          readOnly: true
-          nullable: true
-          description: JSON arguments for the tool call
-        tool_status:
-          readOnly: true
-          nullable: true
-          description: |-
-            Whether the tool call was approved or rejected by the user
-
-            * `pending` - Pending
-            * `approved` - Approved
-            * `rejected` - Rejected
-          oneOf:
-          - $ref: '#/components/schemas/ToolStatusEnum'
-          - $ref: '#/components/schemas/NullEnum'
-        token_count:
-          type: integer
-          readOnly: true
-          description: Number of tokens in this message
-        created:
-          type: string
-          format: date-time
-          readOnly: true
-      required:
-      - content
-      - created
-      - id
-      - role
-      - token_count
-      - tool_args
-      - tool_name
-      - tool_status
     CheckSSOAvailabilityResponse:
       type: object
       properties:
@@ -11463,27 +11687,40 @@ components:
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the character position a comment begins
-            on.
+          description: 'The starting character offset of the comment. For code/markdown
+            files: 0-indexed character position within the start line. For PDF text-selection
+            comments: character offset in the page''s text layer. For PDF region comments:
+            values >= 1,000,000 encode a bounding box as MARKER + leftPct*101 + topPct
+            (percentages 0-100 of page dimensions). For Jupyter notebooks (.ipynb):
+            always 0 (comments target entire cells).'
         endChar:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the character position a comment ends
-            on.
+          description: 'The ending character offset of the comment. For code/markdown
+            files: 0-indexed character position within the end line. For PDF text-selection
+            comments: character offset in the page''s text layer. For PDF region comments:
+            values >= 1,000,000 encode a bounding box as MARKER + rightPct*101 + bottomPct
+            (percentages 0-100 of page dimensions). For Jupyter notebooks (.ipynb):
+            always 0 (comments target entire cells).'
         startLine:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the line number a comment begins on.
+          description: 'The line or position where the comment begins. For code/markdown
+            files: 0-indexed line number. For PDF files: 1-based page number. For
+            Jupyter notebooks (.ipynb): 0-based cell index.'
         endLine:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the line number a comment begins on.
+          description: 'The line or position where the comment ends. For code/markdown
+            files: 0-indexed line number. For PDF files: 1-based page number (usually
+            same as startLine). For Jupyter notebooks (.ipynb): 0-based cell index
+            (usually same as startLine).'
         file:
           type: integer
           description: The related file_id.
@@ -11498,8 +11735,8 @@ components:
         feedback:
           type: integer
           readOnly: true
-          description: An integer representing the feedback applied to this comment.
-            Currently only valid if rubricComment is not null.
+          description: 'Student feedback on this comment. Valid values: -1 (negative),
+            0 (none), 1 (positive). Only applicable when rubricComment is set.'
         color:
           type: string
           nullable: true
@@ -11721,8 +11958,6 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
-        aiChatDisabled:
-          type: boolean
         aiUseOwnSettings:
           type: boolean
         aiTokenRates:
@@ -11732,9 +11967,6 @@ components:
           type: boolean
           readOnly: true
         aiCommentsEnabled:
-          type: boolean
-          readOnly: true
-        aiChatEnabled:
           type: boolean
           readOnly: true
         orgAiAvailable:
@@ -11754,7 +11986,6 @@ components:
             additionalProperties: {}
           readOnly: true
       required:
-      - aiChatEnabled
       - aiCommentsEnabled
       - aiEnabled
       - apiKeyHint
@@ -11762,6 +11993,60 @@ components:
       - hasApiKey
       - id
       - orgAiAvailable
+    CourseAuditEvent:
+      type: object
+      description: Read-only serializer for course audit events.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          readOnly: true
+          description: The course this event belongs to
+        assignment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The assignment associated with this event
+        submission:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The submission associated with this event
+        user:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The user who performed the action
+        userEmail:
+          type: string
+          readOnly: true
+        assignmentName:
+          type: string
+          readOnly: true
+        eventType:
+          type: string
+          readOnly: true
+        meta:
+          readOnly: true
+          nullable: true
+          description: Extra context for the event (error messages, counts, etc.)
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assignment
+      - assignmentName
+      - course
+      - created
+      - eventType
+      - id
+      - meta
+      - submission
+      - user
+      - userEmail
     CourseFile:
       type: object
       description: |-
@@ -12463,6 +12748,31 @@ components:
             JSON)
       required:
       - file_id
+    GenerateAIAssistanceResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        submissionId:
+          type: integer
+      required:
+      - status
+      - submissionId
+    GenerateDescriptionResponse:
+      type: object
+      properties:
+        aiDescription:
+          type: string
+      required:
+      - aiDescription
+    GenerateFileSuggestionsRequest:
+      type: object
+      properties:
+        fileId:
+          type: integer
+          description: ID of the submission file to generate suggestions for.
+      required:
+      - fileId
     GenerateOTTRequest:
       type: object
       properties:
@@ -12782,8 +13092,6 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
-        aiChatDisabled:
-          type: boolean
         aiCoursePolicy:
           $ref: '#/components/schemas/AiCoursePolicyEnum'
         aiEnabledCourseIds:
@@ -12800,9 +13108,6 @@ components:
         aiCommentsEnabled:
           type: boolean
           readOnly: true
-        aiChatEnabled:
-          type: boolean
-          readOnly: true
         hasApiKey:
           type: boolean
           readOnly: true
@@ -12817,7 +13122,6 @@ components:
             additionalProperties: {}
           readOnly: true
       required:
-      - aiChatEnabled
       - aiCommentsEnabled
       - aiEnabled
       - aiEnabledCourseIds
@@ -12835,6 +13139,29 @@ components:
         * `ok` - ok
         * `degraded` - degraded
         * `critical` - critical
+    PaginatedCourseAuditEventList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CourseAuditEvent'
     PaginatedSectionList:
       type: object
       required:
@@ -13127,6 +13454,15 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        ai_description:
+          type: string
+          description: AI-generated description of the assignment used as context
+            for AI grading features. Editable by course admins, visible to graders.
+            Not shown to students.
+        ai_description_locked:
+          type: boolean
+          description: When True, prevents automatic regeneration of ai_description
+            from new submissions.
         runFilesOnSubmit:
           type: boolean
           description: If True, submission files will be automatically executed and
@@ -13206,39 +13542,6 @@ components:
             for tests/helpers).
         isTestResource:
           type: boolean
-    PatchedChatConversationList:
-      type: object
-      description: Lightweight serializer for listing conversations (no messages).
-      properties:
-        id:
-          type: integer
-          readOnly: true
-        submission:
-          type: integer
-          description: The submission this conversation is about
-        assignment:
-          type: integer
-          readOnly: true
-          description: The assignment this conversation belongs to
-        title:
-          type: string
-          description: Title for this conversation (auto-generated or user-set)
-          maxLength: 200
-        summary:
-          type: string
-          readOnly: true
-          description: Rolling summary of older messages for context window management
-        messageCount:
-          type: integer
-          readOnly: true
-        created:
-          type: string
-          format: date-time
-          readOnly: true
-        modified:
-          type: string
-          format: date-time
-          readOnly: true
     PatchedComment:
       type: object
       properties:
@@ -13262,27 +13565,40 @@ components:
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the character position a comment begins
-            on.
+          description: 'The starting character offset of the comment. For code/markdown
+            files: 0-indexed character position within the start line. For PDF text-selection
+            comments: character offset in the page''s text layer. For PDF region comments:
+            values >= 1,000,000 encode a bounding box as MARKER + leftPct*101 + topPct
+            (percentages 0-100 of page dimensions). For Jupyter notebooks (.ipynb):
+            always 0 (comments target entire cells).'
         endChar:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the character position a comment ends
-            on.
+          description: 'The ending character offset of the comment. For code/markdown
+            files: 0-indexed character position within the end line. For PDF text-selection
+            comments: character offset in the page''s text layer. For PDF region comments:
+            values >= 1,000,000 encode a bounding box as MARKER + rightPct*101 + bottomPct
+            (percentages 0-100 of page dimensions). For Jupyter notebooks (.ipynb):
+            always 0 (comments target entire cells).'
         startLine:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the line number a comment begins on.
+          description: 'The line or position where the comment begins. For code/markdown
+            files: 0-indexed line number. For PDF files: 1-based page number. For
+            Jupyter notebooks (.ipynb): 0-based cell index.'
         endLine:
           type: integer
           maximum: 9223372036854775807
           minimum: -9223372036854775808
           format: int64
-          description: An integer representing the line number a comment begins on.
+          description: 'The line or position where the comment ends. For code/markdown
+            files: 0-indexed line number. For PDF files: 1-based page number (usually
+            same as startLine). For Jupyter notebooks (.ipynb): 0-based cell index
+            (usually same as startLine).'
         file:
           type: integer
           description: The related file_id.
@@ -13297,8 +13613,8 @@ components:
         feedback:
           type: integer
           readOnly: true
-          description: An integer representing the feedback applied to this comment.
-            Currently only valid if rubricComment is not null.
+          description: 'Student feedback on this comment. Valid values: -1 (negative),
+            0 (none), 1 (positive). Only applicable when rubricComment is set.'
         color:
           type: string
           nullable: true
@@ -13499,8 +13815,6 @@ components:
           type: boolean
         aiCommentsDisabled:
           type: boolean
-        aiChatDisabled:
-          type: boolean
         aiUseOwnSettings:
           type: boolean
         aiTokenRates:
@@ -13510,9 +13824,6 @@ components:
           type: boolean
           readOnly: true
         aiCommentsEnabled:
-          type: boolean
-          readOnly: true
-        aiChatEnabled:
           type: boolean
           readOnly: true
         orgAiAvailable:
@@ -13799,8 +14110,6 @@ components:
         aiDisabled:
           type: boolean
         aiCommentsDisabled:
-          type: boolean
-        aiChatDisabled:
           type: boolean
         aiCoursePolicy:
           $ref: '#/components/schemas/AiCoursePolicyEnum'
@@ -14126,6 +14435,89 @@ components:
         results:
           nullable: true
           description: Structured test results (list of subtests).
+    PatchedSuggestedComment:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          readOnly: true
+          description: The submission this suggestion belongs to.
+        file:
+          type: integer
+          readOnly: true
+          description: The file this suggestion targets.
+        text:
+          type: string
+          readOnly: true
+          description: The AI-generated comment text.
+        startLine:
+          type: integer
+          readOnly: true
+          description: The line or position where the suggestion begins (same semantics
+            as Comment.startLine).
+        endLine:
+          type: integer
+          readOnly: true
+          description: The line or position where the suggestion ends (same semantics
+            as Comment.endLine).
+        startChar:
+          type: integer
+          readOnly: true
+          description: The starting character offset (same semantics as Comment.startChar).
+        endChar:
+          type: integer
+          readOnly: true
+          description: The ending character offset (same semantics as Comment.endChar).
+        rubricComment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: Optional rubric comment the AI mapped this suggestion to.
+        pointDelta:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          readOnly: true
+          nullable: true
+          description: AI-suggested point delta. Null if linked to a rubricComment.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/SuggestedCommentStatusEnum'
+          description: |-
+            Current status of this suggestion.
+
+            * `pending` - Pending
+            * `accepted` - Accepted
+            * `rejected` - Rejected
+        acceptedBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The grader who accepted this suggestion.
+        acceptedComment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The real Comment created when this suggestion was accepted.
+        generationMetadata:
+          readOnly: true
+          nullable: true
+          description: Metadata about the generation (model used, tokens, confidence,
+            etc.).
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
     PatchedTestCase:
       type: object
       properties:
@@ -14433,20 +14825,6 @@ components:
       required:
       - isValid
       - success
-    RoleEnum:
-      enum:
-      - user
-      - assistant
-      - tool_call
-      - tool_result
-      - summary
-      type: string
-      description: |-
-        * `user` - User
-        * `assistant` - Assistant
-        * `tool_call` - Tool Call
-        * `tool_result` - Tool Result
-        * `summary` - Summary
     RubricCategory:
       type: object
       properties:
@@ -15017,6 +15395,39 @@ components:
       required:
       - id
       - token
+    SubmissionSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          readOnly: true
+          description: The submission this summary describes.
+        text:
+          type: string
+          readOnly: true
+          description: Markdown-formatted summary of the submission.
+        generationMetadata:
+          readOnly: true
+          nullable: true
+          description: Metadata about the generation (model used, tokens, etc.).
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - generationMetadata
+      - id
+      - modified
+      - submission
+      - text
     SubmissionTest:
       type: object
       properties:
@@ -15119,6 +15530,115 @@ components:
           type: boolean
       required:
       - success
+    SuggestedComment:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          readOnly: true
+          description: The submission this suggestion belongs to.
+        file:
+          type: integer
+          readOnly: true
+          description: The file this suggestion targets.
+        text:
+          type: string
+          readOnly: true
+          description: The AI-generated comment text.
+        startLine:
+          type: integer
+          readOnly: true
+          description: The line or position where the suggestion begins (same semantics
+            as Comment.startLine).
+        endLine:
+          type: integer
+          readOnly: true
+          description: The line or position where the suggestion ends (same semantics
+            as Comment.endLine).
+        startChar:
+          type: integer
+          readOnly: true
+          description: The starting character offset (same semantics as Comment.startChar).
+        endChar:
+          type: integer
+          readOnly: true
+          description: The ending character offset (same semantics as Comment.endChar).
+        rubricComment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: Optional rubric comment the AI mapped this suggestion to.
+        pointDelta:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          readOnly: true
+          nullable: true
+          description: AI-suggested point delta. Null if linked to a rubricComment.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/SuggestedCommentStatusEnum'
+          description: |-
+            Current status of this suggestion.
+
+            * `pending` - Pending
+            * `accepted` - Accepted
+            * `rejected` - Rejected
+        acceptedBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The grader who accepted this suggestion.
+        acceptedComment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The real Comment created when this suggestion was accepted.
+        generationMetadata:
+          readOnly: true
+          nullable: true
+          description: Metadata about the generation (model used, tokens, confidence,
+            etc.).
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - acceptedBy
+      - acceptedComment
+      - created
+      - endChar
+      - endLine
+      - file
+      - generationMetadata
+      - id
+      - modified
+      - pointDelta
+      - rubricComment
+      - startChar
+      - startLine
+      - submission
+      - text
+    SuggestedCommentStatusEnum:
+      enum:
+      - pending
+      - accepted
+      - rejected
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `accepted` - Accepted
+        * `rejected` - Rejected
     SystemActivityResponse:
       type: object
       properties:
@@ -15494,16 +16014,6 @@ components:
           writeOnly: true
       required:
       - token
-    ToolStatusEnum:
-      enum:
-      - pending
-      - approved
-      - rejected
-      type: string
-      description: |-
-        * `pending` - Pending
-        * `approved` - Approved
-        * `rejected` - Rejected
     TypeEnum:
       enum:
       - io

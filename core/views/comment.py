@@ -12,6 +12,7 @@ from rest_framework.decorators import action
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub
 
 from core.permissions.helpers import returnNotAuthorized, returnForbidden
+from core.services.audit import record_audit_event
 
 from rest_framework import serializers
 from logging import getLogger
@@ -93,6 +94,20 @@ class CommentViewSet(ListProtectedViewSet):
         else:
             comment.feedback = feedback
             comment.save()
+
+            submission = comment.file.submission
+            record_audit_event(
+                course=submission.assignment.course,
+                event_type='comment_feedback',
+                user=user,
+                assignment=submission.assignment,
+                submission=submission,
+                meta={
+                    'comment_id': comment.id,
+                    'feedback': feedback,
+                },
+            )
+
             return Response(CommentBasicSerializer(comment).data)
 
     @action(detail=False, methods=['POST'])

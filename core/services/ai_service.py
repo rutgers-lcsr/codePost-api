@@ -28,7 +28,7 @@ import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional, Literal
 from dataclasses import dataclass
-from core.models import Course, Assignment, SubmissionFile, User
+from core.models import Course, Assignment, Submission, SubmissionFile, User
 
 if TYPE_CHECKING:
     import pymupdf
@@ -40,8 +40,9 @@ if TYPE_CHECKING:
 # -----------------------------------------------------------------------
 AI_MODELS: dict[str, list[tuple[str, str, bool]]] = {
     'gemini': [
-        ('gemini-3-pro-preview', 'Gemini 3 Pro (Preview)', True),
-        ('gemini-2.5-flash', 'Gemini 2.5 Flash', True),
+        ('gemini-3-pro-preview', 'Gemini 3 Pro (Preview)', False),
+        ('gemini-3-flash-preview', 'Gemini 3 Flash (Preview)', True),
+        ('gemini-2.5-flash', 'Gemini 2.5 Flash', False),
         ('gemini-2.5-pro', 'Gemini 2.5 Pro', False),
         ('gemini-2.0-flash', 'Gemini 2.0 Flash', False),
         ('gemini-1.5-flash', 'Gemini 1.5 Flash', False),
@@ -291,6 +292,16 @@ Context:
             return bool(self.provider and self.base_url)
         return bool(self.provider and self.api_key)
 
+    @property
+    def is_globally_disabled(self) -> bool:
+        """Check if AI is globally disabled (course or org-level)."""
+        if self.course.ai_use_own_settings:
+            return bool(self.course.ai_disabled)
+        org = self.course.organization
+        if org and self._org_allows_course(org, self.course):
+            return bool(org.ai_disabled)
+        return bool(self.course.ai_disabled)
+
     # ------------------------------------------------------------------
     # Cost estimation & usage recording
     # ------------------------------------------------------------------
@@ -310,6 +321,7 @@ Context:
     TOKEN_RATES: dict[str, tuple[float, float]] = {
         # Gemini
         'gemini-3-pro-preview': (2.00, 12.00),
+        'gemini-3-flash-preview': (0.50, 3),
         'gemini-2.5-flash': (0.15, 0.60),
         'gemini-2.5-pro': (1.25, 10.00),
         'gemini-2.0-flash': (0.10, 0.40),
@@ -665,7 +677,7 @@ run_test("Test Explanation", 10, "Score + explanation", 30) do
 end"""
     }
 
-    TEST_GENERATION_PROMPT = """You are an expert autograder for a Computer Science course.
+    TEST_GENERATION_PROMPT = """You are an autograder for a Computer Science course.
 Your task is to generate a robust test script for a student submission file: {target_filename}.
 The test script should verify the correctness of the student's code based on the provided context.
 
@@ -1071,10 +1083,9 @@ expression, variable, or token the feedback is about, rather than highlighting t
 
 **Notebook (.ipynb) files:**
 For Jupyter notebook files, line numbers work differently:
-- start_line and end_line are **0-indexed cell indices**, NOT line numbers within a cell.
-- Cell 1 in the UI corresponds to index 0, Cell 2 to index 1, etc.
-- When using read_file_contents on a notebook, the output will label each cell with its index.
-- To comment on a specific cell, set start_line to that cell's index (e.g., for Cell 3, use start_line=2).
+- start_line and end_line are **1-based cell numbers**, NOT line numbers within a cell.
+- The cells are labeled "CELL 1", "CELL 2", etc. in the content below.
+- To comment on a specific cell, set start_line to that cell's number (e.g., for CELL 3, use start_line=3).
 - Comments on notebooks target entire cells — you cannot target a specific line within a cell.
 
 **Context:**
@@ -1161,6 +1172,656 @@ For Jupyter notebook files, line numbers work differently:
             logger.warning(f"Conversation summarization failed: {e}")
             return ""
 
+    # ------------------------------------------------------------------
+    # AI Grading Assistance: Suggested Comments, Summary, Description
+    # ------------------------------------------------------------------
+
+    SUGGESTED_COMMENTS_PROMPT = """You are an AI assistant helping grade student code submissions.
+Your task is to analyze the student's code and generate specific, actionable feedback comments
+that a human grader can review and apply.
+
+Guidelines:
+- Generate comments only where there are genuine issues, improvements, or notable patterns
+- Be specific: reference exact code constructs, variable names, or logic errors
+- Each comment should target a specific location in a specific file
+- Keep individual comments concise (1-3 sentences)
+- If a rubric item applies, reference it by ID
+- Suggest appropriate point deductions when applicable
+- Do NOT generate comments for trivial style issues unless relevant to the assignment
+- Be constructive: explain why something is wrong and how to fix it
+
+Assignment: {assignment_name}
+{assignment_description}
+
+{rubric_context}
+
+{test_results}
+"""
+
+    SUBMISSION_SUMMARY_PROMPT = """You are an assistant helping graders understand student submissions.
+Generate a concise summary that helps the grader quickly orient themselves before reviewing.
+
+Include:
+- What the student implemented — mention specific class names, functions, and design patterns used
+- Key strengths worth noting
+- Key issues or concerns requiring grader attention
+- Test results overview (which passed/failed and why, if available)
+- **Grading priority**: which files or areas should the grader review most carefully, and why
+{description_comparison}
+
+Keep the summary to 5-10 bullet points. Use markdown formatting. Just respond with the summary text — do not reply to me directly.
+
+Assignment: {assignment_name}
+{assignment_description}
+
+{test_results}
+
+{rubric}
+"""
+
+    ASSIGNMENT_DESCRIPTION_PROMPT = """You are analyzing a programming assignment.
+Based on the provided materials (template code, test definitions, rubric, student-facing instructions,
+and sample student submissions), generate a clear, concise description of what this assignment asks
+students to do.
+
+Include:
+- The main objective and learning goals
+- Key requirements and constraints
+- What a correct solution should accomplish
+- Important implementation details students need to handle
+- **Main submission file**: Identify which file is the primary/main file that students are expected \
+to implement their solution in (e.g. "The main submission file is `calculator.py`."). Look at which \
+file contains the core logic, is targeted by tests, or is the entry point. Use the exact filename \
+(e.g. `calculator.py`, not just `calculator`). If multiple files are equally important, list them all.
+
+This description will be used as AI context to help generate better feedback for student submissions. Do not reply to me directly — just generate the description text.
+Keep it factual and specific — avoid generic statements.
+
+Assignment Name: {assignment_name}
+Student-Facing Instructions: {explanation}
+
+{template_files}
+
+{test_cases}
+
+{rubric}
+
+{submission_samples}
+"""
+
+    @staticmethod
+    def _add_line_numbers(content: str) -> str:
+        """Prepend 0-indexed line numbers to each line of code.
+
+        This makes line references unambiguous for the AI model, which otherwise
+        has to count lines itself and tends to use 1-based indexing.
+        """
+        lines = content.split('\n')
+        return '\n'.join(f'{i}: {line}' for i, line in enumerate(lines))
+
+    @staticmethod
+    def _collect_submission_context(submission: Submission) -> dict:
+        """Collect all relevant context from a submission for AI processing.
+
+        Returns a dict with keys: files, test_results, rubric_context, assignment_description.
+        """
+        from core.models import SubmissionFile, SubmissionTest, RubricCategory
+
+        MAX_TOTAL_CHARS = 200_000  # Total character budget across all files
+
+        assignment = submission.assignment
+
+        # Collect student files (non-hidden, non-test-resource assignment files + extra uploads)
+        assignment_file_names = set(
+            assignment.files.filter(hidden=False, is_test_resource=False)
+            .values_list('name', flat=True)
+        )
+        hidden_file_names = set(
+            assignment.files.filter(hidden=True).values_list('name', flat=True)
+        )
+        submission_files = list(SubmissionFile.objects.filter(submission=submission))
+
+        # Sort: student files first so they get priority in the budget
+        def _is_student_file(sf):
+            return sf.name in assignment_file_names or sf.name not in hidden_file_names
+
+        submission_files.sort(key=lambda sf: (not _is_student_file(sf), sf.name))
+
+        files_context = []
+        total_chars = 0
+        for sf in submission_files:
+            # Include all submission files — the AI needs full picture
+            content = sf.data
+            is_notebook = sf.name.endswith('.ipynb')
+
+            if is_notebook:
+                # Parse notebook and present as enumerated cells so the AI model
+                # returns 0-based cell indices instead of raw JSON line numbers.
+                content = _format_notebook_as_cells(content)
+            elif len(content) > 50000:
+                content = content[:50000] + "\n... (truncated)"
+
+            # Enforce total character budget
+            remaining = MAX_TOTAL_CHARS - total_chars
+            if remaining <= 0:
+                files_context.append({
+                    'id': sf.id,
+                    'name': sf.name,
+                    'extension': sf.extension,
+                    'content': '(omitted — total size budget exceeded)',
+                    'is_notebook': is_notebook,
+                    'is_student_file': _is_student_file(sf),
+                })
+                continue
+            if len(content) > remaining:
+                content = content[:remaining] + "\n... (truncated — total size budget)"
+
+            total_chars += len(content)
+
+            files_context.append({
+                'id': sf.id,
+                'name': sf.name,
+                'extension': sf.extension,
+                'content': content,
+                'is_notebook': is_notebook,
+                'is_student_file': _is_student_file(sf),
+            })
+
+        # Collect test results
+        test_results = []
+        for st in SubmissionTest.objects.filter(submission=submission).select_related('testCase'):
+            test_results.append({
+                'name': st.testCase.description if hasattr(st.testCase, 'description') else str(st.testCase),
+                'passed': st.passed,
+                'is_error': st.isError,
+                'logs': (st.logs or '')[:2000],
+                'score': str(st.score) if st.score is not None else None,
+                'max_score': str(st.maxScore) if st.maxScore is not None else None,
+            })
+
+        # Collect rubric
+        rubric_parts = []
+        for category in RubricCategory.objects.filter(assignment=assignment).prefetch_related('rubricComments'):
+            cat_text = f"### {category.name} ({category.pointLimit} pts)\n"
+            for rc in category.rubricComments.all():
+                cat_text += f"  - [ID:{rc.id}] {rc.name or rc.text[:60]} ({rc.pointDelta:+g} pts)\n"
+                if rc.explanation:
+                    cat_text += f"    Explanation: {rc.explanation[:200]}\n"
+            rubric_parts.append(cat_text)
+
+        # Build formatted sections
+        test_section = ""
+        if test_results:
+            passed = sum(1 for t in test_results if t['passed'])
+            total = len(test_results)
+            test_section = f"Test Results: {passed}/{total} passed\n"
+            for t in test_results:
+                status = "✓ PASS" if t['passed'] else ("✗ ERROR" if t['is_error'] else "✗ FAIL")
+                test_section += f"  {status}: {t['name']}"
+                if t['score'] is not None:
+                    test_section += f" ({t['score']}/{t['max_score']})"
+                test_section += "\n"
+                if not t['passed'] and t['logs']:
+                    test_section += f"    Logs: {t['logs'][:500]}\n"
+
+        desc = assignment.ai_description or ''
+        desc_section = f"Assignment Description:\n{desc}" if desc else ""
+        desc_section += f"Assignment Instructor Explaination:\n{assignment.explanation}" if assignment.explanation else ""
+
+        return {
+            'files': files_context,
+            'test_results': test_section,
+            'rubric_context': "\n".join(rubric_parts),
+            'assignment_description': desc_section,
+        }
+
+    async def generate_suggested_comments(self, submission) -> list[GenerationResult]:
+        """
+        Generate AI-suggested comments for an entire submission.
+        Returns a list of GenerationResults — one per batch call. The text of each
+        result is a JSON array of suggestion objects.
+        """
+        import json as json_mod
+        from asgiref.sync import sync_to_async
+
+        ctx = await sync_to_async(self._collect_submission_context)(submission)
+        assignment = submission.assignment
+
+        system_prompt = self.SUGGESTED_COMMENTS_PROMPT.format(
+            assignment_name=assignment.name,
+            assignment_description=ctx['assignment_description'],
+            rubric_context=ctx['rubric_context'] or "No rubric defined.",
+            test_results=ctx['test_results'] or "No test results available.",
+        )
+
+        # Build the user prompt with all file contents
+        file_sections = []
+        has_notebooks = False
+        for f in ctx['files']:
+            if f.get('is_notebook'):
+                has_notebooks = True
+                # Notebooks are pre-formatted as enumerated cells — no code fence
+                file_sections.append(
+                    f"### File: {f['name']} (ID: {f['id']}) [NOTEBOOK]\n{f['content']}"
+                )
+            else:
+                # Prepend 0-indexed line numbers so the AI references them accurately
+                numbered = self._add_line_numbers(f['content'])
+                file_sections.append(
+                    f"### File: {f['name']} (ID: {f['id']})\n```{f['extension'].lstrip('.')}\n{numbered}\n```"
+                )
+
+        notebook_note = ""
+        if has_notebooks:
+            notebook_note = (
+                "\n\nIMPORTANT for notebook (.ipynb) files: start_line and end_line must be "
+                "1-based CELL NUMBERS (matching the \"CELL N\" headers above), NOT line numbers. "
+                "For example, to comment on the first cell (CELL 1) use start_line=1, end_line=1."
+            )
+
+        user_prompt = f"""Analyze the following student submission files and generate feedback comments.
+Each line of code is prefixed with its 0-indexed line number (e.g. "0: ...", "1: ...").
+Use these exact line numbers in your response.
+
+{chr(10).join(file_sections)}
+
+Respond with ONLY a JSON array of comment objects. Each object must have:
+- "file_id": integer (the file ID from above)
+- "start_line": integer (the 0-indexed line number shown at the start of each line)
+- "end_line": integer (the 0-indexed line number shown at the start of each line)
+- "start_char": integer (0-indexed character offset within start_line where the issue begins; use 0 for the whole line)
+- "end_char": integer (0-indexed character offset within end_line where the issue ends; use 0 for the whole line)
+- "text": string (the feedback text, markdown supported)
+- "rubric_comment_id": integer or null (ID of a matching rubric item, if applicable)
+- "point_delta": number or null (suggested point deduction/bonus, negative for deduction)
+
+When your feedback targets a specific expression, variable, or function call, set start_char/end_char
+to highlight just that span. Character offsets are relative to the line content AFTER the line number
+prefix (i.e. count from the actual code, not from the "N: " prefix). Use start_char=0, end_char=0
+when the comment applies to the entire line or block. Do NOT use start_char/end_char for notebook files.
+{notebook_note}
+Generate only substantive comments. Return an empty array [] if no issues found.
+"""
+
+        try:
+            if self.provider == 'gemini':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
+            elif self.provider == 'openai':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
+            elif self.provider == 'ollama':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
+            elif self.provider in ('portkey', 'custom'):
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
+            else:
+                raise ValueError(f"Unknown AI provider: {self.provider}")
+
+            # Strip markdown fences if present
+            cleaned = text.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                cleaned = "\n".join(lines).strip()
+
+            # Validate it's parseable JSON
+            json_mod.loads(cleaned)
+
+            return [GenerationResult(
+                text=cleaned,
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
+            )]
+
+        except Exception as e:
+            error_msg = self._parse_error(e)
+            logger.error(f"AI suggested comments generation failed: {e}", exc_info=True)
+            return [GenerationResult(
+                text="",
+                success=False,
+                error=error_msg,
+            )]
+
+    async def generate_file_suggestions(self, submission, file_obj) -> list[GenerationResult]:
+        """
+        Generate AI-suggested comments for a single file within a submission.
+        Returns a list of GenerationResults (typically one). The text of each
+        result is a JSON array of suggestion objects.
+        """
+        import json as json_mod
+        from asgiref.sync import sync_to_async
+
+        ctx = await sync_to_async(self._collect_submission_context)(submission)
+        assignment = submission.assignment
+
+        system_prompt = self.SUGGESTED_COMMENTS_PROMPT.format(
+            assignment_name=assignment.name,
+            assignment_description=ctx['assignment_description'],
+            rubric_context=ctx['rubric_context'] or "No rubric defined.",
+            test_results=ctx['test_results'] or "No test results available.",
+        )
+
+        # Build user prompt with just the target file, plus context from other files
+        is_notebook = file_obj.name.endswith('.ipynb')
+        if is_notebook:
+            content = _format_notebook_as_cells(file_obj.data)
+        else:
+            content = file_obj.data
+            if len(content) > 50000:
+                content = content[:50000] + "\n... (truncated)"
+            # Prepend 0-indexed line numbers so the AI references them accurately
+            content = self._add_line_numbers(content)
+
+        other_files = []
+        for f in ctx['files']:
+            if f['id'] != file_obj.id:
+                if f.get('is_notebook'):
+                    other_files.append(f"### File: {f['name']}\n{f['content']}")
+                else:
+                    numbered = self._add_line_numbers(f['content'])
+                    other_files.append(f"### File: {f['name']}\n```{f['extension'].lstrip('.')}\n{numbered}\n```")
+
+        context_section = ""
+        if other_files:
+            context_section = f"\n\nOther submission files for context:\n{chr(10).join(other_files)}"
+
+        notebook_note = ""
+        if is_notebook:
+            notebook_note = (
+                "\n\nIMPORTANT: This is a notebook (.ipynb) file. start_line and end_line must be "
+                "1-based CELL NUMBERS (matching the \"CELL N\" headers above), NOT line numbers within a cell. "
+                "For example, to comment on the first cell (CELL 1) use start_line=1, end_line=1."
+            )
+            file_header = f"### File: {file_obj.name} (ID: {file_obj.id}) [NOTEBOOK]\n{content}"
+        else:
+            file_header = f"### File: {file_obj.name} (ID: {file_obj.id})\n```{file_obj.extension.lstrip('.')}\n{content}\n```"
+
+        user_prompt = f"""Analyze the following file and generate feedback comments for it.
+Each line of code is prefixed with its 0-indexed line number (e.g. "0: ...", "1: ...").
+Use these exact line numbers in your response.
+
+{file_header}
+{context_section}
+
+Respond with ONLY a JSON array of comment objects. Each object must have:
+- "file_id": {file_obj.id} (this file's ID)
+- "start_line": integer (the 0-indexed line number shown at the start of each line)
+- "end_line": integer (the 0-indexed line number shown at the start of each line)
+- "start_char": integer (0-indexed character offset within start_line where the issue begins; use 0 for the whole line)
+- "end_char": integer (0-indexed character offset within end_line where the issue ends; use 0 for the whole line)
+- "text": string (the feedback text, markdown supported)
+- "rubric_comment_id": integer or null (ID of a matching rubric item, if applicable)
+- "point_delta": number or null (suggested point deduction/bonus, negative for deduction)
+
+When your feedback targets a specific expression, variable, or function call, set start_char/end_char
+to highlight just that span. Character offsets are relative to the line content AFTER the line number
+prefix (i.e. count from the actual code, not from the "N: " prefix). Use start_char=0, end_char=0
+when the comment applies to the entire line or block. Do NOT use start_char/end_char for notebook files.
+{notebook_note}
+Generate only substantive comments. Return an empty array [] if no issues found.
+"""
+
+        try:
+            if self.provider == 'gemini':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
+            elif self.provider == 'openai':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
+            elif self.provider == 'ollama':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
+            elif self.provider in ('portkey', 'custom'):
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
+            else:
+                raise ValueError(f"Unknown AI provider: {self.provider}")
+
+            # Strip markdown fences if present
+            cleaned = text.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                cleaned = "\n".join(lines).strip()
+
+            json_mod.loads(cleaned)
+
+            return [GenerationResult(
+                text=cleaned,
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
+            )]
+
+        except Exception as e:
+            error_msg = self._parse_error(e)
+            logger.error(f"AI file suggestions generation failed: {e}", exc_info=True)
+            return [GenerationResult(
+                text="",
+                success=False,
+                error=error_msg,
+            )]
+
+    async def generate_submission_summary(self, submission, target_file=None) -> GenerationResult:
+        """Generate a summary of a submission to help graders orient themselves.
+
+        Args:
+            submission: The Submission to summarize.
+            target_file: Optional SubmissionFile to focus the summary on (the detected
+                "main" file). When provided, the prompt is adjusted to present this file
+                prominently and instruct the AI to focus its analysis on it. Other files
+                are still included as context. When None, all files are treated equally
+                (existing behavior).
+        """
+        from asgiref.sync import sync_to_async
+
+        ctx = await sync_to_async(self._collect_submission_context)(submission)
+        assignment = submission.assignment
+
+        has_description = bool(ctx['assignment_description'])
+        description_comparison = (
+            "- How the submission compares to the assignment requirements (based on the description above)"
+            if has_description else ""
+        )
+
+        system_prompt = self.SUBMISSION_SUMMARY_PROMPT.format(
+            assignment_name=assignment.name,
+            assignment_description=ctx['assignment_description'],
+            test_results=ctx['test_results'] or "No test results available.",
+            rubric=ctx['rubric_context'] or "No rubric defined.",
+            description_comparison=description_comparison,
+        )
+
+        # Build user prompt with file contents, annotating student vs provided files
+        target_file_id = target_file.id if target_file else None
+        primary_sections = []
+        context_sections = []
+        for f in ctx['files']:
+            label = f['name']
+            if f.get('is_student_file'):
+                label += ' (student implementation)'
+            else:
+                label += ' (provided template/test)'
+            section = f"### File: {label}\n```{f['extension'].lstrip('.')}\n{f['content']}\n```"
+
+            if target_file_id and f['id'] == target_file_id:
+                primary_sections.append(section)
+            else:
+                context_sections.append(section)
+
+        if target_file is not None and primary_sections:
+            focus_note = (
+                f"Focus your summary on the PRIMARY file below ({target_file.name}), "
+                "which has been identified as the main submission file. "
+                "The other files are included for context only.\n\n"
+                "## PRIMARY FILE\n"
+            )
+            user_prompt = f"""Summarize this student submission for the grader:
+
+{focus_note}{chr(10).join(primary_sections)}
+
+## CONTEXT FILES
+{chr(10).join(context_sections)}
+
+Provide a concise markdown summary following the guidelines in your instructions.
+"""
+        else:
+            file_sections = primary_sections + context_sections
+            user_prompt = f"""Summarize this student submission for the grader:
+
+{chr(10).join(file_sections)}
+
+Provide a concise markdown summary following the guidelines in your instructions.
+"""
+
+        try:
+            if self.provider == 'gemini':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
+            elif self.provider == 'openai':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
+            elif self.provider == 'ollama':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
+            elif self.provider in ('portkey', 'custom'):
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
+            else:
+                raise ValueError(f"Unknown AI provider: {self.provider}")
+
+            return GenerationResult(
+                text=text.strip(),
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
+            )
+
+        except Exception as e:
+            error_msg = self._parse_error(e)
+            logger.error(f"AI submission summary generation failed: {e}", exc_info=True)
+            return GenerationResult(text="", success=False, error=error_msg)
+
+    async def generate_assignment_description(self, assignment) -> GenerationResult:
+        """Generate an AI description of what an assignment is asking students to do."""
+        from asgiref.sync import sync_to_async
+        from core.models import RubricCategory, SubmissionFile
+
+        CONTEXT_BUDGET = 80000  # chars — stay well under model token limits
+        PER_SUBMISSION_BUDGET = 10000
+
+        def _collect_assignment_context():
+            # Collect template/assignment files
+            tpl_parts = []
+            for af in assignment.files.filter(hidden=False, is_test_resource=False):
+                content = af.data
+                if len(content) > 20000:
+                    content = content[:20000] + "\n... (truncated)"
+                tpl_parts.append(f"### {af.name}\n```\n{content}\n```")
+
+            # Collect test case definitions
+            tst_parts = []
+            for tc in assignment.testCategories.all():
+                for test in tc.testCases.all():
+                    desc = getattr(test, 'description', '') or ''
+                    tst_parts.append(f"- {desc or test.text[:100]}")
+
+            # Collect rubric
+            rub_parts = []
+            for category in RubricCategory.objects.filter(assignment=assignment).prefetch_related('rubricComments'):
+                cat_text = f"### {category.name} ({category.pointLimit} pts)\n"
+                for rc in category.rubricComments.all():
+                    cat_text += f"  - {rc.name or rc.text[:60]} ({rc.pointDelta:+g} pts)\n"
+                rub_parts.append(cat_text)
+
+            # Calculate remaining budget for submission samples
+            materials_size = (
+                sum(len(p) for p in tpl_parts)
+                + sum(len(p) for p in tst_parts)
+                + sum(len(p) for p in rub_parts)
+            )
+            remaining = CONTEXT_BUDGET - materials_size
+            max_samples = min(3, max(0, remaining // PER_SUBMISSION_BUDGET))
+
+            # Sample student submissions (prefer finalized, fall back to any)
+            sub_parts = []
+            if max_samples > 0:
+                student_file_names = set(
+                    assignment.files.filter(hidden=False, is_test_resource=False)
+                    .values_list('name', flat=True)
+                )
+                submissions = list(
+                    assignment.submissions
+                    .order_by('-isFinalized', '?')[:max_samples]
+                )
+                for sub in submissions:
+                    files_text = []
+                    chars_used = 0
+                    for sf in SubmissionFile.objects.filter(submission=sub):
+                        if sf.name not in student_file_names:
+                            continue
+                        content = sf.data
+                        budget_left = PER_SUBMISSION_BUDGET - chars_used
+                        if budget_left <= 0:
+                            break
+                        if len(content) > budget_left:
+                            content = content[:budget_left] + "\n... (truncated)"
+                        files_text.append(f"#### {sf.name}\n```\n{content}\n```")
+                        chars_used += len(content)
+                    if files_text:
+                        sub_parts.append(f"### Submission Sample\n" + "\n".join(files_text))
+
+            return tpl_parts, tst_parts, rub_parts, sub_parts
+
+        template_parts, test_parts, rubric_parts, submission_parts = await sync_to_async(_collect_assignment_context)()
+
+        submission_samples_text = (
+            "Student Submission Samples (use these to understand the range of student work):\n"
+            + "\n".join(submission_parts)
+            if submission_parts
+            else "No student submissions available yet."
+        )
+
+        system_prompt = self.ASSIGNMENT_DESCRIPTION_PROMPT.format(
+            assignment_name=assignment.name,
+            explanation=assignment.explanation or "(No student-facing instructions provided)",
+            template_files="\n".join(template_parts) if template_parts else "No template files.",
+            test_cases="\n".join(test_parts) if test_parts else "No test cases defined.",
+            rubric="\n".join(rubric_parts) if rubric_parts else "No rubric defined.",
+            submission_samples=submission_samples_text,
+        )
+
+        user_prompt = "Generate a concise assignment description based on the materials above."
+
+        try:
+            if self.provider == 'gemini':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
+            elif self.provider == 'openai':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
+            elif self.provider == 'ollama':
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
+            elif self.provider in ('portkey', 'custom'):
+                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
+            else:
+                raise ValueError(f"Unknown AI provider: {self.provider}")
+
+            return GenerationResult(
+                text=text.strip(),
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
+            )
+
+        except Exception as e:
+            error_msg = self._parse_error(e)
+            logger.error(f"AI assignment description generation failed: {e}", exc_info=True)
+            return GenerationResult(text="", success=False, error=error_msg)
+
     def build_chat_system_prompt(
         self,
         assignment_name: str,
@@ -1170,7 +1831,10 @@ For Jupyter notebook files, line numbers work differently:
         existing_comments: str = "",
         test_summary: str = "",
     ) -> str:
-        """Build the system prompt for chat, filling in context."""
+        """DEPRECATED - NO LONGER SUPPORTING CHATS
+        
+        Build the system prompt for chat, filling in context.
+        """
         return self.CHAT_SYSTEM_PROMPT.format(
             assignment_name=assignment_name,
             submission_id=submission_id,
@@ -1671,6 +2335,35 @@ def build_context_from_file(
         context.all_files_content = '\n\n'.join(other_files)
     
     return context
+
+
+def _format_notebook_as_cells(raw_json: str) -> str:
+    """Convert raw .ipynb JSON into an enumerated cell representation.
+
+    Uses 1-based cell numbers (CELL 1, CELL 2, ...) to match the UI display
+    and avoid off-by-one errors from the AI model.
+    """
+    import json as json_mod
+    try:
+        notebook = json_mod.loads(raw_json)
+    except (json_mod.JSONDecodeError, ValueError):
+        # If parsing fails, fall back to raw content (truncated)
+        return raw_json[:50000] + "\n... (truncated)" if len(raw_json) > 50000 else raw_json
+
+    cells = notebook.get('cells', [])
+    if not cells:
+        return "(empty notebook)"
+
+    parts = []
+    for i, cell in enumerate(cells):
+        cell_type = cell.get('cell_type', 'code').upper()
+        content = _parse_notebook_cell(cell, include_outputs=True)
+        parts.append(f"--- CELL {i + 1} [{cell_type}] ---\n{content}")
+
+    result = "\n\n".join(parts)
+    if len(result) > 50000:
+        result = result[:50000] + "\n... (truncated)"
+    return result
 
 
 def _parse_notebook_cell(cell, include_outputs=False) -> str:

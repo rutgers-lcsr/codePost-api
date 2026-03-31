@@ -353,9 +353,9 @@ class TestSystemAIUsageEndpoint(APITestCase):
 
         data = response.data
         expected_keys = {
-            'totalTokens', 'inputTokens', 'outputTokens', 'estimatedCost',
-            'requestCount', 'timeSeries', 'breakdown', 'modelBreakdown',
-            'granularity', 'startDate', 'endDate',
+            'totalTokens', 'inputTokens', 'outputTokens', 'cachedTokens',
+            'estimatedCost', 'requestCount', 'timeSeries', 'breakdown',
+            'modelBreakdown', 'granularity', 'startDate', 'endDate',
         }
         self.assertEqual(set(data.keys()), expected_keys)
 

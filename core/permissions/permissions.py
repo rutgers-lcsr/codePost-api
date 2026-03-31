@@ -545,3 +545,41 @@ class SubmissionTestPermissions(TemplatePermission):
 
         # POST/DELETE: course admin only
         return isCourseAdmin(user, course)
+
+
+# =============================================================================
+# AI GRADING ASSISTANCE PERMISSIONS
+# =============================================================================
+
+
+class SuggestedCommentPermissions(TemplatePermission):
+    """
+    Permissions for SuggestedComment objects.
+    Only staff of the submission can view or act on suggested comments.
+    Students never see these.
+    """
+
+    def has_permission(self, request, view):
+        # Skip POST-check for detail actions (accept/reject) — they operate
+        # on existing objects and permission is checked in has_object_permission.
+        if request.method == 'POST' and view.action in ('accept', 'reject'):
+            return True
+        return super().has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        submission = obj.submission
+        return isStaffOfSub(user, submission)
+
+
+class SubmissionSummaryPermissions(TemplatePermission):
+    """
+    Permissions for SubmissionSummary objects.
+    Only staff of the submission can view the summary.
+    Students never see these.
+    """
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        submission = obj.submission
+        return isStaffOfSub(user, submission)

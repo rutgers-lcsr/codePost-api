@@ -162,6 +162,8 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
 
   # Copy AI settings
   new_assignment.ai_system_prompt = original_assignment.ai_system_prompt
+  new_assignment.ai_description = original_assignment.ai_description
+  new_assignment.ai_description_locked = original_assignment.ai_description_locked
 
   new_assignment.save()
 

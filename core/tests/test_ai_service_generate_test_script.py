@@ -43,7 +43,7 @@ public class StudentTests {
         return new Object[] {5.0, \"ok\"};
     }
 }
-```""", 100, 200, 300)
+```""", 100, 200, 300, 0)
 
     service._call_openai = MethodType(_fake_openai, service)
 
@@ -75,7 +75,7 @@ public double testOnly() {
 """
 
     async def _fake_openai(self, system_prompt: str, user_prompt: str):
-        return (raw, 50, 100, 150)
+        return (raw, 50, 100, 150, 0)
 
     service._call_openai = MethodType(_fake_openai, service)
 
@@ -101,7 +101,7 @@ def test_generate_test_script_non_java_only_strips_markdown_fences():
 @test(\"x\", points=1)
 def test_x():
     assert 1 == 1
-```""", 80, 120, 200)
+```""", 80, 120, 200, 0)
 
     service._call_openai = MethodType(_fake_openai, service)
 

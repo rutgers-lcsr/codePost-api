@@ -33,6 +33,8 @@ from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCours
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub, isSuperGrader
 import logging
 from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
+from core.serializers.course_audit_event import CourseAuditEventSerializer
+from core.models import CourseAuditEvent
 
 logger = logging.getLogger(__name__)
 
@@ -626,6 +628,110 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         serializer = SectionSerializer(sections, many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        responses=CourseAuditEventSerializer(many=True),
+        parameters=[
+            OpenApiParameter(name='student', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description='Filter by student email'),
+            OpenApiParameter(name='assignment', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=False, description='Filter by assignment ID'),
+            OpenApiParameter(name='event_type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description='Filter by event type'),
+            OpenApiParameter(name='date_from', type=OpenApiTypes.DATETIME, location=OpenApiParameter.QUERY, required=False, description='Filter events after this datetime'),
+            OpenApiParameter(name='date_to', type=OpenApiTypes.DATETIME, location=OpenApiParameter.QUERY, required=False, description='Filter events before this datetime'),
+        ],
+    )
+    @action(detail=True, methods=["GET"], pagination_class=LargeObjectsPagination)
+    def auditLog(self, request, pk=None):
+        """Return paginated audit events for a course, filterable by student, assignment, event type, and date range."""
+        user = request.user
+        course = self.get_object()
+
+        if not isCourseAdmin(user, course):
+            return returnForbidden()
+
+        qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission')
+
+        student = request.query_params.get('student')
+        assignment = request.query_params.get('assignment')
+        event_type = request.query_params.get('event_type')
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+
+        if student:
+            qs = qs.filter(user__email=student)
+        if assignment:
+            qs = qs.filter(assignment_id=assignment)
+        if event_type:
+            qs = qs.filter(event_type=event_type)
+        if date_from:
+            qs = qs.filter(created__gte=date_from)
+        if date_to:
+            qs = qs.filter(created__lte=date_to)
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = CourseAuditEventSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CourseAuditEventSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @extend_schema(
+        responses={(200, 'text/csv'): OpenApiTypes.STR},
+        parameters=[
+            OpenApiParameter(name='student', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name='assignment', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name='event_type', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name='date_from', type=OpenApiTypes.DATETIME, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name='date_to', type=OpenApiTypes.DATETIME, location=OpenApiParameter.QUERY, required=False),
+        ],
+    )
+    @action(detail=True, methods=["GET"])
+    def auditLogExport(self, request, pk=None):
+        """Export audit events for a course as CSV."""
+        import csv
+        from django.http import HttpResponse
+
+        user = request.user
+        course = self.get_object()
+
+        if not isCourseAdmin(user, course):
+            return returnForbidden()
+
+        qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission')
+
+        student = request.query_params.get('student')
+        assignment = request.query_params.get('assignment')
+        event_type = request.query_params.get('event_type')
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+
+        if student:
+            qs = qs.filter(user__email=student)
+        if assignment:
+            qs = qs.filter(assignment_id=assignment)
+        if event_type:
+            qs = qs.filter(event_type=event_type)
+        if date_from:
+            qs = qs.filter(created__gte=date_from)
+        if date_to:
+            qs = qs.filter(created__lte=date_to)
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="audit_log_course_{course.id}.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow(['Timestamp', 'Event Type', 'Student Email', 'Assignment', 'Submission ID', 'Details'])
+
+        for event in qs.iterator():
+            writer.writerow([
+                event.created.isoformat(),
+                event.event_type,
+                event.user.email if event.user else '',
+                event.assignment.name if event.assignment else '',
+                event.submission_id or '',
+                str(event.meta) if event.meta else '',
+            ])
+
+        return response
 
 
 def add_admin_privileges(user):

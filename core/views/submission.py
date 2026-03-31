@@ -7,15 +7,17 @@ from core.serializers.submissionTest import SubmissionTestSerializer
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, inline_serializer
 from drf_spectacular.types import OpenApiTypes
+from rest_framework import serializers, status
 
 from core.serializers.actionResponses import (
   SubmissionCheckPermissionResponseSerializer,
   SubmissionTestResultsResponseSerializer,
   SubmissionPartnerLinkResponseSerializer,
 )
-from rest_framework import status
+from core.serializers.suggested_comment import SuggestedCommentSerializer
+from core.serializers.submission_summary import SubmissionSummarySerializer
 
 from core.views.template import ListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
@@ -38,6 +40,7 @@ from core.permissions.tokens import submission_token_generator
 
 from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail
 from django.db.models import Q
+from core.services.audit import record_audit_event
 
 def get_student_serializer_class(submission, files_only=False):
     """
@@ -116,6 +119,39 @@ class SubmissionViewSet(ListProtectedViewSet):
     else:
         return SubmissionSerializer
 
+  def perform_create(self, serializer):
+    submission = serializer.save()
+    course = submission.assignment.course
+    students = submission.students.all()
+    user = students.first() if students.exists() else self.request.user
+    record_audit_event(
+        course=course,
+        event_type='submission_attempt',
+        user=user,
+        assignment=submission.assignment,
+        submission=submission,
+    )
+
+  def create(self, request, *args, **kwargs):
+    try:
+        return super().create(request, *args, **kwargs)
+    except Exception as exc:
+        # Log the failed submission attempt if we can determine the assignment
+        assignment_id = request.data.get('assignment')
+        if assignment_id:
+            try:
+                from core.models import Assignment
+                assignment = Assignment.objects.select_related('course').get(id=assignment_id)
+                record_audit_event(
+                    course=assignment.course,
+                    event_type='submission_failed',
+                    user=request.user,
+                    assignment=assignment,
+                    meta={'error': str(exc)},
+                )
+            except Exception:
+                pass
+        raise
 
   @extend_schema(responses=SubmissionCheckPermissionResponseSerializer)
   @action(detail=True, methods=['get'])
@@ -141,6 +177,24 @@ class SubmissionViewSet(ListProtectedViewSet):
         'write': False,
         'filesOnly': not canReadFull,  # If feedback not released, restrict to files only
       }
+      # Record audit event for student viewing their submission
+      course = submission.assignment.course
+      if canReadFull:
+          record_audit_event(
+              course=course,
+              event_type='feedback_view',
+              user=user,
+              assignment=submission.assignment,
+              submission=submission,
+          )
+      else:
+          record_audit_event(
+              course=course,
+              event_type='file_view',
+              user=user,
+              assignment=submission.assignment,
+              submission=submission,
+          )
     else:
       toRet = {
         'read': False,
@@ -248,6 +302,15 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission.questionDate = now()
     submission.save()
 
+    record_audit_event(
+        course=course,
+        event_type='regrade_request',
+        user=user,
+        assignment=submission.assignment,
+        submission=submission,
+        meta={'questionText': request.data['questionText'], 'isRegrade': bool(request.data.get('questionIsRegrade'))},
+    )
+
     serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
 
     return Response(serializer.data)
@@ -275,6 +338,14 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission.questionText = ''
     submission.questionDate = None
     submission.save()
+
+    record_audit_event(
+        course=course,
+        event_type='regrade_deleted',
+        user=user,
+        assignment=submission.assignment,
+        submission=submission,
+    )
 
     serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
 
@@ -512,3 +583,206 @@ class SubmissionViewSet(ListProtectedViewSet):
         StudentFeedbackNotificationEmail(student).send_email(submission)
 
     return Response('Notifications sent!', status.HTTP_200_OK)
+
+  @extend_schema(
+      responses=SuggestedCommentSerializer(many=True),
+      description="List all pending AI-suggested comments for this submission. Staff only.",
+  )
+  @action(detail=True, methods=["GET"])
+  def suggestedComments(self, request, pk=None):
+    """Return pending suggested comments for this submission."""
+    from core.models import SuggestedComment
+    from core.serializers.suggested_comment import SuggestedCommentSerializer
+
+    submission = self.get_object()
+    user = request.user
+
+    if not isStaffOfSub(user, submission):
+        return returnForbidden()
+
+    suggestions = SuggestedComment.objects.filter(
+        submission=submission, status='pending'
+    ).select_related('file', 'rubricComment')
+
+    return Response(SuggestedCommentSerializer(suggestions, many=True).data)
+
+  @extend_schema(
+      responses=SubmissionSummarySerializer,
+      description="Get the AI-generated summary for this submission. Staff only.",
+  )
+  @action(detail=True, methods=["GET"])
+  def summary(self, request, pk=None):
+    """Return the AI-generated summary for this submission."""
+    from core.models import SubmissionSummary
+    from core.serializers.submission_summary import SubmissionSummarySerializer
+
+    submission = self.get_object()
+    user = request.user
+
+    if not isStaffOfSub(user, submission):
+        return returnForbidden()
+
+    try:
+        summary_obj = SubmissionSummary.objects.get(submission=submission)
+    except SubmissionSummary.DoesNotExist:
+        return returnNotFound()
+
+    return Response(SubmissionSummarySerializer(summary_obj).data)
+
+  @extend_schema(
+      responses={202: inline_serializer('GenerateAIAssistanceResponse', fields={
+          'status': serializers.CharField(),
+          'submissionId': serializers.IntegerField(),
+      })},
+      description="Manually trigger or regenerate AI summary and suggested comments. Staff only.",
+  )
+  @action(detail=True, methods=["POST"], permission_classes=[IsAuthenticated])
+  def generateAIAssistance(self, request, pk=None):
+    """Trigger AI grading assistance (summary + suggested comments) for this submission."""
+    submission = Submission.objects.get(id=pk)
+    user = request.user
+
+    if not isStaffOfSub(user, submission):
+        return returnForbidden()
+
+    from core.tasks import generate_ai_grading_assistance
+    generate_ai_grading_assistance.delay(submission.id)
+
+    return Response({'status': 'queued', 'submissionId': submission.id}, status.HTTP_202_ACCEPTED)
+
+  @extend_schema(
+      request=inline_serializer('GenerateFileSuggestionsRequest', fields={
+          'fileId': serializers.IntegerField(help_text="ID of the submission file to generate suggestions for."),
+      }),
+      responses=SuggestedCommentSerializer(many=True),
+      description="Generate AI-suggested comments for a specific file in this submission. Runs synchronously. Staff only.",
+  )
+  @action(detail=True, methods=["POST"], permission_classes=[IsAuthenticated])
+  def generateFileSuggestions(self, request, pk=None):
+    """Generate AI suggestions for a single file within this submission."""
+    import json
+    from asgiref.sync import async_to_sync
+    from core.models import SuggestedComment, SubmissionFile
+    from core.serializers.suggested_comment import SuggestedCommentSerializer as SCSer
+    from core.services.ai_service import AIService
+
+    submission = self.get_object()
+    user = request.user
+
+    if not isStaffOfSub(user, submission):
+        return returnForbidden()
+
+    file_id = request.data.get('fileId')
+    if not file_id:
+        return Response({'error': 'fileId is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        file_obj = SubmissionFile.objects.get(id=file_id, submission=submission)
+    except SubmissionFile.DoesNotExist:
+        return returnNotFound()
+
+    course = submission.assignment.course
+    service = AIService(course, submission.assignment)
+
+    if not service.is_configured:
+        return Response({'error': 'AI is not configured for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    results = async_to_sync(service.generate_file_suggestions)(submission, file_obj)
+
+    # Clear existing pending suggestions for this file to prevent duplicates
+    SuggestedComment.objects.filter(
+        submission=submission, file=file_obj, status='pending'
+    ).delete()
+
+    created = []
+    for result in results:
+        if result.success and result.text:
+            try:
+                suggestions = json.loads(result.text)
+            except (json.JSONDecodeError, TypeError):
+                return Response(
+                    {'error': 'AI returned malformed output. Please try again.'},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            is_notebook = file_obj.name.endswith('.ipynb')
+            for s in suggestions:
+                if s.get('file_id') != file_obj.id:
+                    continue
+                # For notebooks, convert 1-based cell numbers to 0-based indices
+                start_line = s.get('start_line', 0)
+                end_line = s.get('end_line', 0)
+                if is_notebook:
+                    start_line = max(0, start_line - 1)
+                    end_line = max(0, end_line - 1)
+                created.append(SuggestedComment.objects.create(
+                    submission=submission,
+                    file=file_obj,
+                    text=s.get('text', ''),
+                    startLine=start_line,
+                    endLine=end_line,
+                    startChar=s.get('start_char', 0),
+                    endChar=s.get('end_char', 0),
+                    rubricComment_id=s.get('rubric_comment_id'),
+                    pointDelta=s.get('point_delta'),
+                    generationMetadata={
+                        'provider': service.provider,
+                        'model': service.model,
+                        'input_tokens': result.input_tokens,
+                        'output_tokens': result.output_tokens,
+                    },
+                ))
+            service.record_usage(result, user, request_type='file_suggestions')
+        elif not result.success:
+            return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response(SCSer(created, many=True).data, status=status.HTTP_201_CREATED)
+
+  @extend_schema(
+      request=None,
+      responses=SubmissionSummarySerializer,
+      description="Generate or regenerate the AI summary for this submission. Runs synchronously. Staff only.",
+  )
+  @action(detail=True, methods=["POST"], permission_classes=[IsAuthenticated])
+  def generateSummary(self, request, pk=None):
+    """Generate or regenerate the AI summary for this submission on demand."""
+    from asgiref.sync import async_to_sync
+    from core.models import SubmissionSummary
+    from core.serializers.submission_summary import SubmissionSummarySerializer as SSSer
+    from core.services.ai_service import AIService
+
+    submission = self.get_object()
+    user = request.user
+
+    if not isStaffOfSub(user, submission):
+        return returnForbidden()
+
+    course = submission.assignment.course
+    service = AIService(course, submission.assignment)
+
+    if not service.is_configured:
+        return Response({'error': 'AI is not configured for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if service.is_globally_disabled:
+        return Response({'error': 'AI is disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    result = async_to_sync(service.generate_submission_summary)(submission)
+
+    if not result.success:
+        return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    summary_obj, _ = SubmissionSummary.objects.update_or_create(
+        submission=submission,
+        defaults={
+            'text': result.text,
+            'generationMetadata': {
+                'provider': service.provider,
+                'model': service.model,
+                'input_tokens': result.input_tokens,
+                'output_tokens': result.output_tokens,
+            },
+        },
+    )
+
+    service.record_usage(result, user, request_type='submission_summary')
+
+    return Response(SSSer(summary_obj).data, status=status.HTTP_201_CREATED)

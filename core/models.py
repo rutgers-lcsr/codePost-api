@@ -159,10 +159,6 @@ class Organization(BaseModel):
       default=False,
       help_text="If True, AI comment generation is disabled at the organization level"
   )
-  ai_chat_disabled = models.BooleanField(
-      default=False,
-      help_text="If True, AI chat assistant is disabled at the organization level"
-  )
   ai_course_policy = models.CharField(
       max_length=16, default='none', choices=AI_COURSE_POLICY_CHOICES,
       help_text="Controls which courses can use the organization's AI configuration: 'all', 'selected', or 'none'"
@@ -374,10 +370,6 @@ class Course(BaseModel):
       default=False,
       help_text="If True, AI comment generation is disabled even if AI is globally enabled"
   )
-  ai_chat_disabled = models.BooleanField(
-      default=False,
-      help_text="If True, AI chat assistant is disabled even if AI is globally enabled"
-  )
   ai_use_own_settings = models.BooleanField(
       default=False,
       help_text="If True, course uses its own AI settings instead of the organization's configuration"
@@ -524,6 +516,16 @@ class Assignment(BaseModel):
       default="",
       help_text="System prompt for AI comment generation. "
                 "Placeholders: {assignment_name}, {file_content}, {selected_content}, {rubric_context}, {grader_draft}"
+  )
+  ai_description = models.TextField(
+      blank=True,
+      default="",
+      help_text="AI-generated description of the assignment used as context for AI grading features. "
+                "Editable by course admins, visible to graders. Not shown to students."
+  )
+  ai_description_locked = models.BooleanField(
+      default=False,
+      help_text="When True, prevents automatic regeneration of ai_description from new submissions."
   )
 
 
@@ -1191,15 +1193,30 @@ class Comment(BaseModel):
   file: SubmissionFile = models.ForeignKey(SubmissionFile, on_delete=models.CASCADE,  # type: ignore[assignment]
                            related_name="comments", help_text=("The related file_id."))
   startChar = models.IntegerField(help_text=(
-      "An integer representing the character position a comment begins on."))
+      "The starting character offset of the comment. "
+      "For code/markdown files: 0-indexed character position within the start line. "
+      "For PDF text-selection comments: character offset in the page's text layer. "
+      "For PDF region comments: values >= 1,000,000 encode a bounding box as MARKER + leftPct*101 + topPct (percentages 0-100 of page dimensions). "
+      "For Jupyter notebooks (.ipynb): always 0 (comments target entire cells)."))
   endChar = models.IntegerField(help_text=(
-      "An integer representing the character position a comment ends on."))
+      "The ending character offset of the comment. "
+      "For code/markdown files: 0-indexed character position within the end line. "
+      "For PDF text-selection comments: character offset in the page's text layer. "
+      "For PDF region comments: values >= 1,000,000 encode a bounding box as MARKER + rightPct*101 + bottomPct (percentages 0-100 of page dimensions). "
+      "For Jupyter notebooks (.ipynb): always 0 (comments target entire cells)."))
   startLine = models.IntegerField(help_text=(
-      "An integer representing the line number a comment begins on."))
+      "The line or position where the comment begins. "
+      "For code/markdown files: 0-indexed line number. "
+      "For PDF files: 1-based page number. "
+      "For Jupyter notebooks (.ipynb): 0-based cell index."))
   endLine = models.IntegerField(help_text=(
-      "An integer representing the line number a comment begins on."))
+      "The line or position where the comment ends. "
+      "For code/markdown files: 0-indexed line number. "
+      "For PDF files: 1-based page number (usually same as startLine). "
+      "For Jupyter notebooks (.ipynb): 0-based cell index (usually same as startLine)."))
   feedback = models.IntegerField(default=0, help_text=(
-      "An integer representing the feedback applied to this comment. Currently only valid if rubricComment is not null."))
+      "Student feedback on this comment. Valid values: -1 (negative), 0 (none), 1 (positive). "
+      "Only applicable when rubricComment is set."))
   color = models.CharField(max_length=7, blank=True, null=True, help_text=(
       "The color in which the comment will render in codePost."), validators=[validate_hex_color])
   tags = models.ManyToManyField(CommentTag, related_name="tag_comments",
@@ -1645,10 +1662,10 @@ def save_submission_from_file(sender, instance, **kwargs):
 def save_submission_from_file_delete(sender, instance, **kwargs):
   try:
     # Check if this is a SubmissionFile (has a submission attribute)
-    if hasattr(instance, 'submission') and instance.submission:
+    if hasattr(instance, 'submission') and instance.submission_id and instance.submission:
       instance.submission.save()
-  except (Submission.DoesNotExist, AttributeError):
-    # Submission was already deleted or doesn't exist
+  except (Submission.DoesNotExist, Assignment.DoesNotExist, AttributeError):
+    # Submission or assignment was already deleted during cascade
     pass
 
 
@@ -1659,7 +1676,11 @@ def save_submission_from_comment(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=Comment)
 def save_submission_from_comment_delete(sender, instance, **kwargs):
-  instance.file.submission.save()
+  try:
+    if instance.file_id and instance.file.submission_id:
+      instance.file.submission.save()
+  except (Submission.DoesNotExist, SubmissionFile.DoesNotExist, File.DoesNotExist, AttributeError):
+    pass
 
 
 @receiver(post_save, sender=SubmissionTest)
@@ -1839,6 +1860,9 @@ class AIUsageRecord(BaseModel):
 
   REQUEST_TYPE_CHOICES = [
       ('comment_generation', 'Comment Generation'),
+      ('suggested_comments', 'Suggested Comments'),
+      ('submission_summary', 'Submission Summary'),
+      ('assignment_description', 'Assignment Description'),
       ('code_review', 'Code Review'),
       ('feedback', 'Feedback'),
       ('other', 'Other'),
@@ -1912,105 +1936,181 @@ class AIUsageRecord(BaseModel):
     return f"AIUsage [{self.provider}/{self.model}] {self.total_tokens} tokens"
 
 
-###############################################################################
-# Chat Conversations (Agentic Grading Assistant)
-###############################################################################
+############# AI Grading Assistance ###############################################
 
-class ChatConversation(BaseModel):
-  """A chat conversation thread between a grader and the AI assistant."""
+class SuggestedComment(BaseModel):
+  """An AI-generated comment suggestion for graders. Not visible to students.
+  Graders can accept (converting to a real Comment) or reject suggestions."""
   if TYPE_CHECKING:
     id: int
+    submission: Submission
+    file: SubmissionFile
+    rubricComment: RubricComment | None
+    acceptedBy: User | None
+    acceptedComment: Comment | None
 
-  submission = models.ForeignKey(
-      'Submission', on_delete=models.CASCADE,
-      related_name='chat_conversations',
-      help_text="The submission this conversation is about",
-  )
-  assignment = models.ForeignKey(
-      'Assignment', on_delete=models.CASCADE,
-      related_name='chat_conversations',
-      help_text="The assignment this conversation belongs to",
-  )
-  user = models.ForeignKey(
-      User, on_delete=models.CASCADE,
-      related_name='chat_conversations',
-      help_text="The grader who owns this conversation",
-  )
-  title = models.CharField(
-      max_length=200, blank=True, default='',
-      help_text="Title for this conversation (auto-generated or user-set)",
-  )
-  summary = models.TextField(
-      blank=True, default='',
-      help_text="Rolling summary of older messages for context window management",
-  )
-
-  class Meta:
-    ordering = ('-modified',)
-    indexes = [
-        models.Index(fields=['submission', 'user']),
-        models.Index(fields=['assignment', 'user']),
-    ]
-
-  def __str__(self):
-    return f"Chat [{self.id}] {self.user} on Submission {self.submission_id}"
-
-
-class ChatMessage(BaseModel):
-  """A single message in a chat conversation."""
-  if TYPE_CHECKING:
-    id: int
-
-  ROLE_CHOICES = [
-      ('user', 'User'),
-      ('assistant', 'Assistant'),
-      ('tool_call', 'Tool Call'),
-      ('tool_result', 'Tool Result'),
-      ('summary', 'Summary'),
-  ]
-
-  TOOL_STATUS_CHOICES = [
+  SUGGESTION_STATUS_CHOICES = [
       ('pending', 'Pending'),
-      ('approved', 'Approved'),
+      ('accepted', 'Accepted'),
       ('rejected', 'Rejected'),
   ]
 
-  conversation = models.ForeignKey(
-      ChatConversation, on_delete=models.CASCADE,
-      related_name='messages',
-      help_text="The conversation this message belongs to",
+  submission: Submission = models.ForeignKey(  # type: ignore[assignment]
+      Submission, on_delete=models.CASCADE,
+      related_name='suggested_comments',
+      help_text="The submission this suggestion belongs to."
   )
-  role = models.CharField(
-      max_length=16, choices=ROLE_CHOICES,
-      help_text="Who sent this message",
+  file: SubmissionFile = models.ForeignKey(  # type: ignore[assignment]
+      SubmissionFile, on_delete=models.CASCADE,
+      related_name='suggested_comments',
+      help_text="The file this suggestion targets."
   )
-  content = models.TextField(
-      blank=True, default='',
-      help_text="The message text content",
+  text = models.TextField(
+      blank=True,
+      help_text="The AI-generated comment text."
   )
-  tool_name = models.CharField(
-      max_length=64, blank=True, null=True,
-      help_text="Name of the tool (for tool_call/tool_result roles)",
+  startLine = models.IntegerField(
+      help_text="The line or position where the suggestion begins (same semantics as Comment.startLine)."
   )
-  tool_args = models.JSONField(
-      blank=True, null=True,
-      help_text="JSON arguments for the tool call",
+  endLine = models.IntegerField(
+      help_text="The line or position where the suggestion ends (same semantics as Comment.endLine)."
   )
-  tool_status = models.CharField(
-      max_length=16, choices=TOOL_STATUS_CHOICES,
-      blank=True, null=True,
-      help_text="Whether the tool call was approved or rejected by the user",
-  )
-  token_count = models.PositiveIntegerField(
+  startChar = models.IntegerField(
       default=0,
-      help_text="Number of tokens in this message",
+      help_text="The starting character offset (same semantics as Comment.startChar)."
+  )
+  endChar = models.IntegerField(
+      default=0,
+      help_text="The ending character offset (same semantics as Comment.endChar)."
+  )
+  rubricComment: RubricComment | None = models.ForeignKey(  # type: ignore[assignment]
+      RubricComment, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='suggested_comments',
+      help_text="Optional rubric comment the AI mapped this suggestion to."
+  )
+  pointDelta = models.DecimalField(
+      max_digits=5, decimal_places=2, blank=True, null=True,
+      help_text="AI-suggested point delta. Null if linked to a rubricComment."
+  )
+  status = models.CharField(
+      max_length=10, choices=SUGGESTION_STATUS_CHOICES, default='pending',
+      help_text="Current status of this suggestion."
+  )
+  acceptedBy: User | None = models.ForeignKey(  # type: ignore[assignment]
+      User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='accepted_suggestions',
+      help_text="The grader who accepted this suggestion."
+  )
+  acceptedComment: Comment | None = models.ForeignKey(  # type: ignore[assignment]
+      Comment, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='source_suggestion',
+      help_text="The real Comment created when this suggestion was accepted."
+  )
+  generationMetadata = models.JSONField(
+      blank=True, null=True,
+      help_text="Metadata about the generation (model used, tokens, confidence, etc.)."
   )
 
+  course = property(lambda self: self.file.course)
+
   class Meta:
-    ordering = ('created',)
+    ordering = ('file', 'startLine', 'startChar')
     indexes = [
-        models.Index(fields=['conversation', 'created']),
+        models.Index(fields=['submission', 'status']),
     ]
 
   def __str__(self):
-    return f"ChatMsg [{self.role}] in Conversation {self.conversation_id}"
+    return f"SuggestedComment [{self.status}] file={self.file_id} L{self.startLine}-{self.endLine}"
+
+
+class SubmissionSummary(BaseModel):
+  """AI-generated summary of a submission to help graders understand the student's work."""
+  if TYPE_CHECKING:
+    id: int
+    submission: Submission
+
+  submission: Submission = models.OneToOneField(  # type: ignore[assignment]
+      Submission, on_delete=models.CASCADE,
+      related_name='summary',
+      help_text="The submission this summary describes."
+  )
+  text = models.TextField(
+      help_text="Markdown-formatted summary of the submission."
+  )
+  generationMetadata = models.JSONField(
+      blank=True, null=True,
+      help_text="Metadata about the generation (model used, tokens, etc.)."
+  )
+
+  course = property(lambda self: self.submission.assignment.course)
+
+  class Meta:
+    verbose_name_plural = 'submission summaries'
+
+  def __str__(self):
+    return f"SubmissionSummary for submission={self.submission_id}"
+
+
+############# Course Audit Log ####################################################
+
+class CourseAuditEvent(BaseModel):
+  """Tracks student activities within a course for instructor data analysis."""
+  if TYPE_CHECKING:
+    id: int
+
+  EVENT_TYPE_CHOICES = [
+      ('submission_attempt', 'Submission Attempt'),
+      ('submission_failed', 'Submission Failed'),
+      ('file_view', 'File View'),
+      ('feedback_view', 'Feedback View'),
+      ('regrade_request', 'Regrade Request'),
+      ('regrade_deleted', 'Regrade Deleted'),
+      ('autograder_triggered', 'Autograder Triggered'),
+      ('autograder_completed', 'Autograder Completed'),
+      ('autograder_failed', 'Autograder Failed'),
+      ('late_day_used', 'Late Day Used'),
+      ('comment_feedback', 'Comment Feedback'),
+  ]
+
+  course = models.ForeignKey(
+      Course, on_delete=models.CASCADE,
+      related_name='audit_events',
+      help_text="The course this event belongs to",
+  )
+  assignment = models.ForeignKey(
+      'Assignment', on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='audit_events',
+      help_text="The assignment associated with this event",
+  )
+  submission = models.ForeignKey(
+      'Submission', on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='audit_events',
+      help_text="The submission associated with this event",
+  )
+  user = models.ForeignKey(
+      User, on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='audit_events',
+      help_text="The user who performed the action",
+  )
+  event_type = models.CharField(
+      max_length=32, choices=EVENT_TYPE_CHOICES,
+      help_text="The type of event",
+  )
+  meta = models.JSONField(
+      blank=True, null=True,
+      help_text="Extra context for the event (error messages, counts, etc.)",
+  )
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [
+        models.Index(fields=['course', '-created']),
+        models.Index(fields=['course', 'event_type']),
+        models.Index(fields=['course', 'user']),
+    ]
+
+  def __str__(self):
+    return f"AuditEvent [{self.event_type}] course={self.course_id} user={self.user_id}"

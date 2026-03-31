@@ -42,6 +42,7 @@ from core.views.testCategoryResource import TestCategoryResourceViewSet
 from core.views.assignmentDataSet import AssignmentDataSetViewSet
 from core.views.dashboard import DashboardViewSet
 from core.views.commentTemplate import CommentTemplateViewSet
+from core.views.suggested_comment import SuggestedCommentViewSet
 from core.views.dev_auth import LoginAsRoleView
 from codepost.settings import DEBUG
 
@@ -50,7 +51,6 @@ from webhooks.view import WebhookViewSet
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
 from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView
-from core.views.chat import ChatConversationViewSet
 
 
 from django.http import HttpResponse
@@ -94,7 +94,7 @@ router.register(r'webhooks', WebhookViewSet)
 router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
 router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 router.register(r'commentTemplates', CommentTemplateViewSet, basename='commentTemplate')
-router.register(r'chatConversations', ChatConversationViewSet, basename='chatConversation')
+router.register(r'suggestedComments', SuggestedCommentViewSet)
 
 # router.register(r'billing', BillingViewSet, basename='billing')
 

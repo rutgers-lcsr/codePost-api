@@ -395,6 +395,21 @@ def RunSubmission(self, submissionID: int):
         # Explicitly get environment using assignment_id to avoid descriptor ambiguity
         environment = Environment.objects.get(assignment_id=assignment_id)
         logger.info(f"[RunSubmission] Found environment {environment.id} (image: {environment.image_name})")
+
+        # Record autograder triggered audit event
+        try:
+            from core.services.audit import record_audit_event
+            course = submission.assignment.course
+            ag_user = submission.students.first()
+            record_audit_event(
+                course=course,
+                event_type='autograder_triggered',
+                user=ag_user,
+                assignment=submission.assignment,
+                submission=submission,
+            )
+        except Exception:
+            pass
         
     except Submission.DoesNotExist:
         logger.error(f"Submission {submissionID} not found")
@@ -608,6 +623,41 @@ def RunSubmission(self, submissionID: int):
     }
     
     logger.info(f"[RunSubmission] Completed submission {submissionID}: {successful} successful, {failed} failed")
+
+    # Record autograder completed/failed audit event
+    try:
+        from core.services.audit import record_audit_event
+        course = submission.assignment.course
+        ag_user = submission.students.first()
+        if failed > 0:
+            record_audit_event(
+                course=course,
+                event_type='autograder_failed',
+                user=ag_user,
+                assignment=submission.assignment,
+                submission=submission,
+                meta={'successful': successful, 'failed': failed, 'test_results_count': len(test_results)},
+            )
+        else:
+            record_audit_event(
+                course=course,
+                event_type='autograder_completed',
+                user=ag_user,
+                assignment=submission.assignment,
+                submission=submission,
+                meta={'successful': successful, 'test_results_count': len(test_results)},
+            )
+    except Exception:
+        pass
+
+    # --- Trigger AI grading assistance (suggested comments + summary) ---
+    try:
+        from core.tasks import generate_ai_grading_assistance
+        generate_ai_grading_assistance.delay(submissionID)
+        logger.info(f"[RunSubmission] Queued AI grading assistance for submission {submissionID}")
+    except Exception as e:
+        logger.warning(f"[RunSubmission] Failed to queue AI grading assistance: {e}")
+
     return summary
 
 

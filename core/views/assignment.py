@@ -24,6 +24,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from core.models import Section, SubmissionHistory, Comment
 
 from core.views.template import ListProtectedViewSet
+from core.services.audit import record_audit_event
 
 from rest_framework import status
 from rest_framework.response import Response
@@ -31,7 +32,7 @@ from rest_framework.decorators import action, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from core.pagination import DefaultPagination, LargeObjectsPagination
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, inline_serializer
 
 from core.serializers.actionResponses import (
   AssignmentQueueLengthResponseSerializer,
@@ -786,9 +787,14 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       submission.save()
 
-      
-
-      
+      # Record audit event for direct upload submission
+      record_audit_event(
+          course=course,
+          event_type='submission_attempt',
+          user=user,
+          assignment=assignment,
+          submission=submission,
+      )
 
       ###############################################################
       # [Begin] Late Logic
@@ -797,6 +803,16 @@ class AssignmentViewSet(ListProtectedViewSet):
       handler = LateSubmissionHandler(submission)
       try:
         handler.handle()
+        # Record late day usage if credits were consumed
+        if handler.late_day_credits_to_use > 0:
+          record_audit_event(
+              course=course,
+              event_type='late_day_used',
+              user=user,
+              assignment=assignment,
+              submission=submission,
+              meta={'credits_used': handler.late_day_credits_to_use},
+          )
       except Exception as e:
         logEvent("Late Submission Error",
                  message=f"Error handling late submission: {e} for submission by user {cast(User, user).email}", level=logging.ERROR)
@@ -1057,6 +1073,51 @@ class AssignmentViewSet(ListProtectedViewSet):
     # Return the newly created assignment data so frontend can navigate to it
     serializer = AssignmentSerializer(copied_assignment, context={'request': request})
     return Response(serializer.data)
+
+  @extend_schema(
+    request=None,
+    responses={200: inline_serializer('GenerateDescriptionResponse', fields={
+        'aiDescription': serializers.CharField(),
+    })},
+    description="Generate or regenerate the AI description for this assignment. Course admin only.",
+  )
+  @action(detail=True, methods=["POST"])
+  def generateDescription(self, request, pk=None):
+    """Generate an AI description of the assignment for use as AI context."""
+    from asgiref.sync import async_to_sync
+    from core.services.ai_service import AIService
+
+    user = self.request.user
+    assignment = self.get_object()
+    course = assignment.course
+
+    if not isCourseAdmin(user, course):
+      return returnForbidden()
+
+    service = AIService(course, assignment)
+
+    if not service.is_configured:
+      return Response({'error': 'AI is not configured for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if service.is_globally_disabled:
+      return Response({'error': 'AI is disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+      result = async_to_sync(service.generate_assignment_description)(assignment)
+
+      if not result.success:
+        return Response({'error': result.error}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+      assignment.ai_description = result.text
+      assignment.save(update_fields=['ai_description', 'modified'])
+
+      service.record_usage(result, user, request_type='assignment_description')
+
+      return Response({'aiDescription': result.text})
+
+    except Exception as e:
+      logger.error(f"AI description generation failed: {e}", exc_info=True)
+      return Response({'error': 'An internal error occurred while generating the description.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
   @extend_schema(
     responses=AssignmentAnalyticsResponseSerializer,

@@ -139,7 +139,6 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
                 obj.ai_model = source_course.ai_model
                 obj.ai_disabled = source_course.ai_disabled
                 obj.ai_comments_disabled = source_course.ai_comments_disabled
-                obj.ai_chat_disabled = source_course.ai_chat_disabled
                 obj.ai_use_own_settings = source_course.ai_use_own_settings
                 
                 # Copy other settings if consistent with tooltips.tsx claim:
@@ -192,11 +191,9 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
   aiModel = serializers.CharField(source='ai_model', required=False, allow_null=True, allow_blank=True)
   aiDisabled = serializers.BooleanField(source='ai_disabled', required=False)
   aiCommentsDisabled = serializers.BooleanField(source='ai_comments_disabled', required=False)
-  aiChatDisabled = serializers.BooleanField(source='ai_chat_disabled', required=False)
   aiUseOwnSettings = serializers.BooleanField(source='ai_use_own_settings', required=False)
   aiEnabled = serializers.SerializerMethodField()
   aiCommentsEnabled = serializers.SerializerMethodField()
-  aiChatEnabled = serializers.SerializerMethodField()
   orgAiAvailable = serializers.SerializerMethodField()
   hasApiKey = serializers.SerializerMethodField()
   apiKeyHint = serializers.SerializerMethodField()
@@ -216,12 +213,10 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'aiModel',
       'aiDisabled',
       'aiCommentsDisabled',
-      'aiChatDisabled',
       'aiUseOwnSettings',
       'aiTokenRates',
       'aiEnabled',
       'aiCommentsEnabled',
-      'aiChatEnabled',
       'orgAiAvailable',
       'hasApiKey',
       'apiKeyHint',
@@ -243,7 +238,6 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
         'api_key': obj.ai_api_key,
         'disabled': obj.ai_disabled,
         'comments_disabled': obj.ai_comments_disabled,
-        'chat_disabled': obj.ai_chat_disabled,
       }
     # Check if org has AI enabled for this course
     org = obj.organization
@@ -253,16 +247,14 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
           'provider': org.ai_provider,
           'api_key': org.ai_api_key,
           'disabled': org.ai_disabled,
-          'comments_disabled': org.ai_comments_disabled,
-          'chat_disabled': org.ai_chat_disabled,
+          'comments_disabled': org.ai_comments_disabled or obj.ai_comments_disabled,
         }
       elif org.ai_course_policy == 'selected' and org.ai_enabled_courses.filter(pk=obj.pk).exists():
         return {
           'provider': org.ai_provider,
           'api_key': org.ai_api_key,
           'disabled': org.ai_disabled,
-          'comments_disabled': org.ai_comments_disabled,
-          'chat_disabled': org.ai_chat_disabled,
+          'comments_disabled': org.ai_comments_disabled or obj.ai_comments_disabled,
         }
     # Fall back to course's own settings
     return {
@@ -270,7 +262,6 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'api_key': obj.ai_api_key,
       'disabled': obj.ai_disabled,
       'comments_disabled': obj.ai_comments_disabled,
-      'chat_disabled': obj.ai_chat_disabled,
     }
   
   @extend_schema_field(serializers.BooleanField)
@@ -284,12 +275,6 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
     """Returns True if AI comments are available (considering org settings)."""
     config = self._get_effective_ai_config(obj)
     return self._provider_is_configured(config['provider'], config['api_key']) and not config['disabled'] and not config['comments_disabled']
-
-  @extend_schema_field(serializers.BooleanField)
-  def get_aiChatEnabled(self, obj):
-    """Returns True if AI chat assistant is available (considering org settings)."""
-    config = self._get_effective_ai_config(obj)
-    return self._provider_is_configured(config['provider'], config['api_key']) and not config['disabled'] and not config['chat_disabled']
 
   @extend_schema_field(serializers.BooleanField)
   def get_orgAiAvailable(self, obj):

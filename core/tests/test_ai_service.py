@@ -207,7 +207,7 @@ class TestAIServiceConfigResolution(TestCase):
             ai_model=None,
         )
         svc = AIService(cast(Course, course))
-        self.assertEqual(svc.model, 'gemini-2.5-flash')
+        self.assertEqual(svc.model, 'gemini-3-pro-preview')
 
     def test_portkey_provider_configures_correctly(self):
         """Portkey provider should resolve with URL and optional key."""
