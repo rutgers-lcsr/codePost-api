@@ -56,8 +56,11 @@ def generate_ai_grading_assistance(submission_id: int):
         logger.debug(f"[AIGrading] AI not configured or disabled for course {course.id}. Skipping.")
         return
 
-    if getattr(course, 'ai_disabled', False):
-        logger.debug(f"[AIGrading] AI disabled for course {course.id}. Skipping.")
+    suggestions_enabled = service.is_feature_enabled('suggested_comments')
+    summary_enabled = service.is_feature_enabled('submission_summary')
+
+    if not suggestions_enabled and not summary_enabled:
+        logger.debug(f"[AIGrading] Both suggestions and summary disabled for course {course.id}. Skipping.")
         return
 
     # --- Detect main file for targeted generation ---
@@ -65,7 +68,10 @@ def generate_ai_grading_assistance(submission_id: int):
     main_file = detect_main_file(submission)
 
     # --- Generate suggested comments ---
-    try:
+    if not suggestions_enabled:
+        logger.debug(f"[AIGrading] Suggested comments disabled for course {course.id}.")
+    else:
+      try:
         # Clear existing pending suggestions to prevent duplicates on re-trigger
         SuggestedComment.objects.filter(submission=submission, status='pending').delete()
 
@@ -78,10 +84,14 @@ def generate_ai_grading_assistance(submission_id: int):
         for result in results:
             if result.success and result.text:
                 suggestions = json.loads(result.text)
-                # Map file IDs to actual submission file IDs that exist
-                valid_file_ids = set(
-                    submission.files.values_list('id', flat=True)
-                )
+                # When targeting a specific file, only save suggestions for that file.
+                # When generating for all files, accept any valid file ID.
+                if main_file:
+                    valid_file_ids = {main_file.id}
+                else:
+                    valid_file_ids = set(
+                        submission.files.values_list('id', flat=True)
+                    )
                 # Identify notebook files so we can convert 1-based cell numbers
                 # (from the AI prompt) to 0-based cell indices (used by the frontend).
                 notebook_file_ids = set(
@@ -120,11 +130,12 @@ def generate_ai_grading_assistance(submission_id: int):
 
             service.record_usage(result, user=submission.grader or submission.students.first(), request_type='suggested_comments')
 
-    except Exception as e:
+      except Exception as e:
         logger.error(f"[AIGrading] Failed to generate suggested comments for submission {submission_id}: {e}", exc_info=True)
 
     # --- Generate submission summary ---
-    try:
+    if summary_enabled:
+      try:
         result = async_to_sync(service.generate_submission_summary)(submission, target_file=main_file)
         if result.success and result.text:
             SubmissionSummary.objects.update_or_create(
@@ -143,11 +154,15 @@ def generate_ai_grading_assistance(submission_id: int):
 
         service.record_usage(result, user=submission.grader or submission.students.first(), request_type='submission_summary')
 
-    except Exception as e:
+      except Exception as e:
         logger.error(f"[AIGrading] Failed to generate summary for submission {submission_id}: {e}", exc_info=True)
 
     # --- Auto-generate assignment description if empty and unlocked ---
-    if not assignment.ai_description and not assignment.ai_description_locked:
+    if (
+        service.is_feature_enabled('assignment_description')
+        and not assignment.ai_description
+        and not assignment.ai_description_locked
+    ):
         # Only auto-generate if we have at least 1 finalized submission to learn from
         finalized_count = assignment.submissions.filter(isFinalized=True).count()
         if finalized_count >= 1 or submission.isFinalized:
@@ -175,3 +190,79 @@ def generate_ai_grading_assistance(submission_id: int):
 
               except Exception as e:
                 logger.error(f"[AIGrading] Failed to generate assignment description: {e}", exc_info=True)
+
+
+@shared_task
+def auto_improve_prompts_scheduled():
+    """Periodic task: auto-improve all prompt types that have enough new feedback.
+
+    Only runs when ``PromptLabSettings.auto_improve_enabled`` and
+    ``schedule_enabled`` are both True.
+    """
+    from core.models import PromptLabSettings, SystemPromptVariant
+    from core.services.prompt_improvement import auto_improve_prompt
+
+    settings = PromptLabSettings.load()
+    if not settings.auto_improve_enabled or not settings.schedule_enabled:
+        logger.info("[AutoImprove] Scheduled run skipped — disabled in settings.")
+        return
+
+    prompt_types = [c[0] for c in SystemPromptVariant.PROMPT_TYPE_CHOICES]
+    for pt in prompt_types:
+        try:
+            variant = auto_improve_prompt(
+                pt,
+                min_feedback=settings.min_feedback,
+                triggered_by='schedule',
+            )
+            if variant:
+                logger.info(f"[AutoImprove] Scheduled: created variant {variant.id} for {pt}")
+        except Exception:
+            logger.exception(f"[AutoImprove] Scheduled run failed for {pt}")
+
+
+@shared_task
+def auto_improve_prompt_threshold(prompt_type: str):
+    """Threshold-triggered task: called by the PromptFeedback post_save signal.
+
+    Only runs when ``PromptLabSettings.auto_improve_enabled`` and
+    ``threshold_enabled`` are both True, and the new-feedback count since
+    the last auto-generated variant exceeds ``feedback_threshold``.
+    """
+    from core.models import PromptLabSettings, SystemPromptVariant, PromptFeedback
+    from core.services.prompt_improvement import auto_improve_prompt
+
+    settings = PromptLabSettings.load()
+    if not settings.auto_improve_enabled or not settings.threshold_enabled:
+        return
+
+    # Count new default-pool feedback since the last auto-generated variant
+    last_auto = SystemPromptVariant.objects.filter(
+        prompt_type=prompt_type,
+        metadata__auto_generated=True,
+    ).order_by('-created').first()
+
+    feedback_qs = PromptFeedback.objects.filter(
+        prompt_type=prompt_type,
+        is_custom_context=False,
+    )
+    if last_auto:
+        feedback_qs = feedback_qs.filter(created__gt=last_auto.created)
+
+    new_count = feedback_qs.count()
+    if new_count < settings.feedback_threshold:
+        return
+
+    try:
+        variant = auto_improve_prompt(
+            prompt_type,
+            min_feedback=settings.min_feedback,
+            triggered_by='threshold',
+        )
+        if variant:
+            logger.info(
+                f"[AutoImprove] Threshold: created variant {variant.id} for "
+                f"{prompt_type} (new_feedback={new_count})"
+            )
+    except Exception:
+        logger.exception(f"[AutoImprove] Threshold run failed for {prompt_type}")

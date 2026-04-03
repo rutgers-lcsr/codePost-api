@@ -27,6 +27,8 @@ from zmq import has
 from django.utils import timezone
 from django.utils.text import slugify
 from core.validators import validate_hex_color
+from core.prompts.registry import prompt_registry
+import core.prompts  # noqa: F401 — triggers @register_prompt side-effects
 from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
 from codepost.settings import DEBUG, MEDIA_ROOT
 from django.db import models
@@ -170,6 +172,10 @@ class Organization(BaseModel):
   ai_token_rates = JSONField(
       default=dict, blank=True,
       help_text='Custom per-model token rates. JSON object mapping model names to {"input": <$/1M tokens>, "output": <$/1M tokens>}'
+  )
+  ai_feature_config = JSONField(
+      default=dict, blank=True,
+      help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}. Missing keys use defaults (enabled).'
   )
 
   class Meta:
@@ -378,6 +384,10 @@ class Course(BaseModel):
       default=dict, blank=True,
       help_text='Custom per-model token rates. JSON object mapping model names to {"input": <$/1M tokens>, "output": <$/1M tokens>}'
   )
+  ai_feature_config = JSONField(
+      default=dict, blank=True,
+      help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}. Missing keys use defaults (enabled).'
+  )
 
   class Meta:
     unique_together = ('name', 'period', 'organization')
@@ -513,7 +523,7 @@ class Assignment(BaseModel):
   # AI-powered comment generation
   ai_system_prompt = models.TextField(
       blank=True,
-      default="",
+      default="" ,
       help_text="System prompt for AI comment generation. "
                 "Placeholders: {assignment_name}, {file_content}, {selected_content}, {rubric_context}, {grader_draft}"
   )
@@ -1922,6 +1932,16 @@ class AIUsageRecord(BaseModel):
       blank=True, null=True,
       help_text="Error message if the request failed"
   )
+  prompt_variant = models.ForeignKey(
+      'SystemPromptVariant', null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='usage_records',
+      help_text="The prompt variant used for this request (for A/B tracking).",
+  )
+  experiment = models.ForeignKey(
+      'PromptExperiment', null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='usage_records',
+      help_text="The A/B experiment this request was part of, if any.",
+  )
 
   class Meta:
     ordering = ('-created',)
@@ -1948,6 +1968,7 @@ class SuggestedComment(BaseModel):
     rubricComment: RubricComment | None
     acceptedBy: User | None
     acceptedComment: Comment | None
+    promptVariant: 'SystemPromptVariant | None'
 
   SUGGESTION_STATUS_CHOICES = [
       ('pending', 'Pending'),
@@ -2010,6 +2031,19 @@ class SuggestedComment(BaseModel):
       blank=True, null=True,
       help_text="Metadata about the generation (model used, tokens, confidence, etc.)."
   )
+  promptVariant: 'SystemPromptVariant | None' = models.ForeignKey(  # type: ignore[assignment]
+      'SystemPromptVariant', null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='suggested_comments',
+      help_text="The prompt variant used to generate this suggestion."
+  )
+  generationBatch = models.UUIDField(
+      null=True, blank=True,
+      help_text="UUID grouping all suggestions from a single generation call."
+  )
+  firstViewedAt = models.DateTimeField(
+      null=True, blank=True,
+      help_text="Timestamp when a grader first saw this suggestion (set on list fetch)."
+  )
 
   course = property(lambda self: self.file.course)
 
@@ -2017,6 +2051,8 @@ class SuggestedComment(BaseModel):
     ordering = ('file', 'startLine', 'startChar')
     indexes = [
         models.Index(fields=['submission', 'status']),
+        models.Index(fields=['promptVariant', 'status']),
+        models.Index(fields=['generationBatch']),
     ]
 
   def __str__(self):
@@ -2040,6 +2076,10 @@ class SubmissionSummary(BaseModel):
   generationMetadata = models.JSONField(
       blank=True, null=True,
       help_text="Metadata about the generation (model used, tokens, etc.)."
+  )
+  regenerationCount = models.PositiveIntegerField(
+      default=0,
+      help_text="Number of times this summary has been regenerated."
   )
 
   course = property(lambda self: self.submission.assignment.course)
@@ -2114,3 +2154,295 @@ class CourseAuditEvent(BaseModel):
 
   def __str__(self):
     return f"AuditEvent [{self.event_type}] course={self.course_id} user={self.user_id}"
+
+
+# -----------------------------------------------------------------------
+# Prompt A/B Testing & Feedback
+# -----------------------------------------------------------------------
+
+class SystemPromptVariant(BaseModel):
+  """A versioned, platform-global AI prompt template.
+
+  Prompts are stored in the DB so they can be updated live without
+  redeployment.  At most one variant per ``prompt_type`` may be ``active``
+  at any time (enforced via ``unique_together`` + partial-unique constraint
+  in the migration).
+  """
+  if TYPE_CHECKING:
+    id: int
+
+  # Populated dynamically from the prompt registry so new prompt types
+  # only need a single file in core/prompts/.
+  PROMPT_TYPE_CHOICES = prompt_registry.choices()
+
+  STATUS_CHOICES = [
+      ('draft', 'Draft'),
+      ('active', 'Active'),
+      ('candidate', 'Candidate'),
+      ('retired', 'Retired'),
+  ]
+
+  prompt_type = models.CharField(
+      max_length=32, choices=PROMPT_TYPE_CHOICES,
+      help_text="Which AI feature this prompt is used for.",
+  )
+  name = models.CharField(
+      max_length=128,
+      help_text="Human-readable label (e.g. 'Concise Feedback v2').",
+  )
+  text = models.TextField(
+      help_text="The prompt template. May contain {placeholder} variables.",
+  )
+  status = models.CharField(
+      max_length=16, choices=STATUS_CHOICES, default='draft',
+      help_text="Lifecycle status. Only one variant per prompt_type may be 'active'.",
+  )
+  version = models.PositiveIntegerField(
+      default=1,
+      help_text="Version number within this prompt's lineage.",
+  )
+  parent = models.ForeignKey(
+      'self', null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='children',
+      help_text="The variant this was derived from (for lineage tracking).",
+  )
+  created_by = models.ForeignKey(
+      User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='created_prompt_variants',
+      help_text="The staff user who created this variant.",
+  )
+  metadata = models.JSONField(
+      default=dict, blank=True,
+      help_text="Arbitrary metadata (auto-generation context, improvement notes, etc.).",
+  )
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [
+        models.Index(fields=['prompt_type', 'status']),
+    ]
+    constraints = [
+        models.UniqueConstraint(
+            fields=['prompt_type'],
+            condition=models.Q(status='active'),
+            name='unique_active_prompt_per_type',
+        ),
+    ]
+
+  def __str__(self):
+    return f"PromptVariant [{self.prompt_type}] {self.name} v{self.version} ({self.status})"
+
+
+class PromptExperiment(BaseModel):
+  """An A/B test comparing two SystemPromptVariant instances.
+
+  When ``status='running'``, a fraction (``sample_rate``) of AI requests
+  for the given ``prompt_type`` will generate outputs from both variants
+  and present them to the grader for preference feedback.
+  """
+  if TYPE_CHECKING:
+    id: int
+
+  STATUS_CHOICES = [
+      ('running', 'Running'),
+      ('paused', 'Paused'),
+      ('completed', 'Completed'),
+  ]
+
+  name = models.CharField(
+      max_length=128,
+      help_text="Human-readable experiment name.",
+  )
+  prompt_type = models.CharField(
+      max_length=32, choices=SystemPromptVariant.PROMPT_TYPE_CHOICES,
+      help_text="Which AI feature is being tested.",
+  )
+  variant_a = models.ForeignKey(
+      SystemPromptVariant, on_delete=models.CASCADE,
+      related_name='experiments_as_a',
+      help_text="The control variant (usually the current active prompt).",
+  )
+  variant_b = models.ForeignKey(
+      SystemPromptVariant, on_delete=models.CASCADE,
+      related_name='experiments_as_b',
+      help_text="The challenger variant.",
+  )
+  status = models.CharField(
+      max_length=16, choices=STATUS_CHOICES, default='paused',
+      help_text="Current experiment lifecycle state.",
+  )
+  sample_rate = models.FloatField(
+      default=0.1,
+      help_text="Fraction of requests that trigger dual generation (0.0–1.0).",
+  )
+  started_by = models.ForeignKey(
+      User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='started_experiments',
+      help_text="Staff user who started this experiment.",
+  )
+  completed_at = models.DateTimeField(
+      null=True, blank=True,
+      help_text="When the experiment was completed.",
+  )
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [
+        models.Index(fields=['prompt_type', 'status']),
+    ]
+    constraints = [
+        models.UniqueConstraint(
+            fields=['prompt_type'],
+            condition=models.Q(status='running'),
+            name='unique_running_experiment_per_type',
+        ),
+    ]
+
+  def __str__(self):
+    return f"Experiment [{self.prompt_type}] {self.name} ({self.status})"
+
+
+class PromptFeedback(BaseModel):
+  """User feedback on AI-generated output, optionally tied to an A/B experiment.
+
+  Two feedback pools:
+    - ``is_custom_context=False`` (default pool): assignment uses the
+      platform default prompt.  Fed into auto-improvement.
+    - ``is_custom_context=True`` (custom pool): assignment has a custom
+      ``ai_system_prompt``.  Visible to staff for manual insight extraction.
+  """
+  if TYPE_CHECKING:
+    id: int
+
+  experiment = models.ForeignKey(
+      PromptExperiment, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='feedback',
+      help_text="The experiment this feedback is part of (null for standalone rating).",
+  )
+  variant_used = models.ForeignKey(
+      SystemPromptVariant, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='feedback_received',
+      help_text="The variant that produced the rated output (null when variant is unknown, e.g. pre-existing summaries).",
+  )
+  chosen_variant = models.ForeignKey(
+      SystemPromptVariant, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='feedback_chosen',
+      help_text="For A/B: the variant the user preferred.",
+  )
+  user = models.ForeignKey(
+      User, on_delete=models.SET_NULL, null=True, blank=True,
+      related_name='prompt_feedback',
+      help_text="The grader who provided this feedback.",
+  )
+  rating = models.SmallIntegerField(
+      null=True, blank=True,
+      help_text="Standalone rating: 1 = thumbs up, -1 = thumbs down.",
+  )
+  feedback_text = models.TextField(
+      blank=True, default='',
+      help_text="Optional free-text explanation.",
+  )
+  ai_output_a = models.TextField(
+      blank=True, default='',
+      help_text="Generated text from variant A (or the only variant for non-A/B).",
+  )
+  ai_output_b = models.TextField(
+      blank=True, default='',
+      help_text="Generated text from variant B (A/B test only).",
+  )
+  usage_record = models.ForeignKey(
+      AIUsageRecord, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name='prompt_feedback',
+      help_text="Link to the AIUsageRecord for cost/token tracking.",
+  )
+  prompt_type = models.CharField(
+      max_length=32, choices=SystemPromptVariant.PROMPT_TYPE_CHOICES,
+      help_text="Denormalized for efficient querying.",
+  )
+  is_custom_context = models.BooleanField(
+      default=False,
+      help_text="True when the assignment had a custom ai_system_prompt override.",
+  )
+  context_hash = models.CharField(
+      max_length=64, blank=True, default='',
+      help_text="Hash of the input context to detect equivalent re-tests.",
+  )
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [
+        models.Index(fields=['prompt_type', 'is_custom_context']),
+        models.Index(fields=['experiment', '-created']),
+    ]
+
+  def __str__(self):
+    return f"PromptFeedback [{self.prompt_type}] user={self.user_id} rating={self.rating}"
+
+
+class PromptLabSettings(models.Model):
+  """Singleton config for Prompt Lab auto-improvement (always pk=1).
+
+  Controls scheduled and threshold-based automatic prompt generation.
+  Manage via the Prompt Lab admin UI or Django admin.
+  """
+
+  auto_improve_enabled = models.BooleanField(
+      default=False,
+      help_text="Master switch for all automatic prompt improvement.",
+  )
+  schedule_enabled = models.BooleanField(
+      default=True,
+      help_text="Enable periodic (Celery beat) auto-improvement runs.",
+  )
+  schedule_interval_hours = models.PositiveIntegerField(
+      default=168,  # weekly
+      help_text="How often (in hours) the scheduled task checks for improvements.",
+  )
+  threshold_enabled = models.BooleanField(
+      default=True,
+      help_text="Enable auto-improvement when new feedback count crosses the threshold.",
+  )
+  feedback_threshold = models.PositiveIntegerField(
+      default=50,
+      help_text="Number of new default-pool feedback entries (since last auto-improve) to trigger generation.",
+  )
+  min_feedback = models.PositiveIntegerField(
+      default=5,
+      help_text="Minimum total feedback required before any auto-improvement can run.",
+  )
+
+  # AI provider config for auto-improvement (platform-level, not per-course)
+  AI_PROVIDER_CHOICES = [
+      ('gemini', 'Google Gemini'),
+      ('openai', 'OpenAI'),
+  ]
+  ai_provider = models.CharField(
+      max_length=32, blank=True, default='',
+      choices=AI_PROVIDER_CHOICES,
+      help_text="AI provider used for auto-improvement and prompt generation.",
+  )
+  ai_api_key = EncryptedCharField(
+      max_length=512, blank=True, default='',
+      help_text="API key for the auto-improvement AI provider (stored encrypted).",
+  )
+  ai_model = models.CharField(
+      max_length=64, blank=True, default='',
+      help_text="Model to use for auto-improvement (e.g. gemini-2.5-pro, gpt-4o).",
+  )
+
+  class Meta:
+    verbose_name = "Prompt Lab Settings"
+    verbose_name_plural = "Prompt Lab Settings"
+
+  def save(self, *args, **kwargs):
+    self.pk = 1
+    super().save(*args, **kwargs)
+
+  @classmethod
+  def load(cls) -> "PromptLabSettings":
+    obj, _ = cls.objects.get_or_create(pk=1)
+    return obj
+
+  def __str__(self):
+    status = "ENABLED" if self.auto_improve_enabled else "disabled"
+    return f"PromptLabSettings [{status}]"

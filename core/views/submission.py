@@ -39,7 +39,7 @@ from rest_framework import serializers
 from core.permissions.tokens import submission_token_generator
 
 from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail
-from django.db.models import Q
+from django.db.models import Q, F
 from core.services.audit import record_audit_event
 
 def get_student_serializer_class(submission, files_only=False):
@@ -591,6 +591,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["GET"])
   def suggestedComments(self, request, pk=None):
     """Return pending suggested comments for this submission."""
+    from django.utils import timezone
     from core.models import SuggestedComment
     from core.serializers.suggested_comment import SuggestedCommentSerializer
 
@@ -603,6 +604,15 @@ class SubmissionViewSet(ListProtectedViewSet):
     suggestions = SuggestedComment.objects.filter(
         submission=submission, status='pending'
     ).select_related('file', 'rubricComment')
+
+    # Stamp first_viewed_at on suggestions that haven't been viewed yet
+    not_yet_viewed = suggestions.filter(firstViewedAt__isnull=True)
+    if not_yet_viewed.exists():
+        not_yet_viewed.update(firstViewedAt=timezone.now())
+        # Re-fetch to include the updated timestamps
+        suggestions = SuggestedComment.objects.filter(
+            submission=submission, status='pending'
+        ).select_related('file', 'rubricComment')
 
     return Response(SuggestedCommentSerializer(suggestions, many=True).data)
 
@@ -661,8 +671,9 @@ class SubmissionViewSet(ListProtectedViewSet):
   def generateFileSuggestions(self, request, pk=None):
     """Generate AI suggestions for a single file within this submission."""
     import json
+    import uuid
     from asgiref.sync import async_to_sync
-    from core.models import SuggestedComment, SubmissionFile
+    from core.models import SuggestedComment, SubmissionFile, SystemPromptVariant
     from core.serializers.suggested_comment import SuggestedCommentSerializer as SCSer
     from core.services.ai_service import AIService
 
@@ -687,6 +698,39 @@ class SubmissionViewSet(ListProtectedViewSet):
     if not service.is_configured:
         return Response({'error': 'AI is not configured for this course.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    if not service.is_feature_enabled('suggested_comments'):
+        return Response({'error': 'Suggested comments are disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check for A/B experiment
+    experiment = AIService.check_experiment('suggested_comments')
+    is_custom = bool(submission.assignment.ai_system_prompt)
+
+    if experiment:
+        # A/B mode: generate from both variants, return both for user comparison
+        results_a = async_to_sync(service.generate_file_suggestions)(
+            submission, file_obj, variant_id_override=experiment.variant_a_id,
+        )
+        results_b = async_to_sync(service.generate_file_suggestions)(
+            submission, file_obj, variant_id_override=experiment.variant_b_id,
+        )
+
+        def _extract_text(results):
+            parts = []
+            for r in results:
+                if r.success and r.text:
+                    parts.append(r.text)
+            return parts
+
+        return Response({
+            'isAbTest': True,
+            'experimentId': experiment.id,
+            'variantAId': experiment.variant_a_id,
+            'variantBId': experiment.variant_b_id,
+            'isCustomContext': is_custom,
+            'resultA': _extract_text(results_a),
+            'resultB': _extract_text(results_b),
+        })
+
     results = async_to_sync(service.generate_file_suggestions)(submission, file_obj)
 
     # Clear existing pending suggestions for this file to prevent duplicates
@@ -694,6 +738,7 @@ class SubmissionViewSet(ListProtectedViewSet):
         submission=submission, file=file_obj, status='pending'
     ).delete()
 
+    batch_id = uuid.uuid4()
     created = []
     for result in results:
         if result.success and result.text:
@@ -704,6 +749,11 @@ class SubmissionViewSet(ListProtectedViewSet):
                     {'error': 'AI returned malformed output. Please try again.'},
                     status=status.HTTP_502_BAD_GATEWAY,
                 )
+            # Resolve the prompt variant FK
+            prompt_variant = None
+            if result.variant_id is not None:
+                prompt_variant = SystemPromptVariant.objects.filter(pk=result.variant_id).first()
+
             is_notebook = file_obj.name.endswith('.ipynb')
             for s in suggestions:
                 if s.get('file_id') != file_obj.id:
@@ -729,13 +779,29 @@ class SubmissionViewSet(ListProtectedViewSet):
                         'model': service.model,
                         'input_tokens': result.input_tokens,
                         'output_tokens': result.output_tokens,
+                        'variant_id': result.variant_id,
                     },
+                    promptVariant=prompt_variant,
+                    generationBatch=batch_id,
                 ))
             service.record_usage(result, user, request_type='file_suggestions')
         elif not result.success:
             return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    return Response(SCSer(created, many=True).data, status=status.HTTP_201_CREATED)
+    # Include variant_id and custom-context flag in response metadata
+    variant_id = None
+    is_custom = bool(submission.assignment.ai_system_prompt)
+    for r in results:
+        if r.variant_id is not None:
+            variant_id = r.variant_id
+            break
+
+    response_data = SCSer(created, many=True).data
+    return Response({
+        'suggestions': response_data,
+        'promptVariantId': variant_id,
+        'isCustomContext': is_custom,
+    }, status=status.HTTP_201_CREATED)
 
   @extend_schema(
       request=None,
@@ -762,15 +828,36 @@ class SubmissionViewSet(ListProtectedViewSet):
     if not service.is_configured:
         return Response({'error': 'AI is not configured for this course.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if service.is_globally_disabled:
-        return Response({'error': 'AI is disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not service.is_feature_enabled('submission_summary'):
+        return Response({'error': 'Submission summaries are disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check for A/B experiment
+    experiment = AIService.check_experiment('submission_summary')
+    is_custom = bool(submission.assignment.ai_system_prompt)
+
+    if experiment:
+        result_a = async_to_sync(service.generate_submission_summary)(
+            submission, variant_id_override=experiment.variant_a_id,
+        )
+        result_b = async_to_sync(service.generate_submission_summary)(
+            submission, variant_id_override=experiment.variant_b_id,
+        )
+        return Response({
+            'isAbTest': True,
+            'experimentId': experiment.id,
+            'variantAId': experiment.variant_a_id,
+            'variantBId': experiment.variant_b_id,
+            'isCustomContext': is_custom,
+            'resultA': {'text': result_a.text, 'success': result_a.success, 'error': result_a.error},
+            'resultB': {'text': result_b.text, 'success': result_b.success, 'error': result_b.error},
+        })
 
     result = async_to_sync(service.generate_submission_summary)(submission)
 
     if not result.success:
         return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    summary_obj, _ = SubmissionSummary.objects.update_or_create(
+    summary_obj, created = SubmissionSummary.objects.update_or_create(
         submission=submission,
         defaults={
             'text': result.text,
@@ -779,10 +866,21 @@ class SubmissionViewSet(ListProtectedViewSet):
                 'model': service.model,
                 'input_tokens': result.input_tokens,
                 'output_tokens': result.output_tokens,
+                'variant_id': result.variant_id,
             },
         },
     )
 
+    # Track regeneration: if the summary already existed, increment the counter
+    if not created:
+        SubmissionSummary.objects.filter(pk=summary_obj.pk).update(
+            regenerationCount=F('regenerationCount') + 1,
+        )
+        summary_obj.refresh_from_db()
+
     service.record_usage(result, user, request_type='submission_summary')
 
-    return Response(SSSer(summary_obj).data, status=status.HTTP_201_CREATED)
+    response_data = SSSer(summary_obj).data
+    response_data['promptVariantId'] = result.variant_id
+    response_data['isCustomContext'] = is_custom
+    return Response(response_data, status=status.HTTP_201_CREATED)

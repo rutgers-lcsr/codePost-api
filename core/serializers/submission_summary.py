@@ -8,5 +8,5 @@ class SubmissionSummarySerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = SubmissionSummary
-    fields = ('id', 'submission', 'text', 'generationMetadata', 'created', 'modified')
-    read_only_fields = ('id', 'submission', 'text', 'generationMetadata', 'created', 'modified')
+    fields = ('id', 'submission', 'text', 'generationMetadata', 'regenerationCount', 'created', 'modified')
+    read_only_fields = ('id', 'submission', 'text', 'generationMetadata', 'regenerationCount', 'created', 'modified')

@@ -56,6 +56,15 @@ _MAIN_FILE_NAMES: dict[str, set[str]] = {
     'php': {'index', 'main', 'app'},
 }
 
+# Extensions for non-code files (penalized in scoring)
+_NON_CODE_EXTENSIONS = {
+    '.pdf', '.txt', '.log', '.csv', '.tsv',
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp',
+    '.zip', '.tar', '.gz', '.rar',
+    '.docx', '.xlsx', '.pptx', '.doc', '.xls',
+    '.md', '.rst',
+}
+
 # Score weights
 _SCORE_REQUIRED_FILE = 3
 _SCORE_TEST_TARGET = 3
@@ -64,6 +73,8 @@ _SCORE_MAIN_FILENAME = 3
 _SCORE_ASSIGNMENT_NAME_MATCH = 4
 _SCORE_DESCRIPTION_MENTION = 2
 _SCORE_LARGEST_FILE = 1
+_SCORE_NOTEBOOK_FILE = 3
+_SCORE_NON_CODE_PENALTY = -2
 
 # Minimum score for confident detection
 _CONFIDENCE_THRESHOLD = 3
@@ -171,6 +182,17 @@ def detect_main_file(submission: Submission) -> SubmissionFile | None:
             score += _SCORE_DESCRIPTION_MENTION
             file_reasons.append('description-mention')
 
+        # Signal: Jupyter notebook files are primary code artifacts
+        if sf.name.lower().endswith('.ipynb'):
+            score += _SCORE_NOTEBOOK_FILE
+            file_reasons.append('notebook')
+
+        # Penalty: non-code files are unlikely to be the main file
+        ext = sf.name[sf.name.rfind('.'):].lower() if '.' in sf.name else ''
+        if ext in _NON_CODE_EXTENSIONS:
+            score += _SCORE_NON_CODE_PENALTY
+            file_reasons.append('non-code')
+
         scores[sf.id] = score
         reasons[sf.id] = file_reasons
 
@@ -226,10 +248,16 @@ def _file_stem(filename: str) -> str:
     return filename[:dot] if dot > 0 else filename
 
 
+def _collapse_digit_spaces(s: str) -> str:
+    """Remove spaces adjacent to digits: 'lab 03' → 'lab03', 'hw 1' → 'hw1'."""
+    return re.sub(r'(\d)\s+', r'\1', re.sub(r'\s+(\d)', r'\1', s))
+
+
 def _names_match(file_stem: str, assignment_name: str) -> bool:
     """Check if a file stem plausibly matches the assignment name.
 
     Handles common transformations: case folding, underscores/hyphens → spaces,
+    digit-adjacent space collapsing ('Lab 03' ↔ 'Lab03'),
     and substring matching for multi-word assignment names.
     """
     stem = file_stem.lower().replace('_', ' ').replace('-', ' ')
@@ -239,7 +267,14 @@ def _names_match(file_stem: str, assignment_name: str) -> bool:
     # Exact match after normalization
     if stem == name:
         return True
+    # Also try with digit-adjacent spaces collapsed
+    stem_collapsed = _collapse_digit_spaces(stem)
+    name_collapsed = _collapse_digit_spaces(name)
+    if stem_collapsed == name_collapsed:
+        return True
     # Stem is a significant substring of the assignment name or vice versa
+    if len(stem_collapsed) >= 3 and (stem_collapsed in name_collapsed or name_collapsed in stem_collapsed):
+        return True
     if len(stem) >= 3 and (stem in name or name in stem):
         return True
     return False

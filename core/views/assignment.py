@@ -921,7 +921,7 @@ class AssignmentViewSet(ListProtectedViewSet):
         
     # Check AI configuration
     service = AIService(course, assignment)
-    if not service.is_configured or course.ai_disabled:
+    if not service.is_configured or not service.is_feature_enabled('test_generation'):
         return Response(
             {'error': 'AI is not configured/enabled for this course.'},
             status=status.HTTP_400_BAD_REQUEST
@@ -1099,8 +1099,8 @@ class AssignmentViewSet(ListProtectedViewSet):
     if not service.is_configured:
       return Response({'error': 'AI is not configured for this course.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if service.is_globally_disabled:
-      return Response({'error': 'AI is disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not service.is_feature_enabled('assignment_description'):
+      return Response({'error': 'Assignment description generation is disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
       result = async_to_sync(service.generate_assignment_description)(assignment)

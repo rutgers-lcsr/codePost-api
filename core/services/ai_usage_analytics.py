@@ -79,6 +79,14 @@ def get_usage_summary(
     start_date = start_date or default_start
     end_date = end_date or default_end
 
+    # Snap bare-date end values (midnight) to end-of-day so the date is inclusive.
+    # Clients (e.g. date pickers without a time component) often send
+    # "2026-03-31T00:00:00Z" meaning "through March 31", but a naive lte filter
+    # would exclude every record created after midnight on that day.
+    if (end_date.hour == 0 and end_date.minute == 0
+            and end_date.second == 0 and end_date.microsecond == 0):
+        end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
     # Apply date filter
     queryset = queryset.filter(created__gte=start_date, created__lte=end_date)
 

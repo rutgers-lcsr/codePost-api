@@ -30,8 +30,12 @@ from typing import TYPE_CHECKING, Optional, Literal
 from dataclasses import dataclass
 from core.models import Course, Assignment, Submission, SubmissionFile, User
 
+import asyncio
+import random
+
 if TYPE_CHECKING:
     import pymupdf
+    from core.models import PromptExperiment
 
 
 # -----------------------------------------------------------------------
@@ -198,6 +202,7 @@ class GenerationResult:
     output_tokens: int = 0
     total_tokens: int = 0
     cached_tokens: int = 0
+    variant_id: Optional[int] = None
 
 
 class AIService:
@@ -207,23 +212,6 @@ class AIService:
     """
     # This is to ensure the ai response is consistently in markdown format
     GLOBAL_SYSTEM_PROMPT =""""""
-    
-    DEFAULT_SYSTEM_PROMPT = """You are an AI assistant helping grade student code submissions.
-Your task is to generate clear, constructive feedback for students.
-
-Guidelines:
-- Be specific about what the issue is
-- Explain why it matters
-- Suggest how to fix it when appropriate
-- Be encouraging but honest
-- Keep comments concise (1-3 sentences)
-
-Context:
-- Assignment: {assignment_name}
-- File: {file_name}
-- File Content:
-{file_content}
-"""
 
     def __init__(self, course: Course, assignment: Optional[Assignment] = None):
         self.course = course
@@ -283,7 +271,253 @@ Context:
     def _get_default_model(self) -> str:
         """Get default model for the configured provider."""
         return self._get_default_model_for(self.provider)
-    
+
+    # ------------------------------------------------------------------
+    # Prompt resolution & A/B experiment support
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def resolve_prompt(prompt_type: str) -> tuple[str, int | None]:
+        """Resolve the active prompt text for the given prompt_type.
+
+        Returns ``(prompt_text, variant_id)``. Falls back to the default
+        template from the prompt registry when no active DB variant exists.
+
+        Results are cached in Django's cache framework for 60 s.
+        """
+        from django.core.cache import cache as django_cache
+        from core.models import SystemPromptVariant
+        from core.prompts.registry import prompt_registry
+
+        cache_key = f'active_prompt:{prompt_type}'
+        cached = django_cache.get(cache_key)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+
+        try:
+            variant = SystemPromptVariant.objects.get(
+                prompt_type=prompt_type, status='active',
+            )
+            result = (variant.text, variant.id)
+        except SystemPromptVariant.DoesNotExist:
+            fallback = prompt_registry.get_default_template(prompt_type)
+            result = (fallback, None)
+
+        django_cache.set(cache_key, result, timeout=60)
+        return result
+
+    @staticmethod
+    def check_experiment(prompt_type: str) -> 'PromptExperiment | None':
+        """Return a running experiment for *prompt_type* if the random roll hits.
+
+        The experiment object (or ``None``) is cached for 30 s so we don't
+        query the DB on every request.  The *sample_rate* roll is **not**
+        cached — each request has an independent chance of triggering A/B.
+        """
+        from django.core.cache import cache as django_cache
+        from core.models import PromptExperiment
+
+        cache_key = f'running_experiment:{prompt_type}'
+        sentinel = '__none__'
+        cached = django_cache.get(cache_key, sentinel)
+
+        if cached is sentinel:
+            try:
+                experiment = PromptExperiment.objects.select_related(
+                    'variant_a', 'variant_b',
+                ).get(prompt_type=prompt_type, status='running')
+            except PromptExperiment.DoesNotExist:
+                experiment = None
+            # Cache for 30 s (even None, to avoid repeated misses)
+            django_cache.set(cache_key, experiment, timeout=30)
+        else:
+            experiment = cached
+
+        if experiment is None:
+            return None
+
+        # Independent random roll against sample_rate
+        if random.random() < experiment.sample_rate:
+            return experiment
+        return None
+
+    async def generate_ab_comment(
+        self,
+        context: 'GenerationContext',
+        experiment: 'PromptExperiment',
+    ) -> tuple['GenerationResult', 'GenerationResult', int]:
+        """Generate two outputs using both experiment variants concurrently.
+
+        Returns ``(result_a, result_b, experiment_id)``.
+        """
+        text_a = experiment.variant_a.text
+        text_b = experiment.variant_b.text
+
+        # Build system + user prompts for both variants
+        system_a = self._format_system_prompt(text_a, context)
+        system_b = self._format_system_prompt(text_b, context)
+
+        template = (
+            self.assignment.ai_system_prompt
+            if self.assignment and self.assignment.ai_system_prompt
+            else self.resolve_prompt('comment_generation')[0]
+        )
+        user_prompt_a = self.build_user_prompt(context, text_a)
+        user_prompt_b = self.build_user_prompt(context, text_b)
+
+        async def _call(system: str, user: str) -> GenerationResult:
+            try:
+                text, inp, out, tot, cached = await self._dispatch_provider(system, user)
+                return GenerationResult(
+                    text=text, success=True,
+                    input_tokens=inp, output_tokens=out,
+                    total_tokens=tot, cached_tokens=cached,
+                )
+            except Exception as e:
+                return GenerationResult(text='', success=False, error=self._parse_error(e))
+
+        result_a, result_b = await asyncio.gather(
+            _call(system_a, user_prompt_a),
+            _call(system_b, user_prompt_b),
+        )
+        return result_a, result_b, experiment.id
+
+    def _format_system_prompt(self, template: str, context: 'GenerationContext') -> str:
+        """Format a prompt template with context values, with fallback on error."""
+        try:
+            formatted = template.format(
+                assignment_name=context.assignment_name,
+                file_name=context.file_name,
+                file_content=context.file_content,
+                selected_content=context.selected_content,
+                rubric_context=context.rubric_context,
+                grader_draft=context.grader_draft,
+                all_files=context.all_files_content,
+            )
+            return "\n\n".join([formatted, self.GLOBAL_SYSTEM_PROMPT])
+        except Exception as e:
+            logger.warning(f"Failed to format prompt template: {e}")
+            return "\n\n".join([template, self.GLOBAL_SYSTEM_PROMPT])
+
+    async def _dispatch_provider(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
+        """Route to the configured provider. Returns (text, input_tokens, output_tokens, total_tokens, cached_tokens)."""
+        if self.provider == 'gemini':
+            return await self._call_gemini(system_prompt, user_prompt)
+        elif self.provider == 'openai':
+            return await self._call_openai(system_prompt, user_prompt)
+        elif self.provider == 'ollama':
+            return await self._call_ollama(system_prompt, user_prompt)
+        elif self.provider in ('portkey', 'custom'):
+            return await self._call_portkey(system_prompt, user_prompt)
+        else:
+            raise ValueError(f"Unknown AI provider: {self.provider}")
+
+    async def _generate(self, system_prompt: str, user_prompt: str, label: str = 'generation') -> GenerationResult:
+        """Dispatch to the configured provider and wrap the result.
+
+        Handles provider routing, token bookkeeping, and error translation
+        so that callers only need to build prompts and consume a
+        ``GenerationResult``.
+        """
+        try:
+            text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._dispatch_provider(system_prompt, user_prompt)
+            return GenerationResult(
+                text=text,
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
+            )
+        except Exception as e:
+            error_msg = self._parse_error(e)
+            logger.error(f"AI {label} failed: {e}", exc_info=True)
+            return GenerationResult(text="", success=False, error=error_msg)
+
+    @staticmethod
+    def _strip_markdown_fences(text: str) -> str:
+        """Strip wrapping markdown code fences from AI output."""
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            lines = stripped.split('\n')
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            stripped = "\n".join(lines).strip()
+        return stripped
+
+    @staticmethod
+    def _parse_json_response(text: str) -> str:
+        """Strip markdown fences and validate JSON. Returns the cleaned text.
+
+        Raises ``json.JSONDecodeError`` if the result isn't valid JSON.
+        """
+        import json as json_mod
+        cleaned = AIService._strip_markdown_fences(text)
+        json_mod.loads(cleaned)  # validate
+        return cleaned
+
+    @staticmethod
+    def _format_file_section(f: dict, include_id: bool = True) -> str:
+        """Format a file context dict into a prompt section.
+
+        Handles notebooks (pre-formatted cells) vs code files (line-numbered
+        + code-fenced).
+        """
+        if f.get('is_notebook'):
+            label = f"### File: {f['name']}"
+            if include_id:
+                label += f" (ID: {f['id']})"
+            return f"{label} [NOTEBOOK]\n{f['content']}"
+        else:
+            numbered = AIService._add_line_numbers(f['content'])
+            label = f"### File: {f['name']}"
+            if include_id:
+                label += f" (ID: {f['id']})"
+            return f"{label}\n```{f['extension'].lstrip('.')}\n{numbered}\n```"
+
+    async def _resolve_and_format_prompt(
+        self,
+        prompt_type: str,
+        format_kwargs: dict,
+        variant_id_override: int | None = None,
+    ) -> tuple[str, int | None]:
+        """Resolve a prompt from the DB (or class constant fallback) and format it.
+
+        When *variant_id_override* is provided, fetch that specific variant
+        instead of the active one.  This is used during A/B experiments to
+        generate output with each experiment variant independently.
+
+        Returns ``(formatted_text, variant_id)``.
+        """
+        from asgiref.sync import sync_to_async
+
+        prompt_text: str = ''
+        variant_id: int | None = None
+
+        if variant_id_override is not None:
+            from core.models import SystemPromptVariant
+            try:
+                variant = await sync_to_async(
+                    SystemPromptVariant.objects.get
+                )(pk=variant_id_override)
+                prompt_text = variant.text
+                variant_id = variant.id
+            except SystemPromptVariant.DoesNotExist:
+                pass
+        else:
+            try:
+                prompt_text, variant_id = await sync_to_async(self.resolve_prompt)(prompt_type)
+            except Exception:
+                # DB may be unavailable (e.g. in unit tests without django_db).
+                pass
+
+        if not prompt_text:
+            from core.prompts.registry import prompt_registry
+            prompt_text = prompt_registry.get_default_template(prompt_type)
+        return prompt_text.format(**format_kwargs), variant_id
+
     @property
     def is_configured(self) -> bool:
         """Check if AI is properly configured for this course."""
@@ -302,12 +536,63 @@ Context:
             return bool(org.ai_disabled)
         return bool(self.course.ai_disabled)
 
+    def is_feature_enabled(self, feature_key: str) -> bool:
+        """Check if a specific AI feature is enabled for this course.
+
+        Resolution order:
+        1. ``ai_disabled`` master switch → always ``False``
+        2. Course ``ai_feature_config[key]`` if present → use it (full autonomy)
+        3. Org ``ai_feature_config[key]`` if present → use it as default
+        4. Registry default (``True``)
+
+        Additionally, a feature is forced on if any feature that requires it
+        is itself enabled (dependency enforcement).
+        """
+        if self.is_globally_disabled:
+            return False
+        if not self.is_configured:
+            return False
+
+        from core.ai_features.registry import ai_feature_registry
+
+        resolved = self._resolve_feature_toggle(feature_key, ai_feature_registry)
+
+        # If toggled off, check whether any dependent feature forces it on.
+        if not resolved:
+            for dep_key in ai_feature_registry.dependents_of(feature_key):
+                if self._resolve_feature_toggle(dep_key, ai_feature_registry):
+                    return True
+
+        return resolved
+
+    def _resolve_feature_toggle(self, feature_key: str, registry) -> bool:
+        """Raw toggle resolution without dependency enforcement."""
+        course_config = getattr(self.course, 'ai_feature_config', None) or {}
+        if feature_key in course_config:
+            return bool(course_config[feature_key])
+
+        org = self.course.organization
+        if org:
+            org_config = getattr(org, 'ai_feature_config', None) or {}
+            if feature_key in org_config:
+                return bool(org_config[feature_key])
+
+        return registry.get_default(feature_key)
+
+    def get_feature_status(self) -> dict[str, bool]:
+        """Return resolved enabled/disabled status for all registered features."""
+        from core.ai_features.registry import ai_feature_registry
+        return {
+            entry.key: self.is_feature_enabled(entry.key)
+            for entry in ai_feature_registry.all()
+        }
+
     # ------------------------------------------------------------------
     # Cost estimation & usage recording
     # ------------------------------------------------------------------
 
     # TTL (in seconds) for Gemini explicit context caches
-    GEMINI_CACHE_TTL = 300  # 5 minutes
+    GEMINI_CACHE_TTL = 900  # 15 minutes
 
     # Provider-specific discount on cached input tokens (fraction of full input rate)
     # Gemini: cached tokens billed at 25% of full input price (75% discount)
@@ -386,6 +671,7 @@ Context:
         result: 'GenerationResult',
         user: User,
         request_type: str = 'comment_generation',
+        experiment: 'PromptExperiment | None' = None,
     ) -> None:
         """
         Persist an AIUsageRecord for the generation that just completed.
@@ -398,9 +684,15 @@ Context:
             The Django user who triggered the generation.
         request_type : str
             One of ``'comment_generation'``, ``'test_generation'``, ``'code_review'``, etc.
+        experiment : PromptExperiment | None
+            The active A/B experiment, if any.
         """
         try:
-            from core.models import AIUsageRecord
+            from core.models import AIUsageRecord, SystemPromptVariant
+
+            prompt_variant = None
+            if result.variant_id is not None:
+                prompt_variant = SystemPromptVariant.objects.filter(pk=result.variant_id).first()
 
             AIUsageRecord.objects.create(
                 organization=self.course.organization,
@@ -422,19 +714,28 @@ Context:
                 ),
                 status='success' if result.success else 'error',
                 error_message=result.error if not result.success else None,
+                prompt_variant=prompt_variant,
+                experiment=experiment,
             )
         except Exception as e:
             logger.warning(f"Failed to record AI usage: {e}")
 
-    def get_system_prompt(self, context: GenerationContext) -> str:
-        """Build the system prompt with context."""
-        if self.assignment and self.assignment.ai_system_prompt:
-            template = self.assignment.ai_system_prompt
+    def get_system_prompt(self, context: GenerationContext) -> tuple[str, int | None, bool]:
+        """Build the system prompt with context.
+
+        Returns ``(formatted_prompt, variant_id, is_custom_context)``.
+        ``is_custom_context`` is True when the assignment has a custom ``ai_system_prompt``.
+        """
+        is_custom = bool(self.assignment and self.assignment.ai_system_prompt)
+
+        if is_custom:
+            template = self.assignment.ai_system_prompt  # type: ignore[union-attr]
+            variant_id: int | None = None
         else:
-            template = self.DEFAULT_SYSTEM_PROMPT
+            template, variant_id = self.resolve_prompt('comment_generation')
             
         try:
-            return "\n\n".join([
+            formatted = "\n\n".join([
                 template.format(
                 assignment_name=context.assignment_name,
                 file_name=context.file_name,
@@ -446,13 +747,14 @@ Context:
             ),
             self.GLOBAL_SYSTEM_PROMPT
         ])
+            return formatted, variant_id, is_custom
         except Exception as e:
             # Fallback if the user's template contains invalid placeholders or syntax
             logger.warning(f"Failed to format system prompt template: {e}")
             return "\n\n".join([
                 template,
                 self.GLOBAL_SYSTEM_PROMPT
-            ])
+            ]), variant_id, is_custom
     
     def build_user_prompt(self, context: GenerationContext, system_prompt_template: str = "") -> str:
         """
@@ -506,27 +808,16 @@ Context:
             )
         
         try:
-            # Check if context was already included in system prompt
-            system_prompt_template = self.assignment.ai_system_prompt if self.assignment and self.assignment.ai_system_prompt else self.DEFAULT_SYSTEM_PROMPT
+            # Resolve prompt (DB-backed with fallback to class constant)
+            from asgiref.sync import sync_to_async
+            system_prompt, variant_id, is_custom = await sync_to_async(self.get_system_prompt)(context)
+            system_prompt_template = self.assignment.ai_system_prompt if self.assignment and self.assignment.ai_system_prompt else self.resolve_prompt('comment_generation')[0]
 
-            system_prompt = self.get_system_prompt(context)
             user_prompt = self.build_user_prompt(context, system_prompt_template)
 
             # Call the appropriate provider
-            if self.provider == 'gemini':
-                logger.debug(f"Calling Gemini ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
-            elif self.provider == 'openai':
-                logger.debug(f"Calling OpenAI ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
-            elif self.provider == 'ollama':
-                logger.debug(f"Calling Ollama ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
-            elif self.provider in ('portkey', 'custom'):
-                logger.debug(f"Calling Portkey/Custom ({self.model}) with system prompt: {system_prompt}\nUser prompt: {user_prompt}")
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
-            else:
-                raise ValueError(f"Unknown AI provider: {self.provider}")
+            logger.debug(f"Calling {self.provider} ({self.model}) for comment generation")
+            text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._dispatch_provider(system_prompt, user_prompt)
 
             return GenerationResult(
                 text=text,
@@ -677,37 +968,6 @@ run_test("Test Explanation", 10, "Score + explanation", 30) do
 end"""
     }
 
-    TEST_GENERATION_PROMPT = """You are an autograder for a Computer Science course.
-Your task is to generate a robust test script for a student submission file: {target_filename}.
-The test script should verify the correctness of the student's code based on the provided context.
-
-CRITICAL RULES:
-1. You MUST use the exact testing harness pattern provided in the example below.
-2. Do NOT import ANY external testing libraries (like unittest, pytest, RSpec, JUnit, etc.).
-3. Do NOT define your own `TestCase` classes or custom runner logic. Use the provided top-level functions or macros ONLY.
-4. Do NOT attempt to parse, read, or import the student submission file (e.g., do not parse JSON or use nbformat/json libraries).
-5. ASSUME all student functions and classes are ALREADY LOADED and available in the global scope. Call them directly.
-6. If the example uses `@test`, use `@test`. If it uses `Tester::test`, use `Tester::test`. If it uses `run_test`, use `run_test`.
-7. Return ONLY the code for the test script. No markdown formatting, no explanations.
-8. For Java tests, methods annotated with @Test must NOT be void. Return a score (number) or an Object[] of [score, explanation].
-9. For Java in this environment: output ONLY `@Test` methods. Do NOT include `package` declarations, `import` statements, or wrapper classes (e.g., `class StudentTests` or `class TestRunner`).
-
-Context:
-- Context File (Solution/Spec): {context_filename}
-{context_content}
-
-Target File to Test: {target_filename}
-Target Content:
-{target_code}
-
-Language: {language}
-
-Language-Specific Test Harness Example ({language}):
-{language_example}
-
-Based on the context (logic to test) and the example harness above, generate the test script.
-"""
-
     def _extract_java_test_methods(self, text: str) -> list[str]:
         """Extract @Test-annotated Java methods, preserving method bodies."""
         methods: list[str] = []
@@ -737,16 +997,7 @@ Based on the context (logic to test) and the example harness above, generate the
 
     def _normalize_generated_test_script(self, text: str, language: str) -> str:
         """Normalize model output to match runtime harness expectations."""
-        normalized = text.strip()
-
-        # Strip markdown fences if present.
-        if normalized.startswith("```"):
-            lines = normalized.split('\n')
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            normalized = "\n".join(lines).strip()
+        normalized = self._strip_markdown_fences(text)
 
         # Java script harness (TestRunner.java) expects method bodies only.
         if language == 'java':
@@ -810,13 +1061,16 @@ Based on the context (logic to test) and the example harness above, generate the
             if rubric_text:
                 rubric_section = f"Rubric Criterion (Test Goal):\n{rubric_text}\n"
 
-            system_prompt = self.TEST_GENERATION_PROMPT.format(
-                context_filename=context_filename,
-                context_content=context_file_content,
-                target_filename=target_filename,
-                target_code=safe_target_code,
-                language=language,
-                language_example=example
+            system_prompt, _variant_id = await self._resolve_and_format_prompt(
+                'test_generation',
+                dict(
+                    context_filename=context_filename,
+                    context_content=context_file_content,
+                    target_filename=target_filename,
+                    target_code=safe_target_code,
+                    language=language,
+                    language_example=example,
+                ),
             )
 
             if rubric_section:
@@ -824,37 +1078,15 @@ Based on the context (logic to test) and the example harness above, generate the
 
             user_prompt = f"Generate a {language} test script for {target_filename}."
 
-            # Call the appropriate provider
-            if self.provider == 'gemini':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
-            elif self.provider == 'openai':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
-            elif self.provider == 'ollama':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
-            elif self.provider in ('portkey', 'custom'):
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
-            else:
-                raise ValueError(f"Unknown AI provider: {self.provider}")
-
-            text = self._normalize_generated_test_script(text, lang_key)
-
-            return GenerationResult(
-                text=text,
-                success=True,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                cached_tokens=cached_tokens,
-            )
+            result = await self._generate(system_prompt, user_prompt, label='test generation')
+            if result.success:
+                result.text = self._normalize_generated_test_script(result.text, lang_key)
+            return result
 
         except Exception as e:
             error_msg = self._parse_error(e)
             logger.error(f"AI test generation failed: {e}", exc_info=True)
-            return GenerationResult(
-                text="",
-                success=False,
-                error=error_msg
-            )
+            return GenerationResult(text="", success=False, error=error_msg)
 
     def _parse_error(self, e: Exception) -> str:
         """Parse exception into user-friendly error message."""
@@ -910,6 +1142,7 @@ Based on the context (logic to test) and the example harness above, generate the
         # Check Django cache for an existing Gemini cache reference
         cache_name = django_cache.get(cache_key)
         if cache_name:
+            logger.debug(f"Gemini cache hit: {cache_name} for prompt hash {prompt_hash}")
             return cache_name
 
         # Create a new explicit cached content on Gemini's servers
@@ -929,7 +1162,7 @@ Based on the context (logic to test) and the example harness above, generate the
         except Exception as e:
             # Explicit caching can fail (e.g., prompt too short, unsupported model).
             # Fall back to implicit caching (Gemini 2.5+ does this automatically).
-            logger.debug(f"Gemini explicit cache creation skipped: {e}")
+            logger.info(f"Gemini explicit cache creation skipped ({type(e).__name__}): {e}")
             return None
 
     async def _call_gemini(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
@@ -1051,203 +1284,8 @@ Based on the context (logic to test) and the example harness above, generate the
             return data["choices"][0]["message"]["content"], input_tokens, output_tokens, total_tokens, 0
 
     # ------------------------------------------------------------------
-    # Streaming chat with tool calling
-    # ------------------------------------------------------------------
-
-    CHAT_SYSTEM_PROMPT = """You are an AI grading assistant embedded in the codePost code review console.
-You are helping a grader review a student's code submission.
-
-**Your capabilities:**
-- Read and analyze the student's submitted files
-- View autograder test results
-- Create inline comments on specific lines of code
-- Apply rubric comments from the assignment rubric
-- Navigate the grader to specific files and lines
-
-**Important rules:**
-- ALWAYS explain what you want to do before calling a tool
-- Be specific about line numbers and file names
-- When suggesting a comment, explain your reasoning first
-- Keep feedback constructive and educational
-- If you're unsure, ask the grader for clarification
-
-**Character-level precision (code/text files only):**
-For regular code and text files, prefer using start_char and end_char to highlight the specific
-expression, variable, or token the feedback is about, rather than highlighting the full line.
-- start_char is the 0-indexed character offset from the beginning of start_line.
-- end_char is the 0-indexed character offset from the beginning of end_line.
-- Example: to highlight `foo` in `x = foo + bar` (where `foo` starts at position 4 and ends at 7),
-  set start_char=4 and end_char=7.
-- If the feedback applies to an entire line or block, you may omit start_char and end_char.
-- Do NOT use start_char/end_char for notebook (.ipynb) or PDF files.
-
-**Notebook (.ipynb) files:**
-For Jupyter notebook files, line numbers work differently:
-- start_line and end_line are **1-based cell numbers**, NOT line numbers within a cell.
-- The cells are labeled "CELL 1", "CELL 2", etc. in the content below.
-- To comment on a specific cell, set start_line to that cell's number (e.g., for CELL 3, use start_line=3).
-- Comments on notebooks target entire cells — you cannot target a specific line within a cell.
-
-**Context:**
-- Assignment: {assignment_name}
-- Submission ID: {submission_id}
-- Files: {file_list}
-{rubric_context}
-{existing_comments}
-{test_summary}
-"""
-
-    SUMMARIZE_PROMPT = (
-        "Summarize the following grading conversation concisely. "
-        "Preserve: key decisions made, comments added, rubric items applied, "
-        "pending issues, and any grading strategy discussed. "
-        "Be brief — this summary will be used as context for continuing the conversation."
-    )
-
-    # Threshold for automatic summarization (message count)
-    SUMMARIZE_THRESHOLD = 20
-
-    async def chat_stream(
-        self,
-        messages: list[dict[str, str]],
-        tools: list[dict] | None = None,
-    ):
-        """
-        Stream a chat response with tool-calling support.
-
-        Yields dicts:
-          {"type": "token", "content": "..."}          — text delta
-          {"type": "tool_call", "name": "...", "args": {...}, "id": "..."}  — tool request
-          {"type": "done", "input_tokens": N, "output_tokens": N}          — completion
-          {"type": "error", "message": "..."}           — error
-
-        The caller is responsible for:
-          1. Handling tool calls (executing or asking user approval).
-          2. Re-invoking chat_stream with the tool result appended to messages.
-        """
-        if not self.is_configured:
-            yield {"type": "error", "message": "AI is not configured for this course."}
-            return
-
-        try:
-            if self.provider == 'gemini':
-                async for chunk in self._stream_gemini(messages, tools):
-                    yield chunk
-            elif self.provider == 'openai':
-                async for chunk in self._stream_openai(messages, tools):
-                    yield chunk
-            elif self.provider == 'ollama':
-                async for chunk in self._stream_ollama(messages, tools):
-                    yield chunk
-            elif self.provider in ('portkey', 'custom'):
-                async for chunk in self._stream_openai_compat(messages, tools):
-                    yield chunk
-            else:
-                yield {"type": "error", "message": f"Unknown AI provider: {self.provider}"}
-        except Exception as e:
-            error_msg = self._parse_error(e)
-            logger.error(f"Chat stream failed: {e}", exc_info=True)
-            yield {"type": "error", "message": error_msg}
-
-    async def summarize_conversation(self, messages: list[dict[str, str]]) -> str:
-        """Summarize a conversation into a compact paragraph for context window management."""
-        conversation_text = "\n".join(
-            f"[{m['role']}]: {m['content'][:500]}" for m in messages if m.get('content')
-        )
-        prompt = f"{self.SUMMARIZE_PROMPT}\n\n{conversation_text}"
-
-        try:
-            if self.provider == 'gemini':
-                text, *_ = await self._call_gemini(self.SUMMARIZE_PROMPT, conversation_text)
-            elif self.provider == 'openai':
-                text, *_ = await self._call_openai(self.SUMMARIZE_PROMPT, conversation_text)
-            elif self.provider == 'ollama':
-                text, *_ = await self._call_ollama(self.SUMMARIZE_PROMPT, conversation_text)
-            elif self.provider in ('portkey', 'custom'):
-                text, *_ = await self._call_portkey(self.SUMMARIZE_PROMPT, conversation_text)
-            else:
-                return ""
-            return text.strip()
-        except Exception as e:
-            logger.warning(f"Conversation summarization failed: {e}")
-            return ""
-
-    # ------------------------------------------------------------------
     # AI Grading Assistance: Suggested Comments, Summary, Description
     # ------------------------------------------------------------------
-
-    SUGGESTED_COMMENTS_PROMPT = """You are an AI assistant helping grade student code submissions.
-Your task is to analyze the student's code and generate specific, actionable feedback comments
-that a human grader can review and apply.
-
-Guidelines:
-- Generate comments only where there are genuine issues, improvements, or notable patterns
-- Be specific: reference exact code constructs, variable names, or logic errors
-- Each comment should target a specific location in a specific file
-- Keep individual comments concise (1-3 sentences)
-- If a rubric item applies, reference it by ID
-- Suggest appropriate point deductions when applicable
-- Do NOT generate comments for trivial style issues unless relevant to the assignment
-- Be constructive: explain why something is wrong and how to fix it
-
-Assignment: {assignment_name}
-{assignment_description}
-
-{rubric_context}
-
-{test_results}
-"""
-
-    SUBMISSION_SUMMARY_PROMPT = """You are an assistant helping graders understand student submissions.
-Generate a concise summary that helps the grader quickly orient themselves before reviewing.
-
-Include:
-- What the student implemented — mention specific class names, functions, and design patterns used
-- Key strengths worth noting
-- Key issues or concerns requiring grader attention
-- Test results overview (which passed/failed and why, if available)
-- **Grading priority**: which files or areas should the grader review most carefully, and why
-{description_comparison}
-
-Keep the summary to 5-10 bullet points. Use markdown formatting. Just respond with the summary text — do not reply to me directly.
-
-Assignment: {assignment_name}
-{assignment_description}
-
-{test_results}
-
-{rubric}
-"""
-
-    ASSIGNMENT_DESCRIPTION_PROMPT = """You are analyzing a programming assignment.
-Based on the provided materials (template code, test definitions, rubric, student-facing instructions,
-and sample student submissions), generate a clear, concise description of what this assignment asks
-students to do.
-
-Include:
-- The main objective and learning goals
-- Key requirements and constraints
-- What a correct solution should accomplish
-- Important implementation details students need to handle
-- **Main submission file**: Identify which file is the primary/main file that students are expected \
-to implement their solution in (e.g. "The main submission file is `calculator.py`."). Look at which \
-file contains the core logic, is targeted by tests, or is the entry point. Use the exact filename \
-(e.g. `calculator.py`, not just `calculator`). If multiple files are equally important, list them all.
-
-This description will be used as AI context to help generate better feedback for student submissions. Do not reply to me directly — just generate the description text.
-Keep it factual and specific — avoid generic statements.
-
-Assignment Name: {assignment_name}
-Student-Facing Instructions: {explanation}
-
-{template_files}
-
-{test_cases}
-
-{rubric}
-
-{submission_samples}
-"""
 
     @staticmethod
     def _add_line_numbers(content: str) -> str:
@@ -1381,35 +1419,30 @@ Student-Facing Instructions: {explanation}
         Returns a list of GenerationResults — one per batch call. The text of each
         result is a JSON array of suggestion objects.
         """
-        import json as json_mod
         from asgiref.sync import sync_to_async
 
         ctx = await sync_to_async(self._collect_submission_context)(submission)
         assignment = submission.assignment
 
-        system_prompt = self.SUGGESTED_COMMENTS_PROMPT.format(
-            assignment_name=assignment.name,
-            assignment_description=ctx['assignment_description'],
-            rubric_context=ctx['rubric_context'] or "No rubric defined.",
-            test_results=ctx['test_results'] or "No test results available.",
+        # Pass test_results="" for backward compat with DB-stored prompt variants
+        # that still reference {test_results}. Actual test results go in user prompt
+        # so the system prompt stays stable across submissions (enables caching).
+        system_prompt, _variant_id = await self._resolve_and_format_prompt(
+            'suggested_comments',
+            dict(
+                assignment_name=assignment.name,
+                assignment_description=ctx['assignment_description'],
+                rubric_context=ctx['rubric_context'] or "No rubric defined.",
+                test_results="",
+            ),
         )
 
         # Build the user prompt with all file contents
+        test_results_section = ctx['test_results'] or "No test results available."
         file_sections = []
-        has_notebooks = False
+        has_notebooks = any(f.get('is_notebook') for f in ctx['files'])
         for f in ctx['files']:
-            if f.get('is_notebook'):
-                has_notebooks = True
-                # Notebooks are pre-formatted as enumerated cells — no code fence
-                file_sections.append(
-                    f"### File: {f['name']} (ID: {f['id']}) [NOTEBOOK]\n{f['content']}"
-                )
-            else:
-                # Prepend 0-indexed line numbers so the AI references them accurately
-                numbered = self._add_line_numbers(f['content'])
-                file_sections.append(
-                    f"### File: {f['name']} (ID: {f['id']})\n```{f['extension'].lstrip('.')}\n{numbered}\n```"
-                )
+            file_sections.append(self._format_file_section(f))
 
         notebook_note = ""
         if has_notebooks:
@@ -1422,6 +1455,8 @@ Student-Facing Instructions: {explanation}
         user_prompt = f"""Analyze the following student submission files and generate feedback comments.
 Each line of code is prefixed with its 0-indexed line number (e.g. "0: ...", "1: ...").
 Use these exact line numbers in your response.
+
+{test_results_section}
 
 {chr(10).join(file_sections)}
 
@@ -1443,67 +1478,45 @@ when the comment applies to the entire line or block. Do NOT use start_char/end_
 Generate only substantive comments. Return an empty array [] if no issues found.
 """
 
+        result = await self._generate(system_prompt, user_prompt, label='suggested comments generation')
+        if not result.success:
+            return [result]
         try:
-            if self.provider == 'gemini':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
-            elif self.provider == 'openai':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
-            elif self.provider == 'ollama':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
-            elif self.provider in ('portkey', 'custom'):
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
-            else:
-                raise ValueError(f"Unknown AI provider: {self.provider}")
-
-            # Strip markdown fences if present
-            cleaned = text.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                cleaned = "\n".join(lines).strip()
-
-            # Validate it's parseable JSON
-            json_mod.loads(cleaned)
-
-            return [GenerationResult(
-                text=cleaned,
-                success=True,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                cached_tokens=cached_tokens,
-            )]
-
+            result.text = self._parse_json_response(result.text)
+            return [result]
         except Exception as e:
             error_msg = self._parse_error(e)
             logger.error(f"AI suggested comments generation failed: {e}", exc_info=True)
-            return [GenerationResult(
-                text="",
-                success=False,
-                error=error_msg,
-            )]
+            return [GenerationResult(text="", success=False, error=error_msg)]
 
-    async def generate_file_suggestions(self, submission, file_obj) -> list[GenerationResult]:
+    async def generate_file_suggestions(self, submission, file_obj, variant_id_override: int | None = None) -> list[GenerationResult]:
         """
         Generate AI-suggested comments for a single file within a submission.
         Returns a list of GenerationResults (typically one). The text of each
         result is a JSON array of suggestion objects.
+
+        When *variant_id_override* is given, use that specific prompt variant
+        instead of the active one (used during A/B experiments).
         """
-        import json as json_mod
         from asgiref.sync import sync_to_async
 
         ctx = await sync_to_async(self._collect_submission_context)(submission)
         assignment = submission.assignment
 
-        system_prompt = self.SUGGESTED_COMMENTS_PROMPT.format(
-            assignment_name=assignment.name,
-            assignment_description=ctx['assignment_description'],
-            rubric_context=ctx['rubric_context'] or "No rubric defined.",
-            test_results=ctx['test_results'] or "No test results available.",
+        # Pass test_results="" for backward compat with DB-stored prompt variants.
+        # Actual test results go in user prompt to keep system prompt cacheable.
+        system_prompt, variant_id = await self._resolve_and_format_prompt(
+            'suggested_comments',
+            dict(
+                assignment_name=assignment.name,
+                assignment_description=ctx['assignment_description'],
+                rubric_context=ctx['rubric_context'] or "No rubric defined.",
+                test_results="",
+            ),
+            variant_id_override=variant_id_override,
         )
+
+        test_results_section = ctx['test_results'] or "No test results available."
 
         # Build user prompt with just the target file, plus context from other files
         is_notebook = file_obj.name.endswith('.ipynb')
@@ -1513,21 +1526,16 @@ Generate only substantive comments. Return an empty array [] if no issues found.
             content = file_obj.data
             if len(content) > 50000:
                 content = content[:50000] + "\n... (truncated)"
-            # Prepend 0-indexed line numbers so the AI references them accurately
             content = self._add_line_numbers(content)
 
         other_files = []
         for f in ctx['files']:
             if f['id'] != file_obj.id:
-                if f.get('is_notebook'):
-                    other_files.append(f"### File: {f['name']}\n{f['content']}")
-                else:
-                    numbered = self._add_line_numbers(f['content'])
-                    other_files.append(f"### File: {f['name']}\n```{f['extension'].lstrip('.')}\n{numbered}\n```")
+                other_files.append(f"- {f['name']}")
 
         context_section = ""
         if other_files:
-            context_section = f"\n\nOther submission files for context:\n{chr(10).join(other_files)}"
+            context_section = f"\n\nOther files in this submission (names only, for reference):\n{chr(10).join(other_files)}"
 
         notebook_note = ""
         if is_notebook:
@@ -1543,6 +1551,9 @@ Generate only substantive comments. Return an empty array [] if no issues found.
         user_prompt = f"""Analyze the following file and generate feedback comments for it.
 Each line of code is prefixed with its 0-indexed line number (e.g. "0: ...", "1: ...").
 Use these exact line numbers in your response.
+IMPORTANT: Only generate comments about code in the TARGET file below. The other files are provided as context only — do NOT generate suggestions for them.
+
+{test_results_section}
 
 {file_header}
 {context_section}
@@ -1565,49 +1576,19 @@ when the comment applies to the entire line or block. Do NOT use start_char/end_
 Generate only substantive comments. Return an empty array [] if no issues found.
 """
 
+        result = await self._generate(system_prompt, user_prompt, label='file suggestions generation')
+        result.variant_id = variant_id
+        if not result.success:
+            return [result]
         try:
-            if self.provider == 'gemini':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
-            elif self.provider == 'openai':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
-            elif self.provider == 'ollama':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
-            elif self.provider in ('portkey', 'custom'):
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
-            else:
-                raise ValueError(f"Unknown AI provider: {self.provider}")
-
-            # Strip markdown fences if present
-            cleaned = text.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                cleaned = "\n".join(lines).strip()
-
-            json_mod.loads(cleaned)
-
-            return [GenerationResult(
-                text=cleaned,
-                success=True,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                cached_tokens=cached_tokens,
-            )]
-
+            result.text = self._parse_json_response(result.text)
+            return [result]
         except Exception as e:
             error_msg = self._parse_error(e)
             logger.error(f"AI file suggestions generation failed: {e}", exc_info=True)
-            return [GenerationResult(
-                text="",
-                success=False,
-                error=error_msg,
-            )]
+            return [GenerationResult(text="", success=False, error=error_msg)]
 
-    async def generate_submission_summary(self, submission, target_file=None) -> GenerationResult:
+    async def generate_submission_summary(self, submission, target_file=None, variant_id_override: int | None = None) -> GenerationResult:
         """Generate a summary of a submission to help graders orient themselves.
 
         Args:
@@ -1617,6 +1598,8 @@ Generate only substantive comments. Return an empty array [] if no issues found.
                 prominently and instruct the AI to focus its analysis on it. Other files
                 are still included as context. When None, all files are treated equally
                 (existing behavior).
+            variant_id_override: When given, use this specific prompt variant instead
+                of the active one (used during A/B experiments).
         """
         from asgiref.sync import sync_to_async
 
@@ -1629,13 +1612,21 @@ Generate only substantive comments. Return an empty array [] if no issues found.
             if has_description else ""
         )
 
-        system_prompt = self.SUBMISSION_SUMMARY_PROMPT.format(
-            assignment_name=assignment.name,
-            assignment_description=ctx['assignment_description'],
-            test_results=ctx['test_results'] or "No test results available.",
-            rubric=ctx['rubric_context'] or "No rubric defined.",
-            description_comparison=description_comparison,
+        # Pass test_results="" for backward compat with DB-stored prompt variants.
+        # Actual test results go in user prompt to keep system prompt cacheable.
+        system_prompt, variant_id = await self._resolve_and_format_prompt(
+            'submission_summary',
+            dict(
+                assignment_name=assignment.name,
+                assignment_description=ctx['assignment_description'],
+                test_results="",
+                rubric=ctx['rubric_context'] or "No rubric defined.",
+                description_comparison=description_comparison,
+            ),
+            variant_id_override=variant_id_override,
         )
+
+        test_results_section = ctx['test_results'] or "No test results available."
 
         # Build user prompt with file contents, annotating student vs provided files
         target_file_id = target_file.id if target_file else None
@@ -1663,6 +1654,8 @@ Generate only substantive comments. Return an empty array [] if no issues found.
             )
             user_prompt = f"""Summarize this student submission for the grader:
 
+{test_results_section}
+
 {focus_note}{chr(10).join(primary_sections)}
 
 ## CONTEXT FILES
@@ -1674,36 +1667,18 @@ Provide a concise markdown summary following the guidelines in your instructions
             file_sections = primary_sections + context_sections
             user_prompt = f"""Summarize this student submission for the grader:
 
+{test_results_section}
+
 {chr(10).join(file_sections)}
 
 Provide a concise markdown summary following the guidelines in your instructions.
 """
 
-        try:
-            if self.provider == 'gemini':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
-            elif self.provider == 'openai':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
-            elif self.provider == 'ollama':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
-            elif self.provider in ('portkey', 'custom'):
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
-            else:
-                raise ValueError(f"Unknown AI provider: {self.provider}")
-
-            return GenerationResult(
-                text=text.strip(),
-                success=True,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                cached_tokens=cached_tokens,
-            )
-
-        except Exception as e:
-            error_msg = self._parse_error(e)
-            logger.error(f"AI submission summary generation failed: {e}", exc_info=True)
-            return GenerationResult(text="", success=False, error=error_msg)
+        result = await self._generate(system_prompt, user_prompt, label='submission summary generation')
+        result.variant_id = variant_id
+        if result.success:
+            result.text = result.text.strip()
+        return result
 
     async def generate_assignment_description(self, assignment) -> GenerationResult:
         """Generate an AI description of what an assignment is asking students to do."""
@@ -1785,354 +1760,24 @@ Provide a concise markdown summary following the guidelines in your instructions
             else "No student submissions available yet."
         )
 
-        system_prompt = self.ASSIGNMENT_DESCRIPTION_PROMPT.format(
-            assignment_name=assignment.name,
-            explanation=assignment.explanation or "(No student-facing instructions provided)",
-            template_files="\n".join(template_parts) if template_parts else "No template files.",
-            test_cases="\n".join(test_parts) if test_parts else "No test cases defined.",
-            rubric="\n".join(rubric_parts) if rubric_parts else "No rubric defined.",
-            submission_samples=submission_samples_text,
+        system_prompt, _variant_id = await self._resolve_and_format_prompt(
+            'assignment_description',
+            dict(
+                assignment_name=assignment.name,
+                explanation=assignment.explanation or "(No student-facing instructions provided)",
+                template_files="\n".join(template_parts) if template_parts else "No template files.",
+                test_cases="\n".join(test_parts) if test_parts else "No test cases defined.",
+                rubric="\n".join(rubric_parts) if rubric_parts else "No rubric defined.",
+                submission_samples=submission_samples_text,
+            ),
         )
 
         user_prompt = "Generate a concise assignment description based on the materials above."
 
-        try:
-            if self.provider == 'gemini':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_gemini(system_prompt, user_prompt)
-            elif self.provider == 'openai':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_openai(system_prompt, user_prompt)
-            elif self.provider == 'ollama':
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_ollama(system_prompt, user_prompt)
-            elif self.provider in ('portkey', 'custom'):
-                text, input_tokens, output_tokens, total_tokens, cached_tokens = await self._call_portkey(system_prompt, user_prompt)
-            else:
-                raise ValueError(f"Unknown AI provider: {self.provider}")
-
-            return GenerationResult(
-                text=text.strip(),
-                success=True,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                cached_tokens=cached_tokens,
-            )
-
-        except Exception as e:
-            error_msg = self._parse_error(e)
-            logger.error(f"AI assignment description generation failed: {e}", exc_info=True)
-            return GenerationResult(text="", success=False, error=error_msg)
-
-    def build_chat_system_prompt(
-        self,
-        assignment_name: str,
-        submission_id: int,
-        file_list: str,
-        rubric_context: str = "",
-        existing_comments: str = "",
-        test_summary: str = "",
-    ) -> str:
-        """DEPRECATED - NO LONGER SUPPORTING CHATS
-        
-        Build the system prompt for chat, filling in context.
-        """
-        return self.CHAT_SYSTEM_PROMPT.format(
-            assignment_name=assignment_name,
-            submission_id=submission_id,
-            file_list=file_list,
-            rubric_context=f"- Rubric:\n{rubric_context}" if rubric_context else "",
-            existing_comments=f"- Existing comments:\n{existing_comments}" if existing_comments else "",
-            test_summary=f"- Test results:\n{test_summary}" if test_summary else "",
-        )
-
-    # ------------------------------------------------------------------
-    # Provider-specific streaming implementations
-    # ------------------------------------------------------------------
-
-    async def _stream_openai(self, messages: list[dict[str, str]], tools: list[dict] | None):
-        """Stream from OpenAI with tool calling."""
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=self.api_key)
-        kwargs: dict = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
-        if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
-
-        collected_tool_calls: dict[int, dict] = {}
-        input_tokens = 0
-        output_tokens = 0
-        cached_tokens = 0
-
-        stream = await client.chat.completions.create(**kwargs)
-        async for chunk in stream:
-            if chunk.usage:
-                input_tokens = chunk.usage.prompt_tokens or 0
-                output_tokens = chunk.usage.completion_tokens or 0
-                if hasattr(chunk.usage, 'prompt_tokens_details') and chunk.usage.prompt_tokens_details:
-                    cached_tokens = getattr(chunk.usage.prompt_tokens_details, 'cached_tokens', 0) or 0
-
-            for choice in (chunk.choices or []):
-                delta = choice.delta
-                if delta.content:
-                    yield {"type": "token", "content": delta.content}
-
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in collected_tool_calls:
-                            collected_tool_calls[idx] = {
-                                "id": tc.id or "",
-                                "name": "",
-                                "args_str": "",
-                            }
-                        if tc.function:
-                            if tc.function.name:
-                                collected_tool_calls[idx]["name"] = tc.function.name
-                            if tc.function.arguments:
-                                collected_tool_calls[idx]["args_str"] += tc.function.arguments
-
-                if choice.finish_reason == "tool_calls":
-                    import json
-                    for _idx, tc_data in sorted(collected_tool_calls.items()):
-                        try:
-                            args = json.loads(tc_data["args_str"]) if tc_data["args_str"] else {}
-                        except json.JSONDecodeError:
-                            args = {}
-                        yield {
-                            "type": "tool_call",
-                            "id": tc_data["id"],
-                            "name": tc_data["name"],
-                            "args": args,
-                        }
-                    return  # Pause for tool execution
-
-        yield {"type": "done", "input_tokens": input_tokens, "output_tokens": output_tokens, "cached_tokens": cached_tokens}
-
-    async def _stream_gemini(self, messages: list[dict[str, str]], tools: list[dict] | None):
-        """Stream from Google Gemini with tool calling."""
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=self.api_key)
-
-        # Convert OpenAI-format messages to Gemini format
-        system_instruction = None
-        contents: list = []
-        for msg in messages:
-            role = msg["role"]
-            if role == "system":
-                system_instruction = msg["content"]
-            elif role == "user":
-                contents.append(types.Content(role="user", parts=[types.Part.from_text(text=msg["content"])]))
-            elif role == "assistant":
-                contents.append(types.Content(role="model", parts=[types.Part.from_text(text=msg["content"])]))
-            elif role == "tool":
-                contents.append(types.Content(role="user", parts=[types.Part.from_text(text=f"[Tool Result]: {msg['content']}")]))
-
-        # Convert OpenAI tool schemas to Gemini tool declarations
-        gemini_tools = None
-        if tools:
-            declarations = []
-            for t in tools:
-                func = t.get("function", {})
-                declarations.append(types.FunctionDeclaration(
-                    name=func["name"],
-                    description=func.get("description", ""),
-                    parameters=func.get("parameters"),
-                ))
-            gemini_tools = [types.Tool(function_declarations=declarations)]
-
-        # Try explicit context caching for the system instruction
-        cache_name = None
-        if system_instruction:
-            cache_name = await self._get_or_create_gemini_cache(system_instruction)
-
-        if cache_name:
-            config = types.GenerateContentConfig(
-                cached_content=cache_name,
-                tools=gemini_tools,
-                thinking_config=types.ThinkingConfig(thinking_budget=8000) if (self.model or '').startswith('gemini-2.5') else None,
-            )
-        else:
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                tools=gemini_tools,
-                thinking_config=types.ThinkingConfig(thinking_budget=8000) if (self.model or '').startswith('gemini-2.5') else None,
-            )
-
-        full_text = ""
-        input_tokens = 0
-        output_tokens = 0
-        cached_tokens = 0
-        is_thinking = False
-
-        async for chunk in await client.aio.models.generate_content_stream(
-            model=self.model,
-            contents=contents,
-            config=config,
-        ):
-            if chunk.usage_metadata:
-                input_tokens = getattr(chunk.usage_metadata, 'prompt_token_count', 0) or 0
-                output_tokens = getattr(chunk.usage_metadata, 'candidates_token_count', 0) or 0
-                cached_tokens = getattr(chunk.usage_metadata, 'cached_content_token_count', 0) or 0
-
-            if chunk.candidates:
-                for candidate in chunk.candidates:
-                    if candidate.content and candidate.content.parts:
-                        for part in candidate.content.parts:
-                            # Thought tokens (Gemini 2.5 thinking mode) — signal UI but don't emit as content
-                            if getattr(part, 'thought', False):
-                                if not is_thinking:
-                                    is_thinking = True
-                                    yield {"type": "thinking"}
-                                continue
-                            if is_thinking and part.text:
-                                is_thinking = False
-                                yield {"type": "thinking_done"}
-                            if part.text:
-                                yield {"type": "token", "content": part.text}
-                                full_text += part.text
-                            if part.function_call:
-                                fc = part.function_call
-                                yield {
-                                    "type": "tool_call",
-                                    "id": fc.name,
-                                    "name": fc.name,
-                                    "args": dict(fc.args) if fc.args else {},
-                                }
-                                return  # Pause for tool execution
-
-        yield {"type": "done", "input_tokens": input_tokens, "output_tokens": output_tokens, "cached_tokens": cached_tokens}
-
-    async def _stream_ollama(self, messages: list[dict[str, str]], tools: list[dict] | None):
-        """Stream from Ollama (local). Tool calling via /api/chat endpoint."""
-        import httpx
-        import json
-
-        base_url = (self.base_url or "http://localhost:11434").rstrip("/")
-        payload: dict = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-        }
-        if tools:
-            payload["tools"] = tools
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream("POST", f"{base_url}/api/chat", json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    msg = data.get("message", {})
-
-                    # Tool calls
-                    if msg.get("tool_calls"):
-                        for tc in msg["tool_calls"]:
-                            func = tc.get("function", {})
-                            yield {
-                                "type": "tool_call",
-                                "id": func.get("name", ""),
-                                "name": func.get("name", ""),
-                                "args": func.get("arguments", {}),
-                            }
-                        return
-
-                    # Text content
-                    content = msg.get("content", "")
-                    if content:
-                        yield {"type": "token", "content": content}
-
-                    if data.get("done"):
-                        yield {
-                            "type": "done",
-                            "input_tokens": data.get("prompt_eval_count", 0) or 0,
-                            "output_tokens": data.get("eval_count", 0) or 0,
-                            "cached_tokens": 0,
-                        }
-                        return
-
-    async def _stream_openai_compat(self, messages: list[dict[str, str]], tools: list[dict] | None):
-        """Stream from Portkey/Custom (OpenAI-compatible). Reuses the OpenAI streaming logic."""
-        import httpx
-        import json
-
-        base_url = (self.base_url or "https://api.portkey.ai/v1").rstrip("/")
-        if base_url.endswith("/v1"):
-            url = f"{base_url}/chat/completions"
-        else:
-            url = f"{base_url}/v1/chat/completions"
-
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["x-portkey-api-key"] = self.api_key
-
-        payload: dict = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-        }
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
-
-        collected_tool_calls: dict[int, dict] = {}
-        input_tokens = 0
-        output_tokens = 0
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-
-                    if "usage" in data and data["usage"]:
-                        input_tokens = data["usage"].get("prompt_tokens", 0) or 0
-                        output_tokens = data["usage"].get("completion_tokens", 0) or 0
-
-                    for choice in data.get("choices", []):
-                        delta = choice.get("delta", {})
-                        if delta.get("content"):
-                            yield {"type": "token", "content": delta["content"]}
-
-                        for tc in delta.get("tool_calls", []):
-                            idx = tc.get("index", 0)
-                            if idx not in collected_tool_calls:
-                                collected_tool_calls[idx] = {"id": tc.get("id", ""), "name": "", "args_str": ""}
-                            func = tc.get("function", {})
-                            if func.get("name"):
-                                collected_tool_calls[idx]["name"] = func["name"]
-                            if func.get("arguments"):
-                                collected_tool_calls[idx]["args_str"] += func["arguments"]
-
-                        if choice.get("finish_reason") == "tool_calls":
-                            for _idx, tc_data in sorted(collected_tool_calls.items()):
-                                try:
-                                    args = json.loads(tc_data["args_str"]) if tc_data["args_str"] else {}
-                                except json.JSONDecodeError:
-                                    args = {}
-                                yield {"type": "tool_call", "id": tc_data["id"], "name": tc_data["name"], "args": args}
-                            return
-
-        yield {"type": "done", "input_tokens": input_tokens, "output_tokens": output_tokens, "cached_tokens": 0}
+        result = await self._generate(system_prompt, user_prompt, label='assignment description generation')
+        if result.success:
+            result.text = result.text.strip()
+        return result
 
 
 REGION_COMMENT_MARKER = 1_000_000
@@ -2309,7 +1954,7 @@ def build_context_from_file(
     )
     
     # Determine if we need full file content or all files content
-    system_prompt_template = assignment.ai_system_prompt if assignment.ai_system_prompt else AIService.DEFAULT_SYSTEM_PROMPT
+    system_prompt_template = assignment.ai_system_prompt if assignment.ai_system_prompt else AIService.resolve_prompt('comment_generation')[0]
     needs_file_content = '{file_content}' in system_prompt_template
     needs_all_files = '{all_files}' in system_prompt_template
     

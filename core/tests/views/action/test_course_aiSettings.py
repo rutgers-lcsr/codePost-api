@@ -65,6 +65,8 @@ class TestPermissions_Course_aiSettings(APITestCase):
       'aiCommentsEnabled',
       'aiUseOwnSettings',
       'aiTokenRates',
+      'aiFeatureConfig',
+      'aiFeatures',
       'orgAiAvailable',
       'hasApiKey',
       'apiKeyHint',

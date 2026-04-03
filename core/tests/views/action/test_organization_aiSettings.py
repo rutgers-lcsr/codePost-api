@@ -73,6 +73,8 @@ class TestOrganizationAISettings(APITestCase):
             'aiCoursePolicy',
             'aiEnabledCourseIds',
             'aiTokenRates',
+            'aiFeatureConfig',
+            'aiFeatures',
             'aiEnabled',
             'aiCommentsEnabled',
             'hasApiKey',

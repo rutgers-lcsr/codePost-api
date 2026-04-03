@@ -23,9 +23,13 @@ Usage:
 
     # Limit to first N submissions:
     python manage.py run_submissions --assignment-id 143 --max-submissions 5
+
+    # Run with higher concurrency (default: 4):
+    python manage.py run_submissions --assignment-id 143 --concurrency 8
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from decimal import Decimal
@@ -79,6 +83,12 @@ class Command(BaseCommand):
             default=False,
             help="Skip AI generation and only run file/test execution.",
         )
+        parser.add_argument(
+            "--concurrency",
+            type=int,
+            default=4,
+            help="Number of submissions to process in parallel (default: 4).",
+        )
 
     def handle(self, *args, **options):
         # Configure Celery for eager (synchronous) execution
@@ -130,27 +140,65 @@ class Command(BaseCommand):
             f"Assignment: {assignment.name} (id={assignment.pk}), "
             f"Course: {assignment.course.name} {assignment.course.period}"
         ))
-        self.stdout.write(f"Processing {total} submission(s)...\n")
 
-        # Snapshot AI usage before run
-        cost_before = self._get_ai_cost(assignment)
+        concurrency = options["concurrency"]
+        self.stdout.write(f"Processing {total} submission(s) with concurrency={concurrency}...\n")
 
-        exec_success = 0
-        exec_fail = 0
-        ai_success = 0
-        ai_fail = 0
-        ai_skip = 0
-        total_time = 0.0
+        asyncio.run(self._ahandle(submissions, assignment, ai_only, no_ai, concurrency))
 
-        for i, sub in enumerate(submissions, 1):
-            students = ", ".join(sub.students.values_list("email", flat=True)) or "(no students)"
-            self.stdout.write(f"[{i}/{total}] Submission {sub.pk} ({students})")
+    async def _ahandle(
+        self,
+        submissions: list[Submission],
+        assignment: Assignment,
+        ai_only: bool,
+        no_ai: bool,
+        concurrency: int,
+    ):
+        """Async entry point — processes submissions concurrently."""
+        total = len(submissions)
+        cost_before = await asyncio.to_thread(self._get_ai_cost, assignment)
+        sem = asyncio.Semaphore(concurrency)
+        completed = 0
 
-            sub_start = time.time()
+        async def process_one(idx: int, sub: Submission) -> dict[str, Any]:
+            nonlocal completed
+            async with sem:
+                students = await asyncio.to_thread(
+                    lambda: ", ".join(sub.students.values_list("email", flat=True)) or "(no students)"
+                )
+                sub_start = time.time()
+                exec_result = None
+                ai_result = None
 
-            # --- Phase 1 & 2: File execution + tests ---
-            if not ai_only:
-                result = self._run_execution(sub)
+                if not ai_only:
+                    exec_result = await asyncio.to_thread(self._run_execution, sub)
+                if not no_ai:
+                    ai_result = await asyncio.to_thread(self._run_ai_generation, sub)
+
+                elapsed = time.time() - sub_start
+                completed += 1
+                self.stderr.write(f"  [{completed}/{total}] done\r")
+                return {
+                    "idx": idx,
+                    "sub": sub,
+                    "students": students,
+                    "exec_result": exec_result,
+                    "ai_result": ai_result,
+                    "elapsed": elapsed,
+                }
+
+        wall_start = time.time()
+        results = await asyncio.gather(
+            *(process_one(i, sub) for i, sub in enumerate(submissions, 1))
+        )
+        wall_time = time.time() - wall_start
+
+        # Print results in submission order
+        exec_success = exec_fail = ai_success = ai_fail = ai_skip = 0
+        for r in results:
+            self.stdout.write(f"[{r['idx']}/{total}] Submission {r['sub'].pk} ({r['students']})")
+            if r["exec_result"] is not None:
+                result = r["exec_result"]
                 if result["success"]:
                     exec_success += 1
                     detail = result.get("message", "")
@@ -162,37 +210,32 @@ class Command(BaseCommand):
                 else:
                     exec_fail += 1
                     self.stdout.write(f"  Execution: {self.style.ERROR('FAILED')} {result.get('error', '')}")
-
-            # --- Phase 3: AI generation ---
-            if not no_ai:
-                ai_result = self._run_ai_generation(sub)
-                if ai_result == "success":
+            if r["ai_result"] is not None:
+                ai_res = r["ai_result"]
+                if ai_res == "success":
                     ai_success += 1
                     self.stdout.write(f"  AI generation: {self.style.SUCCESS('OK')}")
-                elif ai_result == "skipped":
+                elif ai_res == "skipped":
                     ai_skip += 1
                     self.stdout.write(f"  AI generation: {self.style.WARNING('SKIPPED')} (not configured)")
                 else:
                     ai_fail += 1
-                    self.stdout.write(f"  AI generation: {self.style.ERROR('FAILED')} {ai_result}")
-
-            elapsed = time.time() - sub_start
-            total_time += elapsed
-            self.stdout.write(f"  Time: {elapsed:.1f}s\n")
+                    self.stdout.write(f"  AI generation: {self.style.ERROR('FAILED')} {ai_res}")
+            self.stdout.write(f"  Time: {r['elapsed']:.1f}s\n")
 
         # Cost summary
-        cost_after = self._get_ai_cost(assignment)
+        cost_after = await asyncio.to_thread(self._get_ai_cost, assignment)
         run_cost = cost_after - cost_before
 
         self.stdout.write("=" * 60)
-        self.stdout.write(self.style.SUCCESS(f"Done! Processed {total} submission(s) in {total_time:.1f}s"))
+        self.stdout.write(self.style.SUCCESS(f"Done! Processed {total} submission(s) in {wall_time:.1f}s"))
         if not ai_only:
             self.stdout.write(f"  Execution: {exec_success} succeeded, {exec_fail} failed")
         if not no_ai:
             self.stdout.write(f"  AI generation: {ai_success} succeeded, {ai_fail} failed, {ai_skip} skipped")
         self.stdout.write(f"\n  AI cost this run: ${run_cost:.6f}")
         self.stdout.write(f"  Total AI cost for assignment: ${cost_after:.6f}")
-        self._print_ai_usage_breakdown(assignment, cost_before)
+        await asyncio.to_thread(self._print_ai_usage_breakdown, assignment, cost_before)
 
     def _run_execution(self, submission: Submission) -> dict[str, Any]:
         """Run file execution + tests for a single submission."""

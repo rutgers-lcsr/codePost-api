@@ -126,6 +126,39 @@ class TestGetUsageSummary(APITestCase):
         )
         self.assertEqual(summary['requestCount'], 0)
 
+    def test_end_date_at_midnight_is_inclusive(self):
+        """An end_date at 00:00:00 (bare date) should still include records created that day."""
+        from django.utils.dateparse import parse_datetime
+        # Create a record at 14:00 on a specific day
+        specific_day = self.now.replace(hour=14, minute=30, second=0, microsecond=0)
+        AIUsageRecord.objects.create(
+            organization=self.org,
+            course=self.course,
+            assignment=self.assignment,
+            user=self.user,
+            provider='openai',
+            model='gpt-4o-mini',
+            request_type='comment_generation',
+            input_tokens=100,
+            output_tokens=50,
+            total_tokens=150,
+            estimated_cost=Decimal('0.001'),
+            status='success',
+        )
+        # Manually set the created timestamp to the specific time
+        record = AIUsageRecord.objects.latest('id')
+        AIUsageRecord.objects.filter(pk=record.pk).update(created=specific_day)
+
+        # Query with end_date at midnight of the same day (simulating a date picker)
+        midnight = specific_day.replace(hour=0, minute=0, second=0, microsecond=0)
+        summary = get_usage_summary(
+            queryset=AIUsageRecord.objects.filter(pk=record.pk),
+            granularity='daily',
+            start_date=midnight,
+            end_date=midnight,  # same day at 00:00:00 — should be snapped to end-of-day
+        )
+        self.assertEqual(summary['requestCount'], 1)
+
 
 # ===========================================================================
 # Course AI Usage endpoint

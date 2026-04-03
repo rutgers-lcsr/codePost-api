@@ -139,3 +139,22 @@ def cleanup_environment_images(sender, instance, **kwargs):
         logger.info(f"Queued image cleanup for deleted environment {instance.id}")
     except Exception as e:
         logger.error(f"Failed to queue image cleanup for environment {instance.id}: {e}")
+
+
+@receiver(post_save, sender='core.PromptFeedback')
+def check_auto_improve_threshold(sender, instance, created, **kwargs):
+    """Dispatch threshold-based auto-improvement when new feedback is created.
+
+    The actual threshold check happens inside the Celery task to avoid
+    adding latency to the feedback save path.
+    """
+    if not created:
+        return
+    if instance.is_custom_context:
+        return
+
+    try:
+        from core.tasks import auto_improve_prompt_threshold
+        auto_improve_prompt_threshold.delay(instance.prompt_type)
+    except Exception as e:
+        logger.debug(f"Failed to dispatch auto-improve threshold check: {e}")

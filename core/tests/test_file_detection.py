@@ -256,6 +256,70 @@ class DetectMainFileTests(TestCase):
         # Should still detect via assignment name match
         self.assertEqual(result, f_calc)
 
+    def test_notebook_selected_over_non_code_files(self):
+        """Notebook (.ipynb) should be selected over PDF/TXT companions."""
+        assignment = _make_assignment(self.course, name='Lab 03 - Amazon Reviews')
+        _make_environment(assignment, 'python-3.12')
+
+        sub = _make_submission(assignment)
+        f_nb = _make_submission_file(
+            sub, 'Lab03-V1-release.ipynb', '.ipynb',
+            data='{"cells": [], "metadata": {}}',
+        )
+        _make_submission_file(sub, 'log.txt', '.txt', data='some log output')
+        _make_submission_file(
+            sub, 'cgpt.pdf', '.pdf',
+            data='%PDF-1.4 large content here ' * 100,  # larger than notebook
+        )
+
+        result = detect_main_file(sub)
+        self.assertEqual(result, f_nb)
+
+    def test_non_code_files_devalued_but_not_excluded(self):
+        """Non-code files are penalized but still eligible if nothing else qualifies."""
+        assignment = _make_assignment(self.course, name='HW12')
+        _make_assignment_file(assignment, 'output.pdf', '.pdf', required=True)
+
+        sub = _make_submission(assignment)
+        f_pdf = _make_submission_file(sub, 'output.pdf', '.pdf', data='%PDF content')
+        _make_submission_file(sub, 'notes.txt', '.txt', data='some notes')
+
+        result = detect_main_file(sub)
+        # output.pdf gets required(+3) + non-code(-2) + largest(+1) = 2 → below threshold
+        # notes.txt gets non-code(-2) = -2
+        # Neither meets threshold → returns None, but pdf is not excluded from candidates
+        self.assertIsNone(result)
+
+    def test_assignment_name_match_with_numeric_spacing(self):
+        """'Lab03' in filename should match 'Lab 03' in assignment name."""
+        assignment = _make_assignment(self.course, name='Lab 03 - Amazon Reviews')
+        _make_environment(assignment, 'python-3.12')
+        _make_assignment_file(assignment, 'Lab03.py', '.py', required=True)
+        _make_assignment_file(assignment, 'utils.py', '.py', required=True)
+
+        sub = _make_submission(assignment)
+        f_lab = _make_submission_file(sub, 'Lab03.py', '.py', data='# solution')
+        _make_submission_file(sub, 'utils.py', '.py', data='# helpers')
+
+        result = detect_main_file(sub)
+        # Lab03.py: required(+3) + assignment-name-match(+4) = 7
+        # utils.py: required(+3) = 3
+        self.assertEqual(result, f_lab)
+
+    def test_notebook_bonus_meets_threshold_alone(self):
+        """A lone notebook among non-code files should meet the confidence threshold."""
+        assignment = _make_assignment(self.course, name='HW11')
+        _make_environment(assignment, 'python-3.12')
+
+        sub = _make_submission(assignment)
+        f_nb = _make_submission_file(sub, 'analysis.ipynb', '.ipynb', data='{"cells": []}')
+        _make_submission_file(sub, 'data.csv', '.csv', data='a,b,c\n1,2,3\n' * 50)
+
+        result = detect_main_file(sub)
+        # analysis.ipynb: notebook(+3) = 3 → meets threshold
+        # data.csv: non-code(-2) + largest(+1) = -1
+        self.assertEqual(result, f_nb)
+
 
 class TaskRoutingTests(TestCase):
     """Integration tests verifying generate_ai_grading_assistance routes

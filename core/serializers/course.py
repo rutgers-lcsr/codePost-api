@@ -201,6 +201,11 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
     source='ai_token_rates', required=False, default=dict,
     help_text='Custom per-model token rates. JSON: {"model-name": {"input": 0.15, "output": 0.60}}',
   )
+  aiFeatureConfig = serializers.JSONField(
+    source='ai_feature_config', required=False, default=dict,
+    help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}',
+  )
+  aiFeatures = serializers.SerializerMethodField()
   defaultTokenRates = serializers.SerializerMethodField()
   
   class Meta:
@@ -215,6 +220,8 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'aiCommentsDisabled',
       'aiUseOwnSettings',
       'aiTokenRates',
+      'aiFeatureConfig',
+      'aiFeatures',
       'aiEnabled',
       'aiCommentsEnabled',
       'orgAiAvailable',
@@ -299,6 +306,13 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
     """Returns a masked preview of the effective API key, e.g. 'sk-…abc1'."""
     config = self._get_effective_ai_config(obj)
     return self._mask_key(config['api_key'])
+
+  @extend_schema_field(serializers.DictField(child=serializers.BooleanField()))
+  def get_aiFeatures(self, obj):
+    """Returns resolved enabled/disabled status for all AI features."""
+    from core.services.ai_service import AIService
+    service = AIService(obj)
+    return service.get_feature_status()
 
   @extend_schema_field(serializers.DictField(child=serializers.DictField()))
   def get_defaultTokenRates(self, obj):

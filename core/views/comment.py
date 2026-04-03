@@ -189,7 +189,7 @@ class CommentViewSet(ListProtectedViewSet):
         # Build service early to resolve org vs course AI settings
         service = AIService(course, assignment)
 
-        if not service.is_configured or course.ai_disabled or course.ai_comments_disabled:
+        if not service.is_configured or not service.is_feature_enabled('comment_generation'):
             return Response(
                 {'error': 'AI is not available. Please ask your instructor if you think this is a problem.'},
                 status=status.HTTP_400_BAD_REQUEST

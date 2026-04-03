@@ -11,10 +11,14 @@ class SuggestedCommentSerializer(ModelSerializerWithPOSTCheck):
     fields = (
         'id', 'submission', 'file', 'text', 'startLine', 'endLine',
         'startChar', 'endChar', 'rubricComment', 'pointDelta', 'status',
-        'acceptedBy', 'acceptedComment', 'generationMetadata', 'created', 'modified',
+        'acceptedBy', 'acceptedComment', 'generationMetadata',
+        'promptVariant', 'generationBatch', 'firstViewedAt',
+        'created', 'modified',
     )
     read_only_fields = (
         'id', 'submission', 'file', 'text', 'startLine', 'endLine',
         'startChar', 'endChar', 'rubricComment', 'pointDelta',
-        'acceptedBy', 'acceptedComment', 'generationMetadata', 'created', 'modified',
+        'acceptedBy', 'acceptedComment', 'generationMetadata',
+        'promptVariant', 'generationBatch', 'firstViewedAt',
+        'created', 'modified',
     )

@@ -43,6 +43,11 @@ from core.views.assignmentDataSet import AssignmentDataSetViewSet
 from core.views.dashboard import DashboardViewSet
 from core.views.commentTemplate import CommentTemplateViewSet
 from core.views.suggested_comment import SuggestedCommentViewSet
+from core.views.prompt_variant import SystemPromptVariantViewSet
+from core.views.prompt_experiment import PromptExperimentViewSet
+from core.views.prompt_feedback import PromptFeedbackViewSet
+from core.views.prompt_type import PromptTypeListView
+from core.views.ai_feature import AIFeatureListView
 from core.views.dev_auth import LoginAsRoleView
 from codepost.settings import DEBUG
 
@@ -95,6 +100,9 @@ router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
 router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 router.register(r'commentTemplates', CommentTemplateViewSet, basename='commentTemplate')
 router.register(r'suggestedComments', SuggestedCommentViewSet)
+router.register(r'promptVariants', SystemPromptVariantViewSet)
+router.register(r'promptExperiments', PromptExperimentViewSet)
+router.register(r'promptFeedback', PromptFeedbackViewSet)
 
 # router.register(r'billing', BillingViewSet, basename='billing')
 
@@ -132,6 +140,8 @@ urlpatterns = [
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
+    path('promptTypes/', PromptTypeListView.as_view(), name='prompt_types'),
+    path('aiFeatures/', AIFeatureListView.as_view(), name='ai_features'),
     re_path('', include(router.urls)),
 ]
 

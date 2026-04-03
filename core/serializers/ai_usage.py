@@ -103,6 +103,11 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
     source='ai_token_rates', required=False, default=dict,
     help_text='Custom per-model token rates. JSON: {"model-name": {"input": 0.15, "output": 0.60}}',
   )
+  aiFeatureConfig = serializers.JSONField(
+    source='ai_feature_config', required=False, default=dict,
+    help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}',
+  )
+  aiFeatures = serializers.SerializerMethodField()
   aiEnabled = serializers.SerializerMethodField()
   aiCommentsEnabled = serializers.SerializerMethodField()
   hasApiKey = serializers.SerializerMethodField()
@@ -122,6 +127,8 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
       'aiCoursePolicy',
       'aiEnabledCourseIds',
       'aiTokenRates',
+      'aiFeatureConfig',
+      'aiFeatures',
       'aiEnabled',
       'aiCommentsEnabled',
       'hasApiKey',
@@ -135,6 +142,16 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
     if provider in ('ollama', 'portkey'):
       return bool(provider)
     return bool(provider and api_key)
+
+  @extend_schema_field(serializers.DictField(child=serializers.BooleanField()))
+  def get_aiFeatures(self, obj):
+    """Returns the org-level feature config merged with registry defaults."""
+    from core.ai_features.registry import ai_feature_registry
+    org_config = getattr(obj, 'ai_feature_config', None) or {}
+    return {
+      entry.key: bool(org_config.get(entry.key, entry.default_enabled))
+      for entry in ai_feature_registry.all()
+    }
 
   @extend_schema_field(serializers.BooleanField)
   def get_aiEnabled(self, obj):
@@ -206,6 +223,10 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
     source='ai_token_rates', required=False, default=dict,
     help_text='Custom per-model token rates. JSON: {"model-name": {"input": 0.15, "output": 0.60}}',
   )
+  aiFeatureConfig = serializers.JSONField(
+    source='ai_feature_config', required=False, default=dict,
+    help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}',
+  )
 
   class Meta:
     model = Organization
@@ -219,6 +240,7 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
       'aiCoursePolicy',
       'aiEnabledCourseIds',
       'aiTokenRates',
+      'aiFeatureConfig',
     )
 
   def update(self, instance, validated_data):

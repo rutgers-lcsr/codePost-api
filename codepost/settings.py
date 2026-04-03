@@ -588,7 +588,11 @@ CELERY_BEAT_SCHEDULE = {
     "delete-expired-courses": {
         "task": "core.tasks.delete_expired_courses",
         "schedule": crontab(minute=0, hour="*"), # Run every hour
-    }
+    },
+    "auto-improve-prompts": {
+        "task": "core.tasks.auto_improve_prompts_scheduled",
+        "schedule": crontab(minute=0, hour=3, day_of_week=1),  # Monday 3 AM
+    },
 }
 CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "FALSE").upper() == "TRUE"
 CELERY_TASK_STORE_EAGER_RESULT = True
