@@ -10,6 +10,7 @@ from core.permissions.helpers import isStaffOfSub, returnNotAuthorized
 from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema
 from core.serializers.actionResponses import TestCaseRunRequestSerializer, TestCaseRunResponseSerializer
+from core.permissions.capabilities import require_capability
 from core.permissions.helpers import isAuthenticated, returnForbidden
 
 from core.permissions.helpers import isCourseAdmin, isCourseStaff
@@ -59,8 +60,7 @@ class TestCaseViewSet(ListProtectedViewSet):
         if not isAuthenticated(user):
             return returnNotAuthorized()
 
-        if not isCourseStaff(user, course):
-            return returnForbidden()
+        require_capability(user, 'manage_test_cases', assignment)
 
         if not assignment.environment or not assignment.environment.language:
             raise serializers.ValidationError(

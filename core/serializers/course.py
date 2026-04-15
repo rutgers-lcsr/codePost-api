@@ -12,6 +12,7 @@ from rest_framework.validators import UniqueTogetherValidator
 from core.auth import Authentications, type_of_auth
 
 from core.permissions.helpers import isCourseStaff
+from core.permissions.capabilities import compute_course_capabilities
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
   assignments = serializers.SerializerMethodField()
   studentCount = serializers.SerializerMethodField()
   isRubricEditor = serializers.SerializerMethodField()
+  capabilities = serializers.SerializerMethodField()
 
   cloneFrom = serializers.IntegerField(source='clone_from', write_only=True, required=False)
   expirationDate = serializers.DateTimeField(source='expiration_date', required=False, allow_null=True)
@@ -29,8 +31,8 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
               'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
-              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expirationDate', 'organization', 'studentsCanSeeGraders', 'studentCount', 'isRubricEditor', 'cloneFrom')
-    read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount', 'isRubricEditor')
+              'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expirationDate', 'organization', 'studentsCanSeeGraders', 'studentCount', 'isRubricEditor', 'capabilities', 'cloneFrom')
+    read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount', 'isRubricEditor', 'capabilities')
     extra_kwargs = {
         'organization': {'required': False}
     }
@@ -46,6 +48,13 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
     if request and request.user.is_authenticated:
       return obj.rubricEditors.filter(pk=request.user.pk).exists()
     return False
+
+  @extend_schema_field(serializers.DictField(child=serializers.BooleanField()))
+  def get_capabilities(self, obj):
+    request = self.context.get('request')
+    if request and request.user.is_authenticated:
+      return compute_course_capabilities(request.user, obj)
+    return {}
 
   def validate_timezone(self, timezone):
     # Check that timezone corresponds to valid timezone

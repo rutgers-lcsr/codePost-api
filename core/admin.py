@@ -327,9 +327,9 @@ class AuthOneTimeToken(OneTimeToken):
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ("shortname", "name", "profile_count", "course_count", "created", "modified")
+    list_display = ("shortname", "name", "is_main_org", "sso_enabled", "profile_count", "course_count", "created", "modified")
     search_fields = ("name", "shortname")
-    list_filter = ("created", "modified")
+    list_filter = ("is_main_org", "sso_enabled", "created", "modified")
     ordering = ("name",)
     readonly_fields = ("created", "modified")
     

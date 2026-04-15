@@ -97,6 +97,9 @@ WORKER_SHELL_REDIS_URL = os.environ.get("WORKER_SHELL_REDIS_URL", "")
 WORKER_SHELL_FORCE_LOCAL = os.environ.get("WORKER_SHELL_FORCE_LOCAL", "FALSE").upper() == "TRUE"
 WORKER_SHELL_WORKER_ID = os.environ.get("WORKER_SHELL_WORKER_ID", HOSTNAME)
 
+# Main org override (optional — can also be set via Organization.is_main_org in DB)
+MAIN_ORG_ID = os.environ.get("MAIN_ORG_ID", None)
+
 API_HOST = urlparse(API_URL).netloc.split(':')[0]
 
 #################### Authentication And Host settings ##############################
@@ -159,13 +162,15 @@ if DOCKER:
 REST_FRAMEWORK = {
     "COERCE_DECIMAL_TO_STRING": False,
     "DEFAULT_AUTHENTICATION_CLASSES": (
+        "core.authentication.CourseAPIKeyAuthentication",
         "rest_framework.authentication.TokenAuthentication",
-        'rest_framework_simplejwt.authentication.JWTAuthentication',        
+        'core.authentication.CourseScopedJWTAuthentication',
         "rest_framework.authentication.BasicAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
+        'core.permissions.course_scope.CourseScopePermission',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }

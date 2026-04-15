@@ -16,6 +16,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 
 from core.models import Assignment, AssignmentDataSet, User
+from core.permissions.capabilities import require_capability
 from core.permissions.helpers import (
     isAuthenticated,
     isCourseAdmin,
@@ -96,8 +97,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        if not isCourseAdmin(request.user, assignment.course):
-            return returnForbidden()
+        require_capability(request.user, 'manage_datasets', assignment)
         
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
@@ -141,8 +141,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         
         dataset = self.get_object()
         
-        if not isCourseAdmin(request.user, dataset.assignment.course):
-            return returnForbidden()
+        require_capability(request.user, 'manage_datasets', dataset.assignment)
         
         partial = kwargs.pop('partial', False)
         serializer = self.get_serializer(dataset, data=request.data, partial=partial)
@@ -171,8 +170,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         
         dataset = self.get_object()
         
-        if not isCourseAdmin(request.user, dataset.assignment.course):
-            return returnForbidden()
+        require_capability(request.user, 'manage_datasets', dataset.assignment)
         
         dataset_id = dataset.id
         dataset_name = dataset.name

@@ -56,6 +56,8 @@ from core.permissions.helpers import returnNotAuthorized, returnForbidden, retur
 from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff, isSuperGrader, canViewUnanonymizedSubmissions
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub
+from core.permissions.capabilities import compute_assignment_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
+from core.serializers.actionResponses import CapabilitiesResponseSerializer, CapabilitiesWithDescriptionsResponseSerializer
 
 from django.utils import timezone
 
@@ -188,6 +190,41 @@ class AssignmentViewSet(ListProtectedViewSet):
   # Extra functions
   #####################################################################################
 
+  @extend_schema(
+      responses=CapabilitiesResponseSerializer,
+      parameters=[
+          OpenApiParameter(
+              name='descriptions', type=bool,
+              location=OpenApiParameter.QUERY, required=False,
+              description='Include human-readable descriptions for each capability.',
+          ),
+      ],
+  )
+  @action(detail=True, methods=['GET'])
+  def capabilities(self, request, pk=None):
+    """Return the requesting user's capabilities for this assignment."""
+    user = request.user
+    if not isAuthenticated(user):
+      return returnNotAuthorized()
+
+    assignment = self.get_object()
+    course = assignment.course
+
+    if not isCourseMember(user, course):
+      return returnForbidden()
+
+    caps = compute_assignment_capabilities(user, assignment)
+
+    include_descriptions = request.query_params.get('descriptions', '').lower() in ('true', '1')
+    if include_descriptions:
+      descriptions = {
+          cap: CAPABILITY_DESCRIPTIONS.get(Capability(cap), '')
+          for cap in caps
+      }
+      return Response({'capabilities': caps, 'descriptions': descriptions})
+
+    return Response({'capabilitiesMap': caps})
+
   @extend_schema(responses=CommentSerializer(many=True))
   @action(detail=True)
   def comments(self, request, pk=None):
@@ -231,9 +268,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     assignment = self.get_object()
     course = assignment.course
 
-    # Only graders can view the queue length
-    if not isGrader(user, course):
-      return returnForbidden()
+    require_capability(user, 'view_queue', assignment)
 
     section = self.request.query_params.get('section', None)
     
@@ -607,8 +642,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     if not isAuthenticated(user):
       return returnNotAuthorized()
 
-    if not isStudent(user, course) or not assignment.allowStudentUpload:
-      return returnForbidden()
+    require_capability(user, 'upload_submission', assignment)
 
     submission = Submission(assignment=assignment, dateUploaded=timezone.now())
 
@@ -647,12 +681,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     assignment = self.get_object()
     course = assignment.course
 
-    if assignment.isVisible:
-      if not isCourseMember(user, course):
-        return returnForbidden()
-    else:
-      if not isCourseStaff(user, course):
-        return returnForbidden()
+    require_capability(user, 'download_assignment_files', assignment)
 
 
     files = assignment.files.all()
@@ -687,8 +716,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     if not isAuthenticated(user):
       return returnNotAuthorized()
 
-    if not isStudent(user, course) or not assignment.allowStudentUpload:
-      return returnForbidden()
+    require_capability(user, 'upload_submission', assignment)
 
     if request.method == "PATCH" or request.method == "POST":
       if 'files' not in request.data or len(request.data['files']) == 0:
@@ -916,8 +944,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     course = assignment.course
     
     # Check permissions
-    if not isCourseAdmin(user, course) and not isSuperGrader(user, course):
-        return returnForbidden()
+    require_capability(user, 'generate_ai_test_cases', assignment)
         
     # Check AI configuration
     service = AIService(course, assignment)
@@ -1091,8 +1118,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     assignment = self.get_object()
     course = assignment.course
 
-    if not isCourseAdmin(user, course):
-      return returnForbidden()
+    require_capability(user, 'edit_assignment', assignment)
 
     service = AIService(course, assignment)
 
@@ -1135,8 +1161,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     assignment = self.get_object()
     course = assignment.course
 
-    if not isCourseAdmin(user, course):
-      return returnForbidden()
+    require_capability(user, 'view_assignment_statistics', assignment)
 
     try:
       num_buckets = int(request.query_params.get('buckets', 10))

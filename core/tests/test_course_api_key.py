@@ -1,0 +1,351 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+"""
+Tests for Course-Scoped API Keys.
+
+Covers:
+- Key CRUD (create / list / update / revoke)
+- CourseAPIKeyAuthentication backend
+- CourseScopedJWTAuthentication backend
+- CourseScopePermission enforcement
+- OTT → course-scoped JWT propagation
+- Impersonate → course-scoped JWT propagation
+"""
+import pytest
+from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from rest_framework.test import APIClient
+from rest_framework import status
+
+import factory
+
+from core.models import CourseAPIKey, OneTimeToken, Course
+from core.services.course_api_key import get_or_create_course_service_user
+from core.authentication import CourseAPIKeyAuthentication, CourseScopedJWTAuthentication
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def course_a(db):
+    """A course with admins and students."""
+    from core.tests.factories import CourseFactory
+    with factory.django.mute_signals(post_save):
+        return CourseFactory(name="cs100", period="f2025", organization__name="TestOrg")
+
+
+@pytest.fixture
+def course_b(db):
+    """A second course in the same org."""
+    from core.tests.factories import CourseFactory
+    with factory.django.mute_signals(post_save):
+        return CourseFactory(name="cs200", period="f2025", organization__name="TestOrg")
+
+
+@pytest.fixture
+def admin_of_a(course_a):
+    return course_a.courseAdmins.first()
+
+
+@pytest.fixture
+def student_of_a(course_a):
+    return course_a.students.first()
+
+
+@pytest.fixture
+def admin_of_b(course_b):
+    return course_b.courseAdmins.first()
+
+
+@pytest.fixture
+def api_client():
+    return APIClient()
+
+
+@pytest.fixture
+def raw_key_a(course_a, admin_of_a, api_client):
+    """Create a CourseAPIKey for course_a and return the raw key string."""
+    api_client.force_authenticate(user=admin_of_a)
+    resp = api_client.post(
+        f"/courses/{course_a.id}/apiKeys/",
+        {"name": "test-key"},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_201_CREATED, resp.data
+    # Clear forced auth so subsequent credential-based auth works
+    api_client.force_authenticate(user=None)
+    return resp.data["key"]
+
+
+# ---------------------------------------------------------------------------
+# Key CRUD
+# ---------------------------------------------------------------------------
+
+class TestCourseAPIKeyCRUD:
+
+    def test_create_key_returns_raw_key(self, course_a, admin_of_a, api_client):
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "my-key"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_201_CREATED
+        data = resp.data
+        assert data["key"].startswith(f"cpk_{course_a.id}_")
+        assert data["name"] == "my-key"
+        assert data["keyPrefix"] == f"cpk_{course_a.id}_"
+        assert data["createdBy"] == admin_of_a.username
+
+    def test_list_keys_does_not_expose_raw_key(self, course_a, admin_of_a, api_client, raw_key_a):
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.get(f"/courses/{course_a.id}/apiKeys/")
+        assert resp.status_code == status.HTTP_200_OK
+        keys = resp.data
+        assert len(keys) >= 1
+        for k in keys:
+            assert "key" not in k
+            assert "keyPrefix" in k
+
+    def test_duplicate_name_rejected(self, course_a, admin_of_a, api_client, raw_key_a):
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "test-key"},  # same name as raw_key_a
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_revoke_key(self, course_a, admin_of_a, api_client, raw_key_a):
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.delete(f"/courses/{course_a.id}/apiKeys/{key_obj.id}/")
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        assert not CourseAPIKey.objects.filter(pk=key_obj.pk).exists()
+
+    def test_patch_key_name(self, course_a, admin_of_a, api_client, raw_key_a):
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.patch(
+            f"/courses/{course_a.id}/apiKeys/{key_obj.id}/",
+            {"name": "renamed-key"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK
+        key_obj.refresh_from_db()
+        assert key_obj.name == "renamed-key"
+
+    def test_deactivate_key(self, course_a, admin_of_a, api_client, raw_key_a):
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.patch(
+            f"/courses/{course_a.id}/apiKeys/{key_obj.id}/",
+            {"isActive": False},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK
+        key_obj.refresh_from_db()
+        assert key_obj.is_active is False
+
+    def test_non_admin_cannot_create_key(self, course_a, student_of_a, api_client):
+        api_client.force_authenticate(user=student_of_a)
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "hacker-key"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# ---------------------------------------------------------------------------
+# Authentication via CourseKey header
+# ---------------------------------------------------------------------------
+
+class TestCourseAPIKeyAuth:
+
+    def test_auth_with_valid_key(self, course_a, api_client, raw_key_a):
+        """Requests with a valid CourseKey header should authenticate."""
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.get(f"/courses/{course_a.id}/")
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_auth_with_invalid_key_rejected(self, course_a, api_client):
+        api_client.credentials(HTTP_AUTHORIZATION="CourseKey cpk_999_invalidhex")
+        resp = api_client.get(f"/courses/{course_a.id}/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_deactivated_key_rejected(self, course_a, admin_of_a, api_client, raw_key_a):
+        # Deactivate
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        key_obj.is_active = False
+        key_obj.save()
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.get(f"/courses/{course_a.id}/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+# ---------------------------------------------------------------------------
+# Course scope enforcement
+# ---------------------------------------------------------------------------
+
+class TestCourseScopeEnforcement:
+
+    def test_scoped_key_can_access_own_course(self, course_a, api_client, raw_key_a):
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.get(f"/courses/{course_a.id}/")
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_scoped_key_cannot_access_other_course(self, course_a, course_b, api_client, raw_key_a):
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.get(f"/courses/{course_b.id}/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# ---------------------------------------------------------------------------
+# OTT → Course-scoped JWT
+# ---------------------------------------------------------------------------
+
+class TestOTTCourseScoping:
+
+    def test_ott_generated_via_scoped_key_stores_course(self, course_a, api_client, raw_key_a, student_of_a):
+        """OTT generated while course-scoped should store the course FK."""
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.post(
+            "/ott/generate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        ott = OneTimeToken.objects.get(user=student_of_a)
+        assert ott.course_id == course_a.id
+
+    def test_ott_validated_produces_scoped_jwt(self, course_a, api_client, raw_key_a, student_of_a):
+        """Validating an OTT with a course should yield a JWT with course_id claim."""
+        # Generate OTT via scoped key
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        gen_resp = api_client.post(
+            "/ott/generate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        assert gen_resp.status_code == status.HTTP_200_OK
+        ott_token = gen_resp.data["token"]
+
+        # Validate OTT (unauthenticated)
+        client2 = APIClient()
+        val_resp = client2.post(
+            "/ott/validate/",
+            {"token": ott_token},
+            format="json",
+        )
+        assert val_resp.status_code == status.HTTP_200_OK
+        jwt_str = val_resp.data["token"]
+
+        # Use the JWT to access the scoped course → should work
+        client2.credentials(HTTP_AUTHORIZATION=f"Bearer {jwt_str}")
+        resp = client2.get(f"/courses/{course_a.id}/")
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_ott_scoped_jwt_blocked_on_other_course(self, course_a, course_b, api_client, raw_key_a, student_of_a):
+        """A course-scoped JWT obtained via OTT should not access another course."""
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        gen_resp = api_client.post(
+            "/ott/generate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        ott_token = gen_resp.data["token"]
+
+        client2 = APIClient()
+        val_resp = client2.post(
+            "/ott/validate/",
+            {"token": ott_token},
+            format="json",
+        )
+        jwt_str = val_resp.data["token"]
+
+        client2.credentials(HTTP_AUTHORIZATION=f"Bearer {jwt_str}")
+        resp = client2.get(f"/courses/{course_b.id}/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_normal_ott_has_no_course_scope(self, course_a, admin_of_a, student_of_a, api_client):
+        """OTTs generated without a course key should NOT be scoped."""
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.post(
+            "/ott/generate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK
+        ott = OneTimeToken.objects.get(user=student_of_a)
+        assert ott.course_id is None
+
+
+# ---------------------------------------------------------------------------
+# Impersonation → Course-scoped JWT
+# ---------------------------------------------------------------------------
+
+class TestImpersonateCourseScoping:
+
+    def test_impersonate_via_scoped_key_produces_scoped_jwt(self, course_a, api_client, raw_key_a, student_of_a):
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.post(
+            "/impersonate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        jwt_str = resp.data["token"]
+
+        # Use the scoped JWT
+        client2 = APIClient()
+        client2.credentials(HTTP_AUTHORIZATION=f"Bearer {jwt_str}")
+        # Can access scoped course
+        assert client2.get(f"/courses/{course_a.id}/").status_code == status.HTTP_200_OK
+
+    def test_impersonate_via_scoped_key_blocked_other_course(self, course_a, course_b, api_client, raw_key_a, student_of_a):
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.post(
+            "/impersonate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        jwt_str = resp.data["token"]
+
+        client2 = APIClient()
+        client2.credentials(HTTP_AUTHORIZATION=f"Bearer {jwt_str}")
+        assert client2.get(f"/courses/{course_b.id}/").status_code == status.HTTP_403_FORBIDDEN
+
+    def test_impersonate_non_member_rejected_when_scoped(self, course_a, course_b, admin_of_b, api_client, raw_key_a):
+        """Cannot impersonate a user who isn't in the scoped course."""
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.post(
+            "/impersonate/",
+            {"username": admin_of_b.username},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# ---------------------------------------------------------------------------
+# Service user utility
+# ---------------------------------------------------------------------------
+
+class TestServiceUser:
+
+    def test_get_or_create_is_idempotent(self, course_a):
+        user1 = get_or_create_course_service_user(course_a)
+        user2 = get_or_create_course_service_user(course_a)
+        assert user1.pk == user2.pk
+        assert user1.username == f"course-{course_a.id}-api"
+
+    def test_service_user_is_course_admin(self, course_a):
+        user = get_or_create_course_service_user(course_a)
+        assert course_a.courseAdmins.filter(pk=user.pk).exists()
+
+    def test_service_user_profile_flagged(self, course_a):
+        user = get_or_create_course_service_user(course_a)
+        assert user.profile.isServiceAccount is True
+        assert not user.has_usable_password()

@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 from core.models import Environment
-from core.permissions.helpers import isCourseAdmin
+from core.permissions.capabilities import require_capability
 from autograder.serializers.environment_actions import (
     EnvironmentRollbackRequestSerializer,
     EnvironmentRollbackResponseSerializer,
@@ -48,8 +48,7 @@ class EnvironmentRollback(APIView):
         except Environment.DoesNotExist:
             return JsonResponse({"error": "Environment not found"}, status=404)
         
-        if not isCourseAdmin(request.user, env.assignment.course):
-            return JsonResponse({"error": "Admin access required"}, status=403)
+        require_capability(request.user, 'manage_test_cases', env.assignment)
         
         # Get target version
         target_version = request.data.get('version')
@@ -95,8 +94,7 @@ class EnvironmentCleanup(APIView):
         except Environment.DoesNotExist:
             return JsonResponse({"error": "Environment not found"}, status=404)
         
-        if not isCourseAdmin(request.user, env.assignment.course):
-            return JsonResponse({"error": "Admin access required"}, status=403)
+        require_capability(request.user, 'manage_test_cases', env.assignment)
         
         keep_count = request.data.get('keep_count', 3)
         
@@ -132,8 +130,7 @@ class EnvironmentConvertToManual(APIView):
         except Environment.DoesNotExist:
             return JsonResponse({"error": "Environment not found"}, status=404)
         
-        if not isCourseAdmin(request.user, env.assignment.course):
-            return JsonResponse({"error": "Admin access required"}, status=403)
+        require_capability(request.user, 'manage_test_cases', env.assignment)
         
         from_version = request.data.get('from_version')
         
@@ -167,8 +164,7 @@ class EnvironmentStatus(APIView):
         except Environment.DoesNotExist:
             return JsonResponse({"error": "Environment not found"}, status=404)
         
-        if not isCourseAdmin(request.user, env.assignment.course):
-            return JsonResponse({"error": "Admin access required"}, status=403)
+        require_capability(request.user, 'manage_test_cases', env.assignment)
         
         from autograder.services.image_manager import ImageManager
         status_data = ImageManager.get_current_status(environment_id)

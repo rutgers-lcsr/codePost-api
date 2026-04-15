@@ -19,6 +19,7 @@ from rest_framework.authtoken.models import Token
 
 from core.emails import USER_ACCESSIBLE_TEMPLATES, GraderReminderEmail, PublishNewAssignmentEmail, RegradesReminderEmail, UserAddedToCourseEmail
 from core.permissions.helpers import isCourseMember, isCourseAdmin
+from core.permissions.capabilities import require_capability
 
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
@@ -95,8 +96,9 @@ class UserViewSet(SuperUserListProtectedViewSet):
     user_to_email = User.objects.get(email=email)
 
     # does requestor have the authority to email this user?
-    if not (isCourseAdmin(requestor, course) and isCourseMember(user_to_email, course)):
+    if not isCourseMember(user_to_email, course):
         return returnForbidden()
+    require_capability(requestor, 'manage_roster', course)
 
 
 

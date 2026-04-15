@@ -123,6 +123,7 @@ class Organization(BaseModel):
   sso_provider = models.CharField(max_length=32, blank=True, null=True, help_text=("The SSO provider (e.g. CAS, AZURE, OIDC, GOOGLE)."))
   sso_config = JSONField(default=dict, blank=True, help_text=("JSON configuration for the SSO provider."))
   send_welcome_email = models.BooleanField(default=True, help_text=("If False, suppresses welcome/added-to-course emails for users in this organization."))
+  is_main_org = models.BooleanField(default=False, help_text=("If True, this organization is the main/default organization. Only one organization can be the main org at a time. The main org's SSO is used as the default login method."))
 
   # AI Configuration at organization level
   AI_PROVIDER_CHOICES = [
@@ -181,8 +182,25 @@ class Organization(BaseModel):
   class Meta:
     ordering = ('name',)
 
+  def save(self, *args: Any, **kwargs: Any) -> None:
+    if self.is_main_org:
+      Organization.objects.exclude(pk=self.pk).filter(is_main_org=True).update(is_main_org=False)
+    super().save(*args, **kwargs)
+
   def __str__(self):
     return self.shortname
+
+
+def get_main_org() -> Optional['Organization']:
+  """Returns the main organization, checking MAIN_ORG_ID env var first, then the DB flag."""
+  from django.conf import settings as django_settings
+  main_org_id = getattr(django_settings, 'MAIN_ORG_ID', None)
+  if main_org_id:
+    try:
+      return Organization.objects.get(pk=int(main_org_id))
+    except (Organization.DoesNotExist, ValueError):
+      pass
+  return Organization.objects.filter(is_main_org=True).first()
 
 
 # Internal Model - not published in public API
@@ -210,6 +228,9 @@ class Profile(BaseModel):
   stripeCustomerId = models.CharField(max_length=96, unique=True, null=True, blank=True, help_text=(
       "The customer_id from the Stripe customer object."))
 
+  isServiceAccount = models.BooleanField(default=False, help_text=(
+      "If True, this user is an auto-created service account for a course API key."))
+
   def __init__(self, *args, **kwargs):
     # Remove deprecated stripeCustomerId if provided
     if 'stripeCustomerId' in kwargs:
@@ -231,11 +252,11 @@ class OneTimeToken(BaseModel):
   expires_at = models.DateTimeField(default=get_default_token_expiry)
 
   used = models.BooleanField(default=False, help_text=("Whether the token has been used."))
+  course = models.ForeignKey('Course', on_delete=models.CASCADE, null=True, blank=True,
+      related_name="one_time_tokens", help_text=("If set, the JWT issued from this OTT is scoped to this course."))
 
   def is_valid(self):
     return not self.used and timezone.now() < self.expires_at
-
-  
 
   def __str__(self):
     return f"OneTimeToken for {self.user.email} expiring at {self.expires_at}"
@@ -2446,3 +2467,45 @@ class PromptLabSettings(models.Model):
   def __str__(self):
     status = "ENABLED" if self.auto_improve_enabled else "disabled"
     return f"PromptLabSettings [{status}]"
+
+
+class CourseAPIKey(BaseModel):
+  """A named, course-scoped API key.
+
+  The raw key is shown only once on creation.  We store a SHA-256 hash
+  for verification and the first 8 characters as a prefix for fast lookup.
+  Key format: ``cpk_<course_id>_<uuid4_hex>``
+  """
+  if TYPE_CHECKING:
+    id: int
+
+  course = models.ForeignKey(Course, on_delete=models.CASCADE,
+      related_name="api_keys", help_text="The course this key is scoped to.")
+  name = models.CharField(max_length=128, help_text="A human-readable label for this key.")
+  key_prefix = models.CharField(max_length=32, db_index=True, help_text=(
+      "First characters of the raw key, used for fast lookup."))
+  hashed_key = models.CharField(max_length=128, help_text="SHA-256 hash of the full raw key.")
+  created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True,
+      related_name="created_course_api_keys", help_text="The admin who created this key.")
+  is_active = models.BooleanField(default=True, help_text="If False, the key is revoked.")
+  last_used_at = models.DateTimeField(null=True, blank=True, help_text="Last time this key was used to authenticate.")
+
+  class Meta:
+    unique_together = ('course', 'name')
+    verbose_name = "Course API Key"
+    verbose_name_plural = "Course API Keys"
+
+  @staticmethod
+  def generate_key(course_id: int) -> str:
+    """Return a new raw key string: ``cpk_<course_id>_<hex>``."""
+    return f"cpk_{course_id}_{uuid.uuid4().hex}"
+
+  @staticmethod
+  def hash_key(raw_key: str) -> str:
+    return hashlib.sha256(raw_key.encode()).hexdigest()
+
+  def verify(self, raw_key: str) -> bool:
+    return self.hashed_key == self.hash_key(raw_key)
+
+  def __str__(self):
+    return f"CourseAPIKey '{self.name}' for course {self.course_id}"

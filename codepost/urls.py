@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, re_path, include
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshSlidingView, TokenVerifyView
-from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token
+from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token, NON_COURSE_KEY_AUTH
 
 from rest_framework.viewsets import ViewSet
 from core.views.user import UserViewSet
@@ -56,6 +56,7 @@ from webhooks.view import WebhookViewSet
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
 from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView
+from core.views.capabilities import PlatformCapabilitiesView, BatchCapabilitiesView
 
 
 from django.http import HttpResponse
@@ -122,8 +123,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     re_path('^api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('token-auth/', obtain_jwt_token),
-    path('token-refresh/', TokenRefreshSlidingView.as_view(), name='token_refresh'),
-    path('token-verify/', TokenVerifyView.as_view(), name='token_verify'),
+    path('token-refresh/', TokenRefreshSlidingView.as_view(authentication_classes=NON_COURSE_KEY_AUTH), name='token_refresh'),
+    path('token-verify/', TokenVerifyView.as_view(authentication_classes=NON_COURSE_KEY_AUTH), name='token_verify'),
     path('ott/generate/', generate_one_time_token, name='generate_one_time_token'),
     path('ott/validate/', validate_one_time_token, name='validate_one_time_token_by_query'),
     path('ott/', get_jwt_ott, name='get_jwt_ott'),
@@ -140,6 +141,8 @@ urlpatterns = [
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
+    path('capabilities/platform/', PlatformCapabilitiesView.as_view(), name='platform_capabilities'),
+    path('capabilities/batch/', BatchCapabilitiesView.as_view(), name='batch_capabilities'),
     path('promptTypes/', PromptTypeListView.as_view(), name='prompt_types'),
     path('aiFeatures/', AIFeatureListView.as_view(), name='ai_features'),
     re_path('', include(router.urls)),

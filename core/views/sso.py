@@ -3,7 +3,7 @@ from django.http import HttpResponseRedirect, JsonResponse
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.permissions import AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse
-from core.serializers.sso import CheckSSOAvailabilityResponseSerializer
+from core.serializers.sso import CheckSSOAvailabilityResponseSerializer, MainOrgSSOConfigSerializer, OrgSSOConfigSerializer
 from django.conf import settings
 from core.models import Organization, User
 from core.utils import get_or_create_user
@@ -417,3 +417,52 @@ def check_sso_availability(request):
         })
         
     return JsonResponse({'sso_enabled': False})
+
+
+@extend_schema(responses={200: MainOrgSSOConfigSerializer})
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_sso_config(request):
+    """
+    Returns SSO configuration for the main/default organization.
+    Used by the frontend to auto-redirect to SSO on the default login page.
+    """
+    from core.models import get_main_org
+    organization = get_main_org()
+
+    if not organization:
+        return JsonResponse({'main_org': False})
+
+    response = {
+        'main_org': True,
+        'sso_enabled': organization.sso_enabled,
+        'org_id': organization.id,
+        'org_name': organization.name,
+    }
+    if organization.sso_enabled:
+        response['provider'] = organization.sso_provider
+    return JsonResponse(response)
+
+
+@extend_schema(responses={200: OrgSSOConfigSerializer})
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_org_sso_config(request, shortname):
+    """
+    Returns SSO configuration for a specific organization by shortname.
+    Used by the frontend for per-org login pages (e.g. /login/RU).
+    """
+    organization = Organization.objects.filter(shortname__iexact=shortname).first()
+
+    if not organization:
+        return JsonResponse({'error': 'Organization not found'}, status=404)
+
+    response = {
+        'found': True,
+        'sso_enabled': organization.sso_enabled,
+        'org_id': organization.id,
+        'org_name': organization.name,
+    }
+    if organization.sso_enabled:
+        response['provider'] = organization.sso_provider
+    return JsonResponse(response)

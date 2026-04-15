@@ -33,8 +33,16 @@ from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCours
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub, isSuperGrader
 import logging
 from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
+from core.serializers.actionResponses import CapabilitiesResponseSerializer, CapabilitiesWithDescriptionsResponseSerializer
+from core.permissions.capabilities import compute_course_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
+from core.permissions.course_scope import _get_course_scope_id
 from core.serializers.course_audit_event import CourseAuditEventSerializer
-from core.models import CourseAuditEvent
+from core.models import CourseAuditEvent, CourseAPIKey
+from core.serializers.course_api_key import (
+    CourseAPIKeyReadSerializer,
+    CourseAPIKeyCreateSerializer,
+    CourseAPIKeyCreateResponseSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +108,41 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             ).data
         )
 
+    @extend_schema(
+        responses=CapabilitiesResponseSerializer,
+        parameters=[
+            OpenApiParameter(
+                name='descriptions', type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY, required=False,
+                description='Include human-readable descriptions for each capability.',
+            ),
+        ],
+    )
+    @action(detail=True, methods=["GET"])
+    def capabilities(self, request, pk=None):
+        """Return the requesting user's capabilities for this course."""
+        user = request.user
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+
+        course = self.get_object()
+
+        if not isCourseMember(user, course):
+            return returnForbidden()
+
+        is_scoped = _get_course_scope_id(request) is not None
+        caps = compute_course_capabilities(user, course, is_course_scoped=is_scoped)
+
+        include_descriptions = request.query_params.get('descriptions', '').lower() in ('true', '1')
+        if include_descriptions:
+            descriptions = {
+                cap: CAPABILITY_DESCRIPTIONS.get(Capability(cap), '')
+                for cap in caps
+            }
+            return Response({'capabilities': caps, 'descriptions': descriptions})
+
+        return Response({'capabilitiesMap': caps})
+
     @extend_schema(responses=CourseSettingsSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
     def courseSettings(self, request, pk=None):
@@ -116,8 +159,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             serializer = CourseSettingsSerializer(course, context={"request": request})
             return Response(serializer.data)
         elif request.method == "PATCH":
-            if not isCourseAdmin(user, course):
-                return returnForbidden()
+            require_capability(user, 'edit_course_settings', course)
 
         serializer = CourseSettingsSerializer(
             course, data=request.data, partial=True, context={"request": request}
@@ -134,8 +176,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnNotAuthorized()
 
         course = self.get_object()
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'change_invite_code', course)
 
         course.inviteCode = generate_invite_code()
         course.save()
@@ -162,8 +203,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             if not isCourseStaff(user, course):
                 return returnForbidden()
         else:
-            if not isCourseAdmin(user, course):
-                return returnForbidden()
+            require_capability(user, 'configure_ai', course)
 
         if request.method == "GET":
             serializer = CourseAISettingsSerializer(course, context={"request": request})
@@ -201,8 +241,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         course = self.get_object()
 
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'view_ai_usage', course)
 
         from core.services.ai_usage_analytics import get_usage_summary
         from core.models import AIUsageRecord
@@ -252,8 +291,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         course: Course = self.get_object()
 
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'configure_ai', course)
 
         # Use AIService to resolve effective config (handles org inheritance)
         svc = AIService(course)
@@ -544,8 +582,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if form.is_valid():
             course = Course.objects.get(id=pk)
 
-            if not isCourseAdmin(user, course):
-                return returnForbidden()
+            require_capability(user, 'edit_rubric', course)
 
             try:
                 category = RubricCategory.objects.get(id=form.cleaned_data["id"])
@@ -565,8 +602,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnNotAuthorized()
 
         course = self.get_object()
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'manage_roster', course)
 
         if request.method == "GET":
             serializer = CourseRosterMapSerializer({"rosterMap": course.rosterMap})
@@ -588,8 +624,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnNotAuthorized()
 
         course = self.get_object()
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'manage_roster', course)
 
         if request.method == "GET":
             serializer = CourseStudentCaptionsSerializer({"studentCaptions": course.studentCaptions})
@@ -616,8 +651,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         course = self.get_object()
 
         # Only allow course admins to access this endpoint
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'manage_sections', course)
 
         sections = course.sections.all().prefetch_related("leaders", "students")
         page = self.paginate_queryset(sections)
@@ -644,8 +678,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         user = request.user
         course = self.get_object()
 
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'view_audit_log', course)
 
         qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission')
 
@@ -693,8 +726,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         user = request.user
         course = self.get_object()
 
-        if not isCourseAdmin(user, course):
-            return returnForbidden()
+        require_capability(user, 'view_audit_log', course)
 
         qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission')
 
@@ -733,6 +765,93 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         return response
 
+    # ----- Course API Keys -----
+
+    @extend_schema(
+        request=CourseAPIKeyCreateSerializer,
+        responses={201: CourseAPIKeyCreateResponseSerializer},
+    )
+    @action(detail=True, methods=["GET", "POST"], url_path="apiKeys", url_name="api-keys")
+    def apiKeys(self, request, pk=None):
+        """List or create course-scoped API keys."""
+        course = self.get_object()
+
+        require_capability(request.user, 'manage_course_api_keys', course)
+
+        if request.method == "GET":
+            keys = CourseAPIKey.objects.filter(course=course).order_by("-created")
+            serializer = CourseAPIKeyReadSerializer(keys, many=True)
+            return Response(serializer.data)
+
+        # POST — create a new key
+        ser = CourseAPIKeyCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        name = ser.validated_data["name"]
+
+        if CourseAPIKey.objects.filter(course=course, name=name).exists():
+            return Response(
+                {"error": f"A key named '{name}' already exists for this course."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_key = CourseAPIKey.generate_key(course.id)
+        prefix = raw_key[: raw_key.index("_", 4) + 1]  # e.g. "cpk_123_"
+
+        api_key = CourseAPIKey.objects.create(
+            course=course,
+            name=name,
+            key_prefix=prefix,
+            hashed_key=CourseAPIKey.hash_key(raw_key),
+            created_by=request.user,
+        )
+
+        return Response(
+            {
+                "id": api_key.id,
+                "name": api_key.name,
+                "key": raw_key,
+                "keyPrefix": api_key.key_prefix,
+                "createdBy": request.user.username,
+                "created": api_key.created,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        responses={200: CourseAPIKeyReadSerializer},
+    )
+    @action(
+        detail=True,
+        methods=["PATCH", "DELETE"],
+        url_path=r"apiKeys/(?P<key_id>\d+)",
+        url_name="api-key-detail",
+        permission_classes=[IsAuthenticated],
+    )
+    def apiKeyDetail(self, request, pk=None, key_id=None):
+        """Update or revoke a single course API key."""
+        course = self.get_object()
+
+        require_capability(request.user, 'manage_course_api_keys', course)
+
+        try:
+            api_key = CourseAPIKey.objects.get(pk=key_id, course=course)
+        except CourseAPIKey.DoesNotExist:
+            return returnNotFound()
+
+        if request.method == "DELETE":
+            api_key.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # PATCH
+        if "name" in request.data:
+            api_key.name = request.data["name"]
+        if "isActive" in request.data:
+            api_key.is_active = request.data["isActive"]
+
+        api_key.save()
+        serializer = CourseAPIKeyReadSerializer(api_key)
+        return Response(serializer.data)
+
 
 def add_admin_privileges(user):
     user.profile.canCreateCourses = True
@@ -744,14 +863,12 @@ def get_roster_permission_errors(user, request, course):
     if not isAuthenticated(user):
         return returnNotAuthorized()
     if request.method == "GET":
-        if not (
-            isCourseAdmin(user, course)
-            or isSuperGrader(user, course)
-            or user.is_superuser
-        ):
+        # Full roster access requires admin or supergrader — broader than view_roster
+        # capability (which includes regular graders for lighter UI checks).
+        if not (isCourseAdmin(user, course) or isSuperGrader(user, course) or user.is_superuser):
             return returnForbidden()
     elif request.method == "PATCH":
-        if not (user.is_superuser or (isCourseAdmin(user, course) and user.profile.canModifyRosters)):
+        if not (user.is_superuser or (check_capability(user, 'manage_roster', course) and user.profile.canModifyRosters)):
             return returnForbidden()
     return False
 

@@ -60,6 +60,39 @@ info:
 
     See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for more examples.
 paths:
+  /aiFeatures/:
+    get:
+      operationId: aiFeatures_list
+      description: List all registered AI features with their defaults.
+      tags:
+      - aiFeatures
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                    label:
+                      type: string
+                    description:
+                      type: string
+                    defaultEnabled:
+                      type: boolean
+                    requires:
+                      type: array
+                      items:
+                        type: string
+          description: ''
   /assignmentDataSets/:
     get:
       operationId: assignmentDataSets_list
@@ -73,8 +106,8 @@ paths:
       tags:
       - assignmentDataSets
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -104,8 +137,8 @@ paths:
               $ref: '#/components/schemas/AssignmentDataSetCreate'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -129,8 +162,8 @@ paths:
       tags:
       - assignmentDataSets
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -165,8 +198,8 @@ paths:
               $ref: '#/components/schemas/AssignmentDataSetUpdate'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -206,8 +239,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedAssignmentDataSetUpdate'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -230,8 +263,8 @@ paths:
       tags:
       - assignmentDataSets
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -254,8 +287,8 @@ paths:
       tags:
       - assignmentDataSets
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -275,8 +308,8 @@ paths:
       tags:
       - assignmentDataSets
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -315,8 +348,8 @@ paths:
       tags:
       - assignmentFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -368,8 +401,8 @@ paths:
               $ref: '#/components/schemas/AssignmentFile'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -415,8 +448,8 @@ paths:
       tags:
       - assignmentFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -473,8 +506,8 @@ paths:
               $ref: '#/components/schemas/AssignmentFile'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -530,8 +563,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedAssignmentFile'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -576,8 +609,8 @@ paths:
       tags:
       - assignmentFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -607,8 +640,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -655,8 +688,8 @@ paths:
               $ref: '#/components/schemas/Assignment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -697,8 +730,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -750,8 +783,8 @@ paths:
               $ref: '#/components/schemas/Assignment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -802,8 +835,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedAssignment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -843,8 +876,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -871,8 +904,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -905,8 +938,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -915,6 +948,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BeforeStudentUploadResponse'
+          description: ''
+  /assignments/{id}/capabilities/:
+    get:
+      operationId: assignments_capabilitiesRetrieve
+      description: Return the requesting user's capabilities for this assignment.
+      parameters:
+      - in: query
+        name: descriptions
+        schema:
+          type: boolean
+        description: Include human-readable descriptions for each capability.
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesResponse'
           description: ''
   /assignments/{id}/clone/:
     post:
@@ -942,8 +1005,8 @@ paths:
               $ref: '#/components/schemas/AssignmentClone'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -972,8 +1035,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1002,8 +1065,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1029,8 +1092,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1054,8 +1117,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1082,8 +1145,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1126,8 +1189,8 @@ paths:
               $ref: '#/components/schemas/AssignmentGenerateTest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1151,8 +1214,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1176,8 +1239,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1218,8 +1281,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1247,8 +1310,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1287,8 +1350,8 @@ paths:
               $ref: '#/components/schemas/Assignment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1326,8 +1389,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedAssignment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1380,8 +1443,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1421,8 +1484,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1474,8 +1537,8 @@ paths:
       tags:
       - assignments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1500,8 +1563,8 @@ paths:
       tags:
       - auth
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -1518,8 +1581,8 @@ paths:
       tags:
       - auth
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -1529,6 +1592,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CheckSSOAvailabilityResponse'
+          description: ''
+  /auth/sso/config/:
+    get:
+      operationId: auth_ssoConfigRetrieve
+      description: |-
+        Returns SSO configuration for the main/default organization.
+        Used by the frontend to auto-redirect to SSO on the default login page.
+      tags:
+      - auth
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MainOrgSSOConfig'
+          description: ''
+  /auth/sso/config/{shortname}/:
+    get:
+      operationId: auth_ssoConfigRetrieve2
+      description: |-
+        Returns SSO configuration for a specific organization by shortname.
+        Used by the frontend for per-org login pages (e.g. /login/RU).
+      parameters:
+      - in: path
+        name: shortname
+        schema:
+          type: string
+        required: true
+      tags:
+      - auth
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgSSOConfig'
           description: ''
   /auth/sso/login/{provider}/:
     get:
@@ -1546,8 +1657,8 @@ paths:
       tags:
       - auth
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -1563,8 +1674,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1596,8 +1707,8 @@ paths:
               $ref: '#/components/schemas/Environment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1635,8 +1746,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EnvironmentCleanupRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1674,8 +1785,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EnvironmentConvertToManualRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1713,8 +1824,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EnvironmentRollbackRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1740,8 +1851,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1767,8 +1878,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1805,8 +1916,8 @@ paths:
               $ref: '#/components/schemas/Environment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1842,8 +1953,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedEnvironment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1868,8 +1979,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1902,8 +2013,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedEnvironmentBuildRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1931,8 +2042,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1964,8 +2075,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -1991,8 +2102,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2029,8 +2140,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EnvironmentPreviewRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2069,8 +2180,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedEnvironmentRunRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2113,8 +2224,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedEnvironmentRunAllRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2146,8 +2257,8 @@ paths:
               $ref: '#/components/schemas/CodeExecutionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2194,8 +2305,8 @@ paths:
               $ref: '#/components/schemas/FileExecutionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2229,8 +2340,8 @@ paths:
               $ref: '#/components/schemas/AsyncExecutionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2247,8 +2358,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2277,8 +2388,8 @@ paths:
               $ref: '#/components/schemas/FileExecutionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2306,8 +2417,8 @@ paths:
               $ref: '#/components/schemas/NotebookExecutionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2336,8 +2447,8 @@ paths:
               $ref: '#/components/schemas/NotebookCellExecutionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2356,8 +2467,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2380,8 +2491,8 @@ paths:
       tags:
       - autograder
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2412,8 +2523,8 @@ paths:
               $ref: '#/components/schemas/TestExecutionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2422,6 +2533,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TestExecutionResult'
+          description: ''
+  /capabilities/batch/:
+    post:
+      operationId: capabilities_batchCreate
+      description: |-
+        Return capabilities for multiple resources in a single request.
+
+        Accepts up to 20 keys like ``"course:1"``, ``"assignment:5"``,
+        ``"submission:42"``, or ``"platform"``.  Returns a map of key →
+        capability dict.  Invalid or inaccessible keys are silently skipped.
+
+        A shared ``RoleCache`` is used across all computations so that
+        role-check DB queries are deduplicated.
+      tags:
+      - capabilities
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchCapabilitiesRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BatchCapabilitiesRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BatchCapabilitiesRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchCapabilitiesResponse'
+          description: ''
+  /capabilities/platform/:
+    get:
+      operationId: capabilities_platformRetrieve
+      description: Return the requesting user's platform-level capabilities.
+      parameters:
+      - in: query
+        name: descriptions
+        schema:
+          type: boolean
+        description: Include human-readable descriptions for each capability.
+      tags:
+      - capabilities
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesResponse'
           description: ''
   /commentTemplates/:
     get:
@@ -2444,8 +2617,8 @@ paths:
       tags:
       - commentTemplates
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2474,8 +2647,8 @@ paths:
               $ref: '#/components/schemas/CommentTemplate'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2498,8 +2671,8 @@ paths:
       tags:
       - commentTemplates
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2533,8 +2706,8 @@ paths:
               $ref: '#/components/schemas/CommentTemplate'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2567,8 +2740,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCommentTemplate'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2590,8 +2763,8 @@ paths:
       tags:
       - commentTemplates
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2621,8 +2794,8 @@ paths:
       tags:
       - comments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2669,8 +2842,8 @@ paths:
               $ref: '#/components/schemas/Comment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2711,8 +2884,8 @@ paths:
       tags:
       - comments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2764,8 +2937,8 @@ paths:
               $ref: '#/components/schemas/Comment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2816,8 +2989,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2857,8 +3030,8 @@ paths:
       tags:
       - comments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2906,8 +3079,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2949,8 +3122,8 @@ paths:
               $ref: '#/components/schemas/Comment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -2969,8 +3142,8 @@ paths:
       tags:
       - courseFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3022,8 +3195,8 @@ paths:
               $ref: '#/components/schemas/CourseFile'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3069,8 +3242,8 @@ paths:
       tags:
       - courseFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3127,8 +3300,8 @@ paths:
               $ref: '#/components/schemas/CourseFile'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3184,8 +3357,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourseFile'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3230,8 +3403,8 @@ paths:
       tags:
       - courseFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3261,8 +3434,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3309,8 +3482,8 @@ paths:
               $ref: '#/components/schemas/Course'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3351,8 +3524,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3404,8 +3577,8 @@ paths:
               $ref: '#/components/schemas/Course'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3456,8 +3629,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourse'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3497,8 +3670,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3534,8 +3707,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourse'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3563,8 +3736,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3593,8 +3766,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3633,8 +3806,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourseAISettings'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3680,8 +3853,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3690,6 +3863,139 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AIUsageSummary'
+          description: ''
+  /courses/{id}/apiKeys/:
+    get:
+      operationId: courses_apiKeysRetrieve
+      description: List or create course-scoped API keys.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseAPIKeyCreateResponse'
+          description: ''
+    post:
+      operationId: courses_apiKeysCreate
+      description: List or create course-scoped API keys.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseAPIKeyCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CourseAPIKeyCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CourseAPIKeyCreate'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseAPIKeyCreateResponse'
+          description: ''
+  /courses/{id}/apiKeys/{keyId}/:
+    patch:
+      operationId: courses_apiKeysPartialUpdate
+      description: Update or revoke a single course API key.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      - in: path
+        name: keyId
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - courses
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCourse'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCourse'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCourse'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseAPIKeyRead'
+          description: ''
+    delete:
+      operationId: courses_apiKeysDestroy
+      description: Update or revoke a single course API key.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      - in: path
+        name: keyId
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourseAPIKeyRead'
           description: ''
   /courses/{id}/auditLog/:
     get:
@@ -3745,8 +4051,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3792,8 +4098,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3802,6 +4108,36 @@ paths:
             text/csv:
               schema:
                 type: string
+          description: ''
+  /courses/{id}/capabilities/:
+    get:
+      operationId: courses_capabilitiesRetrieve
+      description: Return the requesting user's capabilities for this course.
+      parameters:
+      - in: query
+        name: descriptions
+        schema:
+          type: boolean
+        description: Include human-readable descriptions for each capability.
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesResponse'
           description: ''
   /courses/{id}/changeInviteCode/:
     patch:
@@ -3845,8 +4181,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourse'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3887,8 +4223,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3939,8 +4275,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourse'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -3992,8 +4328,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourse'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4029,8 +4365,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourse'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4059,8 +4395,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4099,8 +4435,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourse'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4141,8 +4477,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4193,8 +4529,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourseRosterMap'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4234,8 +4570,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4276,8 +4612,8 @@ paths:
       tags:
       - courses
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4328,8 +4664,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedCourseStudentCaptions'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4360,8 +4696,8 @@ paths:
               $ref: '#/components/schemas/PendingAdminActionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4380,8 +4716,8 @@ paths:
       tags:
       - dashboard
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4414,8 +4750,8 @@ paths:
               $ref: '#/components/schemas/PendingAdminActionRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4434,8 +4770,8 @@ paths:
       tags:
       - dashboard
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4454,8 +4790,8 @@ paths:
       tags:
       - dashboard
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4497,8 +4833,8 @@ paths:
       tags:
       - files
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4553,8 +4889,8 @@ paths:
               $ref: '#/components/schemas/File'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4603,8 +4939,8 @@ paths:
       tags:
       - files
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4664,8 +5000,8 @@ paths:
               $ref: '#/components/schemas/File'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4724,8 +5060,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedFile'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4773,8 +5109,8 @@ paths:
       tags:
       - files
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4802,8 +5138,8 @@ paths:
             schema:
               $ref: '#/components/schemas/ImpersonateRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4830,8 +5166,8 @@ paths:
             schema:
               $ref: '#/components/schemas/LogDumpRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4863,8 +5199,8 @@ paths:
             schema:
               $ref: '#/components/schemas/LogErrorRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4893,8 +5229,8 @@ paths:
             schema:
               $ref: '#/components/schemas/LogHappinessRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4928,8 +5264,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -4976,8 +5312,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5018,8 +5354,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5071,8 +5407,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5123,8 +5459,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedOrganization'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5164,8 +5500,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5188,8 +5524,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5216,8 +5552,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5254,8 +5590,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedOrganizationAISettingsUpdate'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5301,8 +5637,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5326,8 +5662,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5365,8 +5701,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5404,8 +5740,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5443,8 +5779,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5470,8 +5806,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5509,8 +5845,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5548,8 +5884,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5587,8 +5923,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5614,8 +5950,8 @@ paths:
       tags:
       - organizations
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5653,8 +5989,8 @@ paths:
               $ref: '#/components/schemas/Organization'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5674,7 +6010,6 @@ paths:
       - ott
       security:
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5694,8 +6029,8 @@ paths:
       tags:
       - ott
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5726,8 +6061,8 @@ paths:
               $ref: '#/components/schemas/GenerateOTTRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5747,8 +6082,8 @@ paths:
       tags:
       - ott
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5779,8 +6114,8 @@ paths:
               $ref: '#/components/schemas/ValidateOTTRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5789,6 +6124,1079 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
+          description: ''
+  /promptExperiments/:
+    get:
+      operationId: promptExperiments_list
+      description: |-
+        CRUD and lifecycle management for A/B prompt experiments.
+
+        Superuser-only.  Only one experiment per prompt_type may be 'running'
+        at a time (enforced at the DB level).
+
+        list:
+        List all experiments. Supports ?promptType= and ?status= filters.
+
+        create:
+        Create a new experiment (defaults to 'paused').
+
+        retrieve / update / partial_update / delete:
+        Standard CRUD.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - promptExperiments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPromptExperimentList'
+          description: ''
+    post:
+      operationId: promptExperiments_create
+      description: |-
+        CRUD and lifecycle management for A/B prompt experiments.
+
+        Superuser-only.  Only one experiment per prompt_type may be 'running'
+        at a time (enforced at the DB level).
+
+        list:
+        List all experiments. Supports ?promptType= and ?status= filters.
+
+        create:
+        Create a new experiment (defaults to 'paused').
+
+        retrieve / update / partial_update / delete:
+        Standard CRUD.
+      tags:
+      - promptExperiments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptExperiment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PromptExperiment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PromptExperiment'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperiment'
+          description: ''
+  /promptExperiments/{id}/:
+    get:
+      operationId: promptExperiments_retrieve
+      description: |-
+        CRUD and lifecycle management for A/B prompt experiments.
+
+        Superuser-only.  Only one experiment per prompt_type may be 'running'
+        at a time (enforced at the DB level).
+
+        list:
+        List all experiments. Supports ?promptType= and ?status= filters.
+
+        create:
+        Create a new experiment (defaults to 'paused').
+
+        retrieve / update / partial_update / delete:
+        Standard CRUD.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      tags:
+      - promptExperiments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperiment'
+          description: ''
+    put:
+      operationId: promptExperiments_update
+      description: |-
+        CRUD and lifecycle management for A/B prompt experiments.
+
+        Superuser-only.  Only one experiment per prompt_type may be 'running'
+        at a time (enforced at the DB level).
+
+        list:
+        List all experiments. Supports ?promptType= and ?status= filters.
+
+        create:
+        Create a new experiment (defaults to 'paused').
+
+        retrieve / update / partial_update / delete:
+        Standard CRUD.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      tags:
+      - promptExperiments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptExperiment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PromptExperiment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PromptExperiment'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperiment'
+          description: ''
+    patch:
+      operationId: promptExperiments_partialUpdate
+      description: |-
+        CRUD and lifecycle management for A/B prompt experiments.
+
+        Superuser-only.  Only one experiment per prompt_type may be 'running'
+        at a time (enforced at the DB level).
+
+        list:
+        List all experiments. Supports ?promptType= and ?status= filters.
+
+        create:
+        Create a new experiment (defaults to 'paused').
+
+        retrieve / update / partial_update / delete:
+        Standard CRUD.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      tags:
+      - promptExperiments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPromptExperiment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPromptExperiment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPromptExperiment'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperiment'
+          description: ''
+    delete:
+      operationId: promptExperiments_destroy
+      description: |-
+        CRUD and lifecycle management for A/B prompt experiments.
+
+        Superuser-only.  Only one experiment per prompt_type may be 'running'
+        at a time (enforced at the DB level).
+
+        list:
+        List all experiments. Supports ?promptType= and ?status= filters.
+
+        create:
+        Create a new experiment (defaults to 'paused').
+
+        retrieve / update / partial_update / delete:
+        Standard CRUD.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      tags:
+      - promptExperiments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /promptExperiments/{id}/complete/:
+    post:
+      operationId: promptExperiments_completeCreate
+      description: Mark this experiment as completed. Optionally promote the winner.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      - in: query
+        name: promoteWinner
+        schema:
+          type: boolean
+        description: If true, activate the winning variant.
+      tags:
+      - promptExperiments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperiment'
+          description: ''
+  /promptExperiments/{id}/pause/:
+    post:
+      operationId: promptExperiments_pauseCreate
+      description: Pause this experiment (no new A/B requests will be triggered).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      tags:
+      - promptExperiments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperiment'
+          description: ''
+  /promptExperiments/{id}/results/:
+    get:
+      operationId: promptExperiments_resultsRetrieve
+      description: Get aggregated feedback results for this experiment, including
+        behavioral metrics.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      - in: query
+        name: minAssignments
+        schema:
+          type: integer
+        description: 'Minimum distinct assignments required for behavioral metrics
+          (default: 1).'
+      - in: query
+        name: minSamplesPerVariant
+        schema:
+          type: integer
+        description: 'Minimum suggestions per variant for confident metrics (default:
+          30).'
+      - in: query
+        name: pool
+        schema:
+          type: string
+          enum:
+          - all
+          - custom
+          - default
+        description: 'Filter feedback pool: ''default'', ''custom'', or ''all''.'
+      tags:
+      - promptExperiments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperimentResults'
+          description: ''
+  /promptExperiments/{id}/resume/:
+    post:
+      operationId: promptExperiments_resumeCreate
+      description: Start (resume) this experiment so it begins sampling requests.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt experiment.
+        required: true
+      tags:
+      - promptExperiments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptExperiment'
+          description: ''
+  /promptFeedback/:
+    get:
+      operationId: promptFeedback_list
+      description: Override to allow superuser listing (bypasses ListProtectedViewSet
+        block).
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - promptFeedback
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPromptFeedbackList'
+          description: ''
+    post:
+      operationId: promptFeedback_create
+      description: |-
+        Prompt feedback from graders/admins on AI-generated output.
+
+        create:
+        Submit feedback (any authenticated user).
+
+        list / retrieve:
+        Superuser-only. Supports ?promptType=, ?experimentId=, ?isCustomContext= filters.
+      tags:
+      - promptFeedback
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptFeedback'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PromptFeedback'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PromptFeedback'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptFeedback'
+          description: ''
+  /promptFeedback/{id}/:
+    get:
+      operationId: promptFeedback_retrieve
+      description: |-
+        Prompt feedback from graders/admins on AI-generated output.
+
+        create:
+        Submit feedback (any authenticated user).
+
+        list / retrieve:
+        Superuser-only. Supports ?promptType=, ?experimentId=, ?isCustomContext= filters.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt feedback.
+        required: true
+      tags:
+      - promptFeedback
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptFeedback'
+          description: ''
+    put:
+      operationId: promptFeedback_update
+      description: |-
+        Prompt feedback from graders/admins on AI-generated output.
+
+        create:
+        Submit feedback (any authenticated user).
+
+        list / retrieve:
+        Superuser-only. Supports ?promptType=, ?experimentId=, ?isCustomContext= filters.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt feedback.
+        required: true
+      tags:
+      - promptFeedback
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptFeedback'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PromptFeedback'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PromptFeedback'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptFeedback'
+          description: ''
+    patch:
+      operationId: promptFeedback_partialUpdate
+      description: |-
+        Prompt feedback from graders/admins on AI-generated output.
+
+        create:
+        Submit feedback (any authenticated user).
+
+        list / retrieve:
+        Superuser-only. Supports ?promptType=, ?experimentId=, ?isCustomContext= filters.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt feedback.
+        required: true
+      tags:
+      - promptFeedback
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPromptFeedback'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPromptFeedback'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPromptFeedback'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptFeedback'
+          description: ''
+    delete:
+      operationId: promptFeedback_destroy
+      description: |-
+        Prompt feedback from graders/admins on AI-generated output.
+
+        create:
+        Submit feedback (any authenticated user).
+
+        list / retrieve:
+        Superuser-only. Supports ?promptType=, ?experimentId=, ?isCustomContext= filters.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this prompt feedback.
+        required: true
+      tags:
+      - promptFeedback
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /promptTypes/:
+    get:
+      operationId: promptTypes_list
+      description: List all registered AI prompt types.
+      tags:
+      - promptTypes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                    label:
+                      type: string
+                    description:
+                      type: string
+          description: ''
+  /promptVariants/:
+    get:
+      operationId: promptVariants_list
+      description: |-
+        CRUD for platform-global AI system prompt variants.
+
+        Superuser-only.  Use the ``activate`` action to promote a variant as the
+        active prompt for its type (retiring the previous active variant).
+
+        list:
+        List all prompt variants (superuser only). Supports ?promptType= filter.
+
+        retrieve:
+        Return a single variant.
+
+        create:
+        Create a new variant (status defaults to 'draft').
+
+        update / partial_update:
+        Edit a variant. Cannot edit an 'active' variant directly —
+        clone it first, edit the clone, then activate the clone.
+
+        delete:
+        Delete a variant. Active variants cannot be deleted.
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSystemPromptVariantList'
+          description: ''
+    post:
+      operationId: promptVariants_create
+      description: |-
+        CRUD for platform-global AI system prompt variants.
+
+        Superuser-only.  Use the ``activate`` action to promote a variant as the
+        active prompt for its type (retiring the previous active variant).
+
+        list:
+        List all prompt variants (superuser only). Supports ?promptType= filter.
+
+        retrieve:
+        Return a single variant.
+
+        create:
+        Create a new variant (status defaults to 'draft').
+
+        update / partial_update:
+        Edit a variant. Cannot edit an 'active' variant directly —
+        clone it first, edit the clone, then activate the clone.
+
+        delete:
+        Delete a variant. Active variants cannot be deleted.
+      tags:
+      - promptVariants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemPromptVariant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SystemPromptVariant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SystemPromptVariant'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemPromptVariant'
+          description: ''
+  /promptVariants/{id}/:
+    get:
+      operationId: promptVariants_retrieve
+      description: |-
+        CRUD for platform-global AI system prompt variants.
+
+        Superuser-only.  Use the ``activate`` action to promote a variant as the
+        active prompt for its type (retiring the previous active variant).
+
+        list:
+        List all prompt variants (superuser only). Supports ?promptType= filter.
+
+        retrieve:
+        Return a single variant.
+
+        create:
+        Create a new variant (status defaults to 'draft').
+
+        update / partial_update:
+        Edit a variant. Cannot edit an 'active' variant directly —
+        clone it first, edit the clone, then activate the clone.
+
+        delete:
+        Delete a variant. Active variants cannot be deleted.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this system prompt variant.
+        required: true
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemPromptVariant'
+          description: ''
+    put:
+      operationId: promptVariants_update
+      description: |-
+        CRUD for platform-global AI system prompt variants.
+
+        Superuser-only.  Use the ``activate`` action to promote a variant as the
+        active prompt for its type (retiring the previous active variant).
+
+        list:
+        List all prompt variants (superuser only). Supports ?promptType= filter.
+
+        retrieve:
+        Return a single variant.
+
+        create:
+        Create a new variant (status defaults to 'draft').
+
+        update / partial_update:
+        Edit a variant. Cannot edit an 'active' variant directly —
+        clone it first, edit the clone, then activate the clone.
+
+        delete:
+        Delete a variant. Active variants cannot be deleted.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this system prompt variant.
+        required: true
+      tags:
+      - promptVariants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemPromptVariant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SystemPromptVariant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SystemPromptVariant'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemPromptVariant'
+          description: ''
+    patch:
+      operationId: promptVariants_partialUpdate
+      description: |-
+        CRUD for platform-global AI system prompt variants.
+
+        Superuser-only.  Use the ``activate`` action to promote a variant as the
+        active prompt for its type (retiring the previous active variant).
+
+        list:
+        List all prompt variants (superuser only). Supports ?promptType= filter.
+
+        retrieve:
+        Return a single variant.
+
+        create:
+        Create a new variant (status defaults to 'draft').
+
+        update / partial_update:
+        Edit a variant. Cannot edit an 'active' variant directly —
+        clone it first, edit the clone, then activate the clone.
+
+        delete:
+        Delete a variant. Active variants cannot be deleted.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this system prompt variant.
+        required: true
+      tags:
+      - promptVariants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSystemPromptVariant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSystemPromptVariant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSystemPromptVariant'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemPromptVariant'
+          description: ''
+    delete:
+      operationId: promptVariants_destroy
+      description: |-
+        CRUD for platform-global AI system prompt variants.
+
+        Superuser-only.  Use the ``activate`` action to promote a variant as the
+        active prompt for its type (retiring the previous active variant).
+
+        list:
+        List all prompt variants (superuser only). Supports ?promptType= filter.
+
+        retrieve:
+        Return a single variant.
+
+        create:
+        Create a new variant (status defaults to 'draft').
+
+        update / partial_update:
+        Edit a variant. Cannot edit an 'active' variant directly —
+        clone it first, edit the clone, then activate the clone.
+
+        delete:
+        Delete a variant. Active variants cannot be deleted.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this system prompt variant.
+        required: true
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /promptVariants/{id}/activate/:
+    post:
+      operationId: promptVariants_activateCreate
+      description: Set this variant as the active prompt for its type. The previously
+        active variant (if any) is moved to 'retired'.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this system prompt variant.
+        required: true
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemPromptVariant'
+          description: ''
+  /promptVariants/{id}/clone/:
+    post:
+      operationId: promptVariants_cloneCreate
+      description: Clone this variant as a new draft for editing.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this system prompt variant.
+        required: true
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemPromptVariant'
+          description: ''
+  /promptVariants/{id}/stats/:
+    get:
+      operationId: promptVariants_statsRetrieve
+      description: 'Get performance stats for this prompt variant: behavioral metrics
+        (acceptance/rejection/edit rates, time to decide) and explicit feedback (thumbs
+        up/down).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this system prompt variant.
+        required: true
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /promptVariants/auto-improve/:
+    post:
+      operationId: promptVariants_autoImproveCreate
+      description: Analyze feedback for a prompt type and use AI to generate an improved
+        variant. Creates a new draft child of the current active variant.
+      parameters:
+      - in: query
+        name: promptType
+        schema:
+          type: string
+        description: The prompt type to auto-improve.
+        required: true
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemPromptVariant'
+          description: ''
+  /promptVariants/settings/:
+    get:
+      operationId: promptVariants_settingsRetrieve
+      description: Get the current Prompt Lab auto-improvement settings.
+      tags:
+      - promptVariants
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /promptVariants/settings/update/:
+    put:
+      operationId: promptVariants_settingsUpdateUpdate
+      description: Update Prompt Lab auto-improvement settings.
+      tags:
+      - promptVariants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: {}
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /registration/checkStatusNewAdminUser/:
     get:
@@ -5800,8 +7208,8 @@ paths:
       tags:
       - registration
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -5820,7 +7228,6 @@ paths:
       - registration
       security:
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5848,8 +7255,8 @@ paths:
               $ref: '#/components/schemas/EmailPasswordResetRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -5887,8 +7294,8 @@ paths:
               $ref: '#/components/schemas/EmailRegistrationRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -5912,8 +7319,8 @@ paths:
       tags:
       - registration
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -5932,8 +7339,8 @@ paths:
       tags:
       - registration
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -5968,8 +7375,8 @@ paths:
               $ref: '#/components/schemas/RegisterAndSetPasswordRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -5998,8 +7405,8 @@ paths:
               $ref: '#/components/schemas/ResetPasswordRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -6031,8 +7438,8 @@ paths:
               $ref: '#/components/schemas/SetCredentialsRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6065,8 +7472,8 @@ paths:
               $ref: '#/components/schemas/ValidateNewAdminUserRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -6102,8 +7509,8 @@ paths:
               $ref: '#/components/schemas/VerifyRegistrationTokenRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -6133,8 +7540,8 @@ paths:
               $ref: '#/components/schemas/VerifyResetTokenRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -6169,8 +7576,8 @@ paths:
       tags:
       - rubricCategories
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6217,8 +7624,8 @@ paths:
               $ref: '#/components/schemas/RubricCategory'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6259,8 +7666,8 @@ paths:
       tags:
       - rubricCategories
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6312,8 +7719,8 @@ paths:
               $ref: '#/components/schemas/RubricCategory'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6364,8 +7771,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedRubricCategory'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6405,8 +7812,8 @@ paths:
       tags:
       - rubricCategories
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6436,8 +7843,8 @@ paths:
       tags:
       - rubricComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6484,8 +7891,8 @@ paths:
               $ref: '#/components/schemas/RubricComment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6526,8 +7933,8 @@ paths:
       tags:
       - rubricComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6579,8 +7986,8 @@ paths:
               $ref: '#/components/schemas/RubricComment'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6631,8 +8038,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedRubricComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6672,8 +8079,8 @@ paths:
       tags:
       - rubricComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6710,8 +8117,8 @@ paths:
       tags:
       - rubricComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6752,8 +8159,8 @@ paths:
       tags:
       - rubricComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6787,8 +8194,8 @@ paths:
       tags:
       - sections
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6835,8 +8242,8 @@ paths:
               $ref: '#/components/schemas/Section'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6877,8 +8284,8 @@ paths:
       tags:
       - sections
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6930,8 +8337,8 @@ paths:
               $ref: '#/components/schemas/Section'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -6982,8 +8389,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSection'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7023,8 +8430,8 @@ paths:
       tags:
       - sections
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7049,8 +8456,8 @@ paths:
       tags:
       - sections
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7091,8 +8498,8 @@ paths:
       tags:
       - submissionFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7144,8 +8551,8 @@ paths:
               $ref: '#/components/schemas/SubmissionFile'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7191,8 +8598,8 @@ paths:
       tags:
       - submissionFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7249,8 +8656,8 @@ paths:
               $ref: '#/components/schemas/SubmissionFile'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7306,8 +8713,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSubmissionFile'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7352,8 +8759,8 @@ paths:
       tags:
       - submissionFiles
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7383,8 +8790,8 @@ paths:
       tags:
       - submissionTests
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7431,8 +8838,8 @@ paths:
               $ref: '#/components/schemas/SubmissionTest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7473,8 +8880,8 @@ paths:
       tags:
       - submissionTests
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7526,8 +8933,8 @@ paths:
               $ref: '#/components/schemas/SubmissionTest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7578,8 +8985,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSubmissionTest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7619,8 +9026,8 @@ paths:
       tags:
       - submissionTests
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7650,8 +9057,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7698,8 +9105,8 @@ paths:
               $ref: '#/components/schemas/Submission'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7740,8 +9147,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7793,8 +9200,8 @@ paths:
               $ref: '#/components/schemas/Submission'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7845,8 +9252,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSubmission'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7886,8 +9293,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7924,8 +9331,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -7977,8 +9384,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSubmission'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8015,8 +9422,8 @@ paths:
               $ref: '#/components/schemas/Submission'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8053,8 +9460,8 @@ paths:
               $ref: '#/components/schemas/GenerateFileSuggestionsRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8097,8 +9504,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8123,8 +9530,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8165,8 +9572,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8219,8 +9626,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSubmission'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8275,8 +9682,8 @@ paths:
               $ref: '#/components/schemas/Submission'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8317,8 +9724,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8359,8 +9766,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8414,8 +9821,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSubmission'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8440,8 +9847,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8467,8 +9874,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8509,8 +9916,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8556,8 +9963,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8603,8 +10010,8 @@ paths:
       tags:
       - submissions
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8632,8 +10039,8 @@ paths:
               $ref: '#/components/schemas/SubscribeToEmailListRequest'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8657,8 +10064,8 @@ paths:
       tags:
       - suggestedComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8694,8 +10101,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SuggestedComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8726,8 +10133,8 @@ paths:
       tags:
       - suggestedComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8768,8 +10175,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SuggestedComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8810,8 +10217,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedSuggestedComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8841,8 +10248,8 @@ paths:
       tags:
       - suggestedComments
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8874,8 +10281,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SuggestedComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8910,8 +10317,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SuggestedComment'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8962,8 +10369,8 @@ paths:
       tags:
       - system
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -8995,8 +10402,8 @@ paths:
       tags:
       - system
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9040,8 +10447,8 @@ paths:
       tags:
       - system
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9059,8 +10466,8 @@ paths:
       tags:
       - system
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       - {}
@@ -9082,8 +10489,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedMaintenanceBanner'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9099,8 +10506,8 @@ paths:
       tags:
       - system
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9134,8 +10541,8 @@ paths:
       tags:
       - testCases
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9182,8 +10589,8 @@ paths:
               $ref: '#/components/schemas/TestCase'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9224,8 +10631,8 @@ paths:
       tags:
       - testCases
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9277,8 +10684,8 @@ paths:
               $ref: '#/components/schemas/TestCase'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9329,8 +10736,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedTestCase'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9370,8 +10777,8 @@ paths:
       tags:
       - testCases
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9419,8 +10826,8 @@ paths:
             schema:
               $ref: '#/components/schemas/TestCaseRunRequest'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9454,8 +10861,8 @@ paths:
       tags:
       - testCategories
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9502,8 +10909,8 @@ paths:
               $ref: '#/components/schemas/TestCategory'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9544,8 +10951,8 @@ paths:
       tags:
       - testCategories
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9597,8 +11004,8 @@ paths:
               $ref: '#/components/schemas/TestCategory'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9649,8 +11056,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedTestCategory'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9690,8 +11097,8 @@ paths:
       tags:
       - testCategories
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9725,8 +11132,8 @@ paths:
               $ref: '#/components/schemas/TestCategory'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9755,8 +11162,8 @@ paths:
               $ref: '#/components/schemas/TestCategory'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9790,8 +11197,8 @@ paths:
       tags:
       - testCategoryResources
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9838,8 +11245,8 @@ paths:
               $ref: '#/components/schemas/TestCategoryResource'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9880,8 +11287,8 @@ paths:
       tags:
       - testCategoryResources
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9933,8 +11340,8 @@ paths:
               $ref: '#/components/schemas/TestCategoryResource'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -9985,8 +11392,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedTestCategoryResource'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10026,8 +11433,8 @@ paths:
       tags:
       - testCategoryResources
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10039,8 +11446,8 @@ paths:
       tags:
       - tmp-script
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10097,6 +11504,10 @@ paths:
             schema:
               $ref: '#/components/schemas/TokenRefreshSliding'
         required: true
+      security:
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
       responses:
         '200':
           content:
@@ -10124,6 +11535,10 @@ paths:
             schema:
               $ref: '#/components/schemas/TokenVerify'
         required: true
+      security:
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
       responses:
         '200':
           content:
@@ -10162,8 +11577,8 @@ paths:
       tags:
       - users
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10190,8 +11605,8 @@ paths:
               $ref: '#/components/schemas/User'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10214,8 +11629,8 @@ paths:
       tags:
       - users
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10249,8 +11664,8 @@ paths:
               $ref: '#/components/schemas/User'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10283,8 +11698,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedUser'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10306,8 +11721,8 @@ paths:
       tags:
       - users
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10338,8 +11753,8 @@ paths:
               $ref: '#/components/schemas/User'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10355,8 +11770,8 @@ paths:
       tags:
       - users
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10382,8 +11797,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedUser'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10411,8 +11826,8 @@ paths:
               $ref: '#/components/schemas/User'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10445,8 +11860,8 @@ paths:
               $ref: '#/components/schemas/User'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10462,8 +11877,8 @@ paths:
       tags:
       - webhooks
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10492,8 +11907,8 @@ paths:
               $ref: '#/components/schemas/Webhook'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10516,8 +11931,8 @@ paths:
       tags:
       - webhooks
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10551,8 +11966,8 @@ paths:
               $ref: '#/components/schemas/Webhook'
         required: true
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10585,8 +12000,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedWebhook'
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -10608,8 +12023,8 @@ paths:
       tags:
       - webhooks
       security:
+      - courseKeyAuth: []
       - tokenAuth: []
-      - jwtAuth: []
       - basicAuth: []
       - cookieAuth: []
       responses:
@@ -11547,6 +12962,139 @@ components:
       required:
       - status
       - task_id
+    BatchCapabilitiesRequest:
+      type: object
+      description: |-
+        Request body for ``POST /capabilities/batch/``.
+
+        Each key must be ``"course:{id}"``, ``"assignment:{id}"``,
+        ``"submission:{id}"``, or ``"platform"``.
+      properties:
+        keys:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          description: List of resource keys, e.g. ["course:1", "assignment:5", "submission:42",
+            "platform"].
+          maxItems: 20
+      required:
+      - keys
+    BatchCapabilitiesResponse:
+      type: object
+      description: |-
+        Response for ``POST /capabilities/batch/``.
+
+        Returns ``{ results: { "course:1": { ... }, "assignment:5": { ... } } }``.
+      properties:
+        results:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              view_course:
+                type: boolean
+              edit_course_settings:
+                type: boolean
+              manage_roster:
+                type: boolean
+              view_roster:
+                type: boolean
+              manage_sections:
+                type: boolean
+              view_analytics:
+                type: boolean
+              configure_ai:
+                type: boolean
+              view_ai_usage:
+                type: boolean
+              create_assignment:
+                type: boolean
+              claim_submissions:
+                type: boolean
+              view_audit_log:
+                type: boolean
+              change_invite_code:
+                type: boolean
+              manage_course_api_keys:
+                type: boolean
+              edit_assignment:
+                type: boolean
+              copy_assignment:
+                type: boolean
+              view_assignment:
+                type: boolean
+              edit_rubric:
+                type: boolean
+              view_rubric:
+                type: boolean
+              release_grades:
+                type: boolean
+              manage_extensions:
+                type: boolean
+              view_queue:
+                type: boolean
+              manage_test_cases:
+                type: boolean
+              view_assignment_statistics:
+                type: boolean
+              upload_submission:
+                type: boolean
+              generate_ai_test_cases:
+                type: boolean
+              manage_datasets:
+                type: boolean
+              download_assignment_files:
+                type: boolean
+              view_submission:
+                type: boolean
+              view_feedback:
+                type: boolean
+              grade_submission:
+                type: boolean
+              comment_on_submission:
+                type: boolean
+              finalize_submission:
+                type: boolean
+              unfinalize_submission:
+                type: boolean
+              view_student_identity:
+                type: boolean
+              request_regrade:
+                type: boolean
+              manage_regrades:
+                type: boolean
+              run_autograder:
+                type: boolean
+              run_code:
+                type: boolean
+              generate_ai_comments:
+                type: boolean
+              manage_partners:
+                type: boolean
+              notify_students_feedback:
+                type: boolean
+              view_ai_assistance:
+                type: boolean
+              trigger_ai_assistance:
+                type: boolean
+              manage_global_templates:
+                type: boolean
+              view_submission_history:
+                type: boolean
+              provide_comment_feedback:
+                type: boolean
+              create_course:
+                type: boolean
+              manage_organization:
+                type: boolean
+              impersonate_user:
+                type: boolean
+              access_admin_dashboard:
+                type: boolean
+          description: Map of resource keys to their capability maps.
+      required:
+      - results
     BeforeStudentUploadResponse:
       type: object
       properties:
@@ -11564,6 +13112,39 @@ components:
       required:
       - daysLate
       - pointsOff
+    BehavioralMetrics:
+      type: object
+      description: Behavioral metrics comparing both variants.
+      properties:
+        variantA:
+          $ref: '#/components/schemas/VariantBehavioralStats'
+        variantB:
+          $ref: '#/components/schemas/VariantBehavioralStats'
+        variantAConfident:
+          type: boolean
+        variantBConfident:
+          type: boolean
+        batchAcceptanceRateA:
+          type: number
+          format: double
+          nullable: true
+        batchAcceptanceRateB:
+          type: number
+          format: double
+          nullable: true
+        minAssignmentsThreshold:
+          type: integer
+        minSamplesThreshold:
+          type: integer
+      required:
+      - batchAcceptanceRateA
+      - batchAcceptanceRateB
+      - minAssignmentsThreshold
+      - minSamplesThreshold
+      - variantA
+      - variantAConfident
+      - variantB
+      - variantBConfident
     BuildTypeEnum:
       enum:
       - default
@@ -11598,6 +13179,122 @@ components:
           description: Username who executed the code (staff only)
       required:
       - has_cache
+    CapabilitiesResponse:
+      type: object
+      description: |-
+        Serializer for the capabilities endpoint.
+
+        Returns ``{ "capabilitiesMap": { cap_key: bool, ... } }``.
+        The field is named in camelCase so the API response matches the
+        generated TypeScript client property name (no camelCase renderer
+        middleware is installed).
+      properties:
+        capabilitiesMap:
+          type: object
+          properties:
+            view_course:
+              type: boolean
+            edit_course_settings:
+              type: boolean
+            manage_roster:
+              type: boolean
+            view_roster:
+              type: boolean
+            manage_sections:
+              type: boolean
+            view_analytics:
+              type: boolean
+            configure_ai:
+              type: boolean
+            view_ai_usage:
+              type: boolean
+            create_assignment:
+              type: boolean
+            claim_submissions:
+              type: boolean
+            view_audit_log:
+              type: boolean
+            change_invite_code:
+              type: boolean
+            manage_course_api_keys:
+              type: boolean
+            edit_assignment:
+              type: boolean
+            copy_assignment:
+              type: boolean
+            view_assignment:
+              type: boolean
+            edit_rubric:
+              type: boolean
+            view_rubric:
+              type: boolean
+            release_grades:
+              type: boolean
+            manage_extensions:
+              type: boolean
+            view_queue:
+              type: boolean
+            manage_test_cases:
+              type: boolean
+            view_assignment_statistics:
+              type: boolean
+            upload_submission:
+              type: boolean
+            generate_ai_test_cases:
+              type: boolean
+            manage_datasets:
+              type: boolean
+            download_assignment_files:
+              type: boolean
+            view_submission:
+              type: boolean
+            view_feedback:
+              type: boolean
+            grade_submission:
+              type: boolean
+            comment_on_submission:
+              type: boolean
+            finalize_submission:
+              type: boolean
+            unfinalize_submission:
+              type: boolean
+            view_student_identity:
+              type: boolean
+            request_regrade:
+              type: boolean
+            manage_regrades:
+              type: boolean
+            run_autograder:
+              type: boolean
+            run_code:
+              type: boolean
+            generate_ai_comments:
+              type: boolean
+            manage_partners:
+              type: boolean
+            notify_students_feedback:
+              type: boolean
+            view_ai_assistance:
+              type: boolean
+            trigger_ai_assistance:
+              type: boolean
+            manage_global_templates:
+              type: boolean
+            view_submission_history:
+              type: boolean
+            provide_comment_feedback:
+              type: boolean
+            create_course:
+              type: boolean
+            manage_organization:
+              type: boolean
+            impersonate_user:
+              type: boolean
+            access_admin_dashboard:
+              type: boolean
+          description: Map of capability keys to boolean values.
+      required:
+      - capabilitiesMap
     CeleryCheck:
       type: object
       description: Result of a single health probe.
@@ -11919,11 +13616,17 @@ components:
         isRubricEditor:
           type: boolean
           readOnly: true
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+          readOnly: true
         cloneFrom:
           type: integer
           writeOnly: true
       required:
       - assignments
+      - capabilities
       - id
       - inviteCode
       - isRubricEditor
@@ -11963,6 +13666,14 @@ components:
         aiTokenRates:
           description: 'Custom per-model token rates. JSON: {"model-name": {"input":
             0.15, "output": 0.60}}'
+        aiFeatureConfig:
+          description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
+            "suggested_comments": false, ...}'
+        aiFeatures:
+          type: object
+          additionalProperties:
+            type: boolean
+          readOnly: true
         aiEnabled:
           type: boolean
           readOnly: true
@@ -11988,11 +13699,87 @@ components:
       required:
       - aiCommentsEnabled
       - aiEnabled
+      - aiFeatures
       - apiKeyHint
       - defaultTokenRates
       - hasApiKey
       - id
       - orgAiAvailable
+    CourseAPIKeyCreate:
+      type: object
+      description: Input serializer for creating a new course API key.
+      properties:
+        name:
+          type: string
+          maxLength: 128
+      required:
+      - name
+    CourseAPIKeyCreateResponse:
+      type: object
+      description: Response serializer that includes the raw key (shown only once).
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        key:
+          type: string
+          description: The full API key. This is only shown once.
+        keyPrefix:
+          type: string
+        createdBy:
+          type: string
+        created:
+          type: string
+          format: date-time
+      required:
+      - created
+      - createdBy
+      - id
+      - key
+      - keyPrefix
+      - name
+    CourseAPIKeyRead:
+      type: object
+      description: Read-only representation of a course API key (never exposes the
+        full key).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: A human-readable label for this key.
+          maxLength: 128
+        keyPrefix:
+          type: string
+          description: First characters of the raw key, used for fast lookup.
+          maxLength: 32
+        isActive:
+          type: boolean
+          description: If False, the key is revoked.
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last time this key was used to authenticate.
+        createdBy:
+          type: string
+          readOnly: true
+          nullable: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+      required:
+      - created
+      - createdBy
+      - id
+      - keyPrefix
+      - name
     CourseAuditEvent:
       type: object
       description: Read-only serializer for course audit events.
@@ -12942,6 +14729,21 @@ components:
           type: boolean
       required:
       - success
+    MainOrgSSOConfig:
+      type: object
+      properties:
+        main_org:
+          type: boolean
+        sso_enabled:
+          type: boolean
+        org_id:
+          type: integer
+        org_name:
+          type: string
+        provider:
+          type: string
+      required:
+      - main_org
     MaintenanceBannerResponse:
       type: object
       description: Full response shape returned by both GET and PATCH /system/banner/.
@@ -13035,6 +14837,21 @@ components:
     NullEnum:
       enum:
       - null
+    OrgSSOConfig:
+      type: object
+      properties:
+        found:
+          type: boolean
+        sso_enabled:
+          type: boolean
+        org_id:
+          type: integer
+        org_name:
+          type: string
+        provider:
+          type: string
+      required:
+      - found
     Organization:
       type: object
       properties:
@@ -13102,6 +14919,14 @@ components:
         aiTokenRates:
           description: 'Custom per-model token rates. JSON: {"model-name": {"input":
             0.15, "output": 0.60}}'
+        aiFeatureConfig:
+          description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
+            "suggested_comments": false, ...}'
+        aiFeatures:
+          type: object
+          additionalProperties:
+            type: boolean
+          readOnly: true
         aiEnabled:
           type: boolean
           readOnly: true
@@ -13125,6 +14950,7 @@ components:
       - aiCommentsEnabled
       - aiEnabled
       - aiEnabledCourseIds
+      - aiFeatures
       - apiKeyHint
       - defaultTokenRates
       - hasApiKey
@@ -13162,6 +14988,52 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CourseAuditEvent'
+    PaginatedPromptExperimentList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptExperiment'
+    PaginatedPromptFeedbackList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptFeedback'
     PaginatedSectionList:
       type: object
       required:
@@ -13254,6 +15126,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubmissionWithTests'
+    PaginatedSystemPromptVariantList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SystemPromptVariant'
     PaginatedUserList:
       type: object
       required:
@@ -13786,6 +15681,11 @@ components:
         isRubricEditor:
           type: boolean
           readOnly: true
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+          readOnly: true
         cloneFrom:
           type: integer
           writeOnly: true
@@ -13820,6 +15720,14 @@ components:
         aiTokenRates:
           description: 'Custom per-model token rates. JSON: {"model-name": {"input":
             0.15, "output": 0.60}}'
+        aiFeatureConfig:
+          description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
+            "suggested_comments": false, ...}'
+        aiFeatures:
+          type: object
+          additionalProperties:
+            type: boolean
+          readOnly: true
         aiEnabled:
           type: boolean
           readOnly: true
@@ -14123,6 +16031,112 @@ components:
         aiTokenRates:
           description: 'Custom per-model token rates. JSON: {"model-name": {"input":
             0.15, "output": 0.60}}'
+        aiFeatureConfig:
+          description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
+            "suggested_comments": false, ...}'
+    PatchedPromptExperiment:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Human-readable experiment name.
+          maxLength: 128
+        promptType:
+          type: string
+        variantA:
+          type: integer
+        variantB:
+          type: integer
+        variantADetail:
+          allOf:
+          - $ref: '#/components/schemas/SystemPromptVariantSummary'
+          readOnly: true
+        variantBDetail:
+          allOf:
+          - $ref: '#/components/schemas/SystemPromptVariantSummary'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PromptExperimentStatusEnum'
+          description: |-
+            Current experiment lifecycle state.
+
+            * `running` - Running
+            * `paused` - Paused
+            * `completed` - Completed
+        sampleRate:
+          type: number
+          format: double
+        startedBy:
+          type: integer
+          readOnly: true
+        completedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedPromptFeedback:
+      type: object
+      description: Serializer for creating and reading PromptFeedback records.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        experiment:
+          type: integer
+          nullable: true
+        variantUsed:
+          type: integer
+          nullable: true
+        chosenVariant:
+          type: integer
+          nullable: true
+        user:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The grader who provided this feedback.
+        rating:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: 'Standalone rating: 1 = thumbs up, -1 = thumbs down.'
+        feedbackText:
+          type: string
+        aiOutputA:
+          type: string
+        aiOutputB:
+          type: string
+        usageRecord:
+          type: integer
+          nullable: true
+        promptType:
+          type: string
+        isCustomContext:
+          type: boolean
+          default: false
+        contextHash:
+          type: string
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
     PatchedRubricCategory:
       type: object
       properties:
@@ -14510,6 +16524,71 @@ components:
           nullable: true
           description: Metadata about the generation (model used, tokens, confidence,
             etc.).
+        promptVariant:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The prompt variant used to generate this suggestion.
+        generationBatch:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          description: UUID grouping all suggestions from a single generation call.
+        firstViewedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: Timestamp when a grader first saw this suggestion (set on list
+            fetch).
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedSystemPromptVariant:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        promptType:
+          type: string
+        name:
+          type: string
+          description: Human-readable label (e.g. 'Concise Feedback v2').
+          maxLength: 128
+        text:
+          type: string
+          description: The prompt template. May contain {placeholder} variables.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status4a6Enum'
+          description: |-
+            Lifecycle status. Only one variant per prompt_type may be 'active'.
+
+            * `draft` - Draft
+            * `active` - Active
+            * `candidate` - Candidate
+            * `retired` - Retired
+        version:
+          type: integer
+          readOnly: true
+          description: Version number within this prompt's lineage.
+        parent:
+          type: integer
+          nullable: true
+          description: The variant this was derived from (for lineage tracking).
+        createdBy:
+          type: integer
+          readOnly: true
+        metadata:
+          description: Arbitrary metadata (auto-generation context, improvement notes,
+            etc.).
         created:
           type: string
           format: date-time
@@ -14779,6 +16858,176 @@ components:
           type: string
       required:
       - status
+    PromptExperiment:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          description: Human-readable experiment name.
+          maxLength: 128
+        promptType:
+          type: string
+        variantA:
+          type: integer
+        variantB:
+          type: integer
+        variantADetail:
+          allOf:
+          - $ref: '#/components/schemas/SystemPromptVariantSummary'
+          readOnly: true
+        variantBDetail:
+          allOf:
+          - $ref: '#/components/schemas/SystemPromptVariantSummary'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PromptExperimentStatusEnum'
+          description: |-
+            Current experiment lifecycle state.
+
+            * `running` - Running
+            * `paused` - Paused
+            * `completed` - Completed
+        sampleRate:
+          type: number
+          format: double
+        startedBy:
+          type: integer
+          readOnly: true
+        completedAt:
+          type: string
+          format: date-time
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - completedAt
+      - created
+      - id
+      - modified
+      - name
+      - promptType
+      - sampleRate
+      - startedBy
+      - variantA
+      - variantADetail
+      - variantB
+      - variantBDetail
+    PromptExperimentResults:
+      type: object
+      description: Aggregated results for a completed (or running) experiment.
+      properties:
+        experimentId:
+          type: integer
+        promptType:
+          type: string
+        totalFeedback:
+          type: integer
+        variantAWins:
+          type: integer
+        variantBWins:
+          type: integer
+        ties:
+          type: integer
+        defaultPoolCount:
+          type: integer
+        customPoolCount:
+          type: integer
+        thumbsUp:
+          type: integer
+        thumbsDown:
+          type: integer
+        behavioral:
+          $ref: '#/components/schemas/BehavioralMetrics'
+      required:
+      - behavioral
+      - customPoolCount
+      - defaultPoolCount
+      - experimentId
+      - promptType
+      - thumbsDown
+      - thumbsUp
+      - ties
+      - totalFeedback
+      - variantAWins
+      - variantBWins
+    PromptExperimentStatusEnum:
+      enum:
+      - running
+      - paused
+      - completed
+      type: string
+      description: |-
+        * `running` - Running
+        * `paused` - Paused
+        * `completed` - Completed
+    PromptFeedback:
+      type: object
+      description: Serializer for creating and reading PromptFeedback records.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        experiment:
+          type: integer
+          nullable: true
+        variantUsed:
+          type: integer
+          nullable: true
+        chosenVariant:
+          type: integer
+          nullable: true
+        user:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The grader who provided this feedback.
+        rating:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          nullable: true
+          description: 'Standalone rating: 1 = thumbs up, -1 = thumbs down.'
+        feedbackText:
+          type: string
+        aiOutputA:
+          type: string
+        aiOutputB:
+          type: string
+        usageRecord:
+          type: integer
+          nullable: true
+        promptType:
+          type: string
+        isCustomContext:
+          type: boolean
+          default: false
+        contextHash:
+          type: string
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - id
+      - modified
+      - promptType
+      - user
     RegisterAndSetPasswordRequest:
       type: object
       properties:
@@ -15019,6 +17268,18 @@ components:
           type: number
           format: double
           nullable: true
+    Status4a6Enum:
+      enum:
+      - draft
+      - active
+      - candidate
+      - retired
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `active` - Active
+        * `candidate` - Candidate
+        * `retired` - Retired
     StatusDfeEnum:
       enum:
       - ok
@@ -15266,6 +17527,109 @@ components:
           type: boolean
         filesOnly:
           type: boolean
+        capabilities:
+          type: object
+          properties:
+            view_course:
+              type: boolean
+            edit_course_settings:
+              type: boolean
+            manage_roster:
+              type: boolean
+            view_roster:
+              type: boolean
+            manage_sections:
+              type: boolean
+            view_analytics:
+              type: boolean
+            configure_ai:
+              type: boolean
+            view_ai_usage:
+              type: boolean
+            create_assignment:
+              type: boolean
+            claim_submissions:
+              type: boolean
+            view_audit_log:
+              type: boolean
+            change_invite_code:
+              type: boolean
+            manage_course_api_keys:
+              type: boolean
+            edit_assignment:
+              type: boolean
+            copy_assignment:
+              type: boolean
+            view_assignment:
+              type: boolean
+            edit_rubric:
+              type: boolean
+            view_rubric:
+              type: boolean
+            release_grades:
+              type: boolean
+            manage_extensions:
+              type: boolean
+            view_queue:
+              type: boolean
+            manage_test_cases:
+              type: boolean
+            view_assignment_statistics:
+              type: boolean
+            upload_submission:
+              type: boolean
+            generate_ai_test_cases:
+              type: boolean
+            manage_datasets:
+              type: boolean
+            download_assignment_files:
+              type: boolean
+            view_submission:
+              type: boolean
+            view_feedback:
+              type: boolean
+            grade_submission:
+              type: boolean
+            comment_on_submission:
+              type: boolean
+            finalize_submission:
+              type: boolean
+            unfinalize_submission:
+              type: boolean
+            view_student_identity:
+              type: boolean
+            request_regrade:
+              type: boolean
+            manage_regrades:
+              type: boolean
+            run_autograder:
+              type: boolean
+            run_code:
+              type: boolean
+            generate_ai_comments:
+              type: boolean
+            manage_partners:
+              type: boolean
+            notify_students_feedback:
+              type: boolean
+            view_ai_assistance:
+              type: boolean
+            trigger_ai_assistance:
+              type: boolean
+            manage_global_templates:
+              type: boolean
+            view_submission_history:
+              type: boolean
+            provide_comment_feedback:
+              type: boolean
+            create_course:
+              type: boolean
+            manage_organization:
+              type: boolean
+            impersonate_user:
+              type: boolean
+            access_admin_dashboard:
+              type: boolean
       required:
       - filesOnly
       - read
@@ -15413,6 +17777,10 @@ components:
           readOnly: true
           nullable: true
           description: Metadata about the generation (model used, tokens, etc.).
+        regenerationCount:
+          type: integer
+          readOnly: true
+          description: Number of times this summary has been regenerated.
         created:
           type: string
           format: date-time
@@ -15426,6 +17794,7 @@ components:
       - generationMetadata
       - id
       - modified
+      - regenerationCount
       - submission
       - text
     SubmissionTest:
@@ -15605,6 +17974,24 @@ components:
           nullable: true
           description: Metadata about the generation (model used, tokens, confidence,
             etc.).
+        promptVariant:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The prompt variant used to generate this suggestion.
+        generationBatch:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          description: UUID grouping all suggestions from a single generation call.
+        firstViewedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: Timestamp when a grader first saw this suggestion (set on list
+            fetch).
         created:
           type: string
           format: date-time
@@ -15620,10 +18007,13 @@ components:
       - endChar
       - endLine
       - file
+      - firstViewedAt
+      - generationBatch
       - generationMetadata
       - id
       - modified
       - pointDelta
+      - promptVariant
       - rubricComment
       - startChar
       - startLine
@@ -15687,6 +18077,96 @@ components:
       - migrations
       - overall
       - recent_events_1h
+    SystemPromptVariant:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        promptType:
+          type: string
+        name:
+          type: string
+          description: Human-readable label (e.g. 'Concise Feedback v2').
+          maxLength: 128
+        text:
+          type: string
+          description: The prompt template. May contain {placeholder} variables.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status4a6Enum'
+          description: |-
+            Lifecycle status. Only one variant per prompt_type may be 'active'.
+
+            * `draft` - Draft
+            * `active` - Active
+            * `candidate` - Candidate
+            * `retired` - Retired
+        version:
+          type: integer
+          readOnly: true
+          description: Version number within this prompt's lineage.
+        parent:
+          type: integer
+          nullable: true
+          description: The variant this was derived from (for lineage tracking).
+        createdBy:
+          type: integer
+          readOnly: true
+        metadata:
+          description: Arbitrary metadata (auto-generation context, improvement notes,
+            etc.).
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - createdBy
+      - id
+      - modified
+      - name
+      - promptType
+      - text
+      - version
+    SystemPromptVariantSummary:
+      type: object
+      description: Lightweight serializer for embedding inside experiment responses.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        promptType:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          description: Human-readable label (e.g. 'Concise Feedback v2').
+          maxLength: 128
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status4a6Enum'
+          description: |-
+            Lifecycle status. Only one variant per prompt_type may be 'active'.
+
+            * `draft` - Draft
+            * `active` - Active
+            * `candidate` - Candidate
+            * `retired` - Retired
+        version:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: Version number within this prompt's lineage.
+      required:
+      - id
+      - name
+      - promptType
     TaskStatusResponse:
       type: object
       description: Response for task status check
@@ -16140,6 +18620,46 @@ components:
           type: string
       required:
       - token
+    VariantBehavioralStats:
+      type: object
+      description: Behavioral stats for a single variant.
+      properties:
+        total:
+          type: integer
+        accepted:
+          type: integer
+        rejected:
+          type: integer
+        pending:
+          type: integer
+        acceptanceRate:
+          type: number
+          format: double
+          nullable: true
+        rejectionRate:
+          type: number
+          format: double
+          nullable: true
+        editRate:
+          type: number
+          format: double
+          nullable: true
+        avgTimeToDecideSeconds:
+          type: number
+          format: double
+          nullable: true
+        distinctAssignments:
+          type: integer
+      required:
+      - acceptanceRate
+      - accepted
+      - avgTimeToDecideSeconds
+      - distinctAssignments
+      - editRate
+      - pending
+      - rejected
+      - rejectionRate
+      - total
     VerifyRegistrationTokenRequest:
       type: object
       properties:
@@ -16222,10 +18742,11 @@ components:
       type: apiKey
       in: cookie
       name: sessionid
-    jwtAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+    courseKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Course-scoped API key. Format: `CourseKey cpk_<course_id>_<secret>`'
     tokenAuth:
       type: apiKey
       in: header

@@ -7,3 +7,19 @@ class CheckSSOAvailabilityResponseSerializer(serializers.Serializer):
     provider = serializers.CharField(required=False)
     org_id = serializers.IntegerField(required=False)
     org_name = serializers.CharField(required=False)
+
+
+class MainOrgSSOConfigSerializer(serializers.Serializer):
+    main_org = serializers.BooleanField()
+    sso_enabled = serializers.BooleanField(required=False)
+    org_id = serializers.IntegerField(required=False)
+    org_name = serializers.CharField(required=False)
+    provider = serializers.CharField(required=False)
+
+
+class OrgSSOConfigSerializer(serializers.Serializer):
+    found = serializers.BooleanField()
+    sso_enabled = serializers.BooleanField(required=False)
+    org_id = serializers.IntegerField(required=False)
+    org_name = serializers.CharField(required=False)
+    provider = serializers.CharField(required=False)

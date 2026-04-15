@@ -3,7 +3,9 @@ from datetime import timedelta
 from django.http import HttpResponseRedirect
 from core.models import User
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.authentication import BasicAuthentication, SessionAuthentication, TokenAuthentication
+from core.authentication import CourseScopedJWTAuthentication
 from rest_framework.response import Response
 from rest_framework.views import APIView
 import logging
@@ -24,8 +26,20 @@ from core.serializers.auth import (
   JwtOttResponseSerializer,
   ImpersonateRequestSerializer,
 )
+# Authentication classes that exclude CourseAPIKeyAuthentication.
+# Used on endpoints that issue unscoped tokens (current_user, get_jwt_ott,
+# token-auth, token-refresh) to prevent a course key holder from obtaining
+# a token with broader access than the key itself grants.
+NON_COURSE_KEY_AUTH = (
+    TokenAuthentication,
+    CourseScopedJWTAuthentication,
+    BasicAuthentication,
+    SessionAuthentication,
+)
+
 @extend_schema(responses={200: UserSerializer})
 @api_view(['GET'])
+@authentication_classes(NON_COURSE_KEY_AUTH)
 @permission_classes([IsAuthenticated])
 def current_user(request):
   """
@@ -51,7 +65,7 @@ class JWTSerializer(serializers.TokenObtainSlidingSerializer):
       return token
   
   @classmethod
-  def get_token(cls, user, never_expire=False):
+  def get_token(cls, user, never_expire=False, course_id=None):
      
       token = super().get_token(user)
       if never_expire:
@@ -60,6 +74,8 @@ class JWTSerializer(serializers.TokenObtainSlidingSerializer):
       token['user_id'] = user.id
       token['email'] = user.email
       token['username'] = user.username
+      if course_id is not None:
+          token['course_id'] = course_id
       return token
   def validate(self, attrs):
     data = super().validate(attrs)
@@ -74,7 +90,6 @@ class JWTSerializer(serializers.TokenObtainSlidingSerializer):
 
 
 class AccountLoginAPIView(views.TokenObtainSlidingView):
-  
   serializer_class = JWTSerializer
 
 obtain_jwt_token = AccountLoginAPIView.as_view()
@@ -107,9 +122,27 @@ class ImpersonateView(APIView):
     except User.DoesNotExist:
       return Response({"error": "User does not exist"}, status=404)
     
+    # Determine if the request is course-scoped (via course API key or scoped JWT)
+    course_scope_id = getattr(request, 'course_scope_id', None)
+    if course_scope_id is None:
+      auth = getattr(request, 'auth', None)
+      if isinstance(auth, dict):
+        course_scope_id = auth.get('course_scope_id')
+      elif hasattr(auth, 'course_scope_id'):
+        course_scope_id = auth.course_scope_id
+
     # Authorization: staff/superusers can impersonate anyone.
     # Course admins can only impersonate students/graders in their courses.
-    if not (request.user.is_staff or request.user.is_superuser):
+    # Course-scoped requests can only impersonate members of the scoped course.
+    if course_scope_id is not None:
+      from core.permissions.helpers import isCourseMember
+      try:
+        scoped_course = Course.objects.get(pk=course_scope_id)
+      except Course.DoesNotExist:
+        return Response({"error": "Scoped course does not exist."}, status=400)
+      if not isCourseMember(user, scoped_course):
+        return Response({"error": "Target user is not a member of the scoped course."}, status=403)
+    elif not (request.user.is_staff or request.user.is_superuser):
       sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
       if not sharded_course.exists():
         return Response({"error": "You do not have permission to impersonate this user."}, status=403)
@@ -129,8 +162,8 @@ class ImpersonateView(APIView):
     request.user = user
 
 
-    # Generate a token for the user
-    token = JWTSerializer.get_token(request.user, never_expire=should_expire)
+    # Generate a token for the user — propagate course scope if present
+    token = JWTSerializer.get_token(request.user, never_expire=should_expire, course_id=course_scope_id)
     serializer = UserSerializer(request.user, context={'request': request})
 
     data = serializer.data
@@ -193,10 +226,23 @@ def generate_one_time_token(request):
       event_type='audit'
   )
 
+  # Determine if the request is course-scoped (CourseKey or course-scoped JWT).
+  course_scope_id = getattr(request, 'course_scope_id', None)
+  if course_scope_id is None:
+    auth = getattr(request, 'auth', None)
+    if isinstance(auth, dict):
+      course_scope_id = auth.get('course_scope_id')
+    elif hasattr(auth, 'course_scope_id'):
+      course_scope_id = auth.course_scope_id
+
   # remove previous tokens
   OneTimeToken.objects.filter(user=user).delete()
   
-  token = OneTimeToken.objects.create(user=user)
+  create_kwargs = {'user': user}
+  if course_scope_id is not None:
+    create_kwargs['course_id'] = course_scope_id
+
+  token = OneTimeToken.objects.create(**create_kwargs)
   return Response({
     "token": str(token.token),
     "expires_at": token.expires_at.isoformat()
@@ -235,7 +281,9 @@ def validate_one_time_token(request):
   request.user = user
   serializer = UserSerializer(user, context={'request': request})
 
-  jwt_token = JWTSerializer.get_token(user, never_expire=True)
+  # Propagate course scope from the OTT into the JWT
+  ott_course_id = token_obj.course_id if token_obj.course_id else None
+  jwt_token = JWTSerializer.get_token(user, never_expire=True, course_id=ott_course_id)
 
   data = serializer.data
   data['token'] = str(jwt_token)
@@ -246,6 +294,7 @@ def validate_one_time_token(request):
 
 @extend_schema(responses={200: JwtOttResponseSerializer})
 @api_view(['GET'])
+@authentication_classes(NON_COURSE_KEY_AUTH)
 @permission_classes([IsAuthenticated])
 def get_jwt_ott(request):
   """

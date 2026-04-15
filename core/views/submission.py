@@ -25,6 +25,7 @@ from core.permissions.permissions import SubmissionPermissions
 
 from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, isStudentOfSub, isStaffOfSub, canViewUnanonymizedSubmissions, isSectionLeaderOfStudent, isSuperGrader
+from core.permissions.capabilities import compute_submission_capabilities, require_capability, check_capability
 
 from core.models import User
 from rest_framework import serializers
@@ -162,24 +163,22 @@ class SubmissionViewSet(ListProtectedViewSet):
     except Submission.DoesNotExist:
       return returnNotFound()
 
-    if isStaffOfSub(user, submission):
-      toRet = {
-        'read': True,
-        'write': True,
-        'filesOnly': False,
-      }
-    elif isStudentOfSub(user, submission):
-      # Students can ALWAYS view their submission (files)
-      # But can only see full feedback (comments/grades) after feedbackReleased is True or liveFeedbackMode is on
-      canReadFull = submission.assignment.feedbackReleased or submission.assignment.liveFeedbackMode
-      toRet = {
-        'read': True,  # Always allow read access to files
-        'write': False,
-        'filesOnly': not canReadFull,  # If feedback not released, restrict to files only
-      }
-      # Record audit event for student viewing their submission
+    caps = compute_submission_capabilities(user, submission)
+
+    canRead = caps.get('view_submission', False)
+    canWrite = caps.get('grade_submission', False)
+    canViewFeedback = caps.get('view_feedback', False)
+
+    toRet = {
+      'read': canRead,
+      'write': canWrite,
+      'filesOnly': canRead and not canViewFeedback,
+    }
+
+    # Record audit event for student viewing their submission
+    if canRead and not canWrite:
       course = submission.assignment.course
-      if canReadFull:
+      if canViewFeedback:
           record_audit_event(
               course=course,
               event_type='feedback_view',
@@ -195,12 +194,9 @@ class SubmissionViewSet(ListProtectedViewSet):
               assignment=submission.assignment,
               submission=submission,
           )
-    else:
-      toRet = {
-        'read': False,
-        'write': False,
-        'filesOnly': False,
-      }
+
+    # Attach fine-grained capabilities alongside legacy fields
+    toRet['capabilities'] = caps
 
     return Response(toRet)
 
@@ -267,11 +263,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = Submission.objects.get(id=pk)
     course = submission.assignment.course
 
-    if not isStudentOfSub(user, submission):
-      return returnForbidden()
-
-    if not submission.assignment.allowRegradeRequests:
-      raise serializers.ValidationError("Regrade requests are not enabled for this assignment.")
+    require_capability(user, 'request_regrade', submission)
 
     if not submission.isFinalized:
       raise serializers.ValidationError("Your submission has not been graded yet. You can submit a regrade request after your submission has been graded.")
@@ -322,11 +314,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = Submission.objects.get(id=pk)
     course = submission.assignment.course
 
-    if not isStudentOfSub(user, submission):
-      return returnForbidden()
-
-    if not submission.assignment.allowRegradeRequests:
-      raise serializers.ValidationError("Regrade requests are not enabled for this assignment.")
+    require_capability(user, 'request_regrade', submission)
 
     if not submission.isFinalized:
       raise serializers.ValidationError("Your submission has not been graded yet.")
@@ -376,7 +364,7 @@ class SubmissionViewSet(ListProtectedViewSet):
             maxFailedTests = assignment.environment and assignment.environment.maxExposedFailedTests
             tests = filterExposedSubmissionTests(list(submission.tests.all()), maxFailedTests)[0]
     else:
-        returnForbidden()
+        return returnForbidden()
 
     serializer = SubmissionTestSerializer(tests, many=True, context={"request": request})
     return Response(serializer.data)
@@ -392,6 +380,9 @@ class SubmissionViewSet(ListProtectedViewSet):
     assignment = submission.assignment
     isStudentMode = self.request.query_params.get('isStudentMode', "False") == "True"
 
+    # Ensure the user can at least view this submission
+    require_capability(user, 'view_submission', submission)
+
     # contents of _tests.txt
     logCode = ''
     def retrieve_log_code(submission):
@@ -400,6 +391,8 @@ class SubmissionViewSet(ListProtectedViewSet):
             return logFile.data
         except:
             return ''
+        
+    
 
     # If admin and admin is not in studentmode
     if isStaffOfSub(user, submission) and not isStudentMode:
@@ -424,7 +417,7 @@ class SubmissionViewSet(ListProtectedViewSet):
                 logCode = ''
 
     else:
-        returnForbidden()
+        return returnForbidden()
 
     submissionTests = SubmissionTestSerializer(tests, many=True, context={"request": request}).data
 
@@ -442,8 +435,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     if not assignment.allowStudentUploadWithPartners:
         return returnForbidden()
 
-    if not isStudentOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'manage_partners', submission)
 
     if submission.isFinalized:
         return returnForbidden()
@@ -549,8 +541,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     user = request.user
     submission = Submission.objects.get(id=pk)
 
-    if not isStudentOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'manage_partners', submission)
 
     submission.students.remove(user)
 
@@ -562,8 +553,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     user = request.user
     submission = Submission.objects.get(id=pk)
 
-    if not isStaffOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'notify_students_feedback', submission)
 
     if not submission.assignment.isReleased:
         return Response('Assignment must be released', status.HTTP_406_NOT_ACCEPTABLE)
@@ -598,8 +588,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = self.get_object()
     user = request.user
 
-    if not isStaffOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'view_ai_assistance', submission)
 
     suggestions = SuggestedComment.objects.filter(
         submission=submission, status='pending'
@@ -629,8 +618,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = self.get_object()
     user = request.user
 
-    if not isStaffOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'view_ai_assistance', submission)
 
     try:
         summary_obj = SubmissionSummary.objects.get(submission=submission)
@@ -652,8 +640,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = Submission.objects.get(id=pk)
     user = request.user
 
-    if not isStaffOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'trigger_ai_assistance', submission)
 
     from core.tasks import generate_ai_grading_assistance
     generate_ai_grading_assistance.delay(submission.id)
@@ -680,8 +667,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = self.get_object()
     user = request.user
 
-    if not isStaffOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'trigger_ai_assistance', submission)
 
     file_id = request.data.get('fileId')
     if not file_id:
@@ -819,8 +805,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     submission = self.get_object()
     user = request.user
 
-    if not isStaffOfSub(user, submission):
-        return returnForbidden()
+    require_capability(user, 'trigger_ai_assistance', submission)
 
     course = submission.assignment.course
     service = AIService(course, submission.assignment)
