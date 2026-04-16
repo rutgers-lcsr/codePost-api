@@ -70,6 +70,7 @@ class Capability(str, Enum):
     REQUEST_REGRADE = "request_regrade"
     MANAGE_REGRADES = "manage_regrades"
     RUN_AUTOGRADER = "run_autograder"
+    VIEW_TEST_RESULTS = "view_test_results"
     RUN_CODE = "run_code"
     GENERATE_AI_COMMENTS = "generate_ai_comments"
     MANAGE_PARTNERS = "manage_partners"
@@ -128,6 +129,7 @@ CAPABILITY_DESCRIPTIONS: dict[Capability, str] = {
     Capability.REQUEST_REGRADE: "Submit a regrade request on a finalized submission.",
     Capability.MANAGE_REGRADES: "Review, approve, or reject regrade requests.",
     Capability.RUN_AUTOGRADER: "Execute autograder test cases against a submission.",
+    Capability.VIEW_TEST_RESULTS: "View autograder test results on a submission.",
     Capability.RUN_CODE: "Execute submission code in the sandboxed environment.",
     Capability.GENERATE_AI_COMMENTS: "Trigger AI-powered comment generation on a submission.",
     Capability.MANAGE_PARTNERS: "Create or remove partner links on a submission.",
@@ -287,6 +289,7 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
         Capability.REQUEST_REGRADE: student_of_sub and bool(getattr(assignment, 'allowRegradeRequests', False)),
         Capability.MANAGE_REGRADES: admin or super_grader,
         Capability.RUN_AUTOGRADER: staff_of_sub,
+        Capability.VIEW_TEST_RESULTS: staff_of_sub or (student_of_sub and feedback_available),
         Capability.RUN_CODE: staff_of_sub or student_of_sub,
         Capability.GENERATE_AI_COMMENTS: staff_of_sub and not getattr(course, 'ai_disabled', False) and not getattr(course, 'ai_comments_disabled', False),
         Capability.MANAGE_PARTNERS: student_of_sub and bool(getattr(assignment, 'allowStudentUploadWithPartners', False)) and not archived,
