@@ -12,6 +12,22 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ---
 
+## [3.3.0] — AI Assistance, Analytics & Capabilities
+
+### Added
+
+- **AI suggested comments** — AI can now generate suggested comments, descriptions, and assignment summaries for graders and instructors.
+- **Assignment analytics** — new analytics endpoints and data for assignment-level usage and grading insights.
+- **Capabilities system** — introduced a capabilities framework for feature gating and progressive rollout.
+- **Prompt feedback for AB testing** — added behavioral feedback tracking on AI prompts to support AB testing and prompt development.
+- **Course audit log** — new audit log support for tracking course-level events and changes.
+
+### Fixed
+
+- **`view_test_results` permission** — added missing permission so students and graders can view test results as intended.
+
+---
+
 ## [3.2.0] — AI Settings & Usage Analytics
 
 ### Added — AI Configuration
