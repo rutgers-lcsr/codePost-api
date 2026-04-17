@@ -12453,6 +12453,45 @@ components:
       - points
       - rubricCategories
       - testCategories
+    AssignmentAnalyticsAttemptDistribution:
+      type: object
+      properties:
+        attempts:
+          type: integer
+        studentCount:
+          type: integer
+      required:
+      - attempts
+      - studentCount
+    AssignmentAnalyticsFeedbackDepth:
+      type: object
+      properties:
+        overall:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentAnalyticsFeedbackOverall'
+          nullable: true
+        byGrader:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsGraderFeedback'
+      required:
+      - byGrader
+      - overall
+    AssignmentAnalyticsFeedbackOverall:
+      type: object
+      properties:
+        meanCommentsPerSubmission:
+          type: number
+          format: double
+        medianCommentsPerSubmission:
+          type: number
+          format: double
+        totalSubmissionsWithComments:
+          type: integer
+      required:
+      - meanCommentsPerSubmission
+      - medianCommentsPerSubmission
+      - totalSubmissionsWithComments
     AssignmentAnalyticsGradeDistribution:
       type: object
       properties:
@@ -12468,6 +12507,79 @@ components:
       - bucketMax
       - bucketMin
       - count
+    AssignmentAnalyticsGraderConsistency:
+      type: object
+      properties:
+        grader:
+          type: string
+        meanGrade:
+          type: number
+          format: double
+          nullable: true
+        stddevGrade:
+          type: number
+          format: double
+          nullable: true
+        count:
+          type: integer
+      required:
+      - count
+      - grader
+      - meanGrade
+      - stddevGrade
+    AssignmentAnalyticsGraderFeedback:
+      type: object
+      properties:
+        grader:
+          type: string
+        totalComments:
+          type: integer
+        rubricComments:
+          type: integer
+        freeformComments:
+          type: integer
+        submissionsGraded:
+          type: integer
+        meanComments:
+          type: number
+          format: double
+      required:
+      - freeformComments
+      - grader
+      - meanComments
+      - rubricComments
+      - submissionsGraded
+      - totalComments
+    AssignmentAnalyticsGraderTurnaround:
+      type: object
+      properties:
+        grader:
+          type: string
+        count:
+          type: integer
+        meanHours:
+          type: number
+          format: double
+          nullable: true
+        medianHours:
+          type: number
+          format: double
+          nullable: true
+        minHours:
+          type: number
+          format: double
+          nullable: true
+        maxHours:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - count
+      - grader
+      - maxHours
+      - meanHours
+      - medianHours
+      - minHours
     AssignmentAnalyticsGraderWorkload:
       type: object
       properties:
@@ -12494,6 +12606,34 @@ components:
       required:
       - count
       - period
+    AssignmentAnalyticsLateByDay:
+      type: object
+      properties:
+        day:
+          type: integer
+        count:
+          type: integer
+      required:
+      - count
+      - day
+    AssignmentAnalyticsLateSubmissions:
+      type: object
+      properties:
+        dueDate:
+          type: string
+        onTime:
+          type: integer
+        late:
+          type: integer
+        lateByDay:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsLateByDay'
+      required:
+      - dueDate
+      - late
+      - lateByDay
+      - onTime
     AssignmentAnalyticsResponse:
       type: object
       properties:
@@ -12513,11 +12653,113 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssignmentAnalyticsTestResults'
+        rubricUsage:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsRubricUsage'
+        scoreByCategory:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsScoreByCategory'
+        graderConsistency:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsGraderConsistency'
+        submissionAttempts:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentAnalyticsSubmissionAttempts'
+          nullable: true
+        timeToGrade:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentAnalyticsTimeToGrade'
+          nullable: true
+        lateSubmissions:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentAnalyticsLateSubmissions'
+          nullable: true
+        feedbackDepth:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentAnalyticsFeedbackDepth'
+          nullable: true
       required:
       - gradeDistribution
+      - graderConsistency
       - graderWorkload
       - gradingTimeline
+      - rubricUsage
+      - scoreByCategory
       - testResults
+    AssignmentAnalyticsRubricUsage:
+      type: object
+      properties:
+        rubricCommentId:
+          type: integer
+        text:
+          type: string
+        pointDelta:
+          type: number
+          format: double
+        categoryName:
+          type: string
+        count:
+          type: integer
+      required:
+      - categoryName
+      - count
+      - pointDelta
+      - rubricCommentId
+      - text
+    AssignmentAnalyticsScoreByCategory:
+      type: object
+      properties:
+        categoryName:
+          type: string
+        pointLimit:
+          type: number
+          format: double
+          nullable: true
+        meanDeduction:
+          type: number
+          format: double
+        medianDeduction:
+          type: number
+          format: double
+        minDeduction:
+          type: number
+          format: double
+        maxDeduction:
+          type: number
+          format: double
+        submissionCount:
+          type: integer
+      required:
+      - categoryName
+      - maxDeduction
+      - meanDeduction
+      - medianDeduction
+      - minDeduction
+      - pointLimit
+      - submissionCount
+    AssignmentAnalyticsSubmissionAttempts:
+      type: object
+      properties:
+        attemptDistribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsAttemptDistribution'
+        avgGradeImprovement:
+          type: number
+          format: double
+          nullable: true
+        studentsWithMultipleAttempts:
+          type: integer
+        totalStudents:
+          type: integer
+      required:
+      - attemptDistribution
+      - avgGradeImprovement
+      - studentsWithMultipleAttempts
+      - totalStudents
     AssignmentAnalyticsTestResults:
       type: object
       properties:
@@ -12540,6 +12782,44 @@ components:
       - testCaseDescription
       - testCategoryName
       - total
+    AssignmentAnalyticsTimeToGrade:
+      type: object
+      properties:
+        overall:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentAnalyticsTurnaroundStats'
+          nullable: true
+        byGrader:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentAnalyticsGraderTurnaround'
+      required:
+      - byGrader
+      - overall
+    AssignmentAnalyticsTurnaroundStats:
+      type: object
+      properties:
+        meanHours:
+          type: number
+          format: double
+          nullable: true
+        medianHours:
+          type: number
+          format: double
+          nullable: true
+        minHours:
+          type: number
+          format: double
+          nullable: true
+        maxHours:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - maxHours
+      - meanHours
+      - medianHours
+      - minHours
     AssignmentClone:
       type: object
       properties:
@@ -13066,6 +13346,8 @@ components:
                 type: boolean
               run_autograder:
                 type: boolean
+              view_test_results:
+                type: boolean
               run_code:
                 type: boolean
               generate_ai_comments:
@@ -13265,6 +13547,8 @@ components:
             manage_regrades:
               type: boolean
             run_autograder:
+              type: boolean
+            view_test_results:
               type: boolean
             run_code:
               type: boolean
@@ -17603,6 +17887,8 @@ components:
             manage_regrades:
               type: boolean
             run_autograder:
+              type: boolean
+            view_test_results:
               type: boolean
             run_code:
               type: boolean

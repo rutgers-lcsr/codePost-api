@@ -169,8 +169,105 @@ class AssignmentAnalyticsTestResultsSerializer(serializers.Serializer):
     total = serializers.IntegerField()
 
 
+class AssignmentAnalyticsRubricUsageSerializer(serializers.Serializer):
+    rubricCommentId = serializers.IntegerField()
+    text = serializers.CharField()
+    pointDelta = serializers.FloatField()
+    categoryName = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class AssignmentAnalyticsScoreByCategorySerializer(serializers.Serializer):
+    categoryName = serializers.CharField()
+    pointLimit = serializers.FloatField(allow_null=True)
+    meanDeduction = serializers.FloatField()
+    medianDeduction = serializers.FloatField()
+    minDeduction = serializers.FloatField()
+    maxDeduction = serializers.FloatField()
+    submissionCount = serializers.IntegerField()
+
+
+class AssignmentAnalyticsGraderConsistencySerializer(serializers.Serializer):
+    grader = serializers.CharField()
+    meanGrade = serializers.FloatField(allow_null=True)
+    stddevGrade = serializers.FloatField(allow_null=True)
+    count = serializers.IntegerField()
+
+
+class AssignmentAnalyticsAttemptDistributionSerializer(serializers.Serializer):
+    attempts = serializers.IntegerField()
+    studentCount = serializers.IntegerField()
+
+
+class AssignmentAnalyticsSubmissionAttemptsSerializer(serializers.Serializer):
+    attemptDistribution = AssignmentAnalyticsAttemptDistributionSerializer(many=True)
+    avgGradeImprovement = serializers.FloatField(allow_null=True)
+    studentsWithMultipleAttempts = serializers.IntegerField()
+    totalStudents = serializers.IntegerField()
+
+
+class AssignmentAnalyticsTurnaroundStatsSerializer(serializers.Serializer):
+    meanHours = serializers.FloatField(allow_null=True)
+    medianHours = serializers.FloatField(allow_null=True)
+    minHours = serializers.FloatField(allow_null=True)
+    maxHours = serializers.FloatField(allow_null=True)
+
+
+class AssignmentAnalyticsGraderTurnaroundSerializer(serializers.Serializer):
+    grader = serializers.CharField()
+    count = serializers.IntegerField()
+    meanHours = serializers.FloatField(allow_null=True)
+    medianHours = serializers.FloatField(allow_null=True)
+    minHours = serializers.FloatField(allow_null=True)
+    maxHours = serializers.FloatField(allow_null=True)
+
+
+class AssignmentAnalyticsTimeToGradeSerializer(serializers.Serializer):
+    overall = AssignmentAnalyticsTurnaroundStatsSerializer(allow_null=True)
+    byGrader = AssignmentAnalyticsGraderTurnaroundSerializer(many=True)
+
+
+class AssignmentAnalyticsLateByDaySerializer(serializers.Serializer):
+    day = serializers.IntegerField()
+    count = serializers.IntegerField()
+
+
+class AssignmentAnalyticsLateSubmissionsSerializer(serializers.Serializer):
+    dueDate = serializers.CharField()
+    onTime = serializers.IntegerField()
+    late = serializers.IntegerField()
+    lateByDay = AssignmentAnalyticsLateByDaySerializer(many=True)
+
+
+class AssignmentAnalyticsFeedbackOverallSerializer(serializers.Serializer):
+    meanCommentsPerSubmission = serializers.FloatField()
+    medianCommentsPerSubmission = serializers.FloatField()
+    totalSubmissionsWithComments = serializers.IntegerField()
+
+
+class AssignmentAnalyticsGraderFeedbackSerializer(serializers.Serializer):
+    grader = serializers.CharField()
+    totalComments = serializers.IntegerField()
+    rubricComments = serializers.IntegerField()
+    freeformComments = serializers.IntegerField()
+    submissionsGraded = serializers.IntegerField()
+    meanComments = serializers.FloatField()
+
+
+class AssignmentAnalyticsFeedbackDepthSerializer(serializers.Serializer):
+    overall = AssignmentAnalyticsFeedbackOverallSerializer(allow_null=True)
+    byGrader = AssignmentAnalyticsGraderFeedbackSerializer(many=True)
+
+
 class AssignmentAnalyticsResponseSerializer(serializers.Serializer):
     gradeDistribution = AssignmentAnalyticsGradeDistributionSerializer(many=True)
     graderWorkload = AssignmentAnalyticsGraderWorkloadSerializer(many=True)
     gradingTimeline = AssignmentAnalyticsGradingTimelineSerializer(many=True)
     testResults = AssignmentAnalyticsTestResultsSerializer(many=True)
+    rubricUsage = AssignmentAnalyticsRubricUsageSerializer(many=True)
+    scoreByCategory = AssignmentAnalyticsScoreByCategorySerializer(many=True)
+    graderConsistency = AssignmentAnalyticsGraderConsistencySerializer(many=True)
+    submissionAttempts = AssignmentAnalyticsSubmissionAttemptsSerializer(required=False, allow_null=True)
+    timeToGrade = AssignmentAnalyticsTimeToGradeSerializer(required=False, allow_null=True)
+    lateSubmissions = AssignmentAnalyticsLateSubmissionsSerializer(required=False, allow_null=True)
+    feedbackDepth = AssignmentAnalyticsFeedbackDepthSerializer(required=False, allow_null=True)

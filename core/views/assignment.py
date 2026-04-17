@@ -48,6 +48,13 @@ from core.services.assignment_analytics import (
   get_grader_workload,
   get_grading_timeline,
   get_test_results_summary,
+  get_rubric_usage,
+  get_score_by_category,
+  get_grader_consistency,
+  get_submission_attempts,
+  get_time_to_grade,
+  get_late_submission_stats,
+  get_feedback_depth,
 )
 
 
@@ -1173,4 +1180,11 @@ class AssignmentViewSet(ListProtectedViewSet):
       'graderWorkload': get_grader_workload(assignment),
       'gradingTimeline': get_grading_timeline(assignment),
       'testResults': get_test_results_summary(assignment),
+      'rubricUsage': get_rubric_usage(assignment),
+      'scoreByCategory': get_score_by_category(assignment),
+      'graderConsistency': get_grader_consistency(assignment),
+      'submissionAttempts': get_submission_attempts(assignment),
+      'timeToGrade': get_time_to_grade(assignment),
+      'lateSubmissions': get_late_submission_stats(assignment),
+      'feedbackDepth': get_feedback_depth(assignment),
     })
