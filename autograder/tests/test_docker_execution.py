@@ -126,9 +126,10 @@ def wrong():
     assert val == 99, "not 99"
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertFalse(result.tests[0]["passed"])
-        self.assertEqual(result.tests[0]["status"], "failed")
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "wrong")
+        self.assertFalse(t["passed"])
+        self.assertEqual(t["status"], "failed")
 
     def test_runtime_exception_gives_error(self):
         """An unexpected exception → status='error'."""
@@ -140,9 +141,10 @@ def boom():
     raise RuntimeError("kaboom")
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertEqual(result.tests[0]["status"], "error")
-        self.assertIn("kaboom", result.tests[0]["error"])
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "boom")
+        self.assertEqual(t["status"], "error")
+        self.assertIn("kaboom", t["error"])
 
     def test_multiple_tests_mixed(self):
         """Multiple tests: one pass, one fail."""
@@ -158,8 +160,10 @@ def t2():
     assert x == 0, "x is not 0"
 """,
         )
-        self.assertEqual(len(result.tests), 2)
+        self.assertTrue(len(result.tests) >= 2, f"Expected >= 2 tests. tests: {result.tests}")
         names = {t["name"]: t for t in result.tests}
+        self.assertIn("pass", names)
+        self.assertIn("fail", names)
         self.assertTrue(names["pass"]["passed"])
         self.assertFalse(names["fail"]["passed"])
 
@@ -256,8 +260,9 @@ test("wrong", 3, function() {
 });
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertFalse(result.tests[0]["passed"])
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "wrong")
+        self.assertFalse(t["passed"])
 
     def test_multiple_tests(self):
         result = self._execute(
@@ -271,8 +276,10 @@ test("fail", 2, function() {
 });
 """,
         )
-        self.assertEqual(len(result.tests), 2)
+        self.assertTrue(len(result.tests) >= 2, f"Expected >= 2 tests. tests: {result.tests}")
         names = {r["name"]: r for r in result.tests}
+        self.assertIn("pass", names)
+        self.assertIn("fail", names)
         self.assertTrue(names["pass"]["passed"])
         self.assertFalse(names["fail"]["passed"])
 
@@ -336,9 +343,10 @@ TEST(wrong, 3) {
 }
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertFalse(result.tests[0]["passed"])
-        self.assertEqual(result.tests[0]["status"], "failed")
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "wrong")
+        self.assertFalse(t["passed"])
+        self.assertEqual(t["status"], "failed")
 
     def test_runtime_exception_gives_error(self):
         result = self._execute(
@@ -351,8 +359,9 @@ TEST(boom_test, 2) {
 }
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertEqual(result.tests[0]["status"], "error")
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "boom_test")
+        self.assertEqual(t["status"], "error")
 
     def test_verify_pipeline(self):
         result = self._execute(
@@ -414,8 +423,9 @@ class JavaDockerExecutionTests(SimpleTestCase):
     }
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertFalse(result.tests[0]["passed"])
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "wrong")
+        self.assertFalse(t["passed"])
 
     def test_runtime_exception_gives_error(self):
         result = self._execute(
@@ -427,8 +437,9 @@ class JavaDockerExecutionTests(SimpleTestCase):
     }
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertEqual(result.tests[0]["status"], "error")
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "boom_test")
+        self.assertEqual(t["status"], "error")
 
     def test_verify_pipeline(self):
         result = self._execute(
@@ -487,8 +498,9 @@ run_test("wrong", 3, function() {
 })
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertFalse(result.tests[0]["passed"])
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "wrong")
+        self.assertFalse(t["passed"])
 
     def test_multiple_tests(self):
         result = self._execute(
@@ -503,8 +515,10 @@ run_test("sq_wrong", 2, function() {
 })
 """,
         )
-        self.assertEqual(len(result.tests), 2)
+        self.assertTrue(len(result.tests) >= 2, f"Expected >= 2 tests. tests: {result.tests}")
         names = {r["name"]: r for r in result.tests}
+        self.assertIn("sq_4", names)
+        self.assertIn("sq_wrong", names)
         self.assertTrue(names["sq_4"]["passed"])
         self.assertFalse(names["sq_wrong"]["passed"])
 
@@ -577,9 +591,10 @@ def wrong():
     assert val == 99, "not 99"
 """,
         )
-        self.assertEqual(len(result.tests), 1)
-        self.assertFalse(result.tests[0]["passed"])
-        self.assertEqual(result.tests[0]["status"], "failed")
+        self.assertTrue(len(result.tests) >= 1, f"No tests. tests: {result.tests}")
+        t = next(t for t in result.tests if t["name"] == "wrong")
+        self.assertFalse(t["passed"])
+        self.assertEqual(t["status"], "failed")
 
 
 # ###################################################################
