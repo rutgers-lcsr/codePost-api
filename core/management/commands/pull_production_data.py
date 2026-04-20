@@ -125,7 +125,7 @@ class Command(BaseCommand):
 
         try:
             import importlib
-            import codepost_api_client  # noqa: F401 — verify the generated client is installed
+            import codepost_api_client  # noqa: F401 # type: ignore[reportMissingImports] — verify the generated client is installed
 
             # The SDK's `codepost` package is shadowed by the Django project's
             # `codepost/` app, so we load the client module directly from the

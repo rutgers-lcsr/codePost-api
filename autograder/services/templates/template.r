@@ -191,17 +191,46 @@ run_test <- function(name, points, description = NULL, fn = NULL, timeout = 30) 
 }
 
 output_test_results <- function() {
-    if (!requireNamespace("jsonlite", quietly = TRUE)) {
+    if (length(test_results) == 0) return(invisible(NULL))
+
+    # Try jsonlite first, fall back to manual JSON serialization
+    use_jsonlite <- requireNamespace("jsonlite", quietly = TRUE)
+    if (!use_jsonlite) {
         tryCatch({
-            install.packages("jsonlite", repos = "https://cloud.r-project.org")
-        }, error = function(e) {
-            return()
-        })
+            install.packages("jsonlite", repos = "https://cloud.r-project.org", quiet = TRUE)
+            use_jsonlite <- requireNamespace("jsonlite", quietly = TRUE)
+        }, error = function(e) {})
     }
-    if (requireNamespace("jsonlite", quietly = TRUE)) {
+
+    if (use_jsonlite) {
         cat('<<<TEST_RESULT_JSON_START>>>')
         cat(jsonlite::toJSON(test_results, auto_unbox = TRUE))
         cat('<<<TEST_RESULT_JSON_END>>>')
+    } else {
+        # Pure-R fallback: serialize test_results to JSON without jsonlite
+        escape_json_str <- function(s) {
+            s <- gsub("\\\\", "\\\\\\\\", s)
+            s <- gsub("\"", "\\\\\"", s)
+            s <- gsub("\n", "\\\\n", s)
+            s <- gsub("\r", "\\\\r", s)
+            s <- gsub("\t", "\\\\t", s)
+            s
+        }
+        to_json_value <- function(v) {
+            if (is.null(v) || (is.character(v) && length(v) == 0)) return("null")
+            if (is.logical(v)) return(if (isTRUE(v)) "true" else "false")
+            if (is.numeric(v)) return(as.character(v))
+            paste0("\"", escape_json_str(as.character(v)), "\"")
+        }
+        parts <- vapply(test_results, function(t) {
+            fields <- vapply(names(t), function(k) {
+                paste0("\"", k, "\":", to_json_value(t[[k]]))
+            }, character(1))
+            paste0("{", paste(fields, collapse = ","), "}")
+        }, character(1))
+        cat("<<<TEST_RESULT_JSON_START>>>")
+        cat(paste0("[", paste(parts, collapse = ","), "]"))
+        cat("<<<TEST_RESULT_JSON_END>>>")
     }
 }
 # Execute test code if provided

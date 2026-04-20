@@ -241,7 +241,7 @@ class Command(BaseCommand):
         """Run file execution + tests for a single submission."""
         try:
             from autograder.run import RunSubmission
-            from autograder.models import Environment
+            from core.models import Environment
         except ImportError:
             return {"success": False, "error": "autograder app not available"}
 
