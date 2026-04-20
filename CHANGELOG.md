@@ -8,7 +8,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 > [Rutgers Non-commercial License (RU-NCL)](./LICENSE). By using, downloading, or contributing
 > to this repository you agree to be bound by its terms.
 
-> **Branch note** — `master` is the production branch; `development` is the default development branch.
+> **Branch note** — `main` is the default development branch. Production deploys from `release/*` branches.
 
 ---
 

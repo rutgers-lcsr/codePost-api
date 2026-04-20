@@ -1,4 +1,19 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+#
+# Create Release Branch (API)
+#
+# Manually triggered. Cuts a release/<version> branch from main.
+# Auto-detects the next minor version from the latest git tag, or accepts
+# a manual version input.
+#
+# After running this workflow:
+#   1. CI tests run automatically on the new release/* branch
+#   2. When ready, deploy to production via "Deploy to Production Server"
+#      with ref=release/<version> and version=<version>
+#
+# Run this workflow for BOTH codePost-api and codePost-ui when preparing
+# a coordinated release.
+
 name: Create Release Branch
 
 on:
@@ -18,11 +33,10 @@ jobs:
         runs-on: testing-codepost
         permissions:
             contents: write
-            pull-requests: write
         steps:
             - uses: actions/checkout@v5
               with:
-                  ref: development
+                  ref: main
                   fetch-depth: 0
 
             - name: Determine version
@@ -43,20 +57,13 @@ jobs:
                   git checkout -b release/${{ steps.version.outputs.version }}
                   git push origin release/${{ steps.version.outputs.version }}
 
-            - name: Create pull request
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            - name: Summary
               run: |
-                  gh pr create \
-                    --base master \
-                    --head release/${{ steps.version.outputs.version }} \
-                    --title "release: v${{ steps.version.outputs.version }}" \
-                    --body "## Release ${{ steps.version.outputs.version }}
-
-                  Created from \`development\` branch.
-
-                  **Checklist:**
-                  - [ ] Final testing on this branch
-                  - [ ] Review CHANGELOG
-
-                  **After merging**, semantic-release will create the tag and GitHub Release, and a backmerge PR to \`development\` will be created automatically."
+                  echo "## Release branch created" >> "$GITHUB_STEP_SUMMARY"
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "Branch: \`release/${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+                  echo "Created from: \`main\`" >> "$GITHUB_STEP_SUMMARY"
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "**Next steps:**" >> "$GITHUB_STEP_SUMMARY"
+                  echo "1. Test on the release branch" >> "$GITHUB_STEP_SUMMARY"
+                  echo "2. Deploy to production via the **Deploy to Production** workflow with \`ref: release/${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"

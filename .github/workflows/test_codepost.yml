@@ -1,10 +1,19 @@
+# CI Tests (API)
+#
+# Runs on:
+#   - Push to main (day-to-day development)
+#   - Push to release/* branches (cherry-picked hotfixes)
+#   - Pull requests targeting main
+#
+# Jobs: commitlint (PRs only), djlint, pyright, pytest + coverage
+
 name: Perform Codepost Tests
 
 on:
     push:
-        branches: [master, development, "release/*", "hotfix/*"]
+        branches: [main, "release/*"]
     pull_request:
-        branches: [master, development]
+        branches: [main]
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}

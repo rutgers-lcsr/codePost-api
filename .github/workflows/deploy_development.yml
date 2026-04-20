@@ -1,9 +1,20 @@
+# Deploy to Development Server (API)
+#
+# Triggers automatically on every push to main. Deploys the latest commit
+# to the development environment (data, api, and worker runners).
+#
+# Related workflows:
+#   - test_codepost.yml runs CI on the same branches
+#   - deploy_production.yml is triggered manually for production releases
+#
+# Runners: development-data, development-api, development-workers
+
 name: Deploy to Development Server
 
 on:
     push:
         branches:
-            - development
+            - main
 
 jobs:
     deploy_data:

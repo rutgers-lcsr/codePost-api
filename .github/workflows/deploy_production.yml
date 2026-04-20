@@ -1,9 +1,39 @@
+# Deploy to Production Server (API)
+#
+# Branching model:
+#   main              — day-to-day development, auto-deploys to dev server
+#   release/<version> — cut from main via "Create Release Branch" workflow
+#
+# Release flow:
+#   1. Run "Create Release Branch" workflow to cut release/<version> from main
+#   2. Test on the release branch (CI runs automatically)
+#   3. Run THIS workflow with ref=release/<version> and version=<version>
+#   4. This deploys to production, creates a git tag v<version>, creates a
+#      GitHub Release, and triggers SDK regeneration in codePost-ui and
+#      codepost-python via repository_dispatch
+#
+# Hotfix flow:
+#   1. Fix the bug on main first
+#   2. Cherry-pick the fix onto the active release branch
+#   3. Re-run THIS workflow with the same ref and an incremented patch version
+#
+# Runners: production-data, production-api, production-workers, testing-codepost
+
 name: Deploy to Production Server
 
 on:
-    push:
-        branches:
-            - master
+    workflow_dispatch:
+        inputs:
+            ref:
+                description: "Branch or tag to deploy (e.g., release/3.4.0)"
+                required: true
+            version:
+                description: "Version tag to create after deploy (e.g., 3.4.0)"
+                required: true
+
+concurrency:
+    group: deploy-production-api
+    cancel-in-progress: false
 
 jobs:
     deploy_data:
@@ -20,6 +50,8 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
+              with:
+                  ref: ${{ inputs.ref }}
 
             - name: Set up .env
               run: |
@@ -62,6 +94,8 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
+              with:
+                  ref: ${{ inputs.ref }}
 
             - name: Set up Certs
               run: |
@@ -117,6 +151,8 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
+              with:
+                  ref: ${{ inputs.ref }}
 
             - name: Set up .env
               run: |
@@ -149,3 +185,49 @@ jobs:
 
             - name: Notify workers deployment success
               run: echo "Workers deployment to production server successful!"
+
+    tag-and-notify:
+        needs: [deploy_workers]
+        runs-on: testing-codepost
+        permissions:
+            contents: write
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v5
+              with:
+                  ref: ${{ inputs.ref }}
+                  fetch-depth: 0
+
+            - name: Create and push version tag
+              run: |
+                  git tag "v${{ inputs.version }}"
+                  git push origin "v${{ inputs.version }}"
+
+            - name: Create GitHub Release
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh release create "v${{ inputs.version }}" \
+                    --target "${{ inputs.ref }}" \
+                    --title "v${{ inputs.version }}" \
+                    --generate-notes
+
+            - name: Trigger TypeScript client update
+              continue-on-error: true
+              env:
+                  GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+              run: |
+                  gh api repos/${{ github.repository_owner }}/codePost-ui/dispatches \
+                    -f event_type=api-release \
+                    -f 'client_payload[version]=v${{ inputs.version }}' \
+                    -f 'client_payload[schema_url]=https://codepost-api.cs.rutgers.edu/api/schema/'
+
+            - name: Trigger Python SDK update
+              continue-on-error: true
+              env:
+                  GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+              run: |
+                  gh api repos/${{ github.repository_owner }}/codepost-python/dispatches \
+                    -f event_type=api-release \
+                    -f 'client_payload[version]=v${{ inputs.version }}' \
+                    -f 'client_payload[schema_url]=https://codepost-api.cs.rutgers.edu/api/schema/'
