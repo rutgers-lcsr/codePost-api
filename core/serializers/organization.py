@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 class OrganizationSerializer(ModelSerializerWithPOSTCheck):
   emailDomain = serializers.CharField(source="email_domain", required=False, allow_null=True)
+  allowedEmailDomains = serializers.ListField(
+      child=serializers.CharField(), source="allowed_email_domains", required=False, default=list
+  )
   ssoEnabled = serializers.BooleanField(source="sso_enabled", required=False)
   ssoProvider = serializers.CharField(source="sso_provider", required=False, allow_null=True)
   ssoConfig = serializers.JSONField(source="sso_config", required=False, allow_null=True)
@@ -34,7 +37,7 @@ class OrganizationSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = Organization
-    fields = ('id', 'name', 'shortname', 'emailDomain', 'ssoEnabled', 'ssoProvider', 'ssoConfig', 'sendWelcomeEmail')
+    fields = ('id', 'name', 'shortname', 'emailDomain', 'allowedEmailDomains', 'ssoEnabled', 'ssoProvider', 'ssoConfig', 'sendWelcomeEmail')
 
   def validate(self, attrs):
     sso_config = attrs.get('sso_config')

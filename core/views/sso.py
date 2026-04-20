@@ -15,6 +15,29 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def get_organization_by_email_domain(domain, **filters):
+    """
+    Look up an Organization by email domain. First checks the primary email_domain field,
+    then falls back to checking allowed_email_domains (JSONField list) for additional
+    domains like subdomains (e.g. scarletmail.rutgers.edu -> rutgers.edu org).
+    
+    Uses Python-level filtering for allowed_email_domains to maintain SQLite compatibility.
+    """
+    # 1. Try exact match on primary email_domain
+    org = Organization.objects.filter(email_domain=domain, **filters).first()
+    if org:
+        return org
+    
+    # 2. Fall back to checking allowed_email_domains (Python-level for SQLite compat)
+    for org in Organization.objects.filter(**filters):
+        allowed_domains = org.allowed_email_domains or []
+        if isinstance(allowed_domains, list) and domain in allowed_domains:
+            return org
+    
+    return None
+
+
 # Helper to get service URL
 def get_service_url(request, provider, org_id=None):
     # Construct the callback URL dynamically based on the request's host
@@ -54,7 +77,7 @@ def initiate_sso(request, provider):
     elif email:
         domain = email.split('@')[-1]
         try:
-            organization = Organization.objects.filter(email_domain=domain).first()
+            organization = get_organization_by_email_domain(domain)
         except:
             pass
             
@@ -393,11 +416,8 @@ def check_sso_availability(request):
     # 1. Try by domain
     domain = email.split('@')[-1]
     
-    # HEURISTIC: Check explicit domain mapping first
-    # Note: emailDomain in Organization model might be a string or list? 
-    # Based on OrganizationSerializer it seemed like a string.
-    # But let's check exact match for now.
-    organization = Organization.objects.filter(email_domain=domain, sso_enabled=True).first()
+    # HEURISTIC: Check explicit domain mapping first (primary + allowed domains)
+    organization = get_organization_by_email_domain(domain, sso_enabled=True)
     
     # 2. If no domain match, check user mapping
     if not organization:

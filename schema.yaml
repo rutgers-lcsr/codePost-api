@@ -15154,6 +15154,10 @@ components:
         emailDomain:
           type: string
           nullable: true
+        allowedEmailDomains:
+          type: array
+          items:
+            type: string
         ssoEnabled:
           type: boolean
         ssoProvider:
@@ -16270,6 +16274,10 @@ components:
         emailDomain:
           type: string
           nullable: true
+        allowedEmailDomains:
+          type: array
+          items:
+            type: string
         ssoEnabled:
           type: boolean
         ssoProvider:

@@ -2,7 +2,7 @@
 from django.test import SimpleTestCase, RequestFactory
 from django.urls import reverse
 from unittest.mock import patch, MagicMock
-from core.views.sso import sso_callback, initiate_sso
+from core.views.sso import sso_callback, initiate_sso, get_organization_by_email_domain
 from django.conf import settings
 import json
 
@@ -179,4 +179,116 @@ class SSOTest(SimpleTestCase):
             
             self.assertEqual(response.status_code, 302)
             self.assertTrue("token=fake_token" in response.url)
+
+
+class GetOrganizationByEmailDomainTest(SimpleTestCase):
+    """Tests for the get_organization_by_email_domain helper function."""
+
+    def setUp(self):
+        self.org_primary = MagicMock()
+        self.org_primary.id = 1
+        self.org_primary.email_domain = "rutgers.edu"
+        self.org_primary.allowed_email_domains = ["scarletmail.rutgers.edu", "cs.rutgers.edu"]
+        self.org_primary.sso_enabled = True
+
+        self.org_other = MagicMock()
+        self.org_other.id = 2
+        self.org_other.email_domain = "princeton.edu"
+        self.org_other.allowed_email_domains = []
+        self.org_other.sso_enabled = True
+
+    @patch('core.views.sso.Organization.objects')
+    def test_primary_domain_match(self, mock_objects):
+        """Primary email_domain should match directly via ORM filter."""
+        mock_objects.filter.return_value.first.return_value = self.org_primary
+        result = get_organization_by_email_domain("rutgers.edu")
+        self.assertEqual(result, self.org_primary)
+        mock_objects.filter.assert_called_once_with(email_domain="rutgers.edu")
+
+    @patch('core.views.sso.Organization.objects')
+    def test_allowed_domain_match(self, mock_objects):
+        """A domain in allowed_email_domains should match via fallback."""
+        # Primary lookup returns nothing
+        mock_objects.filter.return_value.first.return_value = None
+        # Fallback iterates all orgs
+        mock_objects.filter.return_value.__iter__ = MagicMock(
+            return_value=iter([self.org_primary, self.org_other])
+        )
+        result = get_organization_by_email_domain("scarletmail.rutgers.edu")
+        self.assertEqual(result, self.org_primary)
+
+    @patch('core.views.sso.Organization.objects')
+    def test_no_match_returns_none(self, mock_objects):
+        """An unrecognized domain should return None."""
+        mock_objects.filter.return_value.first.return_value = None
+        mock_objects.filter.return_value.__iter__ = MagicMock(
+            return_value=iter([self.org_primary, self.org_other])
+        )
+        result = get_organization_by_email_domain("unknown.edu")
+        self.assertIsNone(result)
+
+    @patch('core.views.sso.Organization.objects')
+    def test_allowed_domain_with_extra_filters(self, mock_objects):
+        """Extra filters (e.g. sso_enabled=True) should be passed through."""
+        mock_objects.filter.return_value.first.return_value = None
+        mock_objects.filter.return_value.__iter__ = MagicMock(
+            return_value=iter([self.org_primary])
+        )
+        result = get_organization_by_email_domain("cs.rutgers.edu", sso_enabled=True)
+        self.assertEqual(result, self.org_primary)
+        # Both calls should include sso_enabled=True
+        calls = mock_objects.filter.call_args_list
+        self.assertEqual(calls[0].kwargs.get('sso_enabled'), True)
+
+    @patch('core.views.sso.Organization.objects')
+    def test_empty_allowed_domains_no_match(self, mock_objects):
+        """Org with empty allowed_email_domains shouldn't match non-primary domains."""
+        mock_objects.filter.return_value.first.return_value = None
+        mock_objects.filter.return_value.__iter__ = MagicMock(
+            return_value=iter([self.org_other])
+        )
+        result = get_organization_by_email_domain("mail.princeton.edu")
+        self.assertIsNone(result)
+
+
+class SSOInitiateAllowedDomainsTest(SimpleTestCase):
+    """Tests that initiate_sso works with allowed_email_domains."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.org_mock = MagicMock()
+        self.org_mock.id = 1
+        self.org_mock.name = "Rutgers"
+        self.org_mock.email_domain = "rutgers.edu"
+        self.org_mock.allowed_email_domains = ["scarletmail.rutgers.edu"]
+        self.org_mock.sso_enabled = True
+        self.org_mock.sso_provider = "CAS"
+        self.org_mock.sso_config = {"cas_server_url": "https://cas.rutgers.edu"}
+
+    @patch('core.views.sso.get_organization_by_email_domain')
+    def test_initiate_sso_with_subdomain_email(self, mock_get_org):
+        """SSO initiation with a subdomain email should find the correct org."""
+        mock_get_org.return_value = self.org_mock
+
+        request = self.factory.get('/auth/sso/login/CAS/', {'email': 'student@scarletmail.rutgers.edu'})
+        response = initiate_sso(request, 'CAS')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("https://cas.rutgers.edu", response.url)
+        mock_get_org.assert_called_once_with("scarletmail.rutgers.edu")
+
+    @patch('core.views.sso.get_organization_by_email_domain')
+    @patch('core.views.sso.User.objects.get')
+    def test_initiate_sso_unknown_domain_falls_to_user_lookup(self, mock_user_get, mock_get_org):
+        """If domain is not in primary or allowed, it falls back to user profile lookup."""
+        mock_get_org.return_value = None
+        mock_user = MagicMock()
+        mock_user.profile.organization = self.org_mock
+        mock_user_get.return_value = mock_user
+
+        request = self.factory.get('/auth/sso/login/CAS/', {'email': 'student@personal.com'})
+        response = initiate_sso(request, 'CAS')
+
+        self.assertEqual(response.status_code, 302)
+        mock_get_org.assert_called_once_with("personal.com")
 

@@ -333,6 +333,21 @@ class OrganizationAdmin(admin.ModelAdmin):
     ordering = ("name",)
     readonly_fields = ("created", "modified")
     
+    fieldsets = (
+        (None, {
+            "fields": ("name", "shortname", "is_main_org")
+        }),
+        ("Email", {
+            "fields": ("email_domain", "allowed_email_domains", "send_welcome_email")
+        }),
+        ("SSO", {
+            "fields": ("sso_enabled", "sso_provider", "sso_config")
+        }),
+        ("Metadata", {
+            "fields": ("created", "modified")
+        }),
+    )
+    
     def profile_count(self, obj: Organization) -> int:
         """Number of profiles in this organization"""
         return obj.profiles.count()

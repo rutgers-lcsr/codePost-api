@@ -118,6 +118,8 @@ class Organization(BaseModel):
       "A shortname for the organization (e.g. Princeton University -> PU)"))
   email_domain = models.CharField(max_length=64, blank=True, null=True, help_text=(
       "The email domain associated with the organization."))
+  allowed_email_domains = models.JSONField(default=list, blank=True, help_text=(
+      "Additional email domains that should map to this organization for SSO lookup (e.g. subdomains like scarletmail.rutgers.edu)."))
 
   sso_enabled = models.BooleanField(default=False, help_text=("If True, new users in this organization are automatically activated and assume external authentication."))
   sso_provider = models.CharField(max_length=32, blank=True, null=True, help_text=("The SSO provider (e.g. CAS, AZURE, OIDC, GOOGLE)."))
