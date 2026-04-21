@@ -43,6 +43,7 @@ class UserFactory(factory.django.DjangoModelFactory):
   class Meta:
     model = User
     django_get_or_create = ('username',)
+    skip_postgeneration_save = True
 
   username = factory.LazyAttribute(lambda o: "{}_{}{}@{}.edu".format(
       o.role, o.course, "_{}".format(o.count) if o.count is not None else '', o.organization.shortname))
@@ -148,6 +149,7 @@ class SubmissionFactory(factory.django.DjangoModelFactory):
 
   class Meta:
     model = Submission
+    skip_postgeneration_save = True
 
   assignment = factory.SubFactory('core.tests.factories.AssignmentFactory')
   files = factory.RelatedFactory(SubmissionFileFactory, 'submission')
@@ -179,6 +181,7 @@ class RubricCategoryFactory(factory.django.DjangoModelFactory):
 
   class Meta:
     model = RubricCategory
+    skip_postgeneration_save = True
 
   name = "General"
   assignment = factory.SubFactory('core.tests.factories.AssignmentFactory')
@@ -191,6 +194,7 @@ class AssignmentFactory(factory.django.DjangoModelFactory):
   class Meta:
     model = Assignment
     django_get_or_create = ('name', 'course')
+    skip_postgeneration_save = True
 
   name = 'Hello World'
   points = 20
@@ -239,6 +243,7 @@ class CourseFactory(factory.django.DjangoModelFactory):
   class Meta:
     model = Course
     django_get_or_create = ('name', 'period', 'organization')
+    skip_postgeneration_save = True
 
   name = "cs101"
   period = "s2020"

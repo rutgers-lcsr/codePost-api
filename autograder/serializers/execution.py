@@ -95,6 +95,7 @@ class NotebookCellExecutionRequestSerializer(serializers.Serializer):
 
 
 class TestExecutionRequestSerializer(serializers.Serializer):
+    __test__ = False
     """Request serializer for running tests"""
     testId = serializers.IntegerField(
         required=False, 
@@ -392,6 +393,7 @@ class TaskStatusResponseSerializer(serializers.Serializer):
 # =============================================================================
 
 class TestExecutionResultSerializer(serializers.Serializer):
+    __test__ = False
     """Response for test execution"""
     success = serializers.BooleanField(
         help_text="Whether the test execution completed"

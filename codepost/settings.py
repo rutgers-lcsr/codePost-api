@@ -87,7 +87,7 @@ CLIENT_URL = os.environ.get("CLIENT_URL", "http://localhost:3000")
 DEBUG = os.environ.get("DEBUG", "FALSE").upper() == "TRUE"
 TESTING = os.environ.get("TESTING", "FALSE").upper() == "TRUE" or (len(sys.argv) > 1 and sys.argv[1] == "test")
 ADMINS = [
-    ("LCSR Codepost Team", "mk1800@rutgers.edu"),
+    "mk1800@rutgers.edu",
 ]
 
 # Internal shell relay (API -> worker)
@@ -620,7 +620,7 @@ print("CodePost Configuration:")
 print(f"CodePost API running on {API_URL}")
 print(f"CodePost Client running on {CLIENT_URL}")
 print(f"CodePost API running in {'debug' if DEBUG else 'production'} mode")
-print(f"CodePost API Admins are {', '.join([f'{name} <{email}>' for name, email in ADMINS])}")
+print(f"CodePost API Admins are {', '.join(ADMINS)}")
 print("=" * 80)
 print("Celery Configuration:")
 print(f"  Broker URL: {CELERY_BROKER_URL}")

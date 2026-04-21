@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 
 class TestType(Enum):
+    __test__ = False
     PYTHON2_IO_OUTPUT = 0
     PYTHON2_IO_RETURN = 1
     PYTHON2_UNIT = 2
