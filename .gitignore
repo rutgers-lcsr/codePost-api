@@ -21,3 +21,5 @@ assignment_datasets
 
 sdk_output
 sdk*
+
+_*.sh
