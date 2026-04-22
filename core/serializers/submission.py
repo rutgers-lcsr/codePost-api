@@ -5,7 +5,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Submission, User
-from core.serializers.file import FileSerializer, SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer
+from core.serializers.file import FileSerializer, SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer, SubmissionFileWithNestedCommentsSerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 from core.permissions.helpers import isStudent, isGrader, should_use_student_captions
 from datetime import timezone
@@ -275,3 +275,71 @@ class SubmissionWithTestsSerializer(serializers.ModelSerializer):
     model = Submission
     fields = ('id', 'tests', )
     read_only_fields = ('id', 'tests',)
+
+
+class SubmissionConsoleDataSerializer(serializers.ModelSerializer):
+  """
+  Bulk serializer for the code console. Returns the full nested tree:
+  submission → files → comments (with rubricComment data).
+  Eliminates the N+1 fetch waterfall on the frontend.
+  """
+  files = SubmissionFileWithNestedCommentsSerializer(many=True, read_only=True)
+  students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
+  grader = serializers.SlugRelatedField(many=False, slug_field='email',
+                                        queryset=User.objects.all(), required=False, allow_null=True)
+  dateEdited = serializers.SerializerMethodField()
+
+  class Meta:
+    model = Submission
+    fields = ('id', 'assignment', 'students', 'grader', 'isFinalized', 'dateEdited',
+              'grade', 'queueOrderKey', 'dateUploaded', 'files', 'tests',
+              'questionIsOpen', 'questionIsRegrade', 'questionText',
+              'questionDate', 'responseDate', 'testRunsCompleted', 'lateDayCreditsUsed')
+    read_only_fields = fields
+
+  @extend_schema_field(serializers.DateTimeField)
+  def get_dateEdited(self, obj):
+    tz = pytz.timezone(obj.assignment.course.timezone)
+    return obj.dateEdited.astimezone(tz)
+
+
+class StudentConsoleDataSerializer(serializers.ModelSerializer):
+  """
+  Student version of the console data serializer.
+  When feedback is not released, returns files without comments and masks grades.
+  """
+  files = serializers.SerializerMethodField()
+  students = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all())
+  hasGrader = serializers.SerializerMethodField()
+
+  class Meta:
+    model = Submission
+    fields = ('id', 'assignment', 'students', 'isFinalized', 'dateUploaded',
+              'files', 'grade', 'hasGrader', 'tests', 'testRunsCompleted',
+              'questionIsOpen', 'questionIsRegrade', 'questionText',
+              'questionDate', 'responseDate', 'lateDayCreditsUsed')
+    read_only_fields = fields
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_hasGrader(self, obj):
+    return obj.grader is not None
+
+  @extend_schema_field(SubmissionFileWithNestedCommentsSerializer(many=True))
+  def get_files(self, obj):
+    assignment = obj.assignment
+    if assignment.feedbackReleased or assignment.liveFeedbackMode:
+      return SubmissionFileWithNestedCommentsSerializer(obj.files.all(), many=True).data
+    else:
+      return SubmissionFileWithoutCommentsSerializer(obj.files.all(), many=True).data
+
+  def to_representation(self, obj):
+    ret = super().to_representation(obj)
+    assignment = obj.assignment
+    can_view_feedback = assignment.feedbackReleased or assignment.liveFeedbackMode
+    if not can_view_feedback:
+      ret['grade'] = None
+    # Hide draft responses
+    if obj.questionIsOpen:
+      ret['questionResponse'] = ''
+      ret['responseDate'] = None
+    return ret

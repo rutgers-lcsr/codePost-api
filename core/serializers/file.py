@@ -5,6 +5,7 @@ from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile
 from django import forms
 from core.services.file_handlers.notebook import NotebookHandler
+from core.serializers.comment import CommentWithRubricSerializer
 
 
 class FileSerializer(ModelSerializerWithPOSTCheck):
@@ -36,6 +37,21 @@ class SubmissionFileSerializer(ModelSerializerWithPOSTCheck):
         extra_kwargs = {
             "data": {"trim_whitespace": False},
         }
+
+
+class SubmissionFileWithNestedCommentsSerializer(serializers.ModelSerializer):
+    """
+    Read-only serializer for SubmissionFile that nests full Comment objects
+    (including rubricComment data) instead of returning comment IDs.
+    Used by the console-data bulk endpoint to eliminate N+1 fetches.
+    """
+    comments = CommentWithRubricSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SubmissionFile
+        fields = ('name', 'data', 'extension', 'submission', 'id', 'comments', 'path',
+                  'hiddenBeforePublish', 'created', 'modified')
+        read_only_fields = fields
 
 
 class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):

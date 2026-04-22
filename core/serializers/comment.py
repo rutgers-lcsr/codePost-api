@@ -121,3 +121,27 @@ class CommentBasicSerializer(serializers.ModelSerializer):
     read_only_fields = ('id', 'text', 'pointDelta', 'startChar', 'endChar',
                         'startLine', 'endLine', 'file', 'rubricComment', 'feedback')
     extra_kwargs = {"text": {"trim_whitespace": False}}
+
+
+class CommentWithRubricSerializer(serializers.ModelSerializer):
+  """
+  Read-only comment serializer that nests the full RubricComment object
+  instead of just returning its ID. Used by the console-data bulk endpoint
+  to eliminate the N+1 rubricComment fetch waterfall.
+  """
+  from core.serializers.rubricComment import RubricCommentSerializer
+
+  author = serializers.SlugRelatedField(many=False, slug_field='email', read_only=True)
+  color = serializers.SerializerMethodField()
+  tags = serializers.SlugRelatedField(many=True, slug_field='label', read_only=True)
+  rubricComment = RubricCommentSerializer(read_only=True, allow_null=True)
+
+  class Meta:
+    model = Comment
+    fields = ('id', 'text', 'pointDelta', 'startChar', 'endChar', 'startLine',
+              'endLine', 'file', 'rubricComment', 'author', 'feedback', 'color', 'tags')
+    read_only_fields = fields
+
+  @extend_schema_field(serializers.CharField(allow_null=True))
+  def get_color(self, obj):
+    return getattr(obj, 'color', None)

@@ -71,6 +71,11 @@ def logError(request):
     Event.objects.create(category=category, user=user.email, description="User Error: {}".format(error), meta=json.dumps(meta))
   except:
     pass
+  
+  if DEBUG:
+    # log event to the console in debug mode to verify logging is working
+    logging.warning("Logging error event: {} \n error {}".format(message, errorDetail))
+  
   return Response({'success': True}, status=status.HTTP_200_OK)
 
 

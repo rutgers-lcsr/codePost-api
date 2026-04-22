@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from core.models import Submission, SubmissionTest, TestCase, TestCategory, File
 
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer, SubmissionConsoleDataSerializer, StudentConsoleDataSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 
@@ -573,6 +573,53 @@ class SubmissionViewSet(ListProtectedViewSet):
         StudentFeedbackNotificationEmail(student).send_email(submission)
 
     return Response('Notifications sent!', status.HTTP_200_OK)
+
+  @extend_schema(
+      responses=SubmissionConsoleDataSerializer,
+      description="Return the full nested submission data for the code console in a single request. "
+                  "Includes files with nested comments (and rubricComment data). "
+                  "Eliminates the N+1 fetch waterfall.",
+  )
+  @action(detail=True, methods=['GET'])
+  def consoleData(self, request, pk=None):
+    """
+    Bulk endpoint for the code console. Returns submission → files → comments
+    in one response, replacing dozens of individual API calls.
+    """
+    user = request.user
+    try:
+      submission = Submission.objects.select_related(
+          'assignment__course',
+          'grader',
+      ).prefetch_related(
+          'students',
+          'files__comments__author',
+          'files__comments__rubricComment',
+          'files__comments__tags',
+          'tests',
+      ).get(id=pk)
+    except Submission.DoesNotExist:
+      return returnNotFound()
+
+    course = submission.assignment.course
+
+    # Use the same permission/serializer logic as retrieve
+    if isCourseAdmin(user, course):
+      serializer_class = SubmissionConsoleDataSerializer
+    elif isCourseStaff(user, course):
+      if isStudentOfSub(user, submission):
+        serializer_class = StudentConsoleDataSerializer
+      elif (not submission.assignment.anonymousGrading) or canViewUnanonymizedSubmissions(user, course):
+        serializer_class = SubmissionConsoleDataSerializer
+      else:
+        serializer_class = SubmissionConsoleDataSerializer
+    elif isStudentOfSub(user, submission):
+      serializer_class = StudentConsoleDataSerializer
+    else:
+      return returnForbidden()
+
+    serializer = serializer_class(submission, context={'request': request})
+    return Response(serializer.data)
 
   @extend_schema(
       responses=SuggestedCommentSerializer(many=True),

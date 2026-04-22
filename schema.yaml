@@ -9342,6 +9342,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/SubmissionCheckPermissionResponse'
           description: ''
+  /submissions/{id}/consoleData/:
+    get:
+      operationId: submissions_consoleDataRetrieve
+      description: Return the full nested submission data for the code console in
+        a single request. Includes files with nested comments (and rubricComment data).
+        Eliminates the N+1 fetch waterfall.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionConsoleData'
+          description: ''
   /submissions/{id}/deleteRegrade/:
     patch:
       operationId: submissions_deleteRegradePartialUpdate
@@ -13789,6 +13816,104 @@ components:
       - id
       - owner
       - text
+    CommentWithRubric:
+      type: object
+      description: |-
+        Read-only comment serializer that nests the full RubricComment object
+        instead of just returning its ID. Used by the console-data bulk endpoint
+        to eliminate the N+1 rubricComment fetch waterfall.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        text:
+          type: string
+          readOnly: true
+          description: The text on the comment
+        pointDelta:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          readOnly: true
+          nullable: true
+          description: The points deducted. A negative number represents a bonus.
+        startChar:
+          type: integer
+          readOnly: true
+          description: 'The starting character offset of the comment. For code/markdown
+            files: 0-indexed character position within the start line. For PDF text-selection
+            comments: character offset in the page''s text layer. For PDF region comments:
+            values >= 1,000,000 encode a bounding box as MARKER + leftPct*101 + topPct
+            (percentages 0-100 of page dimensions). For Jupyter notebooks (.ipynb):
+            always 0 (comments target entire cells).'
+        endChar:
+          type: integer
+          readOnly: true
+          description: 'The ending character offset of the comment. For code/markdown
+            files: 0-indexed character position within the end line. For PDF text-selection
+            comments: character offset in the page''s text layer. For PDF region comments:
+            values >= 1,000,000 encode a bounding box as MARKER + rightPct*101 + bottomPct
+            (percentages 0-100 of page dimensions). For Jupyter notebooks (.ipynb):
+            always 0 (comments target entire cells).'
+        startLine:
+          type: integer
+          readOnly: true
+          description: 'The line or position where the comment begins. For code/markdown
+            files: 0-indexed line number. For PDF files: 1-based page number. For
+            Jupyter notebooks (.ipynb): 0-based cell index.'
+        endLine:
+          type: integer
+          readOnly: true
+          description: 'The line or position where the comment ends. For code/markdown
+            files: 0-indexed line number. For PDF files: 1-based page number (usually
+            same as startLine). For Jupyter notebooks (.ipynb): 0-based cell index
+            (usually same as startLine).'
+        file:
+          type: integer
+          readOnly: true
+          description: The related file_id.
+        rubricComment:
+          allOf:
+          - $ref: '#/components/schemas/RubricComment'
+          readOnly: true
+          nullable: true
+        author:
+          type: string
+          format: email
+          title: Email address
+          readOnly: true
+        feedback:
+          type: integer
+          readOnly: true
+          description: 'Student feedback on this comment. Valid values: -1 (negative),
+            0 (none), 1 (positive). Only applicable when rubricComment is set.'
+        color:
+          type: string
+          nullable: true
+          readOnly: true
+        tags:
+          type: array
+          items:
+            type: string
+            description: The tag label.
+          readOnly: true
+      required:
+      - author
+      - color
+      - endChar
+      - endLine
+      - feedback
+      - file
+      - id
+      - pointDelta
+      - rubricComment
+      - startChar
+      - startLine
+      - tags
+      - text
     Course:
       type: object
       properties:
@@ -17928,6 +18053,124 @@ components:
       - filesOnly
       - read
       - write
+    SubmissionConsoleData:
+      type: object
+      description: |-
+        Bulk serializer for the code console. Returns the full nested tree:
+        submission → files → comments (with rubricComment data).
+        Eliminates the N+1 fetch waterfall on the frontend.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          readOnly: true
+          description: The related assignment_id.
+        students:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+        grader:
+          type: string
+          format: email
+          title: Email address
+          nullable: true
+        isFinalized:
+          type: boolean
+          readOnly: true
+          description: A boolean field. 'True' if the submission is finalized. 'False'
+            otherwise.
+        dateEdited:
+          type: string
+          format: date-time
+          readOnly: true
+        grade:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          readOnly: true
+          nullable: true
+          description: The grade for the submission. Null if not graded yet.
+        queueOrderKey:
+          type: integer
+          readOnly: true
+          description: Index used to order the queue from which graders draw submissions.
+            Will sort low to high.
+        dateUploaded:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: The date this submission was created. None if just created,
+            and files haven't been uploaded yet. Used for Celery tasks.
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionFileWithNestedComments'
+          readOnly: true
+        tests:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+        questionIsOpen:
+          type: boolean
+          readOnly: true
+          description: A boolean field. If true the submission has an open question.
+        questionIsRegrade:
+          type: boolean
+          readOnly: true
+          description: A boolean field. If 'True', the submission's question is a
+            regrade request.
+        questionText:
+          type: string
+          readOnly: true
+          description: The text of the question.
+        questionDate:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: The date the request / question was submitted.
+        responseDate:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: The date the response was submitted.
+        testRunsCompleted:
+          type: integer
+          readOnly: true
+          description: Number of times exposed tests have been run for a submission.
+            It only increments if the maxStudentTestRuns Environment setting is on.
+        lateDayCreditsUsed:
+          type: integer
+          readOnly: true
+          description: The number of Late Day Credits used by the Submission.
+      required:
+      - assignment
+      - dateEdited
+      - dateUploaded
+      - files
+      - grade
+      - id
+      - isFinalized
+      - lateDayCreditsUsed
+      - questionDate
+      - questionIsOpen
+      - questionIsRegrade
+      - questionText
+      - queueOrderKey
+      - responseDate
+      - students
+      - testRunsCompleted
+      - tests
     SubmissionFile:
       type: object
       description: |-
@@ -18014,6 +18257,68 @@ components:
       - extension
       - id
       - name
+      - submission
+    SubmissionFileWithNestedComments:
+      type: object
+      description: |-
+        Read-only serializer for SubmissionFile that nests full Comment objects
+        (including rubricComment data) instead of returning comment IDs.
+        Used by the console-data bulk endpoint to eliminate N+1 fetches.
+      properties:
+        name:
+          type: string
+          readOnly: true
+          description: The name of the file.
+        data:
+          type: string
+          readOnly: true
+          description: The data in a file. should be utf-8 encoded text.
+        extension:
+          type: string
+          readOnly: true
+          description: The extension for the file (e.g. '.java' or '.py'
+        submission:
+          type: integer
+          readOnly: true
+          description: The related submission_id.
+        id:
+          type: integer
+          readOnly: true
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommentWithRubric'
+          readOnly: true
+        path:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Optional file path, delimited by slashes, to indicate a directory
+            structure.
+        hiddenBeforePublish:
+          type: boolean
+          readOnly: true
+          description: Whether this file should hidden to students before their feedback
+            has been published. This is for autogenerated test files that shouldn't
+            be exposed to students on upload.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - comments
+      - created
+      - data
+      - extension
+      - hiddenBeforePublish
+      - id
+      - modified
+      - name
+      - path
       - submission
     SubmissionHistory:
       type: object
@@ -18743,7 +19048,6 @@ components:
       - targetPath
     TestExecutionRequest:
       type: object
-      description: Request serializer for running tests
       properties:
         testId:
           type: integer
@@ -18761,7 +19065,6 @@ components:
       - submissionId
     TestExecutionResult:
       type: object
-      description: Response for test execution
       properties:
         success:
           type: boolean
