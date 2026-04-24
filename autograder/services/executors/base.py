@@ -13,6 +13,7 @@ import abc
 import base64
 import json
 import logging
+from core.constants import MAX_FILE_SIZE as MAX_FILE_SIZE_CONST, MAX_OUTPUT_SIZE as MAX_OUTPUT_SIZE_CONST
 import os
 import re
 import shutil
@@ -245,8 +246,8 @@ class Executor(abc.ABC):
     
     # Security limits
     DEFAULT_TIMEOUT = 300  # seconds
-    MAX_OUTPUT_SIZE = 1024 * 1024  # 1MB
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    MAX_OUTPUT_SIZE = MAX_OUTPUT_SIZE_CONST
+    MAX_FILE_SIZE = MAX_FILE_SIZE_CONST
     
     # Docker resource limits
     MAX_MEMORY = "1g"  # 1GB memory limit
@@ -384,6 +385,7 @@ class Executor(abc.ABC):
         timeout_seconds: int,
         labels: Optional[Dict[str, str]] = None,
         tmpfs_size: str = "size=512m,mode=1777",
+        run_pre_script: bool = False,
     ):
         """
         Start a shell session container.
@@ -398,6 +400,7 @@ class Executor(abc.ABC):
             timeout_seconds=timeout_seconds,
             labels=labels,
             tmpfs_size=tmpfs_size,
+            run_pre_script=run_pre_script,
         )
     
     @classmethod
@@ -527,7 +530,7 @@ class Executor(abc.ABC):
             return None
 
         try:
-            container = client.containers.run(
+            container = client.containers.create(
                 image=image_name,
                 command=command,
                 volumes=volumes,
@@ -546,7 +549,6 @@ class Executor(abc.ABC):
                 cap_drop=["ALL"],  # Drop all capabilities
                 tmpfs={"/tmp": "size=512m,mode=1777"} if not needs_network else {"/tmp": "size=2g,mode=1777"},
                 environment=env,
-                detach=True
             )
             return container
         except Exception as e:
@@ -1160,10 +1162,16 @@ class Executor(abc.ABC):
         from io import BytesIO
         self.log("Injecting pre-script as .pre_script.sh")
         
+        # Normalize line endings (Windows \r\n → Unix \n)
+        script_content = self.pre_script.replace('\r\n', '\n').replace('\r', '\n')
+        # Ensure a valid shebang so the script can be executed directly
+        if not script_content.startswith('#!'):
+            script_content = '#!/bin/sh\n' + script_content
+        
         # Create tar archive with the pre-script file
         tar_stream = BytesIO()
         with tarfile.open(fileobj=tar_stream, mode='w') as tar:
-            content_bytes = self.pre_script.encode('utf-8')
+            content_bytes = script_content.encode('utf-8')
             tarinfo = tarfile.TarInfo(name='.pre_script.sh')
             tarinfo.size = len(content_bytes)
             tarinfo.mode = 0o755  # Executable
@@ -1202,7 +1210,7 @@ class Executor(abc.ABC):
         else:
             base_cmd_str = " ".join(base_command)
         
-        shell_command = f"./.pre_script.sh && chmod -x .pre_script.sh && {base_cmd_str}"
+        shell_command = f"sh ./.pre_script.sh && chmod -x .pre_script.sh && {base_cmd_str}"
         self.log(f"Wrapping command with pre-script")
         return ["sh", "-c", shell_command]
 

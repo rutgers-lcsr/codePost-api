@@ -2,6 +2,7 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 
+from core.constants import MAX_DATASET_SIZE
 from core.models import AssignmentDataSet
 
 
@@ -109,11 +110,9 @@ class AssignmentDataSetCreateSerializer(serializers.ModelSerializer):
     
     def validate_file(self, value):
         """Validate file size"""
-        # Check file size (limit to 1GB)
-        max_size = 1024 * 1024 * 1024  # 1GB
-        if value.size > max_size:
+        if value.size > MAX_DATASET_SIZE:
             raise serializers.ValidationError(
-                f"File size exceeds maximum allowed size of {max_size / (1024**3):.1f} GB"
+                f"File size exceeds maximum allowed size of {MAX_DATASET_SIZE / (1024**3):.1f} GB"
             )
         
         return value

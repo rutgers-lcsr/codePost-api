@@ -89,6 +89,7 @@ def _start_container(
     include_assignment_files: bool,
     timeout_seconds: int,
     user_id: int | None = None,
+    run_pre_script: bool = False,
 ):
     from autograder.services.executors.base import Executor
 
@@ -99,6 +100,7 @@ def _start_container(
         include_assignment_files=include_assignment_files,
         timeout_seconds=timeout_seconds,
         labels=labels,
+        run_pre_script=run_pre_script,
     )
 
 
@@ -108,6 +110,7 @@ def _start_session_sync(
     include_assignment_files: bool,
     timeout_seconds: int,
     user_id: int | None = None,
+    run_pre_script: bool = False,
 ):
     from core.models import Environment
 
@@ -118,6 +121,7 @@ def _start_session_sync(
         include_assignment_files,
         timeout_seconds,
         user_id=user_id,
+        run_pre_script=run_pre_script,
     )
     # Sync wrapper to fetch environment and start container.
     return env.image_name, volumes, staging_dir, container, sock
@@ -192,6 +196,7 @@ class WorkerShellRelay:
             return
         include_datasets = bool(payload.get("includeDatasets", True))
         include_assignment_files = bool(payload.get("includeAssignmentFiles", True))
+        run_pre_script = bool(payload.get("runPreScript", False))
         timeout_seconds = _normalize_timeout(payload.get("timeoutSeconds"))
         if timeout_seconds > self.MAX_SESSION_SECONDS:
             timeout_seconds = self.MAX_SESSION_SECONDS
@@ -203,6 +208,7 @@ class WorkerShellRelay:
                 include_assignment_files,
                 timeout_seconds,
                 user_id,
+                run_pre_script,
             )
         except Exception as e:
             logger.exception("Worker shell start failed")

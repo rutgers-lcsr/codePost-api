@@ -28,6 +28,7 @@ import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional, Literal
 from dataclasses import dataclass
+from core.constants import DEFAULT_OLLAMA_URL, DEFAULT_PORTKEY_URL
 from core.models import Course, Assignment, Submission, SubmissionFile, User
 
 import asyncio
@@ -141,7 +142,7 @@ async def _list_openai_models(api_key: str) -> list[dict[str, str]]:
 async def _list_ollama_models(base_url: str) -> list[dict[str, str]]:
     """List locally installed models from Ollama."""
     import httpx
-    url = (base_url or 'http://localhost:11434').rstrip('/')
+    url = (base_url or DEFAULT_OLLAMA_URL).rstrip('/')
     async with httpx.AsyncClient() as client:
         response = await client.get(f"{url}/api/tags", timeout=10.0)
         response.raise_for_status()
@@ -158,7 +159,7 @@ async def _list_ollama_models(base_url: str) -> list[dict[str, str]]:
 async def _list_portkey_models(api_key: str, base_url: str) -> list[dict[str, str]]:
     """List models from Portkey gateway (OpenAI-compatible /v1/models)."""
     import httpx
-    url = (base_url or 'https://api.portkey.ai/v1').rstrip('/')
+    url = (base_url or DEFAULT_PORTKEY_URL).rstrip('/')
     if url.endswith('/v1'):
         endpoint = f"{url}/models"
     else:
@@ -1220,7 +1221,7 @@ end"""
         """Call Ollama API (self-hosted). Returns (text, input_tokens, output_tokens, total_tokens, cached_tokens)."""
         import httpx
         
-        base_url = self.base_url or "http://localhost:11434"
+        base_url = self.base_url or DEFAULT_OLLAMA_URL
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{base_url}/api/generate",
@@ -1248,7 +1249,7 @@ end"""
         """
         import httpx
         
-        base_url = (self.base_url or "https://api.portkey.ai/v1").rstrip('/')
+        base_url = (self.base_url or DEFAULT_PORTKEY_URL).rstrip('/')
         # Ensure the URL doesn't already end with /v1 when we append the path
         if base_url.endswith('/v1'):
             url = f"{base_url}/chat/completions"

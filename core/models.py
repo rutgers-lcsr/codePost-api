@@ -26,6 +26,7 @@ from rest_framework.authtoken.models import Token
 from zmq import has
 from django.utils import timezone
 from django.utils.text import slugify
+from core.constants import BINARY_EXTENSIONS
 from core.validators import validate_hex_color
 from core.prompts.registry import prompt_registry
 import core.prompts  # noqa: F401 — triggers @register_prompt side-effects
@@ -824,7 +825,6 @@ class File(BaseModel):
       raise Exception("File.code is deprecated. Use File.data instead.")
  
     # Normalize newlines, but only for text files
-    BINARY_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
     if not any(self.extension.lower().endswith(ext) for ext in BINARY_EXTENSIONS):
         if '\\r\\n' in self.data:
             self.data = self.data.replace("\\r\\n", "\\n")

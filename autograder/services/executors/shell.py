@@ -59,6 +59,7 @@ class ShellExecutor(Executor):
         timeout_seconds: int,
         labels: Optional[Dict[str, str]] = None,
         tmpfs_size: str = "size=512m,mode=1777",
+        run_pre_script: bool = False,
     ) -> Tuple[ShellExecutor, Dict[str, Dict[str, str]], Dict[str, str], str, Any, Any]:
         client = Executor._get_docker_client()
         if not client:
@@ -82,9 +83,15 @@ class ShellExecutor(Executor):
         }
         merged_labels = {**default_labels, **(labels or {})}
 
-        container = client.containers.run(
+        # If run_pre_script is requested and a pre-script exists, execute it before the interactive shell
+        if run_pre_script and executor.pre_script:
+            shell_command = "sh ./.pre_script.sh; exec bash || sh -i"
+        else:
+            shell_command = "bash || sh -i"
+
+        container = client.containers.create(
             image=env.image_name,
-            command=["sh", "-c", "bash || sh -i"],
+            command=["sh", "-c", shell_command],
             volumes=volumes,
             working_dir="/work",
             network_disabled=not env.allowNetworkAccess,
@@ -98,16 +105,20 @@ class ShellExecutor(Executor):
             cap_drop=["ALL"],
             tmpfs={"/tmp": tmpfs_size},
             environment=docker_env,
-            detach=True,
             tty=True,
             stdin_open=True,
             labels=merged_labels,
         )
+
+        # Inject files before starting so the pre-script exists when the command runs
         executor.add_additional_files(container)
         executor.add_pre_script(container)
 
+        # Attach socket before starting so all output (including pre-script) is captured
         sock = container.attach_socket(params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1})
         sock._sock.setblocking(True)  # type: ignore[attr-defined]  # Docker socket internal
+
+        container.start()
 
         return executor, volumes, docker_env, temp_staging_dir, container, sock
 
@@ -119,6 +130,7 @@ def open_shell_session(
     timeout_seconds: int,
     labels: Optional[Dict[str, str]] = None,
     tmpfs_size: str = "size=512m,mode=1777",
+    run_pre_script: bool = False,
 ) -> Tuple[ShellExecutor, Dict[str, Dict[str, str]], Dict[str, str], str, Any, Any]:
     """
     Start a shell session container and return (executor, volumes, docker_env, staging_dir, container, socket).
@@ -130,6 +142,7 @@ def open_shell_session(
         timeout_seconds=timeout_seconds,
         labels=labels,
         tmpfs_size=tmpfs_size,
+        run_pre_script=run_pre_script,
     )
 
 

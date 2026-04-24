@@ -2,6 +2,7 @@
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 from core.logging import logEvent
+from core.constants import BINARY_EXTENSIONS, MAX_FILE_SIZE
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
 from rest_framework.request import Request
@@ -92,7 +93,6 @@ def encoded_zip(files: list[AssignmentFile]) -> str:
       data = file.data
       
       # For binary files, data might be base64. Try to decode if it looks like base64 or is a binary extension.
-      BINARY_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
       if any(file.name.lower().endswith('.' + ext) for ext in BINARY_EXTENSIONS):
           # Check for data URI prefix and strip it if present
           if data.startswith('data:'):
@@ -747,7 +747,6 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       # Check to make sure the files are valid before we create the submission
       uploaded_filenames = set()
-      MAX_FILE_SIZE = 10 * 1024 * 1024 # 10MB
 
       for f in request.data['files']:
         serializer = FileValidationSerializerWithoutSubmission(data=f)

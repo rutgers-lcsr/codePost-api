@@ -5,6 +5,7 @@ import time
 from typing import List, Dict, Optional, Tuple, Any
 from django.db.models import Count
 from core.models import Submission, Environment, SubmissionFile, Assignment
+from core.constants import NON_CODE_EXTENSIONS
 from log.models import Event
 from core.services.file_handlers.factory import FileHandlerFactory
 
@@ -193,7 +194,7 @@ class Autodetector:
             # This is slower but necessary if no submissions exist or if submissions yielded no language
             logger.info("[AutoDetect] No language detected from submissions (or none exist). Scanning assignment files.")
             for f in assignment.files.all():
-                 if f.extension in ['png', 'jpg', 'zip', 'pdf', 'txt', 'md']:
+                 if f.extension in NON_CODE_EXTENSIONS:
                      continue
                  try:
                      handler = FileHandlerFactory.get_handler(f)
@@ -274,7 +275,7 @@ class Autodetector:
         local_modules = set()
         
         for f in all_files:
-            if f.extension not in ['png', 'jpg', 'zip', 'pdf']:
+            if f.extension not in NON_CODE_EXTENSIONS:
                  active_files.append(f)
             
             # Track local python modules (e.g., client.py -> client, or client/api/notebook.py -> client)

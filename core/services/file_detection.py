@@ -14,6 +14,8 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from core.constants import NON_CODE_EXTENSIONS
+
 if TYPE_CHECKING:
     from core.models import Submission, SubmissionFile
 
@@ -57,13 +59,8 @@ _MAIN_FILE_NAMES: dict[str, set[str]] = {
 }
 
 # Extensions for non-code files (penalized in scoring)
-_NON_CODE_EXTENSIONS = {
-    '.pdf', '.txt', '.log', '.csv', '.tsv',
-    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp',
-    '.zip', '.tar', '.gz', '.rar',
-    '.docx', '.xlsx', '.pptx', '.doc', '.xls',
-    '.md', '.rst',
-}
+# Derived from core.constants with dots added for extension field matching.
+_NON_CODE_EXTENSIONS = {f'.{ext}' for ext in NON_CODE_EXTENSIONS}
 
 # Score weights
 _SCORE_REQUIRED_FILE = 3

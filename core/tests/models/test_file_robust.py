@@ -90,6 +90,18 @@ class TestFileSaveBehavior(TestCase):
         # PDF files should NOT have \\r\\n replaced
         self.assertIn("\\r\\n", file.data)
 
+    def test_db_extension_skips_crlf_normalization(self):
+        """SQLite .db files skip \\r\\n normalization (binary extension)."""
+        submission = setUpSubmission(self)
+        raw = "binary\\r\\ncontent"
+        file = SubmissionFile.objects.create(
+            name="data.db",
+            data=raw,
+            extension=".db",
+            submission=submission,
+        )
+        self.assertIn("\\r\\n", file.data)
+
 
 class TestFileGetCourse(TestCase):
     """Test get_course() traversal for different File subtypes."""

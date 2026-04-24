@@ -109,6 +109,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
 
         include_datasets = self._parse_bool(query.get("includeDatasets", ["true"])[0])
         include_assignment_files = self._parse_bool(query.get("includeAssignmentFiles", ["true"])[0])
+        run_pre_script = self._parse_bool(query.get("runPreScript", ["false"])[0])
         needs_network = env.allowNetworkAccess
         timeout_seconds = _normalize_timeout(
             self._parse_int(query.get("timeoutSeconds", [str(DEFAULT_SHELL_TIMEOUT_SECONDS)])[0])
@@ -125,11 +126,12 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
                 include_assignment_files,
                 timeout_seconds,
                 needs_network,
+                run_pre_script,
             )
             return
 
         if self._should_relay():
-            await self._connect_relay(env_id, user, include_datasets, include_assignment_files, timeout_seconds)
+            await self._connect_relay(env_id, user, include_datasets, include_assignment_files, timeout_seconds, run_pre_script)
             return
 
         labels = {
@@ -150,7 +152,8 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
                     include_assignment_files, 
                     timeout_seconds, 
                     labels, 
-                    tmpfs_size
+                    tmpfs_size,
+                    run_pre_script,
                 )
             )
             self.staging_dir = temp_staging_dir
@@ -457,7 +460,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
 
     @staticmethod
     @database_sync_to_async
-    def _open_shell_session_sync(env, include_datasets, include_assignment_files, timeout_seconds, labels, tmpfs_size):
+    def _open_shell_session_sync(env, include_datasets, include_assignment_files, timeout_seconds, labels, tmpfs_size, run_pre_script=False):
         return Executor.open_shell_session(
             env=env,
             include_datasets=include_datasets,
@@ -465,6 +468,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
             timeout_seconds=timeout_seconds,
             labels=labels,
             tmpfs_size=tmpfs_size,
+            run_pre_script=run_pre_script,
         )
 
     @staticmethod
@@ -637,6 +641,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         include_assignment_files: bool,
         timeout_seconds: int,
         needs_network: bool,
+        run_pre_script: bool = False,
     ):
         # Set up Redis pub/sub relay to a worker session.
         self.redis_client = self._get_redis_client()
@@ -677,6 +682,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
                     "includeAssignmentFiles": include_assignment_files,
                     "timeoutSeconds": timeout_seconds,
                     "networkAccess": needs_network,
+                    "runPreScript": run_pre_script,
                 },
             )
 
@@ -743,6 +749,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         include_datasets: bool,
         include_assignment_files: bool,
         timeout_seconds: int,
+        run_pre_script: bool = False,
     ):
         # Connect to legacy worker WS relay.
         worker_url = getattr(settings, "WORKER_SHELL_WS_URL", "")
@@ -756,6 +763,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
             "includeDatasets": "true" if include_datasets else "false",
             "includeAssignmentFiles": "true" if include_assignment_files else "false",
             "timeoutSeconds": str(timeout_seconds),
+            "runPreScript": "true" if run_pre_script else "false",
         }
         query = "&".join([f"{k}={v}" for k, v in qs.items()])
         ws_url = f"{worker_url.rstrip('/')}/ws/internal/autograder/environments/{env_id}/shell/?{query}"

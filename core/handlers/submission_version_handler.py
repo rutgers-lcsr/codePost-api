@@ -2,6 +2,7 @@
 import base64
 import io
 import zipfile
+from core.constants import BINARY_EXTENSIONS
 from core.models import  Submission
 
 class SubmissionVersionHandler:
@@ -41,7 +42,6 @@ class SubmissionVersionHandler:
                 data = file.data
 
                 # For binary files, data might be base64. Try to decode if it looks like base64 or is a binary extension.
-                BINARY_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg']
                 if any(file.name.lower().endswith('.' + ext) for ext in BINARY_EXTENSIONS):
                     # Check for data URI prefix and strip it if present
                     if data.startswith('data:'):

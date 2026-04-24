@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 import hashlib
 import re
+from core.constants import BINARY_EXTENSIONS
 
 class MockFile:
     def __init__(self, name, data, extension=None):
@@ -19,7 +20,6 @@ class MockFile:
         
         # --- LOGIC FROM models.py ---
         # Normalize newlines, but only for text files
-        BINARY_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'ipynb']
         # Note: self.extension usually doesn't have dot if passed directly, or does if parsed?
         # In models.py: extension = match.group(1) which includes dot (e.g. '.pdf')
         # So 'pdf' check needs to handle dot or not.
