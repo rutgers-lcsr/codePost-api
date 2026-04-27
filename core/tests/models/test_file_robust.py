@@ -77,30 +77,110 @@ class TestFileSaveBehavior(TestCase):
         with self.assertRaises(ValidationError):
             file.save()
 
-    def test_binary_extensions_skip_crlf_normalization(self):
-        """Binary file extensions (pdf, png, etc.) skip \\r\\n normalization."""
+    def test_data_uri_content_skips_crlf_normalization(self):
+        """Data URI content (binary uploads) is preserved exactly — no CRLF normalization."""
+        import base64
         submission = setUpSubmission(self)
-        raw = "binary\\r\\ncontent"
+        pdf_bytes = b'%PDF-1.4 test content here'
+        encoded = base64.b64encode(pdf_bytes).decode()
+        raw = f"data:application/pdf;base64,{encoded}"
         file = SubmissionFile.objects.create(
             name="doc.pdf",
             data=raw,
             extension=".pdf",
             submission=submission,
         )
-        # PDF files should NOT have \\r\\n replaced
-        self.assertIn("\\r\\n", file.data)
+        # Data URI content should pass through completely unmodified
+        self.assertEqual(file.data, raw)
 
-    def test_db_extension_skips_crlf_normalization(self):
-        """SQLite .db files skip \\r\\n normalization (binary extension)."""
+    def test_data_uri_image_skips_crlf_normalization(self):
+        """Image data URIs are preserved exactly — no CRLF normalization."""
+        import base64
         submission = setUpSubmission(self)
-        raw = "binary\\r\\ncontent"
+        gif_bytes = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00'
+        encoded = base64.b64encode(gif_bytes).decode()
+        raw = f"data:image/gif;base64,{encoded}"
         file = SubmissionFile.objects.create(
-            name="data.db",
+            name="animation.gif",
             data=raw,
-            extension=".db",
+            extension=".gif",
             submission=submission,
         )
-        self.assertIn("\\r\\n", file.data)
+        self.assertEqual(file.data, raw)
+
+    def test_plain_text_still_normalizes_crlf(self):
+        """Plain text files (no data URI prefix) still get \\r\\n normalized."""
+        submission = setUpSubmission(self)
+        raw = "line1\\r\\nline2"
+        file = SubmissionFile.objects.create(
+            name="hello.py",
+            data=raw,
+            extension=".py",
+            submission=submission,
+        )
+        self.assertNotIn("\\r\\n", file.data)
+        self.assertIn("\\n", file.data)
+
+    def test_mime_validation_rejects_mismatched_content(self):
+        """A data URI claiming image/png but containing a GIF should be rejected."""
+        import base64
+        submission = setUpSubmission(self)
+        # GIF89a header — valid GIF, but we'll claim it's PNG
+        gif_bytes = b'GIF89a' + bytes([0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00])
+        encoded = base64.b64encode(gif_bytes).decode()
+        raw = f"data:image/png;base64,{encoded}"
+        with self.assertRaises(ValidationError) as ctx:
+            SubmissionFile.objects.create(
+                name="fake.png",
+                data=raw,
+                extension=".png",
+                submission=submission,
+            )
+        self.assertIn("does not match the claimed MIME type", str(ctx.exception))
+
+    def test_mime_validation_accepts_matching_content(self):
+        """A data URI with matching MIME and magic bytes should succeed."""
+        import base64
+        submission = setUpSubmission(self)
+        # Valid PNG header: 0x89 P N G \r \n 0x1a \n then IHDR chunk
+        png_header = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]) + b'IHDR' + bytes(4)
+        encoded = base64.b64encode(png_header).decode()
+        raw = f"data:image/png;base64,{encoded}"
+        file = SubmissionFile.objects.create(
+            name="valid.png",
+            data=raw,
+            extension=".png",
+            submission=submission,
+        )
+        self.assertTrue(file.data.startswith("data:image/png"))
+
+    def test_mime_validation_allows_unknown_mime_types(self):
+        """Unknown MIME types (no known signature) should be allowed through."""
+        import base64
+        submission = setUpSubmission(self)
+        content = b'some arbitrary binary content here'
+        encoded = base64.b64encode(content).decode()
+        raw = f"data:application/octet-stream;base64,{encoded}"
+        file = SubmissionFile.objects.create(
+            name="unknown.bin",
+            data=raw,
+            extension=".bin",
+            submission=submission,
+        )
+        self.assertTrue(file.data.startswith("data:application/octet-stream"))
+
+    def test_mime_validation_rejects_invalid_base64(self):
+        """A data URI with a known MIME but corrupt base64 should be rejected."""
+        submission = setUpSubmission(self)
+        raw = "data:image/png;base64,!!!not-valid-base64!!!"
+        with self.assertRaises(ValidationError) as ctx:
+            SubmissionFile.objects.create(
+                name="corrupt.png",
+                data=raw,
+                extension=".png",
+                submission=submission,
+            )
+        self.assertIn("invalid base64", str(ctx.exception))
 
 
 class TestFileGetCourse(TestCase):

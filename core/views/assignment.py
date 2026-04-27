@@ -2,7 +2,7 @@
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 from core.logging import logEvent
-from core.constants import BINARY_EXTENSIONS, MAX_FILE_SIZE
+from core.constants import MAX_FILE_SIZE
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
 from rest_framework.request import Request
@@ -92,29 +92,13 @@ def encoded_zip(files: list[AssignmentFile]) -> str:
     for file in files:
       data = file.data
       
-      # For binary files, data might be base64. Try to decode if it looks like base64 or is a binary extension.
-      if any(file.name.lower().endswith('.' + ext) for ext in BINARY_EXTENSIONS):
-          # Check for data URI prefix and strip it if present
-          if data.startswith('data:'):
-              try:
-                  header, encoded = data.split(',', 1)
-                  data = base64.b64decode(encoded)
-              except Exception:
-                  # If splitting/decoding fails, assume it's raw data or already decoded (though unlikely for binary in text field)
-                  # or write as is. But for binary, writestr expects bytes usually?
-                  # writestr(name, data) -> data can be str or bytes.
-                  # If str, it encodes as utf-8. We don't want utf-8 encoded PDF bytes.
-                  # So we WANT bytes.
-                  # If base64 decode fails, maybe it's not base64?
-                  # But our models.py change ensures it IS base64 string in DB.
-                  # Let's just try decode.
-                  pass
-          else:
-              # No prefix, try direct decode if it looks like base64 (or just assume it is for these extensiosn)
-              try:
-                  data = base64.b64decode(data)
-              except Exception:
-                  pass
+      # Data URI content ("data:<mime>;base64,...") is binary — decode before adding to zip.
+      if data.startswith('data:'):
+          try:
+              _header, encoded = data.split(',', 1)
+              data = base64.b64decode(encoded)
+          except Exception:
+              pass
                   
       zip_file.writestr(file.name, data)
 

@@ -21,7 +21,7 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
 
         executor = Executor.factory(file_obj, content_override=code_override, test_code=test_code, example_code=example_code)
         if not executor:
-            return {"error": f"No executor found for file: {file_obj.name}"}
+            return {"error": f"No executor found for file: {file_obj.name}, unsupported file type or language. If you'd like to request support for this file type, please contact codePost.", "success": False}
         
         # Execute (synchronous within the task)
         # Executor.execute() doesn't take timeout arg? 

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import re
 import hashlib
+import base64
 import uuid
 import shutil
 from encrypted_model_fields.fields import EncryptedCharField
@@ -26,7 +27,7 @@ from rest_framework.authtoken.models import Token
 from zmq import has
 from django.utils import timezone
 from django.utils.text import slugify
-from core.constants import BINARY_EXTENSIONS
+
 from core.validators import validate_hex_color
 from core.prompts.registry import prompt_registry
 import core.prompts  # noqa: F401 — triggers @register_prompt side-effects
@@ -819,15 +820,144 @@ class File(BaseModel):
       except AttributeError:
           raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
+  # ── Magic byte signatures for data URI MIME validation ────────────────────
+  # Maps MIME type prefixes to a list of valid magic byte sequences.
+  # Each entry is (offset, bytes) — the signature must appear at the given offset.
+  # Only MIME types that appear in data URIs from the frontend need entries here.
+  MIME_SIGNATURES: dict[str, list[tuple[int, bytes]]] = {
+      # ── Images ──
+      'image/png':       [(0, b'\x89PNG\r\n\x1a\n')],
+      'image/jpeg':      [(0, b'\xff\xd8\xff')],
+      'image/gif':       [(0, b'GIF87a'), (0, b'GIF89a')],
+      'image/webp':      [(8, b'WEBP')],                    # RIFF????WEBP
+      'image/bmp':       [(0, b'BM')],
+      'image/tiff':      [(0, b'II\x2a\x00'), (0, b'MM\x00\x2a')],  # little-endian / big-endian
+      'image/x-icon':    [(0, b'\x00\x00\x01\x00'), (0, b'\x00\x00\x02\x00')],  # ICO / CUR
+      'image/avif':      [(4, b'ftyp')],                    # ISOBMFF container like MP4
+      'image/heic':      [(4, b'ftyp')],                    # ISOBMFF container
+      'image/heif':      [(4, b'ftyp')],                    # ISOBMFF container
+      'image/jxl':       [(0, b'\xff\x0a'), (0, b'\x00\x00\x00\x0cJXL \r\n\x87\n')],  # raw / ISOBMFF
+
+      # ── Documents ──
+      'application/pdf': [(0, b'%PDF')],
+
+      # ── Archives & compressed ──
+      'application/zip':              [(0, b'PK\x03\x04'), (0, b'PK\x05\x06'), (0, b'PK\x07\x08')],
+      'application/java-archive':     [(0, b'PK\x03\x04')],                     # JAR is a ZIP
+      'application/x-zip-compressed': [(0, b'PK\x03\x04')],                     # alternate ZIP MIME
+      'application/gzip':             [(0, b'\x1f\x8b')],
+      'application/x-gzip':           [(0, b'\x1f\x8b')],
+      'application/x-bzip2':          [(0, b'BZh')],
+      'application/x-xz':             [(0, b'\xfd7zXZ\x00')],
+      'application/x-7z-compressed':  [(0, b'7z\xbc\xaf\x27\x1c')],
+      'application/x-rar-compressed': [(0, b'Rar!\x1a\x07\x00'), (0, b'Rar!\x1a\x07\x01\x00')],  # RAR4 / RAR5
+      'application/x-tar':            [(257, b'ustar')],                         # POSIX tar
+      'application/zstd':             [(0, b'\x28\xb5\x2f\xfd')],
+
+      # ── Executables & bytecode ──
+      'application/x-sqlite3':        [(0, b'SQLite format 3\x00')],
+      'application/java-vm':          [(0, b'\xca\xfe\xba\xbe')],               # Java .class
+      'application/wasm':             [(0, b'\x00asm')],                         # WebAssembly
+      'application/x-elf':            [(0, b'\x7fELF')],                        # Linux ELF
+      'application/x-executable':     [(0, b'\x7fELF')],
+      'application/x-mach-binary':    [(0, b'\xfe\xed\xfa\xce'), (0, b'\xfe\xed\xfa\xcf'),   # Mach-O 32/64
+                                       (0, b'\xce\xfa\xed\xfe'), (0, b'\xcf\xfa\xed\xfe')],  # Mach-O reversed
+      'application/x-msdownload':     [(0, b'MZ')],                             # PE / DOS EXE
+      'application/x-dosexec':        [(0, b'MZ')],
+
+      # ── Microsoft Office (OOXML = ZIP-based) ──
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document':   [(0, b'PK\x03\x04')],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':         [(0, b'PK\x03\x04')],
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': [(0, b'PK\x03\x04')],
+      # Legacy Office (OLE2 Compound Document)
+      'application/msword':            [(0, b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1')],
+      'application/vnd.ms-excel':      [(0, b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1')],
+      'application/vnd.ms-powerpoint': [(0, b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1')],
+
+      # ── Audio ──
+      'audio/mpeg':      [(0, b'\xff\xfb'), (0, b'\xff\xf3'), (0, b'\xff\xf2'), (0, b'ID3')],
+      'audio/wav':       [(0, b'RIFF')],                    # RIFF????WAVE
+      'audio/ogg':       [(0, b'OggS')],
+      'audio/flac':      [(0, b'fLaC')],
+      'audio/aac':       [(0, b'\xff\xf1'), (0, b'\xff\xf9')],  # ADTS frames
+      'audio/midi':      [(0, b'MThd')],
+      'audio/x-midi':    [(0, b'MThd')],
+      'audio/webm':      [(0, b'\x1a\x45\xdf\xa3')],       # EBML header
+
+      # ── Video ──
+      'video/mp4':       [(4, b'ftyp')],
+      'video/webm':      [(0, b'\x1a\x45\xdf\xa3')],       # EBML header (Matroska/WebM)
+      'video/x-matroska':[(0, b'\x1a\x45\xdf\xa3')],       # MKV uses same EBML header
+      'video/quicktime': [(4, b'ftyp')],                    # MOV
+      'video/x-msvideo': [(0, b'RIFF')],                    # AVI = RIFF????AVI
+      'video/x-flv':     [(0, b'FLV\x01')],
+      'video/mpeg':      [(0, b'\x00\x00\x01\xba'), (0, b'\x00\x00\x01\xb3')],  # MPEG-PS / MPEG-1
+
+      # ── Fonts ──
+      'font/woff':       [(0, b'wOFF')],
+      'font/woff2':      [(0, b'wOF2')],
+      'font/otf':        [(0, b'OTTO')],
+      'font/ttf':        [(0, b'\x00\x01\x00\x00')],
+      'application/font-woff':  [(0, b'wOFF')],             # older MIME
+      'application/font-woff2': [(0, b'wOF2')],
+
+      # ── Misc ──
+      'application/x-shockwave-flash': [(0, b'CWS'), (0, b'FWS'), (0, b'ZWS')],  # SWF
+      'application/x-apple-diskimage': [(0, b'x\x01\x73\x0d\x62\x62\x60')],      # DMG (zlib start)
+  }
+
+  def _validate_data_uri_mime(self) -> None:
+      """Validate that the binary content matches the MIME type in the data URI.
+
+      Raises ValidationError if the MIME type has a known signature that
+      does not match the decoded bytes. Unknown MIME types are allowed through
+      (we only reject known mismatches, not unknown types).
+      """
+      try:
+          header, encoded = self.data.split(',', 1)
+      except ValueError:
+          return  # Malformed data URI — let other validation handle it
+
+      # Parse MIME from "data:<mime>;base64" or "data:<mime>;charset=...;base64"
+      mime = header.replace('data:', '').split(';')[0].strip().lower()
+      if not mime:
+          return
+
+      signatures = self.MIME_SIGNATURES.get(mime)
+      if signatures is None:
+          return  # No known signature for this MIME — allow through
+
+      try:
+          raw = base64.b64decode(encoded)
+      except Exception:
+          raise ValidationError(
+              f"File '{self.name}': data URI claims {mime} but contains invalid base64."
+          )
+
+      for offset, magic in signatures:
+          if len(raw) >= offset + len(magic) and raw[offset:offset + len(magic)] == magic:
+              return  # Match found
+
+      raise ValidationError(
+          f"File '{self.name}': content does not match the claimed MIME type '{mime}'. "
+          "The file may be corrupted or mislabeled."
+      )
+
   def save(self, *args, **kwargs):
     # Check if trying to use deprecated 'code' field
     if hasattr(self, 'code') and self.code:  # type: ignore[attr-defined]
       raise Exception("File.code is deprecated. Use File.data instead.")
  
-    # Normalize newlines, but only for text files
-    if not any(self.extension.lower().endswith(ext) for ext in BINARY_EXTENSIONS):
+    # Normalize newlines, but only for plain text files.
+    # Data URI content ("data:<mime>;base64,...") is binary — skip normalization.
+    if not self.data.startswith('data:'):
         if '\\r\\n' in self.data:
             self.data = self.data.replace("\\r\\n", "\\n")
+    else:
+        # Validate that the MIME type claimed in the data URI matches the actual
+        # binary content (magic bytes). Prevents uploading malicious content
+        # disguised as a benign file type.
+        self._validate_data_uri_mime()
     
     # Ensure utf-8 encoding (base64 is ascii safe)
     self.data = self.data.encode('utf-8').decode('utf-8')

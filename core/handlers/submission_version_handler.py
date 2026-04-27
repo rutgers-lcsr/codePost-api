@@ -2,8 +2,7 @@
 import base64
 import io
 import zipfile
-from core.constants import BINARY_EXTENSIONS
-from core.models import  Submission
+from core.models import Submission
 
 class SubmissionVersionHandler:
 
@@ -41,21 +40,13 @@ class SubmissionVersionHandler:
             for file in files:
                 data = file.data
 
-                # For binary files, data might be base64. Try to decode if it looks like base64 or is a binary extension.
-                if any(file.name.lower().endswith('.' + ext) for ext in BINARY_EXTENSIONS):
-                    # Check for data URI prefix and strip it if present
-                    if data.startswith('data:'):
-                        try:
-                            header, encoded = data.split(',', 1)
-                            data = base64.b64decode(encoded)
-                        except Exception:
-                            pass
-                    else:
-                        # No prefix, try direct decode if it looks like base64
-                        try:
-                            data = base64.b64decode(data)
-                        except Exception:
-                            pass
+                # Data URI content ("data:<mime>;base64,...") is binary — decode before adding to zip.
+                if data.startswith('data:'):
+                    try:
+                        _header, encoded = data.split(',', 1)
+                        data = base64.b64decode(encoded)
+                    except Exception:
+                        pass
                 
                 zip_file.writestr(file.name, data)
 
