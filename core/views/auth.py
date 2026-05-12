@@ -2,7 +2,7 @@
 from datetime import timedelta
 from core.models import User
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, throttle_classes
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication, TokenAuthentication
 from core.authentication import CourseScopedJWTAuthentication
 from rest_framework.response import Response
@@ -15,6 +15,7 @@ from core.serializers.user import UserSerializer
 from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt import serializers, views
 from codepost.settings import DEBUG
+from core.throttles import AuthAnonRateThrottle, AuthUserRateThrottle
 from core.serializers.auth import (
   GenerateOTTRequestSerializer,
   GenerateOTTResponseSerializer,
@@ -87,6 +88,7 @@ class JWTSerializer(serializers.TokenObtainSlidingSerializer):
 
 class AccountLoginAPIView(views.TokenObtainSlidingView):
   serializer_class = JWTSerializer
+  throttle_classes = [AuthAnonRateThrottle]
 
 obtain_jwt_token = AccountLoginAPIView.as_view()
 
@@ -99,6 +101,7 @@ class ImpersonateView(APIView):
   students or graders in courses they administer.
   """
   permission_classes = [IsAuthenticated]
+  throttle_classes = [AuthUserRateThrottle]
 
   @extend_schema(request=ImpersonateRequestSerializer, responses={200: UserSerializer})
   def post(self, request, *args, **kwargs):
@@ -143,8 +146,8 @@ class ImpersonateView(APIView):
       if not sharded_course.exists():
         return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
-    # if never_expire is set, we will set the token to expire in 1 year
-    should_expire = request.data.get('never_expire', False)
+    # Only superusers can create long-lived impersonation tokens
+    should_expire = request.data.get('never_expire', False) and request.user.is_superuser
     
     # Log the impersonation event
     logEvent(
@@ -248,6 +251,7 @@ def generate_one_time_token(request):
 @extend_schema(request=ValidateOTTRequestSerializer, responses={200: UserSerializer})
 @api_view(['GET', 'POST'])
 @permission_classes([])
+@throttle_classes([AuthAnonRateThrottle])
 def validate_one_time_token(request):
   """
   Validate a one-time token and return the associated user data. 
@@ -279,7 +283,7 @@ def validate_one_time_token(request):
 
   # Propagate course scope from the OTT into the JWT
   ott_course_id = token_obj.course_id if token_obj.course_id else None
-  jwt_token = JWTSerializer.get_token(user, never_expire=True, course_id=ott_course_id)
+  jwt_token = JWTSerializer.get_token(user, course_id=ott_course_id)
 
   data = serializer.data
   data['token'] = str(jwt_token)

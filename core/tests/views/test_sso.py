@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.test import SimpleTestCase, RequestFactory
 from unittest.mock import patch, MagicMock
+from django.core.cache import cache
 from core.views.sso import sso_callback, initiate_sso, get_organization_by_email_domain
 
 from core.models import Organization
@@ -136,7 +137,9 @@ class SSOTest(SimpleTestCase):
             mock_token.access_token = "fake_token"
             mock_refresh.return_value = mock_token
 
-            request = self.factory.get('/auth/sso/callback/AZURE/', {'org': '1', 'code': 'auth_code'})
+            # Set up state in cache to pass CSRF validation
+            cache.set('sso_state:test_azure_state', '1', timeout=600)
+            request = self.factory.get('/auth/sso/callback/AZURE/', {'org': '1', 'code': 'auth_code', 'state': 'test_azure_state'})
             response = sso_callback(request, 'AZURE')
             
             self.assertEqual(response.status_code, 302)
@@ -171,7 +174,9 @@ class SSOTest(SimpleTestCase):
             mock_token.access_token = "fake_token"
             mock_refresh.return_value = mock_token
 
-            request = self.factory.get('/auth/sso/callback/GOOGLE/', {'org': '1', 'code': 'google_code'})
+            # Set up state in cache to pass CSRF validation
+            cache.set('sso_state:test_google_state', '1', timeout=600)
+            request = self.factory.get('/auth/sso/callback/GOOGLE/', {'org': '1', 'code': 'google_code', 'state': 'test_google_state'})
             response = sso_callback(request, 'GOOGLE')
             
             self.assertEqual(response.status_code, 302)

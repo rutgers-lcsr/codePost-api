@@ -5,9 +5,11 @@ from rest_framework.permissions import AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from core.serializers.sso import CheckSSOAvailabilityResponseSerializer, MainOrgSSOConfigSerializer, OrgSSOConfigSerializer
 from django.conf import settings
+from django.core.cache import cache
 from core.models import Organization, User
 from core.utils import get_or_create_user
 import requests
+import secrets
 import urllib.parse
 import xml.etree.ElementTree as ET
 import logging
@@ -121,7 +123,8 @@ def initiate_sso(request, provider):
             
         scopes = "openid email profile"
         redirect_uri = get_service_url(request, provider, organization.id)
-        state = "random_state_string" # Should use session/cache to verify state
+        state = secrets.token_urlsafe(32)
+        cache.set(f"sso_state:{state}", str(organization.id), timeout=600)  # 10 min TTL
         
         auth_endpoint = ""
         
@@ -228,9 +231,7 @@ def sso_callback(request, provider):
         params = {'service': service_url, 'ticket': ticket}
         
         try:
-            # Disable SSL verification for debug to support localhost self-signed certs
-            verify_ssl = not settings.DEBUG
-            response = requests.get(validation_url, params=params, timeout=10, verify=verify_ssl)
+            response = requests.get(validation_url, params=params, timeout=10, verify=True)
             
             if response.status_code != 200:
                  logger.error(f"CAS Validation Failed Status: {response.status_code} Body: {response.text}")
@@ -259,7 +260,7 @@ def sso_callback(request, provider):
                         if failure is not None:
                              msg = failure.text.strip() if failure.text else "Unknown"
                              logger.error(f"CAS Auth Failure Response: {msg}")
-                             return error_redirect(f"CAS Authentication Failed: {msg}")
+                             return error_redirect("SSO authentication failed. Please try again or contact support.")
                         
                         # Fallback for 'user' tag directly
                         if not email:
@@ -274,10 +275,21 @@ def sso_callback(request, provider):
 
         except Exception as e:
             logger.error(f"CAS Validation Error: {e}")
-            return error_redirect(f"Internal Error during CAS validation: {str(e)}")
+            return error_redirect("An error occurred during SSO authentication. Please try again.")
     
     # --- OAUTH VALIDATION (Azure/Google/OIDC) ---
     elif provider in ['AZURE', 'GOOGLE', 'OIDC']:
+        # Validate OAuth state parameter to prevent CSRF
+        received_state = request.query_params.get('state')
+        if not received_state:
+            return error_redirect('Missing state parameter')
+        cached_org_id = cache.get(f"sso_state:{received_state}")
+        if cached_org_id is None:
+            return error_redirect('Invalid or expired state parameter')
+        cache.delete(f"sso_state:{received_state}")  # One-time use
+        if str(org_id) != cached_org_id:
+            return error_redirect('State parameter does not match organization')
+
         code = request.query_params.get('code')
         if not code:
             return error_redirect('No auth code provided')

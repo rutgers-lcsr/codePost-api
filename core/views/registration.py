@@ -2,7 +2,7 @@
 
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
@@ -12,6 +12,7 @@ from django.contrib.auth.tokens import default_token_generator
 from core.logging import logEvent
 from core.models import User, Organization, Course
 from core.utils import is_course_member, email_passes_whitelist
+from core.throttles import AuthAnonRateThrottle
 from core.forms.forms import (
     ChangePasswordForm,
     EmailForm,
@@ -71,6 +72,7 @@ import logging
 )
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def emailRegistration(request):
     """
     Request body includes: email.
@@ -200,6 +202,7 @@ def verifyRegistrationToken(request):
 )
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def registerAndSetPassword(request):
     """
     Function takes a (uid, token) as authorization and, if authorization is valid, sets the associated
@@ -679,6 +682,7 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
 )
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def emailPasswordReset(request):
 
     form = EmailForm(request.data)
@@ -732,9 +736,8 @@ def verifyResetToken(request):
 )
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def resetPassword(request):
-    # Probably should enforce some password checks here...currently, users
-    # can bypass any client-side password requirements using this endpoint
     form = ChangePasswordForm(request.data)
     if form.is_valid():
         uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
@@ -744,8 +747,10 @@ def resetPassword(request):
                 user, form.cleaned_data["token"]
             )
             if isValid:
-                # Update password
-                user.set_password(form.cleaned_data["password"])
+                # Use password2 (validated by PasswordMatchForm._post_clean)
+                # instead of the unvalidated password field
+                password = form.cleaned_data.get("password2") or form.cleaned_data["password"]
+                user.set_password(password)
                 user.profile.isPasswordSet = True
                 user.save()
             return Response(

@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import regex
 import structlog
 import mimetypes
+from django.core.exceptions import ImproperlyConfigured
 
 # Fix for .mjs files serving with wrong mime type
 mimetypes.add_type("application/javascript", ".mjs", True)
@@ -114,6 +115,11 @@ if SECRET_KEY == "your-secret-key-for-dev-only-must-be-at-least-32-bytes":
 
 # Encryption settings
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "a8ZLWym0lKXZW2iwQw8mx3kdsX7EiGxjfznpPeGBZ4M=")
+if FIELD_ENCRYPTION_KEY == "a8ZLWym0lKXZW2iwQw8mx3kdsX7EiGxjfznpPeGBZ4M=":
+    logger.warning(
+        "insecure_field_encryption_key",
+        message="You are using the default FIELD_ENCRYPTION_KEY. This is insecure and must not be used in production."
+    )
 
 
 # Allowed host settings — derived from API_URL + optional EXTRA_ALLOWED_HOSTS env var
@@ -145,7 +151,7 @@ if DOCKER:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_REDIRECT_EXEMPT = [r"^health-check/$"]
     SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = False
 
 REST_FRAMEWORK = {
@@ -241,6 +247,11 @@ See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python)
 # https://pypi.org/project/django-cors-headers/
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
+if CORS_ALLOW_ALL_ORIGINS and DOCKER:
+    raise ImproperlyConfigured(
+        "CORS_ALLOW_ALL_ORIGINS must not be True in Docker/production. "
+        "Set DEBUG=FALSE or configure CORS_ALLOWED_ORIGINS explicitly."
+    )
 CORS_ALLOWED_ORIGINS = [CLIENT_URL, API_URL]
 _extra_cors = os.environ.get("EXTRA_CORS_ORIGINS", "")
 if _extra_cors:
@@ -608,44 +619,45 @@ AUTOGRADER_AUTO_EXECUTE = os.environ.get("AUTOGRADER_AUTO_EXECUTE", "FALSE").upp
 
 #################### Log info to console for debugging ##############################
 
-print("=" * 80)
-print("CodePost Configuration:")
-print(f"CodePost API running on {API_URL}")
-print(f"CodePost Client running on {CLIENT_URL}")
-print(f"CodePost API running in {'debug' if DEBUG else 'production'} mode")
-print(f"CodePost API Admins are {', '.join(ADMINS)}")
-print("=" * 80)
-print("Celery Configuration:")
-print(f"  Broker URL: {CELERY_BROKER_URL}")
-print(f"  Default Queue: {CELERY_DEFAULT_QUEUE}")
-print(f"  Result Backend: {CELERY_RESULT_BACKEND}")
-print(f"  Autograder Auto Execute: {AUTOGRADER_AUTO_EXECUTE}")
-print("=" * 80)
-print("Database Configuration:")
-print(f"  Database Engine: {DATABASES['default']['ENGINE']}")
-print(f"  Database Name: {DATABASES['default']['NAME']}")
-print(f"  Database Host: {DATABASES['default'].get('HOST', 'N/A')}")
-print(f"  Database Port: {DATABASES['default'].get('PORT', 'N/A')}")
-print(f"  Database User: {DATABASES['default'].get('USER', 'N/A')}")
-print("=" * 80)
-print("EMAIL Configuration:")
-print(f"  EMAIL_HOST: {EMAIL_HOST}")
-print(f"  EMAIL_PORT: {EMAIL_PORT}")
-print(f"  TLS: {EMAIL_USE_TLS} SSL: {EMAIL_USE_SSL}")
-print(f"  DEFAULT_EMAIL_FROM: {DEFAULT_EMAIL_FROM}")
-if OVERRIDE_EMAIL:
-    print(f"  OVERRIDE_EMAIL: {OVERRIDE_EMAIL}")
-print("=" * 80)
+if DEBUG:
+    print("=" * 80)
+    print("CodePost Configuration:")
+    print(f"CodePost API running on {API_URL}")
+    print(f"CodePost Client running on {CLIENT_URL}")
+    print(f"CodePost API running in {'debug' if DEBUG else 'production'} mode")
+    print(f"CodePost API Admins are {', '.join(ADMINS)}")
+    print("=" * 80)
+    print("Celery Configuration:")
+    print(f"  Broker URL: {CELERY_BROKER_URL}")
+    print(f"  Default Queue: {CELERY_DEFAULT_QUEUE}")
+    print(f"  Result Backend: {CELERY_RESULT_BACKEND}")
+    print(f"  Autograder Auto Execute: {AUTOGRADER_AUTO_EXECUTE}")
+    print("=" * 80)
+    print("Database Configuration:")
+    print(f"  Database Engine: {DATABASES['default']['ENGINE']}")
+    print(f"  Database Name: {DATABASES['default']['NAME']}")
+    print(f"  Database Host: {DATABASES['default'].get('HOST', 'N/A')}")
+    print(f"  Database Port: {DATABASES['default'].get('PORT', 'N/A')}")
+    print(f"  Database User: {DATABASES['default'].get('USER', 'N/A')}")
+    print("=" * 80)
+    print("EMAIL Configuration:")
+    print(f"  EMAIL_HOST: {EMAIL_HOST}")
+    print(f"  EMAIL_PORT: {EMAIL_PORT}")
+    print(f"  TLS: {EMAIL_USE_TLS} SSL: {EMAIL_USE_SSL}")
+    print(f"  DEFAULT_EMAIL_FROM: {DEFAULT_EMAIL_FROM}")
+    if OVERRIDE_EMAIL:
+        print(f"  OVERRIDE_EMAIL: {OVERRIDE_EMAIL}")
+    print("=" * 80)
 
 
 
-print("=" * 80)
-print("API Documentation info:")
-print(f"API Documentation URL: {API_URL}/api/schema/")
-print(f"API Documentation YAML: {API_URL}/api/schema/yaml/")
-print("=" * 80)
+    print("=" * 80)
+    print("API Documentation info:")
+    print(f"API Documentation URL: {API_URL}/api/schema/")
+    print(f"API Documentation YAML: {API_URL}/api/schema/yaml/")
+    print("=" * 80)
 
-print("""
+    print("""
 Django settings loaded successfully.
 
 
@@ -658,4 +670,4 @@ Django settings loaded successfully.
 
 Welcome to CodePost!      
       """)
-print("=" * 80)
+    print("=" * 80)
