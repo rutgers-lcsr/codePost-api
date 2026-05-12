@@ -41,6 +41,12 @@ jobs:
         steps:
             - uses: actions/checkout@v5
 
+            - name: Install Poetry
+              run: |
+                  rm -rf ~/.local/share/pypoetry
+                  curl -sSL https://install.python-poetry.org | python3 -
+                  echo "$HOME/.local/bin" >> $GITHUB_PATH
+
             - name: Install dependencies
               run: poetry install --no-interaction
 
@@ -52,6 +58,12 @@ jobs:
         runs-on: testing-codepost
         steps:
             - uses: actions/checkout@v5
+
+            - name: Install Poetry
+              run: |
+                  rm -rf ~/.local/share/pypoetry
+                  curl -sSL https://install.python-poetry.org | python3 -
+                  echo "$HOME/.local/bin" >> $GITHUB_PATH
 
             - name: Install dependencies
               run: poetry install --no-interaction
@@ -69,6 +81,12 @@ jobs:
             DJANGO_SETTINGS_MODULE: codepost.settings
         steps:
             - uses: actions/checkout@v5
+
+            - name: Install Poetry
+              run: |
+                  rm -rf ~/.local/share/pypoetry
+                  curl -sSL https://install.python-poetry.org | python3 -
+                  echo "$HOME/.local/bin" >> $GITHUB_PATH
 
             - name: Install dependencies
               run: poetry install --no-interaction
