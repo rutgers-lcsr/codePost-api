@@ -60,11 +60,12 @@ def get_hook_model():
         return HookModel
 
 
-def find_and_fire_hook(event_name, instance, user_override=None, payload_override=None, updated_fields=[], payload_addition=None):
+def find_and_fire_hook(event_name, instance, user_override=None, payload_override=None, updated_fields=None, payload_addition=None):
     """
     Look up Hooks that apply
     """
-    from django.contrib.auth.models import User
+    if updated_fields is None:
+        updated_fields = []
     from webhooks.models import HOOK_EVENTS
 
     if event_name not in HOOK_EVENTS.keys():

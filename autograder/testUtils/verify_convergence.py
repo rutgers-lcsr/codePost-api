@@ -4,8 +4,7 @@ import os
 import uuid
 import sys
 import unittest
-from unittest.mock import MagicMock, patch, ANY
-import time
+from unittest.mock import MagicMock, patch
 
 # Path setup for Django
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -16,9 +15,9 @@ django.setup()
 
 from core.models import Environment, Assignment, Submission, SubmissionFile, User, Course, Organization
 from autograder.run import RunSubmission
-from autograder.services.executors import Executor, ExecutionResult
+from autograder.services.executors import ExecutionResult
 
-from django.test import TransactionTestCase, override_settings
+from django.test import TransactionTestCase
 
 class TestConvergencePipeline(TransactionTestCase):
     def setUp(self):
@@ -70,7 +69,6 @@ class TestConvergencePipeline(TransactionTestCase):
         print(f"\n--- Testing RunSubmission Convergence for Submission {self.submission.id} ---")
         
         # Override Celery to run tasks locally
-        from codepost.settings import DEBUG
         with self.settings(CELERY_TASK_ALWAYS_EAGER=True):
             
             # Setup Mock Executor
@@ -159,7 +157,6 @@ class TestConvergencePipeline(TransactionTestCase):
         print(f"\n--- Testing Multi-User Convergence ---")
         
         # Override Celery
-        from codepost.settings import DEBUG
         with self.settings(CELERY_TASK_ALWAYS_EAGER=True):
             
             # Setup Multiple Users & Submissions
@@ -227,7 +224,6 @@ class TestConvergencePipeline(TransactionTestCase):
         print(f"\n--- Testing Mixed Package Convergence ---")
         
         # Override Celery
-        from codepost.settings import DEBUG
         with self.settings(CELERY_TASK_ALWAYS_EAGER=True):
             
             # Setup Submissions for different packages
@@ -236,19 +232,19 @@ class TestConvergencePipeline(TransactionTestCase):
             # Group 3: pandas (1 sub - should NOT converge yet)
             
             subs_requests = []
-            for i in range(3):
+            for _ in range(3):
                 s = Submission.objects.create(assignment=self.assignment)
                 SubmissionFile.objects.create(submission=s, name="main.py", extension="py", data="import requests")
                 subs_requests.append(s)
             
             subs_numpy = []
-            for i in range(3):
+            for _ in range(3):
                 s = Submission.objects.create(assignment=self.assignment)
                 SubmissionFile.objects.create(submission=s, name="main.py", extension="py", data="import numpy")
                 subs_numpy.append(s)
                 
             subs_pandas = []
-            for i in range(1):
+            for _ in range(1):
                 s = Submission.objects.create(assignment=self.assignment)
                 SubmissionFile.objects.create(submission=s, name="main.py", extension="py", data="import pandas")
                 subs_pandas.append(s)
@@ -360,7 +356,6 @@ class TestConvergencePipeline(TransactionTestCase):
         print(f"\n--- Testing Runtime Install Convergence (Success Logic) ---")
         
         # Override Celery
-        from codepost.settings import DEBUG
         with self.settings(CELERY_TASK_ALWAYS_EAGER=True):
             
             # Setup Submission
@@ -392,7 +387,7 @@ class TestConvergencePipeline(TransactionTestCase):
             
             # Run 3 times
             print("[Test] Running submission 3 times (expecting success but tracking)...")
-            for i in range(3):
+            for _ in range(3):
                 RunSubmission(s.id)
                 self.env.refresh_from_db()
             
@@ -452,7 +447,7 @@ class TestConvergencePipeline(TransactionTestCase):
             # Run 3 times (R threshold might be different? Default is 3 usually)
             # RConverger inherits BaseConverger, threshold 3.
             print("[Test] Running R submission 3 times...")
-            for i in range(3):
+            for _ in range(3):
                 # We need to ensure RunSubmission picks up the R environment.
                 # Since assignment has 'env' (python), we need to handle multiple environments?
                 # Or just assign this env to the assignment?
@@ -497,7 +492,7 @@ class TestConvergencePipeline(TransactionTestCase):
             mock_build.return_value = True
             
             print("[Test] Running R submission 3 times...")
-            for i in range(3):
+            for _ in range(3):
                 RunSubmission(s.id)
                 r_env.refresh_from_db()
             

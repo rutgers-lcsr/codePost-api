@@ -6,7 +6,7 @@ from core.serializers.organization import OrganizationSerializer
 from core.views.template import SuperUserListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
 from core.permissions.permissions import OrganizationPermissions
-from rest_framework.decorators import permission_classes as api_permission_classes, action
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from core.models import User
@@ -293,7 +293,6 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     Send password reset email to a user.
     Payload: { 'user_email': '...' }
     """
-    from django.contrib.auth.tokens import default_token_generator
     from core.emails import PasswordResetEmail
     
     organization = self.get_object()

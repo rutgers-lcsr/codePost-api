@@ -1,11 +1,9 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.contrib.auth.models import User
-from core.models import Profile
 from core.models import Organization, Course
 from core.models import Section, Assignment
 from core.models import Submission, File, Comment
 from core.models import RubricCategory, RubricComment
-import random
 import json
 
 # Set up users

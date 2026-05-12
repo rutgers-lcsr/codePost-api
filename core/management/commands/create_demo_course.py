@@ -12,7 +12,6 @@ from core.models import (
     Comment,
     Course,
     Environment,
-    Organization,
     RubricCategory,
     RubricComment,
     Submission,

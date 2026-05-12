@@ -1,6 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from django.urls import path, re_path, include
-from django.views.generic import TemplateView
+from django.urls import path
 from core.views.auth import current_user
 
 import core.views.registration as registration

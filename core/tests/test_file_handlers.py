@@ -1,7 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.test import SimpleTestCase
 import unittest.mock
-from unittest.mock import MagicMock
 from core.models import File
 from core.services.file_handlers.factory import FileHandlerFactory
 from core.services.file_handlers.python import PythonHandler

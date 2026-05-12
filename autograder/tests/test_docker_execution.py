@@ -17,16 +17,12 @@ Skip Docker tests (runs in CI without Docker):
     pytest -m "not docker"
 """
 
-import json
-import os
-import shutil
-import unittest
 from typing import Any, Dict, List, cast
 
 import pytest
 from django.test import SimpleTestCase
 
-from autograder.services.executors.base import Executor, ExecutionResult
+from autograder.services.executors.base import ExecutionResult
 from autograder.services.executors.mock_file import MockFile
 from autograder.services.TestService import TestService
 

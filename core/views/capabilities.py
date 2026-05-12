@@ -4,7 +4,6 @@ import re
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
@@ -20,7 +19,6 @@ from core.permissions.role_cache import RoleCache
 from core.permissions.course_scope import _get_course_scope_id
 from core.serializers.actionResponses import (
     CapabilitiesResponseSerializer,
-    CapabilitiesWithDescriptionsResponseSerializer,
     BatchCapabilitiesRequestSerializer,
     BatchCapabilitiesResponseSerializer,
 )

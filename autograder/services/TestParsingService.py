@@ -2,9 +2,8 @@
 
 import ast
 import re
-import json
 import logging
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
 from core.models import TestCategory, TestCase
 
 logger = logging.getLogger(__name__)

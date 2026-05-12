@@ -4,7 +4,7 @@ from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Organization, User
 
-from core.auth import Authentications, type_of_auth
+from core.auth import type_of_auth
 import logging
 
 logger = logging.getLogger(__name__)

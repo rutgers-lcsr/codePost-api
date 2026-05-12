@@ -11,8 +11,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema
 
-from core.models import File, SubmissionFile, AssignmentFile, CourseFile, CachedExecutionResult
-from core.permissions.helpers import isAuthenticated, returnNotAuthorized, returnForbidden, isStaffOfSub
+from core.models import File, CachedExecutionResult
+from core.permissions.helpers import isStaffOfSub
 from core.permissions.permissions import FileExecutionPermissions
 from autograder.serializers.execution import CacheCheckResponseSerializer
 

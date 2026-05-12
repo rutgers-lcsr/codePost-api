@@ -21,7 +21,7 @@ class TestPermissions_Assignment_Clone(APITestCase):
   def setUp(self):
     setUpBase(self)
 
-    db = cast(dict[str, Any], getattr(self, "DB"))
+    db = cast(dict[str, Any], self.DB)
     self.assignment = Assignment.objects.get(id=db["Assignment"].id)
 
     self.helper_file = AssignmentFile.objects.create(

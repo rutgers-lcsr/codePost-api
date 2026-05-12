@@ -4,7 +4,6 @@ from core.tests.views.personas import Persona
 from rest_framework import status
 from core.serializers.rubricComment import RubricCommentSerializer
 
-from core.tests.views.results.rubricComment import PERMISSIONS
 
 from core.models import *
 

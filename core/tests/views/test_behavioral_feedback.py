@@ -224,7 +224,7 @@ class TestSuggestedCommentNewFields:
         """The SuggestedComment serializer should include the new fields."""
         from core.models import SuggestedComment
 
-        sc = SuggestedComment.objects.create(
+        _sc = SuggestedComment.objects.create(
             submission=grading_setup['submission'],
             file=grading_setup['file'],
             text="test",
@@ -579,7 +579,7 @@ class TestAutoPromotionGates:
         self, api_client, superuser, experiment, grading_setup, prompt_variants,
     ):
         """When explicit and behavioral both favor the same variant, promotion should succeed."""
-        from core.models import PromptFeedback, SuggestedComment, SystemPromptVariant
+        from core.models import PromptFeedback, SuggestedComment
 
         variant_a = prompt_variants['a']
         variant_b = prompt_variants['b']

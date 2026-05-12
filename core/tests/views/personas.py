@@ -181,7 +181,7 @@ class Persona(Enum):
     assignment = Assignment.objects.filter(course=self.course).first()
     newSubmission = Submission.objects.create(assignment=assignment)
     user = self.course.graders.first()
-    student = self.course.students.last()
+    _student = self.course.students.last()
 
     newSubmission.grader = user
     newSubmission.save()

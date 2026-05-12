@@ -1,7 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 import time
 
-from core.tests.views.results import course
 from core.views.auth import JWTSerializer
 from core.views.template import SuperUserListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
@@ -18,7 +17,7 @@ from core.permissions.helpers import returnNotAuthorized, returnForbidden
 from rest_framework.authtoken.models import Token
 
 from core.emails import USER_ACCESSIBLE_TEMPLATES, GraderReminderEmail, PublishNewAssignmentEmail, RegradesReminderEmail, UserAddedToCourseEmail
-from core.permissions.helpers import isCourseMember, isCourseAdmin
+from core.permissions.helpers import isCourseMember
 from core.permissions.capabilities import require_capability
 
 from rest_framework import status

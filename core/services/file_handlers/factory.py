@@ -1,10 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-import json
 from typing import Any, Dict, Type
 import logging
 
-from core.models import File
-from log.models import Event
 from .base import BaseFileHandler
 from .default import DefaultHandler
 from .python import PythonHandler

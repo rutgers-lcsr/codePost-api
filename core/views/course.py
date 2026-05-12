@@ -11,7 +11,6 @@ from core.serializers.course import (
     CourseStudentCaptionsSerializer,
 )
 from core.serializers.section import SectionSerializer
-from core.serializers.user import UserSerializer
 from core.views.template import SuperUserListProtectedViewSet
 
 from rest_framework.response import Response
@@ -29,11 +28,11 @@ from core.permissions.helpers import (
     returnNotFound,
 )
 from core.permissions.helpers import isAuthenticated
-from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff
-from core.permissions.helpers import isStudentOfSub, isStaffOfSub, isSuperGrader
+from core.permissions.helpers import isCourseAdmin, isCourseMember, isCourseStaff
+from core.permissions.helpers import isSuperGrader
 import logging
 from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
-from core.serializers.actionResponses import CapabilitiesResponseSerializer, CapabilitiesWithDescriptionsResponseSerializer
+from core.serializers.actionResponses import CapabilitiesResponseSerializer
 from core.permissions.capabilities import compute_course_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
 from core.permissions.course_scope import _get_course_scope_id
 from core.serializers.course_audit_event import CourseAuditEventSerializer
@@ -48,7 +47,6 @@ logger = logging.getLogger(__name__)
 
 from core.pagination import LargeObjectsPagination
 
-from django.contrib.auth.tokens import default_token_generator
 
 from core.utils import get_or_create_user
 

@@ -22,7 +22,6 @@ from core.permissions.helpers import (
 )
 from core.permissions.template import TemplatePermission
 from rest_framework import permissions
-from rest_framework.request import Request
 from codepost.settings import logger
 from typing import cast
 
@@ -284,7 +283,7 @@ class SubmissionPermissions(TemplatePermission):
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
         course = obj.assignment.course
-        assignment = obj.assignment
+        _assignment = obj.assignment
 
         # GET: staff of submission, or students (if released/live feedback)
         if request.method == "GET":

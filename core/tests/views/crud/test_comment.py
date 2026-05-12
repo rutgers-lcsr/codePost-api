@@ -5,7 +5,6 @@ from rest_framework import status
 from core.serializers.comment import CommentSerializer
 
 from core.models import *
-from core.tests.views.results.comment import PERMISSIONS
 
 
 def _normalize_comment_permissions(permissions, *, allow_student_read: bool):
@@ -65,7 +64,7 @@ class TestPermissions_Comment_Released(BaseTestCases.TestPermissions):
     def assertModification(self, detail):
       comment = Comment.objects.get(id=detail)
       submission = comment.file.submission
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
 
@@ -90,7 +89,7 @@ class TestPermissions_Comment_FinalizedReleased(BaseTestCases.TestPermissions):
     def assertModification(self, detail):
       comment = Comment.objects.get(id=detail)
       submission = comment.file.submission
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
 
@@ -114,7 +113,7 @@ class TestPermissions_Comment_ReleasedLiveFeedback(BaseTestCases.TestPermissions
     def assertModification(self, detail):
       comment = Comment.objects.get(id=detail)
       submission = comment.file.submission
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
       self.assertTrue(submission.assignment.liveFeedbackMode)
@@ -139,7 +138,7 @@ class TestPermissions_Comment_UnreleasedLiveFeedback(BaseTestCases.TestPermissio
     def assertModification(self, detail):
       comment = Comment.objects.get(id=detail)
       submission = comment.file.submission
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
       self.assertFalse(submission.assignment.isReleased)
       self.assertTrue(submission.assignment.liveFeedbackMode)
@@ -165,7 +164,7 @@ class TestPermissions_Comment_FinalizedReleasedDontHideGraders(BaseTestCases.Tes
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
       self.assertFalse(submission.assignment.hideGradersFromStudents)

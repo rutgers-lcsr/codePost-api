@@ -6,16 +6,13 @@ Integration tests for the course AI settings inheritance behavior:
 - orgAiAvailable field reflects actual state
 - Toggling ai_use_own_settings changes effective config
 """
-from django.db.models.signals import post_save
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-import factory.django
 
 from core.tests.utils import request_as, setUpBase
 from core.tests.views.personas import Persona
-from core.models import Organization, Course
 
 
 class TestCourseAISettingsInheritance(APITestCase):

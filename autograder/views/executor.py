@@ -9,7 +9,7 @@ import logging
 from typing import Any, cast, Optional
 import json
 
-from rest_framework import serializers, status
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.generics import GenericAPIView

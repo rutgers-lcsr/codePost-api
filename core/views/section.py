@@ -7,11 +7,11 @@ from core.serializers.submission import AnonymousSubmissionSerializer, Submissio
 from core.views.template import ListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
 from core.permissions.permissions import SectionPermissions
-from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound, canViewUnanonymizedSubmissions
+from core.permissions.helpers import returnForbidden, canViewUnanonymizedSubmissions
 
 from rest_framework.response import Response
 
-from rest_framework.decorators import action, permission_classes
+from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 class SectionViewSet(ListProtectedViewSet):

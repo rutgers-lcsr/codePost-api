@@ -6,7 +6,6 @@ Handles versioning, cleanup, rollback, and promotion of Docker images.
 """
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 from django.utils import timezone
 from core.models import Environment
 

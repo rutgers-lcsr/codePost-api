@@ -20,7 +20,6 @@ it through the compute functions.  No thread-local or middleware is involved.
 """
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

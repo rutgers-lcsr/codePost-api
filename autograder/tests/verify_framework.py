@@ -3,7 +3,6 @@
 import os
 import sys
 import django
-from django.conf import settings
 
 # Setup Django environment
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -11,7 +10,6 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "codepost.settings")
 django.setup()
 
 from autograder.services.executors.python import PythonExecutor
-from core.models import File
 import json
 
 class MockHandler:
@@ -377,7 +375,7 @@ TEST(FailureTest, 5.0) {
 
     mock_php_nb = MockPhpNB(php_nb_json)
 
-    php_test_code = """
+    _php_test_code = """
     Tester::test("Addition Test", 10.0, function() {
         if (add(1, 2) !== 3) {
             throw new Exception("1+2 should be 3");

@@ -6,8 +6,6 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 from django.conf import settings
-from core.auth import Authentications, type_of_auth
-from core.logging import logEvent
 from log.models import Event
 from codepost.settings import DEBUG
 

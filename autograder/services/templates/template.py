@@ -9,13 +9,11 @@ import os
 import time
 import site
 import json
-import inspect
 import traceback
 import io
 import contextlib
 import base64
-import typing
-from typing import List, Dict, Any, Optional, Callable, Union
+from typing import List, Optional, Callable
 import signal
 
 # Set environment for pip
@@ -44,7 +42,6 @@ if os.path.exists(pip_cache_path):
         template_log(f"Could not calculate cache size: {str(e)}", "DEBUG")
 
 # Check which packages are already installed
-import importlib.util
 needs_install = []
 for package in packages_to_install:
     try:
@@ -76,7 +73,7 @@ if needs_install:
             else:
                 template_log(f"Pip output: {result.stdout}\n{result.stderr}", "DEBUG")
                 raise subprocess.CalledProcessError(result.returncode, result.args)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             elapsed = time.time() - start_time
             template_log(f"[{i}/{len(needs_install)}] ✗ {package} failed ({elapsed:.1f}s)", "ERROR")
             failed_packages.append(package)
@@ -125,7 +122,7 @@ def _codepost_plot_hook(*args, **kwargs):
 
 # Setup Plot Capture
 try:
-    import matplotlib
+    import matplotlib  # noqa: F401
     import matplotlib.pyplot as plt
     
     # Monkeypatch
@@ -367,7 +364,7 @@ except (SyntaxError, IndentationError, TabError):
         f"{STUDENT_CODE_SYNTAX_ERROR_MSG}",
         file=sys.stderr,
     )
-except Exception as e:
+except Exception:
     # If the student code crashes at top-level, we print the error
     # but we still proceed to run tests (which will likely fail if they depend on defined functions)
     print(f"Student Code Runtime Error:\n{traceback.format_exc()}", file=sys.stderr)
@@ -380,7 +377,7 @@ try:
     if test_code.strip():
         print(f"SCRIPT_DEBUG: {test_code[:500]}", file=sys.stderr)
         _exec_with_pseudo_file(test_code, "/work/test_script.py")
-except Exception as e:
+except Exception:
     _test_script_tb = traceback.format_exc()
     print(f"Test Script Error:\n{_test_script_tb}", file=sys.stderr)
     # Emit a synthetic error result so the backend knows the script crashed

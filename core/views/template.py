@@ -4,10 +4,8 @@ from rest_framework import viewsets
 from rest_framework.response import Response
 from rest_framework.request import Request
 
-from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound
+from core.permissions.helpers import returnNotAuthorized, returnForbidden
 from core.permissions.helpers import isAuthenticated
-from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember
-from core.permissions.helpers import isStudentOfSub, isStaffOfSub
 
 from rest_framework.pagination import PageNumberPagination
 

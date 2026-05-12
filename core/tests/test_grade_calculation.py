@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from core.models import Submission, calculate_grade, TestCategory, TestCase as AutograderTestCase, SubmissionTest
+from core.models import calculate_grade, TestCategory, TestCase as AutograderTestCase, SubmissionTest
 from django.test import TestCase
 from core.tests.utils import setUpClient, setUpSubmission, setUpFile, setUpRubricComment, setUpRubricCategory, setUpComment
 import random
@@ -12,9 +12,9 @@ import decimal
 
 def setUpFileAndComments(self, submission, genericPts, name, path, rubricComment):
   file = setUpFile(self, name=name, path=path, submission=submission)
-  comment1 = setUpComment(self, file=file, pointDelta=0)
-  comment2 = setUpComment(self, file=file, pointDelta=genericPts)
-  comment3 = setUpComment(self, file=file, rubricComment=rubricComment, pointDelta=random.randint(1, 100))
+  _comment1 = setUpComment(self, file=file, pointDelta=0)
+  _comment2 = setUpComment(self, file=file, pointDelta=genericPts)
+  _comment3 = setUpComment(self, file=file, rubricComment=rubricComment, pointDelta=random.randint(1, 100))
   return file
 
 
@@ -31,9 +31,9 @@ def setUpSubmissionWithFiles(self, additiveGrading, assignmentPts, f1Pts, f1Rubr
   # Set up files
   (file1Name, file2Name) = ('file1.java', 'file1.java') if testOld else ('file1.java', 'file2.java')
   (file1Path, file2Path) = ('src', 'src') if (testPath and testOld) else ('src', 'tst') if (testPath) else ('', '')
-  file1 = setUpFileAndComments(self, submission=submission, genericPts=f1Pts,
+  _file1 = setUpFileAndComments(self, submission=submission, genericPts=f1Pts,
                                name=file1Name, path=file1Path, rubricComment=rubricComment1)
-  file2 = setUpFileAndComments(self, submission=submission, genericPts=f2Pts,
+  _file2 = setUpFileAndComments(self, submission=submission, genericPts=f2Pts,
                                name=file2Name, path=file2Path, rubricComment=rubricComment2)
 
   return submission

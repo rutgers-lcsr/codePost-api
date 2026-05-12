@@ -11,7 +11,6 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "codepost.settings")
 django.setup()
 
 from autograder.services.TestService import TestService
-from core.models import TestCase
 
 # Mocking data structures since we can't import Django models fully in standalone script easily
 # But we can verify the static method logic if we mock inputs
@@ -38,7 +37,7 @@ def test_verify_script_test():
     
     verified_pass = TestService.verify_script_test(mock_tc, results_pass)
     
-    assert verified_pass['passed'] == True
+    assert verified_pass['passed']
     assert "✓ Test1: 10/10" in verified_pass['logs']
     assert "✓ Test2: 5/5" in verified_pass['logs']
     assert "Good job" in verified_pass['logs']
@@ -54,7 +53,7 @@ def test_verify_script_test():
     }
     
     verified_fail = TestService.verify_script_test(mock_tc, results_fail)
-    assert verified_fail['passed'] == False
+    assert not verified_fail['passed']
     assert "✗ Test2: 0/5" in verified_fail['logs']
     assert "AssertionError" in verified_fail['logs']
     print("PASS: Mixed execution case")
@@ -67,7 +66,7 @@ def test_verify_script_test():
     }
     
     verified_empty = TestService.verify_script_test(mock_tc, results_empty)
-    assert verified_empty['passed'] == False
+    assert not verified_empty['passed']
     assert "Compilation failed" in verified_empty['logs']
     assert "Syntax Error" in verified_empty['logs']
     print("PASS: Empty results case")

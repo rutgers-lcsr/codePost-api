@@ -11,7 +11,6 @@ time-to-grade, late submissions, and feedback depth.
 import math
 import statistics
 from collections import Counter, defaultdict
-from datetime import timedelta
 
 from django.db.models import Avg, Count, F, Q, StdDev
 from django.db.models.functions import TruncDay
@@ -213,7 +212,7 @@ def get_score_by_category(assignment: Assignment) -> list[dict]:
         return []
 
     # Get all rubric-backed comments on finalized submissions, grouped by (submission, category)
-    comment_data = (
+    _comment_data = (
         Comment.objects.filter(
             file__submission__assignment=assignment,
             file__submission__isFinalized=True,
@@ -343,7 +342,7 @@ def get_submission_attempts(assignment: Assignment) -> dict:
     attempt_counts: Counter[int] = Counter()
     grade_improvements: list[float] = []
 
-    for email, subs in student_subs.items():
+    for _email, subs in student_subs.items():
         num_attempts = len(subs)
         attempt_counts[num_attempts] += 1
 

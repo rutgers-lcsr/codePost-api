@@ -17,9 +17,6 @@ from rest_framework.test import APITestCase
 
 from core.models import Section, Course
 from core.tests.utils import request_as, setUpBase, setUpClient, setUpCourse, setUpSection
-from core.tests.factories import (
-    CourseFactory, OrganizationFactory,
-)
 from core.tests.views.personas import Persona
 
 

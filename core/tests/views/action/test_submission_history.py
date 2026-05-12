@@ -1,5 +1,4 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from core.tests.views.permissions_base import BaseTestCases, initPermissionsClass
 from core.tests.views.personas import Persona
 
 from core.tests.factories import *

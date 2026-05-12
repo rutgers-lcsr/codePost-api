@@ -6,9 +6,9 @@ from core.constants import MAX_FILE_SIZE
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
 from rest_framework import serializers
 from rest_framework.request import Request
-from core.serializers.assignment import AssignmentSerializer, AssignmentSerializerWithStatistics, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats, AssignmentCloneSerializer, AssignmentGenerateTestSerializer, AssignmentGenerateTestResponseSerializer
+from core.serializers.assignment import AssignmentSerializer, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats, AssignmentCloneSerializer, AssignmentGenerateTestSerializer, AssignmentGenerateTestResponseSerializer
 from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.serializers.rubricComment import RubricCommentSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
@@ -29,7 +29,7 @@ from core.services.audit import record_audit_event
 
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import action, permission_classes
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from core.pagination import DefaultPagination, LargeObjectsPagination
@@ -63,9 +63,8 @@ from core.permissions.permissions import AssignmentPermissions, RubricCommentPer
 from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff, isSuperGrader, canViewUnanonymizedSubmissions
-from core.permissions.helpers import isStudentOfSub, isStaffOfSub
-from core.permissions.capabilities import compute_assignment_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
-from core.serializers.actionResponses import CapabilitiesResponseSerializer, CapabilitiesWithDescriptionsResponseSerializer
+from core.permissions.capabilities import compute_assignment_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability
+from core.serializers.actionResponses import CapabilitiesResponseSerializer
 
 from django.utils import timezone
 
@@ -261,7 +260,7 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     require_capability(user, 'view_queue', assignment)
 
-    section = self.request.query_params.get('section', None)
+    section = self.request.query_params.get('section', None)  # noqa: F841
     
     # Base query: submissions for this assignment that are unassigned
     # We also filter for students enrolled in the course
@@ -389,7 +388,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       except ObjectDoesNotExist:
         return returnNotFound(message="No such section")
 
-    submission = None
+    _submission = None
 
     if len(submissions) <= 0:
       return Response(status=status.HTTP_204_NO_CONTENT)
@@ -525,7 +524,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       if len(filteredSubs) == 0:
         return Response([])
 
-      subCandidate = filteredSubs[0]
+      subCandidate = filteredSubs[0]  # noqa: F841
 
 
       # StudentSubmissionSerializer handles all cases:
@@ -648,7 +647,7 @@ class AssignmentViewSet(ListProtectedViewSet):
           "pointsOff": 0
       }, status=status.HTTP_200_OK)
 
-    if course.lateDayCreditsAllowable == None:
+    if course.lateDayCreditsAllowable is None:
       return Response({
           "daysLate": handler.real_days_late,
           "pointsOff": handler.get_points()
@@ -670,7 +669,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     """
     user = request.user
     assignment = self.get_object()
-    course = assignment.course
+    _course = assignment.course
 
     require_capability(user, 'download_assignment_files', assignment)
 
@@ -1149,7 +1148,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     """
     user = self.request.user
     assignment = self.get_object()
-    course = assignment.course
+    _course = assignment.course
 
     require_capability(user, 'view_assignment_statistics', assignment)
 

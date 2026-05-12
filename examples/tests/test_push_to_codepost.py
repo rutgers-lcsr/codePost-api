@@ -31,13 +31,13 @@ class Tests:
         assert 'mean' in assignment
         assignment = get_assignment_info(
             BASE_URL, api_token, 'COS126', 'S2019', 'Hellooo')
-        assert assignment == None
+        assert assignment is None
         assignment = get_assignment_info(
             BASE_URL, api_token, 'COS126000', 'S2019', 'Hello')
-        assert assignment == None
+        assert assignment is None
         assignment = get_assignment_info(
             BASE_URL, api_token, 'COS126', 'S2019000', 'Hello')
-        assert assignment == None
+        assert assignment is None
 
     def test_upload_submission_cautious(self):
         api_token = self.get_api_token()
@@ -104,7 +104,7 @@ class Tests:
                                    (BASE_URL, assignment['id'], students[0]), auth=(USERNAME, PASSWORD)).json()
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] != None
+        assert submissions[0]['grader'] is not None
 
         # Collision with new file (partners)
         students = ['partner1@princeton.edu', 'partner2@princeton.edu']
@@ -116,7 +116,7 @@ class Tests:
                                    (BASE_URL, assignment['id'], students[0]), auth=(USERNAME, PASSWORD)).json()
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] != None
+        assert submissions[0]['grader'] is not None
 
         # Collision with new file, remove old file
         # (should just append the file)
@@ -130,7 +130,7 @@ class Tests:
 
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] != None
+        assert submissions[0]['grader'] is not None
 
         # No collisions
         students = ['student16@princeton.edu']
@@ -142,7 +142,7 @@ class Tests:
                                    (BASE_URL, assignment['id'], students[0]), auth=(USERNAME, PASSWORD)).json()
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] == None
+        assert submissions[0]['grader'] is None
 
     def test_upload_submission_diffscan(self):
         api_token = self.get_api_token()
@@ -167,7 +167,7 @@ class Tests:
         submissions = requests.get('%s/assignments/%d/submissions?student=%s' %
                                    (BASE_URL, assignment['id'], students[0]), auth=(USERNAME, PASSWORD)).json()
         assert response == UF_UPLOADED
-        assert submissions[0]['grader'] != None  # don't unclaim
+        assert submissions[0]['grader'] is not None  # don't unclaim
         assert len(submissions[0]['files']) == 1
 
         # Collision with new file
@@ -184,7 +184,7 @@ class Tests:
 
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] != None  # don't unclaim
+        assert submissions[0]['grader'] is not None  # don't unclaim
         assert len(file['comments']) == 1  # don't delete comments
 
         # Collision with new file, edit old file
@@ -200,7 +200,7 @@ class Tests:
 
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] != None
+        assert submissions[0]['grader'] is not None
         assert 'updated' in file['code']
         assert len(file['comments']) == 0
 
@@ -216,7 +216,7 @@ class Tests:
 
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] != None
+        assert submissions[0]['grader'] is not None
 
     def test_upload_submission_overwrite(self):
         api_token = self.get_api_token()
@@ -233,14 +233,14 @@ class Tests:
 
         submissions1 = requests.get('%s/assignments/%d/submissions?student=%s' %
                                     (BASE_URL, assignment['id'], students[0]), auth=(USERNAME, PASSWORD)).json()
-        submissions2 = requests.get('%s/assignments/%d/submissions?student=%s' %
+        _submissions2 = requests.get('%s/assignments/%d/submissions?student=%s' %
                                     (BASE_URL, assignment['id'], 'partner4@princeton.edu'), auth=(USERNAME, PASSWORD)).json()
 
         file = requests.get('%s/files/%d/' %
                             (BASE_URL, submissions1[0]['files'][0]), auth=(USERNAME, PASSWORD)).json()
 
         assert response == UF_UPLOADED
-        assert submissions1[0]['grader'] == None
+        assert submissions1[0]['grader'] is None
         assert len(submissions1[0]['files']) == 1
         assert len(file['comments']) == 0
 
@@ -258,7 +258,7 @@ class Tests:
                             (BASE_URL, submissions[0]['files'][0]), auth=(USERNAME, PASSWORD)).json()
 
         assert response == UF_UPLOADED
-        assert submissions[0]['grader'] == None
+        assert submissions[0]['grader'] is None
         assert len(submissions[0]['files']) == 1
         assert len(file['comments']) == 0
 
@@ -276,7 +276,7 @@ class Tests:
                             (BASE_URL, submissions[0]['files'][0]), auth=(USERNAME, PASSWORD)).json()
 
         assert response == UF_UPLOADED
-        assert submissions[0]['grader'] == None
+        assert submissions[0]['grader'] is None
         assert len(submissions[0]['files']) == 1
         assert 'new' in file['code']
 
@@ -291,7 +291,7 @@ class Tests:
 
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 2
-        assert submissions[0]['grader'] == None
+        assert submissions[0]['grader'] is None
 
     def test_upload_submission_pregrade(self):
         api_token = self.get_api_token()
@@ -329,7 +329,7 @@ class Tests:
 
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 1
-        assert submissions[0]['grader'] == None
+        assert submissions[0]['grader'] is None
         assert 'new' in file['code']
 
         # Single collision, grader assigned
@@ -356,5 +356,5 @@ class Tests:
 
         assert response == UF_UPLOADED
         assert len(submissions[0]['files']) == 1
-        assert submissions[0]['grader'] == None
+        assert submissions[0]['grader'] is None
         assert 'new' in file['code']

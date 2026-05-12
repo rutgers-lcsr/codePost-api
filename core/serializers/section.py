@@ -2,7 +2,7 @@
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Section, User
-from core.permissions.helpers import isGrader, isStudent, isCourseAdmin, should_use_student_captions
+from core.permissions.helpers import isGrader, isStudent, should_use_student_captions
 
 class SectionSerializer(ModelSerializerWithPOSTCheck):
   leaders = serializers.SlugRelatedField(many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)

@@ -7,10 +7,8 @@ The following includes Python and Python Notebook executors.
 
 import base64
 import os
-import ast
 import re
 from datetime import datetime
-import tempfile
 import shutil
 import logging
 from typing import Any, List, Optional, cast
@@ -20,7 +18,6 @@ from requests.exceptions import ReadTimeout
 from .base import Executor, NotebookExecutor, ExecutionResult
 
 logger = logging.getLogger(__name__)
-import json
 
 
 def _collect_local_python_modules(file_obj: Any, additional_files: dict[str, str]) -> set[str]:

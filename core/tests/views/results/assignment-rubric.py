@@ -2,8 +2,6 @@
 from rest_framework import status
 from core.tests.views.personas import Persona
 
-from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
-from core.serializers.rubricComment import RubricCommentSerializer
 
 PERMISSIONS = {
     "PERMISSIONS_BASE": {

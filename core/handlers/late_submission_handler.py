@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from core.models import Course, Assignment, Submission, Comment, CommentTag
+from core.models import Submission, Comment, CommentTag
 
 
 def date_diff_days(first, second):
@@ -21,7 +21,7 @@ def late_day_credits_available_by_student(user, assignment):
   Return the number of Late Day Credits that a student still has available.
   Exclude the current assignment.
   """
-  if assignment.course.lateDayCreditsAllowable == None or assignment.course.lateDayCreditsAllowable == 0:
+  if assignment.course.lateDayCreditsAllowable is None or assignment.course.lateDayCreditsAllowable == 0:
     return 0
 
   submissions = Submission.objects.filter(students=user, assignment__course=assignment.course)
@@ -47,7 +47,7 @@ class LateSubmissionHandler:
     self.course = submission.assignment.course
     self.students = students
 
-    if self.assignment.uploadDueDate == None:
+    if self.assignment.uploadDueDate is None:
       self.real_days_late = 0
     else:
       self.real_days_late = date_diff_days(self.assignment.uploadDueDate, self.submission.dateUploaded)
@@ -111,7 +111,7 @@ class LateSubmissionHandler:
     credits_available = 0
 
     # Optionally declare students in case we are handling an unsaved Submission object
-    if self.students == None:
+    if self.students is None:
       students = self.submission.students.all()
     else:
       students = self.students
@@ -152,7 +152,7 @@ class LateSubmissionHandler:
     str_days_late = "Days Late:                {}\n".format(self.real_days_late)
     str_credits_used = ""
 
-    if self.course.lateDayCreditsAllowable != None:
+    if self.course.lateDayCreditsAllowable is not None:
       str_credits_used = "Late Credits Used:        {}\nDays Late (After Credit): {}".format(
           self.late_day_credits_to_use, self.calculated_days_late())
 
@@ -183,7 +183,7 @@ class LateSubmissionHandler:
           comment.delete()
 
   def handle(self):
-    if self.assignment.uploadDueDate != None and self.is_late() and (len(self.assignment.lateDeductions) > 0 or self.course.lateDayCreditsAllowable != None):
+    if self.assignment.uploadDueDate is not None and self.is_late() and (len(self.assignment.lateDeductions) > 0 or self.course.lateDayCreditsAllowable is not None):
 
       # Update Submission
       self.submission.lateDayCreditsUsed = self.late_day_credits_to_use

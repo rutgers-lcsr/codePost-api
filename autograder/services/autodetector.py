@@ -4,7 +4,7 @@ import json
 import time
 from typing import List, Dict, Optional, Tuple, Any
 from django.db.models import Count
-from core.models import Submission, Environment, SubmissionFile, Assignment
+from core.models import Submission, SubmissionFile, Assignment
 from core.constants import NON_CODE_EXTENSIONS
 from log.models import Event
 from core.services.file_handlers.factory import FileHandlerFactory
@@ -73,7 +73,7 @@ class Autodetector:
         # Does the detected language match the file's language?
         # e.g. if we detecting python, we want python requirements.
         
-        for file_obj, handler in active_files:
+        for _file_obj, handler in active_files:
             try:
                 # Only gather requirements if the file matches the detected language 
                 # OR if it's a config file relevant to that language.
@@ -160,7 +160,7 @@ class Autodetector:
         
         language_counts: Dict[str, int] = {}
         ipynb_count = 0 
-        ipynb_extension = None
+        _ipynb_extension = None
 
         if stats:
             # Build map from Extension -> Language using Factory logic
@@ -178,7 +178,7 @@ class Autodetector:
                 
                 if ext.lower().replace('.','') == 'ipynb':
                     ipynb_count += count
-                    ipynb_extension = ext
+                    _ipynb_extension = ext
                     continue
                     
                 try:

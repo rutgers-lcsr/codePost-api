@@ -13,7 +13,6 @@ from core.serializers.actionResponses import TestCaseRunRequestSerializer, TestC
 from core.permissions.capabilities import require_capability
 from core.permissions.helpers import isAuthenticated, returnForbidden
 
-from core.permissions.helpers import isCourseAdmin, isCourseStaff
 
 from rest_framework.response import Response
 
@@ -55,7 +54,7 @@ class TestCaseViewSet(ListProtectedViewSet):
         user = self.request.user
         testCase = TestCase.objects.get(id=pk)
         assignment = testCase.testCategory.assignment
-        course = assignment.course
+        _course = assignment.course
 
         if not isAuthenticated(user):
             return returnNotAuthorized()

@@ -9,23 +9,16 @@ Covers:
 - Comment position validation (startLine/endLine, startChar/endChar)
 - Cascade deletion when parent file is deleted
 """
-from decimal import Decimal
-from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from core.models import Comment, RubricComment
+from core.models import Comment
 from core.tests.utils import (
     request_as, setUpBase, setUpClient,
     setUpFile, setUpComment, setUpRubricComment, setUpRubricCategory,
-    setUpAssignment, setUpSubmission,
-)
-from core.tests.factories import (
-    CourseFactory, OrganizationFactory, AssignmentFactory,
-    SubmissionFactory, SubmissionFileFactory,
-    RubricCategoryFactory, RubricCommentFactory,
+    setUpSubmission,
 )
 from core.tests.views.personas import Persona
 

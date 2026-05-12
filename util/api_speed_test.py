@@ -156,7 +156,7 @@ for i in range(0, numAssignmnents):
           else:
             fileID = r.json()['id']
 
-          for n in range(0, numComments):
+          for _ in range(0, numComments):
             payload = {
               'text' : 'nice!',
               'pointDelta' : 0,

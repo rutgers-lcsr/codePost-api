@@ -5,11 +5,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase, APIClient
 
 from core.tests.factories import (
-    AdminFactory,
     CourseFactory,
     AssignmentFactory,
     GraderFactory,
-    SectionFactory,
     SupergraderFactory,
     UserFactory,
     OrganizationFactory,

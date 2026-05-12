@@ -1,7 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
 from rest_framework.test import APITestCase
 from rest_framework import status
-from core.models import CourseAuditEvent
 from core.services.audit import record_audit_event
 from core.tests.factories import OrganizationFactory, UserFactory
 

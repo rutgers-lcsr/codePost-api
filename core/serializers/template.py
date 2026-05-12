@@ -1,6 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from rest_framework import serializers
-from django.db.models import ManyToManyField
 
 
 
@@ -53,7 +52,7 @@ class ModelSerializerWithPOSTCheck(serializers.ModelSerializer):
     except:
       course = None
 
-    if self.instance.__class__.__name__ != 'Course' and course != None and course.archived:
+    if self.instance.__class__.__name__ != 'Course' and course is not None and course.archived:
       raise serializers.ValidationError("The Course is archived and cannot be edited.")
 
     return super().validate(data)

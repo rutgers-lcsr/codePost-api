@@ -2,8 +2,6 @@
 import os
 import logging
 import base64
-import tempfile
-import shutil
 from datetime import datetime
 from typing import Optional, List
 

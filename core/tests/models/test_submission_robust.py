@@ -16,15 +16,9 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from core.models import Submission, Assignment, Comment, calculate_grade
 from core.tests.utils import (
     request_as, setUpBase, setUpClient,
     setUpSubmission, setUpFile, setUpComment,
-    setUpRubricCategory, setUpRubricComment,
-)
-from core.tests.factories import (
-    CourseFactory, OrganizationFactory, AssignmentFactory,
-    SubmissionFactory, SubmissionFileFactory,
 )
 from core.tests.views.personas import Persona
 
@@ -50,7 +44,7 @@ class TestSubmissionGradeCalculation(TestCase):
         submission = setUpSubmission(self)
         submission.gradeFrozen = False
         submission.save()
-        grade_before = submission.grade
+        _grade_before = submission.grade
 
         # Add a deduction comment
         file = setUpFile(self, submission=submission)

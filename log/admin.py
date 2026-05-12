@@ -2,7 +2,7 @@
 from django.contrib import admin
 from log.models import Event, TrackedAutograderRun
 import json
-from django.utils.html import format_html, escape
+from django.utils.html import escape
 from django.utils.safestring import mark_safe
 class EventAdmin(admin.ModelAdmin):
     list_display = (
@@ -196,7 +196,7 @@ class EventAdmin(admin.ModelAdmin):
                             return "<br>".join(items)
                         elif isinstance(value, list):
                             items = []
-                            for i, item in enumerate(value):
+                            for _, item in enumerate(value):
                                 nested = get_value_elements(item, indent_level + 1)
                                 items.append(f'{indent}<span style="color: #9E9E9E;">•</span> {nested}')
                             return "<br>".join(items)

@@ -9,21 +9,19 @@ from codepost.settings import (
     DEFAULT_EMAIL_FROM,
     OVERRIDE_EMAIL,
     ADMINS,
+    SUPPORT_URL,
     TESTING
 )
 
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
-from django import forms
 
 import logging
 from core.handlers.submission_version_handler import SubmissionVersionHandler
-from core.handlers.submission_version_handler import SubmissionVersionHandler
-from core.logging import log_debug, logEvent
-from core.models import Assignment, Organization, Submission, User
+from core.logging import logEvent
+from core.models import Assignment, Submission, User
 
-from core.tests.views.results import submission
 
 class CodepostEmail(ABC):
     subject = "CodePost Notification"
@@ -44,6 +42,7 @@ class CodepostEmail(ABC):
             "to_email": self.get_to_address(),
             "client_url": CLIENT_URL,
             "api_url": API_URL,
+            "support_url": SUPPORT_URL,
         }
     def get_context(self, **kwargs):
         """

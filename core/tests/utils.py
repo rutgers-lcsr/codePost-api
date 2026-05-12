@@ -5,7 +5,6 @@ from core.models import *
 from core.tests.factories import *
 
 from rest_framework.test import APIClient
-from rest_framework import status
 
 PASSWORD = 'rootabega'
 
@@ -291,6 +290,6 @@ def setUpRoster(self):
   grader.profile.organization = course.organization
   grader.save()
 
-  students = [student.email]
-  graders = [grader.email]
+  _students = [student.email]
+  _graders = [grader.email]
   return course

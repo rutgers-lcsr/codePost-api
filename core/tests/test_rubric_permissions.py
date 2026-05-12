@@ -35,7 +35,7 @@ class RubricPermissionsTest(TestCase):
         self.client.force_authenticate(user=self.rubric_editor)
         
         # Test PATCH (write access)
-        response = self.client.patch(f'/rubricCategories/{self.category.id}/', {'name': 'Updated Name'})
+        _response = self.client.patch(f'/rubricCategories/{self.category.id}/', {'name': 'Updated Name'})
         # Note: Actual response depends on view implementation, but permission check happens first. 
         # If permission denied, it would be 403. If allowed (but maybe other errors), it won't be 403.
         # However, checking permission class directly is more robust if we don't want to rely on full view set up.

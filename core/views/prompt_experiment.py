@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.core.cache import cache as django_cache
-from django.db.models import Q, Count, Case, When, IntegerField, Avg, FloatField, Value, F, Subquery, OuterRef
+from django.db.models import Count, Case, When, IntegerField
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status
@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 
-from core.models import PromptExperiment, PromptFeedback, SuggestedComment, SubmissionSummary
+from core.models import PromptExperiment, PromptFeedback, SuggestedComment
 from core.serializers.prompt_experiment import (
     PromptExperimentSerializer,
     PromptExperimentResultsSerializer,

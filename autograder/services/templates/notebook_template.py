@@ -9,14 +9,12 @@ import os
 import time
 import site
 import json
-import inspect
 import traceback
 import io
 import contextlib
 import base64
-import typing
 import ast
-from typing import List, Dict, Any, Optional, Callable, Union
+from typing import List, Dict, Any, Optional, Callable
 import signal
 
 # Set environment for pip
@@ -47,7 +45,6 @@ if os.path.exists(pip_cache_path):
         template_log(f"Could not calculate cache size: {str(e)}", "DEBUG")
 
 # Check which packages are already installed (from pre-built image or previous runs)
-import importlib.util
 needs_install = []
 for package in packages_to_install:
     try:
@@ -79,7 +76,7 @@ if needs_install:
             else:
                 template_log(f"Pip output: {result.stdout}\n{result.stderr}", "DEBUG")
                 raise subprocess.CalledProcessError(result.returncode, result.args)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             elapsed = time.time() - start_time
             template_log(f"[{i}/{len(needs_install)}] ✗ {package} failed ({elapsed:.1f}s)", "ERROR")
             failed_packages.append(package)

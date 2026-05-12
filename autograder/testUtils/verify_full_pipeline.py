@@ -2,7 +2,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # Path setup for Django
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -13,7 +13,6 @@ django.setup()
 
 from core.models import Environment, Assignment
 from autograder.services.converger import Converger
-from autograder.services.builder import Builder
 from autograder.services.autodetector import Autodetector
 from autograder.testUtils.buildHelpers import createDockerFile
 

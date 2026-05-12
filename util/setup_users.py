@@ -1,7 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-import json
-import re
-from core.models import User, Profile, Organization
+from core.models import User, Organization
 
 # Set up users
 princeton = Organization.objects.create(name="Princeton University", shortname="Princeton",)

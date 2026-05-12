@@ -1,13 +1,12 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.http import HttpResponseRedirect, JsonResponse
-from rest_framework.decorators import api_view, permission_classes, renderer_classes
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from core.serializers.sso import CheckSSOAvailabilityResponseSerializer, MainOrgSSOConfigSerializer, OrgSSOConfigSerializer
 from django.conf import settings
 from core.models import Organization, User
 from core.utils import get_or_create_user
-from core.views.auth import JWTSerializer
 import requests
 import urllib.parse
 import xml.etree.ElementTree as ET

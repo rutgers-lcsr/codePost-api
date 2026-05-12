@@ -7,7 +7,6 @@ This file should be removed once all legacy specific-test-file logic is migrated
 
 from autograder.testUtils.languageTemplates.bash import (
     BASH_TEST,
-    BASH_TEST_GROUP,
     IO_CLI_TEST,
 )
 from autograder.testUtils.languageTemplates.python2 import (
@@ -27,7 +26,6 @@ from autograder.testUtils.languageTemplates.java import (
 )
 from autograder.testUtils.test_types import TestType
 
-from core.models import TestCase
 
 
 def parseTests(testCases, language):

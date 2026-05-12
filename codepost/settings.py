@@ -15,7 +15,6 @@ import os
 import datetime
 import sys
 import socket
-import urllib
 from celery.schedules import crontab
 from urllib.parse import urlparse
 import regex
@@ -86,9 +85,10 @@ API_URL = os.environ.get("API_URL", "http://localhost:8000")
 CLIENT_URL = os.environ.get("CLIENT_URL", "http://localhost:3000")
 DEBUG = os.environ.get("DEBUG", "FALSE").upper() == "TRUE"
 TESTING = os.environ.get("TESTING", "FALSE").upper() == "TRUE" or (len(sys.argv) > 1 and sys.argv[1] == "test")
-ADMINS = [
-    "mk1800@rutgers.edu",
-]
+ADMINS = [e.strip() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
+
+# Support URL shown in emails and error messages
+SUPPORT_URL = os.environ.get("SUPPORT_URL", "https://github.com/rutgers-lcsr/codePost/issues")
 
 # Internal shell relay (API -> worker)
 WORKER_SHELL_WS_URL = os.environ.get("WORKER_SHELL_WS_URL", "")
@@ -116,13 +116,11 @@ if SECRET_KEY == "your-secret-key-for-dev-only-must-be-at-least-32-bytes":
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "a8ZLWym0lKXZW2iwQw8mx3kdsX7EiGxjfznpPeGBZ4M=")
 
 
-# Allowed host settings
-ALLOWED_HOSTS = [
-    "codepost-api.cs.rutgers.edu",
-    "dev-codepost-2.cs.rutgers.edu",
-    "128.6.13.52",  
-    "172.16.71.211",
-]
+# Allowed host settings — derived from API_URL + optional EXTRA_ALLOWED_HOSTS env var
+ALLOWED_HOSTS = [API_HOST] if API_HOST else []
+_extra_hosts = os.environ.get("EXTRA_ALLOWED_HOSTS", "")
+if _extra_hosts:
+    ALLOWED_HOSTS.extend(h.strip() for h in _extra_hosts.split(",") if h.strip())
 
 if DOCKER:
     ALLOWED_HOSTS.append(os.environ.get("API_HOSTNAME", "localhost"))
@@ -135,15 +133,6 @@ if DEBUG:
         "insecure_allowed_hosts",
         message="You are using a wildcard ALLOWED_HOSTS. This is insecure and should not be used in production."
     )
-
-if not API_HOST in ALLOWED_HOSTS:
-    logger.warning(
-        "api_host_not_in_allowed_hosts",
-        api_host=API_HOST,
-        message="API host is not in ALLOWED_HOSTS. This may cause issues with CORS and CSRF protection."
-    ) 
-
-
 
 
 
@@ -190,7 +179,7 @@ An API for administrators to mine course data and automate common tasks.
 ### Installation
 
 ```bash
-pip install git+https://github.com/rutgers-lcsr/codepost-python.git
+pip install codepost
 ```
 
 ### Basic Usage (Python SDK)
@@ -251,7 +240,11 @@ See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python)
 # CORS settings
 # https://pypi.org/project/django-cors-headers/
 
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOWED_ORIGINS = [CLIENT_URL, API_URL]
+_extra_cors = os.environ.get("EXTRA_CORS_ORIGINS", "")
+if _extra_cors:
+    CORS_ALLOWED_ORIGINS.extend(o.strip() for o in _extra_cors.split(",") if o.strip())
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     "Authorization",
@@ -273,15 +266,15 @@ CORS_ALLOW_HEADERS = [
 ]
 CORS_ALLOW_METHODS = ["*"]
 
-CSRF_TRUSTED_ORIGINS = (
+CSRF_TRUSTED_ORIGINS = [
     "http://localhost",
     "https://localhost",
-    "http://*.cs.rutgers.edu",
-    "https://*.cs.rutgers.edu",
-    "https://dev-codepost-1.cs.rutgers.edu",
-    "https://dev-codepost-2.cs.rutgers.edu",
-    "https://codepost.cs.rutgers.edu",
-)
+    CLIENT_URL,
+    API_URL,
+]
+_extra_csrf = os.environ.get("EXTRA_CSRF_ORIGINS", "")
+if _extra_csrf:
+    CSRF_TRUSTED_ORIGINS.extend(o.strip() for o in _extra_csrf.split(",") if o.strip())
 
 checkCSRFTrustedOrigins(CLIENT_URL, CSRF_TRUSTED_ORIGINS)
 

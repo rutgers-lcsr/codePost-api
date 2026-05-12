@@ -105,9 +105,9 @@ class TestAssignmentAverageMedian(TestCase):
         self.assertIsNone(median)
 
     def test_with_finalized_submissions(self):
-        s1 = Submission.objects.create(assignment=self.assignment, isFinalized=True, grade=Decimal("10"), gradeFrozen=True)
-        s2 = Submission.objects.create(assignment=self.assignment, isFinalized=True, grade=Decimal("20"), gradeFrozen=True)
-        s3 = Submission.objects.create(assignment=self.assignment, isFinalized=True, grade=Decimal("15"), gradeFrozen=True)
+        _s1 = Submission.objects.create(assignment=self.assignment, isFinalized=True, grade=Decimal("10"), gradeFrozen=True)
+        _s2 = Submission.objects.create(assignment=self.assignment, isFinalized=True, grade=Decimal("20"), gradeFrozen=True)
+        _s3 = Submission.objects.create(assignment=self.assignment, isFinalized=True, grade=Decimal("15"), gradeFrozen=True)
         mean, median = self.assignment.calculate_average_and_median()
         self.assertIsNotNone(mean)
         self.assertAlmostEqual(float(mean), 15.0, places=1)

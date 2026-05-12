@@ -1,11 +1,9 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from django.contrib.auth.models import User
 from core.models import *
-from core.serializers.assignment import AssignmentSerializer
 
 # Test Cases (in order of logic in registration.py)
 

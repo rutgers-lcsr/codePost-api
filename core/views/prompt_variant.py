@@ -10,7 +10,6 @@ from rest_framework.response import Response
 from core.models import SystemPromptVariant, PromptLabSettings, PromptFeedback, SuggestedComment
 from core.serializers.prompt_variant import (
     SystemPromptVariantSerializer,
-    SystemPromptVariantSummarySerializer,
 )
 from core.views.template import SuperUserListProtectedViewSet, ListPagination
 

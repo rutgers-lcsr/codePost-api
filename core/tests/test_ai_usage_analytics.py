@@ -18,7 +18,6 @@ from core.models import AIUsageRecord
 from core.services.ai_usage_analytics import get_usage_summary
 from core.tests.utils import request_as, setUpBase
 from core.tests.views.personas import Persona
-from core.tests.factories import CourseFactory, OrganizationFactory
 
 
 # ===========================================================================
@@ -128,7 +127,6 @@ class TestGetUsageSummary(APITestCase):
 
     def test_end_date_at_midnight_is_inclusive(self):
         """An end_date at 00:00:00 (bare date) should still include records created that day."""
-        from django.utils.dateparse import parse_datetime
         # Create a record at 14:00 on a specific day
         specific_day = self.now.replace(hour=14, minute=30, second=0, microsecond=0)
         AIUsageRecord.objects.create(

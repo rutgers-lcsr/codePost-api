@@ -3,7 +3,6 @@ from collections import OrderedDict
 
 import requests
 
-import django
 from django.conf import settings
 from django.core import serializers
 from django.core.exceptions import ValidationError, ImproperlyConfigured
@@ -18,7 +17,7 @@ import json
 from core.models import Course
 
 from webhooks.signals import hook_event, raw_hook_event, hook_sent_event
-from webhooks.utils import distill_model_event, get_hook_model, get_module, find_and_fire_hook
+from webhooks.utils import distill_model_event, get_module
 
 
 if getattr(settings, 'HOOK_CUSTOM_MODEL', None) is None:
@@ -92,12 +91,14 @@ class AbstractHook(models.Model):
             'target': self.target
         }
 
-    def serialize_hook(self, instance, updated_fields=[], payload_addition=None):
+    def serialize_hook(self, instance, updated_fields=None, payload_addition=None):
         """
         Serialize the object down to Python primitives.
 
         By default it uses Django's built in serializer.
         """
+        if updated_fields is None:
+            updated_fields = []
         if getattr(instance, 'serialize_hook', None) and callable(instance.serialize_hook):
             return instance.serialize_hook(hook=self)
         if getattr(settings, 'HOOK_SERIALIZER', None):
@@ -123,7 +124,7 @@ class AbstractHook(models.Model):
             'data': data,
         }
 
-    def deliver_hook(self, instance, payload_override=None, updated_fields=[], payload_addition=None):
+    def deliver_hook(self, instance, payload_override=None, updated_fields=None, payload_addition=None):
         """
         Deliver the payload to the target URL.
 
@@ -135,6 +136,8 @@ class AbstractHook(models.Model):
                 return such object. If callable is used it should accept 2
                 arguments: `hook` and `instance`.
         """
+        if updated_fields is None:
+            updated_fields = []
         if payload_override is None:
             payload = self.serialize_hook(instance, updated_fields=updated_fields, payload_addition=payload_addition)
         else:

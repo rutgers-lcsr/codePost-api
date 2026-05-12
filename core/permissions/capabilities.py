@@ -4,20 +4,6 @@ from typing import Union
 
 from rest_framework.exceptions import PermissionDenied
 
-from core.permissions.helpers import (
-    isCourseAdmin,
-    isCourseStaff,
-    isCourseMember,
-    isGrader,
-    isRubricEditor,
-    isStudent,
-    isStaffOfSub,
-    isStudentOfSub,
-    isSuperGrader,
-    isSectionLeaderOfStudent,
-    canViewUnanonymizedSubmissions,
-    hasCourseCreationPrivilege,
-)
 from core.permissions.role_cache import RoleCache
 
 
@@ -276,7 +262,7 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
     super_grader = rc.is_super_grader(course)
     feedback_available = assignment.feedbackReleased or assignment.liveFeedbackMode
 
-    student = rc.is_student(course)
+    _student = rc.is_student(course)
 
     caps.update({
         Capability.VIEW_SUBMISSION: staff_of_sub or student_of_sub,

@@ -4,12 +4,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
-from autograder.services.TestService import TestService
 from autograder.serializers.execution import (
     TestExecutionRequestSerializer,
     TestExecutionResultSerializer,
 )
-from core.models import Submission, TestCase
+from core.models import Submission
 from autograder.tasks import run_test_task
 
 class RunTestView(GenericAPIView):

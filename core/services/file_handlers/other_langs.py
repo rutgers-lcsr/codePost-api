@@ -17,7 +17,7 @@ class RubyHandler(BaseFileHandler):
         if self.file.name == 'Gemfile':
             return self.content
             
-        imports = self.scan_content(self.content)
+        _imports = self.scan_content(self.content)
         # We don't auto-generate Gemfiles from requires currently in the plan,
         # but the interface allows it. For now returning None effectively.
         return None

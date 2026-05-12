@@ -11,16 +11,14 @@ Covers:
 - Impersonate → course-scoped JWT propagation
 """
 import pytest
-from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from rest_framework.test import APIClient
 from rest_framework import status
 
 import factory
 
-from core.models import CourseAPIKey, OneTimeToken, Course
+from core.models import CourseAPIKey, OneTimeToken
 from core.services.course_api_key import get_or_create_course_service_user
-from core.authentication import CourseAPIKeyAuthentication, CourseScopedJWTAuthentication
 
 
 # ---------------------------------------------------------------------------

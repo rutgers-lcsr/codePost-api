@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from core.models import Environment, TestCase, TestCategory, Submission
+from core.models import Environment, TestCase, Submission
 from autograder.serializers.environment import EnvironmentSerializer
 from core.views.template import ListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
@@ -10,16 +10,12 @@ from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import (
     returnNotAuthorized,
     returnForbidden,
-    returnNotFound,
 )
 from core.permissions.helpers import isCourseAdmin, isStudentOfSub, isStaffOfSub
 from rest_framework import serializers
 from rest_framework.response import Response
 
-from autograder.testUtils.compileTemplates import get_compile_template
 
-from autograder.testUtils.parse import parseTests, writeCmdScript
-from autograder.testUtils.ag_logging import AutograderError, AutograderBuild
 
 from autograder.run import RunAll, BuildEnvironment
 from autograder.tasks import run_test_task
@@ -30,7 +26,6 @@ import json
 
 from typing import Any, cast
 
-from autograder.services.builder import Builder
 
 from autograder.serializers.environment_actions import (
     EnvironmentBuildRequestSerializer,
@@ -189,10 +184,10 @@ class EnvironmentViewSet(ListProtectedViewSet):
     )
     @action(detail=True, methods=["PATCH"])
     def runAll(self, request, pk=None):
-        user = self.request.user
+        _user = self.request.user
         environment = self.get_object()
         assignment = environment.assignment
-        course = assignment.course
+        _course = assignment.course
 
         req_ser = EnvironmentRunAllRequestSerializer(data=request.data)
         req_ser.is_valid(raise_exception=True)
@@ -285,7 +280,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
     @extend_schema(request=None, responses={200: OpenApiTypes.STR})
     @action(detail=True, methods=["GET"])
     def dockerfile(self, request, pk=None):
-        user = self.request.user
+        _user = self.request.user
         environment = self.get_object()
         dockerfile = createDockerFile(
             environment.language,
@@ -355,7 +350,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
         Generates a "Reproduction Kit" for debugging locally.
         Returns the components needed to run tests exactly as the autograder does.
         """
-        user = self.request.user
+        _user = self.request.user
         environment = self.get_object()
         assignment = environment.assignment
 

@@ -146,7 +146,7 @@ class CommentViewSet(ListProtectedViewSet):
         from asgiref.sync import async_to_sync
         from rest_framework import status
         from core.models import SubmissionFile, RubricComment
-        from core.services.ai_service import AIService, build_context_from_file, GenerationContext
+        from core.services.ai_service import AIService, build_context_from_file
         from core.permissions.helpers import isAuthenticated
 
         user = request.user

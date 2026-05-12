@@ -143,7 +143,7 @@ class CourseCloneTests(TestCase):
     def test_course_serializer_clone_transfers_assignment_test_assets(self):
         request = APIRequestFactory().post("/courses/", {})
         request.user = self.user
-        setattr(request, "auth", "a" * 40)
+        request.auth = "a" * 40
 
         serializer = CourseSerializer(
             data={"name": "Cloned", "period": "S2027", "cloneFrom": self.source_course.id},

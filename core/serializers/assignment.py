@@ -6,9 +6,8 @@ from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Assignment
 from django.contrib.auth.models import User
 
-from core.auth import Authentications, type_of_auth
+from core.auth import type_of_auth
 
-from core.serializers.submission import SubmissionSerializer
 
 from django.db.models import Max, Min, Avg
 

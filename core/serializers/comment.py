@@ -5,7 +5,6 @@ from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Comment, User, CommentTag
 from core.permissions.helpers import isCourseStaff
 import re
-import json
 
 from core.validators import validate_hex_color
 

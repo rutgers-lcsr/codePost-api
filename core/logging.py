@@ -1,10 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-import functools
 import logging
-import requests
 import json
 import time
-import socket
 from codepost.settings import DEBUG, HOSTNAME
 from log.models import Event
 

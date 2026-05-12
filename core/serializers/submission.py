@@ -5,10 +5,9 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Submission, User
-from core.serializers.file import FileSerializer, SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer, SubmissionFileWithNestedCommentsSerializer
+from core.serializers.file import SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer, SubmissionFileWithNestedCommentsSerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 from core.permissions.helpers import isStudent, isGrader, should_use_student_captions
-from datetime import timezone
 
 
 def formErrorMessage(message, users):
@@ -124,7 +123,7 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
         raise serializers.ValidationError("Finalized submission must have a grader.")
 
     # Check that at least one student on the submission has enough Late Day Credits left
-    if course.lateDayCreditsAllowable != None and newFields['lateDayCreditsUsed'] != None and newFields['lateDayCreditsUsed'] > 0:
+    if course.lateDayCreditsAllowable is not None and newFields['lateDayCreditsUsed'] is not None and newFields['lateDayCreditsUsed'] > 0:
       atLeastOneStudentHasEnoughLateDayCredits = False
       for student in newFields['students']:
         thisCourseSubmissions = Submission.objects.filter(assignment__course=course, students__in=[student])

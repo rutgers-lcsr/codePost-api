@@ -4,10 +4,8 @@ from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.serializers.course import CourseSerializer
 from core.serializers.section import SectionSerializer
-from rest_framework_simplejwt.settings import api_settings
 from core.models import User, Organization, Profile
 from rest_framework.authtoken.models import Token
-from rest_framework_simplejwt.tokens import RefreshToken
 
 
 # Helpful source: https://medium.com/@dakota.lillie/django-react-jwt-authentication-5015ee00ef9a

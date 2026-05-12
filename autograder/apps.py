@@ -7,5 +7,5 @@ class AutograderConfig(AppConfig):
     name = 'autograder'
 
     def ready(self):
-        import autograder.tasks
+        import autograder.tasks  # noqa: F401
 

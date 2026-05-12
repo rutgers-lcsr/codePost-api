@@ -3,8 +3,6 @@ import os
 import logging
 import base64
 import json
-import tempfile
-import shutil
 from datetime import datetime
 from typing import Optional, List
 
@@ -50,7 +48,7 @@ class CPPExecutor(Executor):
         return None
 
     def execute(self) -> ExecutionResult:
-        timeout = self.DEFAULT_TIMEOUT
+        _timeout = self.DEFAULT_TIMEOUT
         start_time = datetime.now()
         
         if not self.file.data:

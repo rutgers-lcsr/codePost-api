@@ -5,11 +5,9 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
-from core.models import Course, Organization, User
-from core.serializers.assignment import AssignmentSerializer
-from rest_framework.validators import UniqueTogetherValidator
+from core.models import Course, User
 
-from core.auth import Authentications, type_of_auth
+from core.auth import type_of_auth
 
 from core.permissions.helpers import isCourseStaff
 from core.permissions.capabilities import compute_course_capabilities

@@ -1,7 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from rest_framework.test import APITestCase
 from rest_framework import status
-from core.models import Submission
 from core.tests.factories import OrganizationFactory, UserFactory
 
 
@@ -167,7 +166,7 @@ class TestRegradeFlow(APITestCase):
             "files": [{"name": "sol.py", "data": "x=1", "extension": ".py", "path": ""}],
             "sendConfirmationEmail": False,
         }, format='json')
-        submission_id = response.data['id']
+        _submission_id = response.data['id']
 
         # Grader1 claims
         self.client.force_authenticate(user=self.grader)

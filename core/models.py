@@ -1,7 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from __future__ import annotations
 
-from ast import For
 from asyncio.log import logger
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -20,20 +19,16 @@ from django.db.models import Avg
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils.timezone import now
-from django.db.models import ManyToManyField
 from jsonfield import JSONField
-from regex import F
 from rest_framework.authtoken.models import Token
-from zmq import has
 from django.utils import timezone
 from django.utils.text import slugify
 
 from core.validators import validate_hex_color
 from core.prompts.registry import prompt_registry
 import core.prompts  # noqa: F401 — triggers @register_prompt side-effects
-from typing import Callable, Optional, TypeVar, Dict, Any, TYPE_CHECKING
+from typing import Optional, Any, TYPE_CHECKING
 from codepost.settings import DEBUG, MEDIA_ROOT
-from django.db import models
 import os
 
 def get_default_token_expiry():

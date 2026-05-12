@@ -62,7 +62,7 @@ class NodeHandler(BaseFileHandler):
                         packages.add(node.source.value)
                 
                 # Recurse
-                for key, value in node.__dict__.items():
+                for _key, value in node.__dict__.items():
                     if isinstance(value, list):
                         for item in value:
                             visit(item)

@@ -19,7 +19,6 @@ from core.models import Assignment, AssignmentDataSet, User
 from core.permissions.capabilities import require_capability
 from core.permissions.helpers import (
     isAuthenticated,
-    isCourseAdmin,
     returnForbidden,
     returnNotAuthorized,
 )

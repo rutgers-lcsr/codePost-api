@@ -1,9 +1,8 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-import json
 from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
-from core.models import Course, Assignment, Submission, Organization, Section
+from core.models import Course, Assignment, Submission, Organization
 from rest_framework import status
 
 class GradeReleaseTestCase(TestCase):

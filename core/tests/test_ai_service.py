@@ -15,12 +15,11 @@ from django.db.models.signals import post_save
 
 import factory.django
 
-from core.models import Course, Organization, AIUsageRecord
+from core.models import Course, AIUsageRecord
 from core.services.ai_service import AIService, GenerationResult
 from core.tests.factories import (
     CourseFactory,
     OrganizationFactory,
-    AdminFactory,
 )
 
 

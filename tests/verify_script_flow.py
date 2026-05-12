@@ -11,7 +11,7 @@ sys.path.append('/staff/users/mk1800/Development/codePost-api')
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'codepost.settings')
 django.setup()
 
-from core.models import Assignment, TestCase, Submission, File
+from core.models import TestCase, File
 from core.services.ai_service import AIService
 from autograder.services.TestService import TestService
 

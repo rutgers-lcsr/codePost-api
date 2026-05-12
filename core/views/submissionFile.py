@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from core.models import SubmissionFile
-from core.serializers.file import SubmissionFileSerializer, SubmissionFileStudentUploadSerializer
+from core.serializers.file import SubmissionFileSerializer
 from core.views.template import ListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
 from core.permissions.permissions import FilePermissions

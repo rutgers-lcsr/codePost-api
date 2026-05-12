@@ -2,7 +2,7 @@
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
-from parameterized import parameterized, parameterized_class
+from parameterized import parameterized
 
 
 from core.tests.utils import request_as, setUpBase
@@ -60,9 +60,9 @@ class BaseTestCases:
 
   class TestPermissions(APITestCase):
 
-    def __init__(self, *args, model="", permissions=[], modifier=None, assertModification=None, **kwargs):
+    def __init__(self, *args, model="", permissions=None, modifier=None, assertModification=None, **kwargs):
       self.model = model
-      self.permissions = permissions
+      self.permissions = permissions if permissions is not None else []
       self.modifier = modifier
       self.assertModification = assertModification
       APITestCase.__init__(self, *args, **kwargs)
@@ -86,7 +86,7 @@ class BaseTestCases:
         self.modifier(self)
 
     actions = []
-    for i, persona in enumerate(Persona):
+    for _, persona in enumerate(Persona):
       actions.extend([
           ("create", persona),
           ("read", persona),

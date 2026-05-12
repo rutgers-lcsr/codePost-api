@@ -5,13 +5,17 @@ import json
 
 
 def createDockerFile(
-    language, build_type, customDockerFile="", dependencies=[], environmentID=0, dependencies_file_content=None, env_vars=None, build_directories=[]
+    language, build_type, customDockerFile="", dependencies=None, environmentID=0, dependencies_file_content=None, env_vars=None, build_directories=None
 ):
     buildSpecs = json.load(open(os.path.join(os.path.dirname(__file__), "buildSpecs.json")))
 
     """
     Helper function to create a dockerfile string from a language, build_type, and dependencies
     """
+    if dependencies is None:
+        dependencies = []
+    if build_directories is None:
+        build_directories = []
     
     if build_type == "default":
         customDockerFile = ""
@@ -30,14 +34,14 @@ def createDockerFile(
             else ""
         )
         baseStr = buildSpecs[lookup]["base"].format(updateID=uniqueStr)
-    installCmd = buildSpecs[lookup]["install"] if lookup in buildSpecs else None
+    _installCmd = buildSpecs[lookup]["install"] if lookup in buildSpecs else None
     userAddCmd = buildSpecs[lookup]["useradd"] if lookup in buildSpecs else ""
 
     # Create user, home directory, and cache directories with correct permissions
     # We pre-create cache directories so they are owned by codepost even when volume mounted (if initialized)
     
     # helper for language detection
-    lang = language.lower() if language else ""
+    _lang = language.lower() if language else ""
     
     caches_to_create = []
     

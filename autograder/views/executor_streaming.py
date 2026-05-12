@@ -9,10 +9,7 @@ notebook executions.
 
 import json
 import logging
-import os
-import time
-import threading
-from typing import Generator, Optional
+from typing import Generator
 
 from django.http import StreamingHttpResponse, JsonResponse
 from rest_framework import status
@@ -21,10 +18,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
-from autograder.services.executors import  ExecutionResult, Executor
+from autograder.services.executors import  Executor
 from autograder.serializers.execution import FileExecutionRequestSerializer
-from core.models import File, Submission, SubmissionFile, AssignmentFile, CourseFile, Assignment, Course, User
-from core.permissions.helpers import isAuthenticated, isStaffOfSub, returnNotAuthorized, returnForbidden, isCourseAdmin
+from core.models import File, Submission, SubmissionFile, AssignmentFile, CourseFile, Assignment
+from core.permissions.helpers import isStaffOfSub, isCourseAdmin
 from core.permissions.permissions import FileExecutionPermissions
 
 logger = logging.getLogger(__name__)

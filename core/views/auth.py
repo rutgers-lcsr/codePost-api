@@ -1,6 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from datetime import timedelta
-from django.http import HttpResponseRedirect
 from core.models import User
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -13,11 +12,8 @@ from drf_spectacular.utils import extend_schema
 from core.logging import logEvent
 from core.models import Course, OneTimeToken
 from core.serializers.user import UserSerializer
-from django.utils.timezone import now
 from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt import serializers, views
-from rest_framework_simplejwt.views import TokenRefreshSlidingView
-from core.forms.forms import ImpersonateForm
 from codepost.settings import DEBUG
 from core.serializers.auth import (
   GenerateOTTRequestSerializer,
@@ -148,7 +144,7 @@ class ImpersonateView(APIView):
         return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
     # if never_expire is set, we will set the token to expire in 1 year
-    should_expire = request.data.get('never_expire', False) == True
+    should_expire = request.data.get('never_expire', False)
     
     # Log the impersonation event
     logEvent(

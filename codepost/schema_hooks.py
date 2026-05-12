@@ -6,7 +6,6 @@ These hooks run after the schema is generated but before it is serialized,
 allowing us to fix operationIds for compatibility with openapi-generator's
 removeOperationIdPrefix option.
 """
-import re
 
 
 def _camelize_tag(tag: str) -> str:
@@ -39,7 +38,7 @@ def restore_underscore_operation_ids(result, generator, **kwargs):
       tmpScriptCreate -> tmpScript_create
     """
     paths = result.get('paths', {})
-    for path_key, path_item in paths.items():
+    for _path_key, path_item in paths.items():
         for method in ('get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'):
             operation = path_item.get(method)
             if operation and 'operationId' in operation:

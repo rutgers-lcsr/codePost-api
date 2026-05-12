@@ -13,10 +13,10 @@ Covers:
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from core.models import File, SubmissionFile, AssignmentFile, Assignment, Course, Organization
+from core.models import File, SubmissionFile, AssignmentFile, Assignment, Course
 from core.tests.utils import setUpClient, setUpFile, setUpSubmission
 from core.tests.factories import (
-    OrganizationFactory, CourseFactory, AssignmentFactory, AssignmentFileFactory,
+    OrganizationFactory,
 )
 import hashlib
 

@@ -1,8 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from rest_framework.test import APITestCase
 from rest_framework import status
-from django.contrib.auth.models import User
-from core.models import Organization, Course, Assignment, Submission, File, RubricCategory, RubricComment
+from core.models import Course, Assignment, Submission
 from core.tests.factories import OrganizationFactory, UserFactory
 
 class TestGoldenPath(APITestCase):
@@ -64,7 +63,7 @@ class TestGoldenPath(APITestCase):
         response = self.client.post('/assignments/', assignment_data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         assignment_id = response.data['id']
-        assignment = Assignment.objects.get(id=assignment_id)
+        _assignment = Assignment.objects.get(id=assignment_id)
 
         # Create Rubric Category and Comment (needed for grading)
         rubric_cat_data = {

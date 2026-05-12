@@ -1,8 +1,8 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django import forms
-from django.utils.translation import gettext, gettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.contrib.auth import (
-    authenticate, get_user_model, password_validation,
+    password_validation,
 )
 
 class IDForm(forms.Form):

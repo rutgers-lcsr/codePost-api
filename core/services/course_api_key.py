@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
 from django.contrib.auth.models import User
 
-from core.models import Course, Profile
+from core.models import Course
 
 
 def get_or_create_course_service_user(course: Course) -> User:

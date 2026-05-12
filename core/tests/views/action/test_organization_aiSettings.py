@@ -6,16 +6,13 @@ Tests for Organization AI Settings endpoints:
 - Permissions (org staff, superuser, others)
 - Course policy & enabled courses management
 """
-from django.db.models.signals import post_save
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-import factory.django
 
 from core.tests.utils import request_as, setUpBase
 from core.tests.views.personas import Persona
-from core.models import Organization, Course
 
 
 class TestOrganizationAISettings(APITestCase):

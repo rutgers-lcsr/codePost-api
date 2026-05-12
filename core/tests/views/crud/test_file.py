@@ -96,7 +96,7 @@ class TestPermissions_File_FinalizedReleased(BaseTestCases.TestPermissions):
     def assertModification(self, detail):
       file = File.objects.get(id=detail)
       submission = _submission_for_file(file)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
 

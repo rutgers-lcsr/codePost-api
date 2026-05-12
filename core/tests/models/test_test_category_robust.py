@@ -14,8 +14,7 @@ from django.test import TestCase as DjangoTestCase
 from django.db import IntegrityError
 
 from core.models import (
-    Assignment, Course, Submission, SubmissionFile,
-    TestCategory, TestCase, SubmissionTest,
+    Assignment, Course, Submission, TestCategory, TestCase, SubmissionTest,
 )
 from core.tests.factories import OrganizationFactory
 

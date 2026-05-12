@@ -10,7 +10,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Optional, Literal
 
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count
 from django.db.models.functions import TruncHour, TruncDay, TruncMonth
 from django.utils import timezone
 

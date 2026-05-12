@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from core.models import Submission, SubmissionTest, TestCase, TestCategory, File
+from core.models import Submission, File
 
-from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionWithoutGradeSerializer, StudentSubmissionFilesOnlySerializer, SubmissionConsoleDataSerializer, StudentConsoleDataSerializer
+from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionFilesOnlySerializer, SubmissionConsoleDataSerializer, StudentConsoleDataSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 
@@ -25,17 +25,13 @@ from core.permissions.permissions import SubmissionPermissions
 
 from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, isStudentOfSub, isStaffOfSub, canViewUnanonymizedSubmissions, isSectionLeaderOfStudent, isSuperGrader
-from core.permissions.capabilities import compute_submission_capabilities, require_capability, check_capability
+from core.permissions.capabilities import compute_submission_capabilities, require_capability
 
 from core.models import User
-from rest_framework import serializers
 from django.utils.timezone import now
 
-from core.permissions.helpers import isAuthenticated
 
 from autograder.run import filterExposedSubmissionTests
-import json
-from rest_framework import serializers
 
 from core.permissions.tokens import submission_token_generator
 
@@ -565,7 +561,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     # if not submission.assignment.course.enableStudentFeedbackNotifications:
     #     return Response('Course EnableStudentFeedbackNotifications must be turned on', status.HTTP_406_NOT_ACCEPTABLE)
 
-    view_submission_url = 'https://compedu.stanford.edu/codeinplace/v1/#/submissions' if submission.assignment.course.id == 925 else 'https://codepost.io/code/{}'.format(submission.id)
+    _view_submission_url = 'https://compedu.stanford.edu/codeinplace/v1/#/submissions' if submission.assignment.course.id == 925 else 'https://codepost.io/code/{}'.format(submission.id)
 
     
 

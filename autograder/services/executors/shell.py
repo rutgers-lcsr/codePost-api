@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from autograder.services.executors import get_executor_class
 from autograder.services.executors.base import ExecutionResult, Executor, FileLike
-from core.models import Environment, File
+from core.models import Environment
 
 
 class _ShellFile:

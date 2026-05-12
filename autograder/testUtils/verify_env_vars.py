@@ -3,7 +3,6 @@
 import os
 import django
 import sys
-import shutil
 import unittest
 
 # Setup Django
@@ -11,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "codepost.settings")
 django.setup()
 
-from core.models import Environment, Assignment, Course, Period, Organization
+from core.models import Environment, Assignment, Course, Organization
 from autograder.testUtils.buildHelpers import createDockerFile
 
 class TestEnvVars(unittest.TestCase):

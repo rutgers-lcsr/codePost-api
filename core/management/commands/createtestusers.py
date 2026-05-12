@@ -2,7 +2,7 @@
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from core.models import User
-from core.models import Course, Organization, Assignment, AssignmentFile, Submission, SubmissionFile
+from core.models import Course
 
 class Command(BaseCommand):
     help = 'Creates test users and enrolls them in ALL existing courses for development'

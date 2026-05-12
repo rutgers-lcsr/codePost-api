@@ -1,10 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.test import SimpleTestCase, RequestFactory
-from django.urls import reverse
 from unittest.mock import patch, MagicMock
 from core.views.sso import sso_callback, initiate_sso, get_organization_by_email_domain
-from django.conf import settings
-import json
 
 from core.models import Organization
 

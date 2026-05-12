@@ -7,7 +7,6 @@ import json
 import logging
 
 from celery.result import AsyncResult
-from autograder.celery import app
 from autograder.serializers.execution import TaskStatusResponseSerializer
 
 logger = logging.getLogger(__name__)

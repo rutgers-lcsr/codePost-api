@@ -3,7 +3,6 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile
-from django import forms
 from core.services.file_handlers.notebook import NotebookHandler
 from core.serializers.comment import CommentWithRubricSerializer
 
@@ -71,10 +70,6 @@ class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
     @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
     def get_comments(self, obj):
         return []
-        POST_permissions_fields = ('submission',)
-        extra_kwargs = {
-            "data": {"trim_whitespace": False},
-        }
 
 
 class SubmissionFileStudentUploadSerializer(ModelSerializerWithPOSTCheck):

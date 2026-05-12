@@ -4,9 +4,6 @@ from rest_framework.compat import (
   coreapi, pygments_css
 )
 from django.template import loader
-import copy
-import json
-import collections
 
 import settings  # type: ignore[import-untyped]  # project settings module
 

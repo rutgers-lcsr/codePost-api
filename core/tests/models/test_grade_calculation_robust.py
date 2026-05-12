@@ -224,11 +224,10 @@ class TestGetCurrentFiles(TestCase):
 
     def test_multiple_versions_returns_latest(self):
         """Two files with same name - latest created wins."""
-        import time
-        f1 = SubmissionFile.objects.create(
+        _f1 = SubmissionFile.objects.create(
             submission=self.submission, name="main.py", extension=".py", data="v1"
         )
-        f2 = SubmissionFile.objects.create(
+        _f2 = SubmissionFile.objects.create(
             submission=self.submission, name="main.py", extension=".py", data="v2"
         )
         files = getCurrentFiles(self.submission)

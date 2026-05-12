@@ -1,5 +1,4 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-import re
 
 from rest_framework import status
 from rest_framework.response import Response
@@ -7,9 +6,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes
-from django.contrib.auth.models import User
+from django.utils.http import urlsafe_base64_decode
 from django.contrib.auth.tokens import default_token_generator
 
 from core.logging import logEvent
@@ -47,16 +44,13 @@ from core.serializers.registration import (
     ResetPasswordResponseSerializer,
 )
 
-from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, ExistingOrgAdminRequestEmail, NewAdminActivationEmail, NewAdminRequestEmail, NewOrgAdminRequestEmail, PasswordResetEmail, PendingConfirmationEmail, UserAddedToCourseEmail
+from core.emails import AdminAlreadyEmail, AdminChangeOrganizationEmail, ExistingOrgAdminRequestEmail, NewAdminActivationEmail, NewOrgAdminRequestEmail, PasswordResetEmail, PendingConfirmationEmail, UserAddedToCourseEmail
 
 from core.permissions.helpers import (
     returnNotAuthorized,
-    returnForbidden,
-    returnNotFound,
 )
 from core.permissions.helpers import isAuthenticated, can_elevate_permissions
 
-from core.views import user
 from log.models import Event
 import json
 
@@ -349,7 +343,7 @@ def validateNewAdminUser(request):
             user = User.objects.get(email=form.cleaned_data["email"])
             org = user.profile.organization
             action_id.append(1)
-            is_student_or_grader = (user.student_courses.count() > 0) or (
+            _is_student_or_grader = (user.student_courses.count() > 0) or (
                 user.grader_courses.count() > 0
             )
             # If they do, check to see if their saved organization matches the
@@ -399,7 +393,7 @@ def validateNewAdminUser(request):
                 username=form.cleaned_data["email"], email=form.cleaned_data["email"]
             )
             user.is_active = False
-            is_student_or_grader = (user.student_courses.count() > 0) or (
+            _is_student_or_grader = (user.student_courses.count() > 0) or (
                 user.grader_courses.count() > 0
             )
 

@@ -3,7 +3,6 @@ import re
 import logging
 from typing import Set, Optional
 
-import javalang.tree
 from .base import BaseFileHandler
 
 logger = logging.getLogger(__name__)
@@ -52,7 +51,7 @@ class JavaHandler(BaseFileHandler):
         try:
              import javalang
              tree = javalang.parse.parse(code)  # type: ignore[attr-defined]  # javalang untyped
-             for path, node in tree.filter(javalang.tree.Import):  # type: ignore[attr-defined]  # javalang untyped
+             for _path, node in tree.filter(javalang.tree.Import):  # type: ignore[attr-defined]  # javalang untyped
                  if node.path:  # type: ignore[attr-defined]  # javalang untyped
                      packages.add(node.path)  # type: ignore[attr-defined]  # javalang untyped
         except ImportError:

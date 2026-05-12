@@ -2,7 +2,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 
 # Path setup for Django
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -11,7 +11,6 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'codepost.settings')
 import django
 django.setup()
 
-import shutil
 from autograder.services.executors.base import Executor
 
 class TestDatasetMounting(unittest.TestCase):

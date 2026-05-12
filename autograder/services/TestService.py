@@ -3,11 +3,9 @@ import logging
 import re
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
-from django.db import transaction
-from django.utils import timezone
 
 from core.models import TestCase, TestCategory, Submission, SubmissionTest, File, CachedExecutionResult
-from autograder.services.executors import get_executor_class, ExecutionResult, Executor
+from autograder.services.executors import Executor
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +260,7 @@ class TestService:
         Runs a suite of tests for a submission.
         Optimized to group tests by Category and run each category script only once.
         """
-        results = []
+        _results = []
         try:
             submission = Submission.objects.get(id=submission_id)
             assignment = submission.assignment
@@ -297,7 +295,7 @@ class TestService:
             # 4. Execute per Category
             all_results = []
             
-            for cat_id, data in category_map.items():
+            for _cat_id, data in category_map.items():
                 category = data['category']
                 category_tests = data['tests'] # Tests we explicitly want results for
                 
@@ -322,7 +320,7 @@ class TestService:
                     
                     # Optimization: Check test.fileName first (explicit target).
                     
-                    target_counts = Counter()
+                    target_counts = Counter()  # noqa: F841
                     # Determine target file
                     most_common_fname = None
                     category = category_tests[0].testCategory # Assuming category_tests is not empty here
@@ -1101,7 +1099,7 @@ class TestService:
         
         if not tests:
             # Maybe the script failed to run or produced no output
-            passed = False
+            _passed = False
             logs = f"{stdout}\n{stderr}".strip()
             if not logs:
                 logs = "[Error] Test script produced no output and no test results found."

@@ -19,17 +19,15 @@ import re
 import shutil
 import struct
 import tarfile
-import tempfile
 import threading
 import time
-import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, TypedDict, Type, Union, cast
 
 import nbformat
 from docker import DockerClient
 
-from core.models import File, User
+from core.models import User
 
 # pkg_resources shim is installed via core.compat for setuptools >= 82 compatibility
 
@@ -1582,7 +1580,7 @@ class NotebookExecutor(Executor):
             except Exception as e:
                 self.log(f"Failed to get container logs: {e}")
                 try:
-                    result_status = container.wait()
+                    _result_status = container.wait()
                 except:
                     pass
             

@@ -3,7 +3,7 @@
 Tests for detect_main_file heuristic in core.services.file_detection,
 and integration tests verifying the task routes correctly based on detection.
 """
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.db.models.signals import post_save
@@ -15,12 +15,6 @@ from core.models import (
     Submission, SubmissionFile, TestCategory,
 )
 from core.services.file_detection import detect_main_file
-from core.tests.factories import (
-    AssignmentFactory,
-    CourseFactory,
-    OrganizationFactory,
-    StudentFactory,
-)
 
 
 @factory.django.mute_signals(post_save)
@@ -281,7 +275,7 @@ class DetectMainFileTests(TestCase):
         _make_assignment_file(assignment, 'output.pdf', '.pdf', required=True)
 
         sub = _make_submission(assignment)
-        f_pdf = _make_submission_file(sub, 'output.pdf', '.pdf', data='%PDF content')
+        _f_pdf = _make_submission_file(sub, 'output.pdf', '.pdf', data='%PDF content')
         _make_submission_file(sub, 'notes.txt', '.txt', data='some notes')
 
         result = detect_main_file(sub)
@@ -347,7 +341,7 @@ class TaskRoutingTests(TestCase):
         sub = Submission.objects.create(assignment=assignment)
         file_objs = []
         for name, ext, data, kwargs in files_spec:
-            af = AssignmentFile.objects.create(
+            _af = AssignmentFile.objects.create(
                 assignment=assignment, name=name, extension=ext, data='', **kwargs,
             )
             sf = SubmissionFile.objects.create(

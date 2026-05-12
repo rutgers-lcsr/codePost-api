@@ -9,7 +9,6 @@ Provides API endpoints for:
 """
 import logging
 from django.http import JsonResponse
-from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema

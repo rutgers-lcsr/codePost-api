@@ -52,7 +52,6 @@ import subprocess
 import sys
 import tempfile
 from typing import Any, Dict, List, cast
-from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -3016,7 +3015,7 @@ class EndToEndTemplateScenarioTests(SimpleTestCase):
         _, _, tests = Executor.parse_test_results(stdout, "")
         self.assertEqual(len(tests), 2)
 
-        exec_result = {"stdout": stdout, "stderr": "", "error": None, "tests": tests}
+        _exec_result = {"stdout": stdout, "stderr": "", "error": None, "tests": tests}
         # crash is present => should_sync = False
         script_crashed = any(
             r.get("name") == "Test Script Execution" and r.get("status") == "error"

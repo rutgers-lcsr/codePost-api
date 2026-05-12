@@ -59,7 +59,7 @@ class TestPermissions_Submission_Released(BaseTestCases.TestPermissions):
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
 
@@ -83,7 +83,7 @@ class TestPermissions_Submission_FinalizedReleased(BaseTestCases.TestPermissions
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
 
@@ -106,7 +106,7 @@ class TestPermissions_Submission_ReleasedLiveFeedback(BaseTestCases.TestPermissi
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
       self.assertTrue(submission.assignment.liveFeedbackMode)
@@ -134,7 +134,7 @@ class TestPermissions_Submission_UnreleasedLiveFeedback(BaseTestCases.TestPermis
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
       self.assertFalse(submission.assignment.isReleased)
       self.assertTrue(submission.assignment.liveFeedbackMode)
@@ -160,7 +160,7 @@ class TestPermissions_Submission_FinalizedReleasedAnonymous(BaseTestCases.TestPe
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
       self.assertTrue(submission.assignment.anonymousGrading)
@@ -186,7 +186,7 @@ class TestPermissions_Submission_FinalizedReleasedHideGrades(BaseTestCases.TestP
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
-      assignment = submission.assignment
+      _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
       self.assertTrue(submission.assignment.isReleased)
       self.assertTrue(submission.assignment.hideGrades)

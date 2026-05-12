@@ -12,15 +12,11 @@ Covers:
 """
 from django.test import TestCase
 from django.db import IntegrityError
-from rest_framework.test import APITestCase
 
-from core.models import Course, Organization, Assignment, Section
+from core.models import Course
 from core.tests.factories import (
-    CourseFactory, OrganizationFactory, AssignmentFactory,
-    AdminFactory, GraderFactory, StudentFactory,
+    OrganizationFactory, GraderFactory, StudentFactory,
 )
-from core.tests.utils import setUpBase, request_as
-from core.tests.views.personas import Persona
 
 
 class TestCourseModelConstraints(TestCase):

@@ -34,7 +34,6 @@ from core.views.file import FileViewSet
 from core.views.submissionFile import SubmissionFileViewSet
 from core.views.assignmentFile import AssignmentFileViewSet
 from core.views.courseFile import CourseFileViewSet
-from core.views.comment import CommentViewSet
 from core.views.submissionTest import SubmissionTestViewSet
 from core.views.testCase import TestCaseViewSet
 from core.views.testCategory import TestCategoryViewSet

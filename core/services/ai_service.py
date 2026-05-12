@@ -26,7 +26,7 @@ import hashlib
 import logging
 import re
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional, Literal
+from typing import TYPE_CHECKING, Optional
 from dataclasses import dataclass
 from core.constants import DEFAULT_OLLAMA_URL, DEFAULT_PORTKEY_URL
 from core.models import Course, Assignment, Submission, SubmissionFile, User
@@ -358,7 +358,7 @@ class AIService:
         system_a = self._format_system_prompt(text_a, context)
         system_b = self._format_system_prompt(text_b, context)
 
-        template = (
+        _template = (
             self.assignment.ai_system_prompt
             if self.assignment and self.assignment.ai_system_prompt
             else self.resolve_prompt('comment_generation')[0]

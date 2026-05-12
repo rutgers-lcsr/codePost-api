@@ -13,10 +13,7 @@ def grading_setup(db):
     """Create a course with assignment, submission, files, rubric, and roster for testing AI grading."""
     from core.tests.factories import (
         CourseFactory,
-        SubmissionFileFactory,
-        RubricCategoryFactory,
     )
-    from core.models import SuggestedComment, SubmissionSummary
 
     with factory.django.mute_signals(post_save):
         course = CourseFactory(
@@ -102,14 +99,14 @@ class TestSuggestedCommentModel:
     def test_ordering(self, grading_setup):
         from core.models import SuggestedComment
 
-        sc1 = SuggestedComment.objects.create(
+        _sc1 = SuggestedComment.objects.create(
             submission=grading_setup['submission'],
             file=grading_setup['file'],
             text="First",
             startLine=10,
             endLine=10,
         )
-        sc2 = SuggestedComment.objects.create(
+        _sc2 = SuggestedComment.objects.create(
             submission=grading_setup['submission'],
             file=grading_setup['file'],
             text="Second",

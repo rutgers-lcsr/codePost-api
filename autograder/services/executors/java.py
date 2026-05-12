@@ -6,7 +6,6 @@ import re
 import shlex
 from datetime import datetime
 from typing import List, Optional
-import tempfile
 import shutil
 
 from .base import Executor, NotebookExecutor, ExecutionResult
@@ -225,7 +224,6 @@ class JavaNotebookExecutor(NotebookExecutor):
         
         For Java, we write the template to a file and compile/run it.
         """
-        import tempfile
         
         # Write template to a temp file
         # Since we are running in docker, we can't write to /work easily from here if we want to RUN `javac /work/file`.

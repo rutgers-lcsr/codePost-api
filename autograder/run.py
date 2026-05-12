@@ -2,7 +2,6 @@
 # External libraries
 import os
 import threading
-import time
 from celery import shared_task
 from enum import Enum
 import json
@@ -17,19 +16,15 @@ from autograder.testUtils.ag_logging import (
 )
 
 from core.models import (
-    File,
     SubmissionFile,
     TestCase,
     SubmissionTest,
     Submission,
     Environment,
-    TestCategory,
-    Assignment,
     User,
 )
 from log.models import Event
 
-from core.permissions.helpers import isStaffOfSub
 
 from core.emails import TestRunAllCompleteEmail
 
@@ -262,7 +257,7 @@ def RunAll(environmentID, user_id, sendEmail=False):
     submissions = environment.assignment.submissions.all()
 
     ######################## 2. Get TestFiles ######################################
-    tests = TestCase.objects.filter(testCategory__assignment=assignment).exclude(
+    _tests = TestCase.objects.filter(testCategory__assignment=assignment).exclude(
         type__in=testCase_types_to_exclude
     )
     all_test_cases = TestCase.objects.filter(
@@ -329,7 +324,7 @@ def RunAll(environmentID, user_id, sendEmail=False):
         RunAll.update_state(state="PROGRESS", meta={"progress": progress_map})
 
     ######################## 7. Turn off "isRunning" ######################################
-    setattr(environment, "isRunning", False)
+    environment.isRunning = False
     environment.save()
 
     if sendEmail and user:
@@ -470,7 +465,7 @@ def RunSubmission(self, submissionID: int):
     try:
         assignment = environment.assignment
         required_files = assignment.files.filter(required=True)
-        required_filenames = {rf.name for rf in required_files}
+        required_filenames = {rf.name for rf in required_files}  # noqa: F841
     except Exception:
         pass
     
@@ -691,7 +686,7 @@ def filterExposedSubmissionTests(submissionTests, maxFailedTests=None):
     # Message is an optional message we want to feed back to students based on
     # conditions hit when parsing results
     message = ""
-    if maxFailedTests == None:
+    if maxFailedTests is None:
         return ([t for t in submissionTests if t.testCase.exposed], "")
 
     # The user has set a limit on the number of failed tests to show

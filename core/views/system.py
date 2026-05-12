@@ -2,9 +2,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
-from rest_framework.decorators import api_view, permission_classes
 from drf_spectacular.utils import extend_schema, OpenApiParameter
-from django.db import connection, DatabaseError
+from django.db import connection
 from log.models import Event
 from django.core.paginator import Paginator
 import time

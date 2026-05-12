@@ -13,11 +13,9 @@ from rest_framework.test import APITestCase
 
 from core.models import RubricCategory, RubricComment, Assignment, Course
 from core.tests.factories import (
-    AssignmentFactory, CourseFactory, OrganizationFactory,
-    RubricCategoryFactory, RubricCommentFactory,
+    OrganizationFactory,
 )
 from core.tests.utils import setUpBase, request_as
-from core.tests.views.personas import Persona
 
 
 class TestRubricCategoryModel(TestCase):
