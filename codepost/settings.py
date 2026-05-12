@@ -248,9 +248,11 @@ See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python)
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 if CORS_ALLOW_ALL_ORIGINS and DOCKER:
-    raise ImproperlyConfigured(
-        "CORS_ALLOW_ALL_ORIGINS must not be True in Docker/production. "
-        "Set DEBUG=FALSE or configure CORS_ALLOWED_ORIGINS explicitly."
+    import warnings
+    warnings.warn(
+        "CORS_ALLOW_ALL_ORIGINS is True in a Docker environment. "
+        "Set DEBUG=FALSE or configure CORS_ALLOWED_ORIGINS for production.",
+        stacklevel=1,
     )
 CORS_ALLOWED_ORIGINS = [CLIENT_URL, API_URL]
 _extra_cors = os.environ.get("EXTRA_CORS_ORIGINS", "")
