@@ -59,7 +59,6 @@ services:
         volumes:
             - ${HOST_DATASET_ROOT:-/mnt/datasets}:/assignment_datasets
             - /tmp/codepost-staging:/staging
-            - /var/run/docker.sock:/var/run/docker.sock
         restart: unless-stopped
         logging:
             driver: json-file

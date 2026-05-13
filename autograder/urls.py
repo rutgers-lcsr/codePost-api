@@ -7,12 +7,6 @@ from autograder.views.environment import EnvironmentViewSet
 
 
 from autograder.views.TaskViewset import TaskViewSet
-from autograder.views.executor import (
-    ExecuteFileView,
-    ExecuteCodeView,
-    ExecuteNotebookView,
-    ExecuteNotebookCellView,
-)
 from autograder.views.executor_streaming import ExecuteFileStreaming
 from autograder.views.executor_async import ExecuteFileAsyncView
 from autograder.views.cache_check import CheckExecutionCache
@@ -34,10 +28,6 @@ router.register(r"environments", EnvironmentViewSet)
 
 urlpatterns = [
     path(r"tasks/<str:pk>/", TaskViewSet.as_view({"get": "retrieve"})),
-    path(r"execute/file/", ExecuteFileView.as_view(), name="execute-file"),
-    path(r"execute/code/", ExecuteCodeView.as_view(), name="execute-code"),
-    path(r"execute/notebook/", ExecuteNotebookView.as_view(), name="execute-notebook"),
-    path(r"execute/notebook-cell/", ExecuteNotebookCellView.as_view(), name="execute-notebook-cell"),
     path(r"execute/file/streaming/", ExecuteFileStreaming.as_view(), name="execute-file-streaming"),
     path(r"execute/file/async/", ExecuteFileAsyncView.as_view(), name="execute-file-async"),
     path(r"execute/file/cache/check/", CheckExecutionCache.as_view(), name="check-execution-cache"),

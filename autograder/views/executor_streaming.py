@@ -3,12 +3,13 @@
 Streaming executor view with Server-Sent Events (SSE) support
 
 This module provides streaming execution endpoints that send progress updates
-to the client using Server-Sent Events, preventing timeout issues with long-running
-notebook executions.
+to the client using Server-Sent Events. Execution is dispatched to a Celery worker
+which publishes progress to a Redis pub/sub channel; this view subscribes and relays.
 """
 
 import json
 import logging
+import uuid
 from typing import Generator
 
 from django.http import StreamingHttpResponse, JsonResponse
@@ -18,7 +19,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
-from autograder.services.executors import  Executor
 from autograder.serializers.execution import FileExecutionRequestSerializer
 from core.models import File, Submission, SubmissionFile, AssignmentFile, CourseFile, Assignment
 from core.permissions.helpers import isStaffOfSub, isCourseAdmin
@@ -112,24 +112,15 @@ class ExecuteFileStreaming(GenericAPIView):
     
     def _execute_with_streaming(self, request, file_obj: File | SubmissionFile | AssignmentFile | CourseFile, submission: Submission | None, assignment: Assignment | None, data: dict) -> Generator[str, None, None]:
         """
-        Generator that yields SSE messages during execution, 
-        Assumes that the file has already been checked for permissions.
+        Generator that yields SSE messages during execution.
         
-        Args:
-            request: Django request object
-            file_obj: File object to execute
-            submission: Submission object
-            assignment: Assignment object
-            data: Request data with execution parameters
-            
-        Yields:
-            SSE formatted messages
+        For cache hits, returns immediately. For cache misses, dispatches execution
+        to a Celery worker and relays progress from a Redis pub/sub channel.
         """
         try:
             # Send initial progress
             yield self._sse_message("progress", {"status": "starting", "message": "Fetching file..."})
         
-            
             user = request.user
             
             # If user is a student and not a staff member, they cannot force execute
@@ -182,33 +173,47 @@ class ExecuteFileStreaming(GenericAPIView):
             
             yield self._sse_message("progress", {"status": "fetching", "message": "Loading file content..."})
             
-            # Determine file type
-            file_name = file_obj.name.lower() if file_obj.name else ""
-            timeout:int = data.get("timeout", 30)
+            timeout: int = data.get("timeout", 30)
             if timeout > 120 or timeout <= 0:
-                # Force maximum timeout of 120 seconds
                 timeout = 120
             
-            # Check if it's a notebook
+            # Dispatch execution to Celery worker and relay via Redis pub/sub
+            channel = f"exec:stream:{uuid.uuid4().hex}"
+            
+            from autograder.tasks import run_file_streaming_task, _get_redis_client
+            run_file_streaming_task.delay(
+                channel=channel,
+                file_id=file_obj.id,
+                user_id=user.id,
+                timeout=timeout,
+                force_execute=force_execute,
+                test_code=test_code,
+                code_override=code_override,
+            )
+            
+            # Subscribe to the Redis channel and relay messages
+            r = _get_redis_client()
+            pubsub = r.pubsub()
+            pubsub.subscribe(channel)
+            
             try:
-                executor = Executor.factory(file_obj, content_override=code_override, test_code=test_code)
-                if not executor:
-                    yield self._sse_message("error", {
-                        "error": f"No executor found for language: {file_name}"
-                    })
-                    return
-                # Execute code
-                yield from executor.execute_streaming(request.user)
+                # Relay messages from worker until _done sentinel
+                for message in pubsub.listen():
+                    if message["type"] != "message":
+                        continue
+                    payload = json.loads(message["data"])
+                    event = payload["event"]
+                    if event == "_done":
+                        break
+                    yield self._sse_message(event, payload["data"])
             except GeneratorExit:
-                # Client disconnected - this is normal
                 logger.info("[ExecuteFileStreaming] Client disconnected")
                 raise
-            except Exception as e:
-                logger.error(f"[ExecuteFileStreaming] Error in sub-generator: {e}", exc_info=True)
-                yield self._sse_message("error", {"error": f"Execution error: {str(e)}"})
+            finally:
+                pubsub.unsubscribe(channel)
+                pubsub.close()
                 
         except GeneratorExit:
-            # Client disconnected - this is normal
             logger.info("[ExecuteFileStreaming] Client disconnected")
             raise
         except Exception as e:

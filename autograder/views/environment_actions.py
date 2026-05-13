@@ -97,14 +97,14 @@ class EnvironmentCleanup(APIView):
         
         keep_count = request.data.get('keep_count', 3)
         
-        from autograder.services.image_manager import ImageManager
-        deleted = ImageManager.cleanup_old_images(environment_id, keep_count)
+        from autograder.tasks import cleanup_images_task
+        task = cleanup_images_task.delay(environment_id, keep_count)
         
-        logger.info(f"Admin {request.user} cleaned up {deleted} images for env {environment_id}")
+        logger.info(f"Admin {request.user} triggered cleanup for env {environment_id}")
         data = {
             "success": True,
-            "deleted_count": deleted,
-            "message": f"Deleted {deleted} old image(s)",
+            "task_id": task.id,
+            "message": f"Cleanup task dispatched",
         }
         resp_ser = EnvironmentCleanupResponseSerializer(instance=data)
         return JsonResponse(resp_ser.data)

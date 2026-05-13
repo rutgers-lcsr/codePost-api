@@ -120,7 +120,7 @@ class EnvironmentCleanupRequestSerializer(serializers.Serializer):
 
 class EnvironmentCleanupResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField()
-    deleted_count = serializers.IntegerField()
+    task_id = serializers.CharField()
     message = serializers.CharField()
 
 
