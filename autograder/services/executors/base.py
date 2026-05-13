@@ -1172,7 +1172,7 @@ class Executor(abc.ABC):
             content_bytes = script_content.encode('utf-8')
             tarinfo = tarfile.TarInfo(name='.pre_script.sh')
             tarinfo.size = len(content_bytes)
-            tarinfo.mode = 0o755  # Executable
+            tarinfo.mode = 0o777  # World-writable so any container user can remove it after execution
             tar.addfile(tarinfo, BytesIO(content_bytes))
         
         tar_stream.seek(0)
@@ -1208,7 +1208,7 @@ class Executor(abc.ABC):
         else:
             base_cmd_str = " ".join(base_command)
         
-        shell_command = f"sh ./.pre_script.sh && chmod -x .pre_script.sh && {base_cmd_str}"
+        shell_command = f"sh ./.pre_script.sh && rm .pre_script.sh && {base_cmd_str}"
         self.log(f"Wrapping command with pre-script")
         return ["sh", "-c", shell_command]
 
