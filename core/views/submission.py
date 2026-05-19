@@ -1,9 +1,11 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from core.models import Submission, File
+from core.models import User
 
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionFilesOnlySerializer, SubmissionConsoleDataSerializer, StudentConsoleDataSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
+from core.serializers.file import SubmissionFileInstructorEditSaveSerializer, SubmissionFileInstructorEditSerializer
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -25,9 +27,10 @@ from core.permissions.permissions import SubmissionPermissions
 
 from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, isStudentOfSub, isStaffOfSub, canViewUnanonymizedSubmissions, isSectionLeaderOfStudent, isSuperGrader
-from core.permissions.capabilities import compute_submission_capabilities, require_capability
+from core.permissions.capabilities import Capability, compute_submission_capabilities, require_capability
+from core.services.audit import record_audit_event
 
-from core.models import User
+from core.models import SubmissionFileInstructorEdit
 from django.utils.timezone import now
 
 
@@ -37,7 +40,7 @@ from core.permissions.tokens import submission_token_generator
 
 from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail
 from django.db.models import Q, F
-from core.services.audit import record_audit_event
+from django.db import transaction
 
 def get_student_serializer_class(submission, files_only=False):
     """
@@ -417,7 +420,78 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     submissionTests = SubmissionTestSerializer(tests, many=True, context={"request": request}).data
 
-    return Response({'submissionTests': submissionTests, 'logs': logCode})
+    isStudentView = isStudentOfSub(user, submission) and not (isStaffOfSub(user, submission) and not isStudentMode)
+
+    # For student views, sanitize hidden tests
+    if isStudentView:
+        for st_data in submissionTests:
+            # Find the matching submission test to check hidden flag
+            matching = [t for t in tests if t.id == st_data.get('id')]
+            if matching and matching[0].testCase.hidden:
+                st_data['logs'] = ''
+                st_data['results'] = None
+
+    # Compute learning objective summary for all views
+    from core.models import LearningObjective
+    objectives = LearningObjective.objects.filter(assignment=assignment)
+    objective_summary = []
+    for obj in objectives:
+        linked_test_ids = set(obj.testCases.values_list('id', flat=True))
+        # Find submission test results for linked test cases
+        linked_results = [t for t in tests if t.testCase.id in linked_test_ids]
+
+        # Compute score based on aggregation mode
+        if not linked_results:
+            score = 0.0
+            met = False
+        elif obj.aggregationMode == 'any':
+            met = any(t.passed for t in linked_results)
+            score = 1.0 if met else 0.0
+        elif obj.aggregationMode == 'percentage':
+            passed_count = sum(1 for t in linked_results if t.passed)
+            score = passed_count / len(linked_results)
+            met = score >= 1.0
+        elif obj.aggregationMode == 'points_weighted':
+            total_points = sum(t.testCase.pointsPass for t in linked_results)
+            if total_points > 0:
+                earned_points = sum(t.testCase.pointsPass for t in linked_results if t.passed)
+                score = earned_points / total_points
+            else:
+                score = 0.0
+            met = score >= 1.0
+        else:  # 'all' (default)
+            met = all(t.passed for t in linked_results)
+            score = 1.0 if met else sum(1 for t in linked_results if t.passed) / len(linked_results)
+
+        all_passed = len(linked_results) > 0 and all(t.passed for t in linked_results)
+        any_failed = any(not t.passed for t in linked_results)
+
+        # For student views, apply visibility mode filtering
+        if isStudentView:
+            visible = False
+            if obj.visibilityMode == 'always':
+                visible = True
+            elif obj.visibilityMode == 'on_pass' and all_passed:
+                visible = True
+            elif obj.visibilityMode == 'on_fail' and any_failed:
+                visible = True
+            # 'never' stays False
+        else:
+            # Staff always see all objectives
+            visible = True
+
+        if visible:
+            objective_summary.append({
+                'id': obj.id,
+                'shortId': obj.shortId,
+                'name': obj.name,
+                'description': obj.description,
+                'met': met,
+                'score': round(score, 4),
+                'aggregationMode': obj.aggregationMode,
+            })
+
+    return Response({'submissionTests': submissionTests, 'logs': logCode, 'learningObjectives': objective_summary})
 
   #################################################################################
 
@@ -592,6 +666,7 @@ class SubmissionViewSet(ListProtectedViewSet):
           'files__comments__author',
           'files__comments__rubricComment',
           'files__comments__tags',
+          'files__instructorEdit',
           'tests',
       ).get(id=pk)
     except Submission.DoesNotExist:
@@ -616,6 +691,40 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     serializer = serializer_class(submission, context={'request': request})
     return Response(serializer.data)
+
+  @extend_schema(
+      request=SubmissionFileInstructorEditSaveSerializer,
+      responses=SubmissionFileInstructorEditSerializer,
+      description="Create or update a persisted instructor edit for a submission file. Staff with grade_submission only.",
+  )
+  @action(detail=True, methods=['PATCH'], permission_classes=[IsAuthenticated])
+  def saveInstructorEdit(self, request, pk=None):
+    submission = self.get_object()
+    user = request.user
+
+    require_capability(user, Capability.GRADE_SUBMISSION, submission)
+
+    serializer = SubmissionFileInstructorEditSaveSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    file_id = serializer.validated_data['fileId']
+    data = serializer.validated_data['data']
+
+    try:
+      submission_file = submission.files.get(id=file_id)
+    except submission.files.model.DoesNotExist:
+      raise serializers.ValidationError({'fileId': 'That file does not belong to this submission.'})
+
+    with transaction.atomic():
+      instructor_edit, _created = SubmissionFileInstructorEdit.objects.get_or_create(
+          file=submission_file,
+          defaults={'data': data, 'lastEditedBy': user},
+      )
+      instructor_edit.data = data
+      instructor_edit.lastEditedBy = user
+      instructor_edit.save()
+
+    return Response(SubmissionFileInstructorEditSerializer(instructor_edit).data, status.HTTP_200_OK)
 
   @extend_schema(
       responses=SuggestedCommentSerializer(many=True),

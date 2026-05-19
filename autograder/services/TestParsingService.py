@@ -4,9 +4,44 @@ import ast
 import re
 import logging
 from typing import List, Dict, Any, Optional
-from core.models import TestCategory, TestCase
+from core.models import TestCategory, TestCase, LearningObjective
 
 logger = logging.getLogger(__name__)
+
+# Regex for inline codepost directives in comments preceding a test definition.
+# Supports: # @codepost hidden objectives=recursion,edge-cases
+# Works with //, #, --, and /* comment styles.
+_DIRECTIVE_PATTERN = re.compile(
+    r'(?://|#|--|/\*)\s*@codepost\b(.*?)(?:\*/)?$', re.MULTILINE
+)
+
+
+def _parse_directives(script: str, test_start_pos: int) -> Dict[str, Any]:
+    """
+    Scan the line(s) immediately before test_start_pos for @codepost directives.
+    Returns parsed directives like {'hidden': True, 'objectives': ['recursion']}.
+    """
+    result: Dict[str, Any] = {}
+    # Get the text before the test definition, limited to 3 lines back
+    preceding = script[:test_start_pos]
+    # Take last 500 chars max for efficiency
+    preceding = preceding[-500:]
+    lines = preceding.rstrip().split('\n')
+    # Check up to 3 lines before
+    for line in reversed(lines[-3:]):
+        stripped = line.strip()
+        m = _DIRECTIVE_PATTERN.search(stripped)
+        if m:
+            directive_text = m.group(1).strip()
+            if 'hidden' in directive_text:
+                result['hidden'] = True
+            obj_match = re.search(r'objectives\s*=\s*(\S+)', directive_text)
+            if obj_match:
+                result['objectives'] = [o.strip() for o in obj_match.group(1).split(',') if o.strip()]
+        elif stripped and not stripped.startswith(('#', '//', '--', '/*', '*')):
+            # Non-comment, non-empty line — stop scanning
+            break
+    return result
 
 class TestParsingService:
     @staticmethod
@@ -74,6 +109,15 @@ class TestParsingService:
                                 elif keyword.arg == 'name':
                                     if isinstance(keyword.value, ast.Constant):
                                          test_info['name'] = keyword.value.value
+                                elif keyword.arg == 'hidden':
+                                    if isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, bool):
+                                        test_info['hidden'] = keyword.value.value
+                                elif keyword.arg == 'objectives':
+                                    if isinstance(keyword.value, ast.List):
+                                        test_info['objectives'] = [
+                                            elt.value for elt in keyword.value.elts
+                                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                                        ]
                             
                             tests.append(test_info)
         except Exception as e:
@@ -113,7 +157,18 @@ class TestParsingService:
             timeout_match = re.search(r'timeout\s*=\s*(\d+(\.\d+)?)', params)
             if timeout_match:
                 test_info['timeout'] = int(float(timeout_match.group(1)))
-                
+
+            # Extract hidden
+            hidden_match = re.search(r'hidden\s*=\s*(true|false)', params, re.IGNORECASE)
+            if hidden_match:
+                test_info['hidden'] = hidden_match.group(1).lower() == 'true'
+
+            # Extract objectives
+            objectives_match = re.search(r'objectives\s*=\s*\{([^}]*)\}', params)
+            if objectives_match:
+                obj_str = objectives_match.group(1)
+                test_info['objectives'] = [s.strip().strip('"') for s in obj_str.split(',') if s.strip().strip('"')]
+
             tests.append(test_info)
             
         return tests
@@ -134,6 +189,8 @@ class TestParsingService:
                 'points': float(match.group(3)),
                 'description': match.group(5) or "",
             }
+            directives = _parse_directives(script, match.start())
+            test_info.update(directives)
             tests.append(test_info)
 
         return tests
@@ -150,12 +207,15 @@ class TestParsingService:
             points = float(match.group(3))
             description = match.group(5) or ""
 
-            tests.append({
+            test_info = {
                 'functionName': re.sub(r'\W+', '_', name).strip('_').lower() or 'tester_test',
                 'name': name,
                 'points': points,
                 'description': description,
-            })
+            }
+            directives = _parse_directives(script, match.start())
+            test_info.update(directives)
+            tests.append(test_info)
 
         return tests
 
@@ -172,13 +232,16 @@ class TestParsingService:
             points = float(match.group(3))
             description = match.group(5) or ""
 
-            tests.append({
+            test_info = {
                 'functionName': re.sub(r'\W+', '_', name).strip('_').lower() or 'run_test',
                 'name': name,
                 'points': points,
                 'description': description,
                 **({'timeout': int(float(match.group(6)))} if match.group(6) else {}),
-            })
+            }
+            directives = _parse_directives(script, match.start())
+            test_info.update(directives)
+            tests.append(test_info)
 
         return tests
 
@@ -212,6 +275,8 @@ class TestParsingService:
             if timeout_val:
                 test_info['timeout'] = int(float(timeout_val))
 
+            directives = _parse_directives(script, match.start())
+            test_info.update(directives)
             tests.append(test_info)
 
         return tests
@@ -229,38 +294,44 @@ class TestParsingService:
         '''
 
         for match in re.finditer(combined_pattern, script, re.DOTALL | re.VERBOSE):
+            test_info: Optional[Dict[str, Any]] = None
             if match.group(1):
                 # TEST_DESC_TIMEOUT(name, points, description, timeout)
-                tests.append({
+                test_info = {
                     'functionName': match.group(1),
                     'name': match.group(1),
                     'points': float(match.group(2)),
                     'description': match.group(3),
                     'timeout': int(float(match.group(4)))
-                })
+                }
             elif match.group(5):
                 # TEST_TIMEOUT(name, points, timeout)
-                tests.append({
+                test_info = {
                     'functionName': match.group(5),
                     'name': match.group(5),
                     'points': float(match.group(6)),
                     'timeout': int(float(match.group(7)))
-                })
+                }
             elif match.group(8):
                 # TEST_DESC(name, points, description)
-                tests.append({
+                test_info = {
                     'functionName': match.group(8),
                     'name': match.group(8),
                     'points': float(match.group(9)),
                     'description': match.group(10)
-                })
+                }
             elif match.group(11):
                 # TEST(name, points)
-                tests.append({
+                test_info = {
                     'functionName': match.group(11),
                     'name': match.group(11),
                     'points': float(match.group(12))
-                })
+                }
+
+            if test_info:
+                directives = _parse_directives(script, match.start())
+                test_info.update(directives)
+                tests.append(test_info)
 
         return tests
 
@@ -275,6 +346,8 @@ class TestParsingService:
             language = getattr(environment, 'language', None)
         except Exception:
             language = None
+
+        assignment = test_category.assignment
 
         logger.info(f"[TestParsingService] Syncing test cases for TestCategory {test_category.pk} (language={language})")
         parsed_tests = TestParsingService.parse_script(test_category, language=language)
@@ -313,20 +386,28 @@ class TestParsingService:
                     t.explanation = explanation
                     t.pointsPass = test_data.get('points', 0)
                     t.timeout = test_data.get('timeout', 30)
+                    t.hidden = test_data.get('hidden', False)
                     t.save()
                     logger.info(f"[TestParsingService] Updated test case: {fname}")
+
+                    # Sync learning objectives
+                    TestParsingService._sync_test_objectives(t, test_data, assignment)
                 else:
                     # Create new
-                    TestCase.objects.create(
+                    t = TestCase.objects.create(
                         testCategory=test_category,
                         functionName=fname,
                         description=description,
                         explanation=explanation,
                         pointsPass=test_data.get('points', 0),
                         timeout=test_data.get('timeout', 30),
+                        hidden=test_data.get('hidden', False),
                         type='script' # Default type for script-based tests
                     )
                     logger.info(f"[TestParsingService] Created test case: {fname}")
+
+                    # Sync learning objectives
+                    TestParsingService._sync_test_objectives(t, test_data, assignment)
             except Exception as e:
                 logger.error(f"[TestParsingService] Failed to create/update test case '{fname}': {e}")
         
@@ -344,3 +425,28 @@ class TestParsingService:
         TestCategory.objects.filter(pk=test_category.pk).update(maxPoints=total_points)
         logger.info(f"[TestParsingService] Sync complete for TestCategory {test_category.pk}: "
                     f"{len(parsed_tests)} tests, {total_points} total points")
+
+    @staticmethod
+    def _sync_test_objectives(test_case: TestCase, test_data: Dict[str, Any], assignment) -> None:
+        """
+        Auto-create and link LearningObjective records based on parsed objectives list.
+        """
+        objective_ids = test_data.get('objectives', [])
+        if not objective_ids:
+            test_case.learningObjectives.clear()
+            return
+
+        objectives = []
+        for short_id in objective_ids:
+            obj, created = LearningObjective.objects.get_or_create(
+                shortId=short_id,
+                assignment=assignment,
+                defaults={
+                    'name': short_id.replace('-', ' ').replace('_', ' ').title(),
+                }
+            )
+            if created:
+                logger.info(f"[TestParsingService] Auto-created learning objective: {short_id}")
+            objectives.append(obj)
+
+        test_case.learningObjectives.set(objectives)

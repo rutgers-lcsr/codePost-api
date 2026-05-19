@@ -3,7 +3,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 from core.logging import logEvent
 from core.constants import MAX_FILE_SIZE
-from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile
+from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile, LearningObjective
 from rest_framework import serializers
 from rest_framework.request import Request
 from core.serializers.assignment import AssignmentSerializer, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats, AssignmentCloneSerializer, AssignmentGenerateTestSerializer, AssignmentGenerateTestResponseSerializer
@@ -16,6 +16,7 @@ from core.serializers.comment import CommentSerializer
 
 from core.serializers.testCase import TestCaseStudentSerializer
 from core.serializers.testCategory import TestCategorySerializer
+from core.serializers.learningObjective import LearningObjectiveSerializer
 from core.serializers.file import FileValidationSerializerWithoutSubmission, SubmissionFileStudentUploadSerializer
 
 
@@ -610,6 +611,23 @@ class AssignmentViewSet(ListProtectedViewSet):
         'testCases': case_serializer.data,
         'testCategories': category_serializer.data
     })
+
+  @extend_schema(responses=LearningObjectiveSerializer(many=True))
+  @action(detail=True, methods=["GET"])
+  def learningObjectives(self, request, pk=None):
+    """Return all learning objectives for this assignment."""
+    user = request.user
+    assignment = self.get_object()
+
+    if not isAuthenticated(user):
+      return returnNotAuthorized()
+
+    if not isCourseStaff(user, assignment.course):
+      return returnForbidden()
+
+    objectives = LearningObjective.objects.filter(assignment=assignment)
+    serializer = LearningObjectiveSerializer(objectives, many=True, context={'request': request})
+    return Response(serializer.data)
 
   @extend_schema(responses=BeforeStudentUploadResponseSerializer)
   @action(detail=True, methods=["GET"])

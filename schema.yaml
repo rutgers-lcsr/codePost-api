@@ -11,7 +11,7 @@ info:
     ### Installation
 
     ```bash
-    pip install git+https://github.com/rutgers-lcsr/codepost-python.git
+    pip install codepost
     ```
 
     ### Basic Usage (Python SDK)
@@ -1200,6 +1200,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/AssignmentGenerateTestResponse'
           description: ''
+  /assignments/{id}/learningObjectives/:
+    get:
+      operationId: assignments_learningObjectivesList
+      description: Return all learning objectives for this assignment.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LearningObjective'
+          description: ''
   /assignments/{id}/queueLength/:
     get:
       operationId: assignments_queueLengthRetrieve
@@ -2235,87 +2262,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/EnvironmentRunAllResponse'
           description: ''
-  /autograder/execute/code/:
-    post:
-      operationId: autograder_executeCodeCreate
-      description: |-
-        Execute a code snippet using the autograder executors.
-
-        DEPRECATED: Use async endpoints.
-      tags:
-      - autograder
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CodeExecutionRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/CodeExecutionRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/CodeExecutionRequest'
-        required: true
-      security:
-      - courseKeyAuth: []
-      - tokenAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExecutionResult'
-          description: ''
-  /autograder/execute/file/:
-    post:
-      operationId: autograder_executeFileCreate
-      description: |-
-        Execute a codePost file - use stream execution instead. This endpoint is used for testing file execution.
-
-        DEPRECATED: Use /autograder/async/execute/file/ instead.
-        This view executes synchronously, blocking the request thread. It should not be used in production
-        for long-running tasks.
-
-        Permissions:
-        - Codepost staff only: Superusers can execute any file
-        - Course Staff: Can execute with overrides if allowed by assignment
-
-        Uses FilePermissions which delegates to appropriate permission class
-        based on file type (SubmissionFile, AssignmentFile, CourseFile)
-
-        POST /autograder/execute/file/
-        {
-            "file_id": 123,
-            "timeout": 30
-        }
-      tags:
-      - autograder
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FileExecutionRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/FileExecutionRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/FileExecutionRequest'
-        required: true
-      security:
-      - courseKeyAuth: []
-      - tokenAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExecutionResult'
-          description: ''
   /autograder/execute/file/async/:
     post:
       operationId: autograder_executeFileAsyncCreate
@@ -2395,69 +2341,6 @@ paths:
       responses:
         '200':
           description: Server-Sent Events stream with ExecutionResult data
-  /autograder/execute/notebook/:
-    post:
-      operationId: autograder_executeNotebookCreate
-      description: |-
-        Execute a full notebook payload.
-
-        DEPRECATED: Use async endpoints.
-      tags:
-      - autograder
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/NotebookExecutionRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/NotebookExecutionRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/NotebookExecutionRequest'
-        required: true
-      security:
-      - courseKeyAuth: []
-      - tokenAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExecutionResult'
-          description: ''
-  /autograder/execute/notebook-cell/:
-    post:
-      operationId: autograder_executeNotebookCellCreate
-      description: Execute a single notebook cell by wrapping it in a minimal notebook.
-      tags:
-      - autograder
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/NotebookCellExecutionRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/NotebookCellExecutionRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/NotebookCellExecutionRequest'
-        required: true
-      security:
-      - courseKeyAuth: []
-      - tokenAuth: []
-      - basicAuth: []
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExecutionResult'
-          description: ''
   /autograder/shell/metrics/:
     get:
       operationId: autograder_shellMetricsRetrieve
@@ -5149,6 +5032,273 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
           description: ''
+  /learningObjectives/:
+    get:
+      operationId: learningObjectives_list
+      description: |-
+        list:
+        Return a list of all the learningObjectives.
+
+        create:
+        Create a new learningObjective.
+
+        retrieve:
+        Return the given learningObjective.
+
+        update:
+        Update a learningObjective.
+
+        partial_update:
+        Update a learningObjective.
+
+        delete:
+        Delete a learningObjective.
+      tags:
+      - learningObjectives
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LearningObjective'
+          description: ''
+    post:
+      operationId: learningObjectives_create
+      description: |-
+        list:
+        Return a list of all the learningObjectives.
+
+        create:
+        Create a new learningObjective.
+
+        retrieve:
+        Return the given learningObjective.
+
+        update:
+        Update a learningObjective.
+
+        partial_update:
+        Update a learningObjective.
+
+        delete:
+        Delete a learningObjective.
+      tags:
+      - learningObjectives
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearningObjective'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LearningObjective'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LearningObjective'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningObjective'
+          description: ''
+  /learningObjectives/{id}/:
+    get:
+      operationId: learningObjectives_retrieve
+      description: |-
+        list:
+        Return a list of all the learningObjectives.
+
+        create:
+        Create a new learningObjective.
+
+        retrieve:
+        Return the given learningObjective.
+
+        update:
+        Update a learningObjective.
+
+        partial_update:
+        Update a learningObjective.
+
+        delete:
+        Delete a learningObjective.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this learning objective.
+        required: true
+      tags:
+      - learningObjectives
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningObjective'
+          description: ''
+    put:
+      operationId: learningObjectives_update
+      description: |-
+        list:
+        Return a list of all the learningObjectives.
+
+        create:
+        Create a new learningObjective.
+
+        retrieve:
+        Return the given learningObjective.
+
+        update:
+        Update a learningObjective.
+
+        partial_update:
+        Update a learningObjective.
+
+        delete:
+        Delete a learningObjective.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this learning objective.
+        required: true
+      tags:
+      - learningObjectives
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LearningObjective'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LearningObjective'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LearningObjective'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningObjective'
+          description: ''
+    patch:
+      operationId: learningObjectives_partialUpdate
+      description: |-
+        list:
+        Return a list of all the learningObjectives.
+
+        create:
+        Create a new learningObjective.
+
+        retrieve:
+        Return the given learningObjective.
+
+        update:
+        Update a learningObjective.
+
+        partial_update:
+        Update a learningObjective.
+
+        delete:
+        Delete a learningObjective.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this learning objective.
+        required: true
+      tags:
+      - learningObjectives
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedLearningObjective'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedLearningObjective'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedLearningObjective'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningObjective'
+          description: ''
+    delete:
+      operationId: learningObjectives_destroy
+      description: |-
+        list:
+        Return a list of all the learningObjectives.
+
+        create:
+        Create a new learningObjective.
+
+        retrieve:
+        Return the given learningObjective.
+
+        update:
+        Update a learningObjective.
+
+        partial_update:
+        Update a learningObjective.
+
+        delete:
+        Delete a learningObjective.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this learning objective.
+        required: true
+      tags:
+      - learningObjectives
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /logs/log/:
     post:
       operationId: logs_logCreate
@@ -9762,6 +9912,43 @@ paths:
               schema:
                 type: string
           description: ''
+  /submissions/{id}/saveInstructorEdit/:
+    patch:
+      operationId: submissions_saveInstructorEditPartialUpdate
+      description: Create or update a persisted instructor edit for a submission file.
+        Staff with grade_submission only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSubmissionFileInstructorEditSave'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSubmissionFileInstructorEditSave'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSubmissionFileInstructorEditSave'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+          description: ''
   /submissions/{id}/submissionTests/:
     get:
       operationId: submissions_submissionTestsList
@@ -12245,6 +12432,18 @@ components:
           type: boolean
       required:
       - success
+    AggregationModeEnum:
+      enum:
+      - all
+      - any
+      - percentage
+      - points_weighted
+      type: string
+      description: |-
+        * `all` - All linked tests must pass
+        * `any` - At least one linked test must pass
+        * `percentage` - Percentage of linked tests that pass
+        * `points_weighted` - Weighted by test point values
     AiCoursePolicyEnum:
       enum:
       - all
@@ -13651,27 +13850,6 @@ components:
       required:
       - pending
       - status
-    CodeExecutionRequest:
-      type: object
-      description: Request serializer for code execution
-      properties:
-        code:
-          type: string
-          description: Code to execute
-        language:
-          type: string
-          description: Language for execution
-        timeout:
-          type: integer
-          maximum: 300
-          minimum: 1
-          default: 30
-        working_dir:
-          type: string
-          nullable: true
-      required:
-      - code
-      - language
     Comment:
       type: object
       properties:
@@ -14712,14 +14890,14 @@ components:
       properties:
         success:
           type: boolean
-        deleted_count:
-          type: integer
+        task_id:
+          type: string
         message:
           type: string
       required:
-      - deleted_count
       - message
       - success
+      - task_id
     EnvironmentConvertToManualRequest:
       type: object
       properties:
@@ -14835,51 +15013,6 @@ components:
           type: integer
       required:
       - environment_id
-    ExecutionResult:
-      type: object
-      description: |-
-        Standard execution result for code files and notebooks.
-
-        This is the primary response type for all execution endpoints.
-      properties:
-        success:
-          type: boolean
-          description: Whether execution completed successfully
-        stdout:
-          type: string
-          description: Standard output from execution
-        stderr:
-          type: string
-          description: Standard error from execution
-        error:
-          type: string
-          nullable: true
-          description: Error message if execution failed
-        execution_time:
-          type: number
-          format: double
-          description: Execution duration in seconds
-        output_data:
-          type: object
-          additionalProperties: {}
-          description: Structured output data (notebook cells, images, etc.)
-        system_logs:
-          type: array
-          items:
-            type: string
-          description: System-level logs from the executor
-        tests:
-          type: array
-          items:
-            type: object
-            additionalProperties: {}
-          description: Structured test results (if present)
-        timestamp:
-          type: string
-          format: date-time
-          description: When the execution completed
-      required:
-      - success
     File:
       type: object
       description: Base serializer for File objects.
@@ -15100,6 +15233,83 @@ components:
         * `1` - Failed
         * `2` - Error
         * `3` - Never run
+    LearningObjective:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          description: The related assignment__id.
+        shortId:
+          type: string
+          description: Short identifier used in test decorators, e.g. 'recursion'.
+          maxLength: 64
+        name:
+          type: string
+          description: Display name for the learning objective.
+          maxLength: 128
+        description:
+          type: string
+          description: Optional longer description of the objective.
+        visibilityMode:
+          allOf:
+          - $ref: '#/components/schemas/VisibilityModeEnum'
+          description: |-
+            Controls when students can see this objective in test results.
+
+            * `always` - Always show
+            * `on_pass` - Show when tests pass
+            * `on_fail` - Show when tests fail
+            * `never` - Admin only
+        aggregationMode:
+          allOf:
+          - $ref: '#/components/schemas/AggregationModeEnum'
+          description: |-
+            How to aggregate results from multiple linked tests.
+
+            * `all` - All linked tests must pass
+            * `any` - At least one linked test must pass
+            * `percentage` - Percentage of linked tests that pass
+            * `points_weighted` - Weighted by test point values
+        testCases:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+      required:
+      - assignment
+      - id
+      - name
+      - shortId
+      - testCases
+    LearningObjectiveSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        shortId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        met:
+          type: boolean
+        score:
+          type: number
+          format: double
+        aggregationMode:
+          type: string
+      required:
+      - aggregationMode
+      - description
+      - id
+      - met
+      - name
+      - score
+      - shortId
     LogDumpRequest:
       type: object
       properties:
@@ -15206,43 +15416,6 @@ components:
       - label
       - pending
       - status
-    NotebookCellExecutionRequest:
-      type: object
-      description: Request serializer for executing a single notebook cell
-      properties:
-        cell_code:
-          type: string
-          description: Cell code to execute
-        cell_index:
-          type: integer
-          default: 0
-        timeout:
-          type: integer
-          maximum: 300
-          minimum: 1
-          default: 30
-        kernel_name:
-          type: string
-          default: python3
-      required:
-      - cell_code
-    NotebookExecutionRequest:
-      type: object
-      description: Request serializer for notebook execution
-      properties:
-        notebook_content:
-          type: string
-          description: Notebook JSON content
-        timeout:
-          type: integer
-          maximum: 300
-          minimum: 1
-          default: 60
-        kernel_name:
-          type: string
-          default: python3
-      required:
-      - notebook_content
     NullEnum:
       enum:
       - null
@@ -16361,6 +16534,51 @@ components:
           type: string
           format: date-time
           readOnly: true
+    PatchedLearningObjective:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          description: The related assignment__id.
+        shortId:
+          type: string
+          description: Short identifier used in test decorators, e.g. 'recursion'.
+          maxLength: 64
+        name:
+          type: string
+          description: Display name for the learning objective.
+          maxLength: 128
+        description:
+          type: string
+          description: Optional longer description of the objective.
+        visibilityMode:
+          allOf:
+          - $ref: '#/components/schemas/VisibilityModeEnum'
+          description: |-
+            Controls when students can see this objective in test results.
+
+            * `always` - Always show
+            * `on_pass` - Show when tests pass
+            * `on_fail` - Show when tests fail
+            * `never` - Admin only
+        aggregationMode:
+          allOf:
+          - $ref: '#/components/schemas/AggregationModeEnum'
+          description: |-
+            How to aggregate results from multiple linked tests.
+
+            * `all` - All linked tests must pass
+            * `any` - At least one linked test must pass
+            * `percentage` - Percentage of linked tests that pass
+            * `points_weighted` - Weighted by test point values
+        testCases:
+          type: array
+          items:
+            type: integer
+          readOnly: true
     PatchedMaintenanceBanner:
       type: object
       properties:
@@ -16813,6 +17031,17 @@ components:
           type: string
           format: date-time
           readOnly: true
+        instructorEdit:
+          allOf:
+          - $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+          readOnly: true
+    PatchedSubmissionFileInstructorEditSave:
+      type: object
+      properties:
+        fileId:
+          type: integer
+        data:
+          type: string
     PatchedSubmissionTest:
       type: object
       properties:
@@ -17099,6 +17328,16 @@ components:
           minimum: -9223372036854775808
           format: int64
           description: Execution timeout in seconds for this test.
+        hidden:
+          type: boolean
+          description: If True, students see only pass/fail status and point impact
+            — not the test name, logs, or explanation.
+        learningObjectives:
+          type: array
+          items:
+            type: integer
+            title: LearningObjectives
+          description: Learning objectives this test is associated with.
     PatchedTestCategory:
       type: object
       properties:
@@ -18218,14 +18457,45 @@ components:
           type: string
           format: date-time
           readOnly: true
+        instructorEdit:
+          allOf:
+          - $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+          readOnly: true
       required:
       - comments
       - created
       - extension
       - id
+      - instructorEdit
       - modified
       - name
       - submission
+    SubmissionFileInstructorEdit:
+      type: object
+      properties:
+        data:
+          type: string
+          readOnly: true
+          description: The persisted instructor-edited contents for this submission
+            file.
+        lastEditedBy:
+          type: string
+          format: email
+          title: Email address
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - data
+      - lastEditedBy
+      - modified
     SubmissionFileStudentUpload:
       type: object
       description: Simplified serializer for students uploading submission files.
@@ -18309,6 +18579,10 @@ components:
           type: string
           format: date-time
           readOnly: true
+        instructorEdit:
+          allOf:
+          - $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+          readOnly: true
       required:
       - comments
       - created
@@ -18316,6 +18590,7 @@ components:
       - extension
       - hiddenBeforePublish
       - id
+      - instructorEdit
       - modified
       - name
       - path
@@ -18467,6 +18742,10 @@ components:
             $ref: '#/components/schemas/SubmissionTest'
         logs:
           type: string
+        learningObjectives:
+          type: array
+          items:
+            $ref: '#/components/schemas/LearningObjectiveSummary'
       required:
       - logs
       - submissionTests
@@ -18890,6 +19169,16 @@ components:
           minimum: -9223372036854775808
           format: int64
           description: Execution timeout in seconds for this test.
+        hidden:
+          type: boolean
+          description: If True, students see only pass/fail status and point impact
+            — not the test name, logs, or explanation.
+        learningObjectives:
+          type: array
+          items:
+            type: integer
+            title: LearningObjectives
+          description: Learning objectives this test is associated with.
       required:
       - description
       - id
@@ -18958,6 +19247,16 @@ components:
           nullable: true
           description: The related rubric comment. If set, failure applies this rubric
             item.
+        hidden:
+          type: boolean
+          description: If True, students see only pass/fail status and point impact
+            — not the test name, logs, or explanation.
+        learningObjectives:
+          type: array
+          items:
+            type: integer
+            title: LearningObjectives
+          description: Learning objectives this test is associated with.
       required:
       - description
       - id
@@ -19297,6 +19596,18 @@ components:
           format: email
       required:
       - isValid
+    VisibilityModeEnum:
+      enum:
+      - always
+      - on_pass
+      - on_fail
+      - never
+      type: string
+      description: |-
+        * `always` - Always show
+        * `on_pass` - Show when tests pass
+        * `on_fail` - Show when tests fail
+        * `never` - Admin only
     Webhook:
       type: object
       properties:

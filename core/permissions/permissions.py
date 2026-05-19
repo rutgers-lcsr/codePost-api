@@ -495,6 +495,26 @@ class TestCategoryPermissions(TemplatePermission):
         return isCourseAdmin(user, course)
 
 
+class LearningObjectivePermissions(TemplatePermission):
+    """
+    Permissions for LearningObjective objects.
+    
+    - POST/PUT/PATCH/DELETE: Course admins only
+    - GET: Course staff
+    """
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        course = obj.assignment.course
+
+        # GET: course staff
+        if request.method == "GET":
+            return isCourseStaff(user, course)
+
+        # All write operations: course admin only
+        return isCourseAdmin(user, course)
+
+
 class TestCategoryResourcePermissions(TemplatePermission):
     """
     Permissions for TestCategoryResource objects.

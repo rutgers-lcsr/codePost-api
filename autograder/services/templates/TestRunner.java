@@ -80,6 +80,10 @@ class TestResult {
     default 1.0;String description()
 
     default "";int timeout() default 30; // seconds
+
+    boolean hidden() default false;
+
+    String[] objectives() default {};
 }
 
 public class TestRunner {

@@ -287,7 +287,7 @@ class TestRunner:
             sys.stderr.flush()
 
 # Public Decorator
-def test(name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
+def test(name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None, hidden: bool = False, objectives: Optional[List[str]] = None):
     def decorator(func):
         test_case = TestCase(func, name=name, points=points, description=description, timeout=timeout)
         TestRunner.get_instance().add_test(test_case)

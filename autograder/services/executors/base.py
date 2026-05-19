@@ -281,6 +281,8 @@ class Executor(abc.ABC):
                     test_results.extend(data)
                 else:
                     test_results.append(data)
+                    
+                # TODO: Add validation of test result structure here and log if it doesn't match expected format
             except Exception as e:
                 logger.error(f"Failed to parse test result: {e}. Content: {json_str[:500]}")
             return "" # Remove from output

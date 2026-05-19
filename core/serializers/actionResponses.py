@@ -119,9 +119,20 @@ class BatchCapabilitiesResponseSerializer(serializers.Serializer):
     )
 
 
+class LearningObjectiveSummarySerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    shortId = serializers.CharField()
+    name = serializers.CharField()
+    description = serializers.CharField()
+    met = serializers.BooleanField()
+    score = serializers.FloatField()
+    aggregationMode = serializers.CharField()
+
+
 class SubmissionTestResultsResponseSerializer(serializers.Serializer):
     submissionTests = SubmissionTestSerializer(many=True)
     logs = serializers.CharField()
+    learningObjectives = LearningObjectiveSummarySerializer(many=True, required=False)
 
 
 class SubmissionPartnerLinkResponseSerializer(serializers.Serializer):

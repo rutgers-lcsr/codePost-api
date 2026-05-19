@@ -144,7 +144,7 @@ public class notebook_template {
 
             // Define Test Annotation
             jshell.eval(
-                    "@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface Test { String name() default \"\"; double points() default 1.0; String description() default \"\"; int timeout() default 30; }");
+                    "@Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) @interface Test { String name() default \"\"; double points() default 1.0; String description() default \"\"; int timeout() default 30; boolean hidden() default false; String[] objectives() default {}; }");
 
             // Define TestResult Class
             jshell.eval(

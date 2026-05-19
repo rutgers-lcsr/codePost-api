@@ -45,6 +45,8 @@ function test(name, points, description, fn, timeout) {
     if (typeof timeout === "undefined" || timeout === null) {
         timeout = 30;
     }
+    // hidden and objectives are parsed from @codepost directives at sync time,
+    // not used at runtime — they only affect DB state.
 
     tests.push({
         name,

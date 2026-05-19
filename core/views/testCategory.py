@@ -77,6 +77,8 @@ class TestCategoryViewSet(ListProtectedViewSet):
                 'points': test.get('points', 0),
                 'timeout': test.get('timeout'),
                 'truncated': truncated,
+                'hidden': test.get('hidden', False),
+                'objectives': test.get('objectives', []),
             })
             
         return Response(preview_data)
