@@ -9912,11 +9912,12 @@ paths:
               schema:
                 type: string
           description: ''
-  /submissions/{id}/saveInstructorEdit/:
+  /submissions/{id}/saveFileEdit/:
     patch:
-      operationId: submissions_saveInstructorEditPartialUpdate
-      description: Create or update a persisted instructor edit for a submission file.
-        Staff with grade_submission only.
+      operationId: submissions_saveFileEditPartialUpdate
+      description: Create or update a persisted edit for a submission file. Course
+        admins may always save edits; graders may save only when the assignment's
+        `gradersCanEditSubmissions` flag is True.
       parameters:
       - in: path
         name: id
@@ -9930,13 +9931,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedSubmissionFileInstructorEditSave'
+              $ref: '#/components/schemas/PatchedSubmissionFileEditSave'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedSubmissionFileInstructorEditSave'
+              $ref: '#/components/schemas/PatchedSubmissionFileEditSave'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedSubmissionFileInstructorEditSave'
+              $ref: '#/components/schemas/PatchedSubmissionFileEditSave'
       security:
       - courseKeyAuth: []
       - tokenAuth: []
@@ -9947,7 +9948,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+                $ref: '#/components/schemas/SubmissionFileEdit'
           description: ''
   /submissions/{id}/submissionTests/:
     get:
@@ -15156,6 +15157,31 @@ components:
       - detail
       - label
       - status
+    HiddenTestSummary:
+      type: object
+      description: |-
+        Replaces individual hidden-test rows in student-facing responses. The student learns
+        how many hidden tests they passed and the point impact, but never sees the underlying
+        TestCase names, descriptions, or logs.
+      properties:
+        label:
+          type: string
+        passedCount:
+          type: integer
+        totalCount:
+          type: integer
+        pointsEarned:
+          type: number
+          format: double
+        pointsTotal:
+          type: number
+          format: double
+      required:
+      - label
+      - passedCount
+      - pointsEarned
+      - pointsTotal
+      - totalCount
     ImpersonateRequest:
       type: object
       properties:
@@ -17031,11 +17057,11 @@ components:
           type: string
           format: date-time
           readOnly: true
-        instructorEdit:
+        edit:
           allOf:
-          - $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+          - $ref: '#/components/schemas/SubmissionFileEdit'
           readOnly: true
-    PatchedSubmissionFileInstructorEditSave:
+    PatchedSubmissionFileEditSave:
       type: object
       properties:
         fileId:
@@ -17095,6 +17121,11 @@ components:
         results:
           nullable: true
           description: Structured test results (list of subtests).
+        hiddenSummary:
+          allOf:
+          - $ref: '#/components/schemas/HiddenTestSummary'
+          nullable: true
+          readOnly: true
     PatchedSuggestedComment:
       type: object
       properties:
@@ -18457,27 +18488,27 @@ components:
           type: string
           format: date-time
           readOnly: true
-        instructorEdit:
+        edit:
           allOf:
-          - $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+          - $ref: '#/components/schemas/SubmissionFileEdit'
           readOnly: true
       required:
       - comments
       - created
+      - edit
       - extension
       - id
-      - instructorEdit
       - modified
       - name
       - submission
-    SubmissionFileInstructorEdit:
+    SubmissionFileEdit:
       type: object
       properties:
         data:
           type: string
           readOnly: true
-          description: The persisted instructor-edited contents for this submission
-            file.
+          description: The persisted edited contents for this submission file (set
+            by an instructor or, if allowed, a grader).
         lastEditedBy:
           type: string
           format: email
@@ -18579,18 +18610,18 @@ components:
           type: string
           format: date-time
           readOnly: true
-        instructorEdit:
+        edit:
           allOf:
-          - $ref: '#/components/schemas/SubmissionFileInstructorEdit'
+          - $ref: '#/components/schemas/SubmissionFileEdit'
           readOnly: true
       required:
       - comments
       - created
       - data
+      - edit
       - extension
       - hiddenBeforePublish
       - id
-      - instructorEdit
       - modified
       - name
       - path
@@ -18724,8 +18755,14 @@ components:
         results:
           nullable: true
           description: Structured test results (list of subtests).
+        hiddenSummary:
+          allOf:
+          - $ref: '#/components/schemas/HiddenTestSummary'
+          nullable: true
+          readOnly: true
       required:
       - created
+      - hiddenSummary
       - id
       - logs
       - modified

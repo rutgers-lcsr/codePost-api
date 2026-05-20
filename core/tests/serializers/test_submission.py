@@ -172,25 +172,54 @@ class TestSerializer_StudentSubmissionSerializer(APITestCase):
 
     def setUp(self):
         setUpBase(self)
+        self.submission = self.DB["Submission"]
 
-        # self.instance_attributes = {
+    def test_grade_is_present_when_feedback_released_and_hide_grades_false(self):
+        from core.serializers.submission import StudentSubmissionSerializer
+        assignment = self.submission.assignment
+        assignment.feedbackReleased = True
+        assignment.hideGrades = False
+        assignment.save()
 
-        # }
+        serializer = StudentSubmissionSerializer(self.submission)
+        self.assertEqual(serializer.data["grade"], self.submission.grade)
 
-        # self.serializer_data = {
+    def test_grade_is_masked_when_hide_grades_true(self):
+        from core.serializers.submission import StudentSubmissionSerializer
+        assignment = self.submission.assignment
+        assignment.feedbackReleased = True
+        assignment.hideGrades = True
+        assignment.save()
 
-        # }
+        serializer = StudentSubmissionSerializer(self.submission)
+        self.assertIsNone(serializer.data["grade"])
 
-        # self.instance = ##.objects.create(**self.instance_attributes)
-        # self.serializer = ##(instance=self.instance)
 
-    def test_contains_expected_fields(self):
-        # data = self.serializer.data
+class TestSerializer_StudentConsoleDataSerializer(APITestCase):
 
-        # expected = []
-        # self.assertEqual(set(data.keys()), set(expected))
-        # self.fail('not implemented yet')
-        pass
+    def setUp(self):
+        setUpBase(self)
+        self.submission = self.DB["Submission"]
+
+    def test_grade_is_present_when_feedback_released_and_hide_grades_false(self):
+        from core.serializers.submission import StudentConsoleDataSerializer
+        assignment = self.submission.assignment
+        assignment.feedbackReleased = True
+        assignment.hideGrades = False
+        assignment.save()
+
+        serializer = StudentConsoleDataSerializer(self.submission)
+        self.assertEqual(serializer.data["grade"], self.submission.grade)
+
+    def test_grade_is_masked_when_hide_grades_true(self):
+        from core.serializers.submission import StudentConsoleDataSerializer
+        assignment = self.submission.assignment
+        assignment.feedbackReleased = True
+        assignment.hideGrades = True
+        assignment.save()
+
+        serializer = StudentConsoleDataSerializer(self.submission)
+        self.assertIsNone(serializer.data["grade"])
 
 
 class TestSerializer_StudentSubmissionWithoutGradeSerializer(APITestCase):

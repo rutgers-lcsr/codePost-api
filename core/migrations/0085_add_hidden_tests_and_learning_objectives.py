@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("core", "0084_submissionfileinstructoredit"),
+        ("core", "0084_submissionfileedit"),
     ]
 
     operations = [

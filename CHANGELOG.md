@@ -12,6 +12,40 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ---
 
+## [3.4.0] — Testing Framework Improvements & Persisted File Edits
+
+### Added — Testing Framework
+
+- **Hidden test cases** — `TestCase.hidden` (boolean) lets instructors mark tests whose name, logs, and explanation are stripped from student-facing test-result responses. Point totals still apply.
+- **Learning Objectives** — new `LearningObjective` model (per assignment) and many-to-many link from `TestCase`. Each objective has:
+  - `shortId` — identifier used in test scripts (e.g. `recursion`).
+  - `visibilityMode` — `always`, `on_pass`, `on_fail`, or `never` (admin only) controlling when students see the objective.
+  - `aggregationMode` — `all`, `any`, `percentage`, or `points_weighted` for computing whether an objective is met from its linked test results.
+- **New test decorator/annotation parameters** — `hidden` and `objectives` are now extracted by `TestParsingService` for every supported language:
+  - **Python / Notebook Python** — `@test(name=..., points=..., hidden=True, objectives=["recursion"])` (decorator signature updated in `template.py` / `notebook_template.py`).
+  - **Java / JShell** — `@Test(name=..., points=..., hidden=true, objectives={"recursion"})` (annotation extended in `TestRunner.java` / `notebook_template.java`).
+  - **R, C/C++, Node/JS/TS, Ruby, PHP** — inline `@codepost` parser directives in the comment immediately preceding a test (e.g. `// @codepost hidden objectives=recursion,edge-cases`). Supports `//`, `#`, `--`, and `/* */` comment styles.
+- **Auto-creation of `LearningObjective` records** — when a script references an objective by `shortId` that does not yet exist on the assignment, `TestParsingService._sync_test_objectives` creates it on first parse.
+- **`/learningObjectives/` resource** — new ViewSet (`LearningObjectiveViewSet`) registered on the default router. CRUD restricted to course admins via `LearningObjectivePermissions`; course staff have read access.
+- **`/assignments/{id}/learningObjectives/` action** — returns all learning objectives for an assignment (course staff only).
+- **Persisted edits to submission files** — new `SubmissionFileEdit` model (one-to-one with `SubmissionFile`) backs a `PATCH /submissions/{id}/saveFileEdit/` action. Requires the `grade_submission` capability; course admins may always save edits, while graders may save only when the assignment's `gradersCanEditSubmissions` flag is True. Previously, instructor/grader edits in the code-review panel were not persisted server-side.
+
+### Changed
+
+- **`/submissions/{id}/submissionTestResults/`** — response now includes a `learningObjectives` array summarizing each objective's `met`, `score`, and `aggregationMode`. For student views, hidden tests have their `logs`/`results` blanked, and objectives are filtered by their `visibilityMode`.
+- **`/testCategories/{id}/preview/`** — preview rows now carry the parsed `hidden` flag and `objectives` list so the UI can surface them before saving.
+- **`TestCaseSerializer` / `TestCaseStudentSerializer`** — both now expose `hidden` and `learningObjectives`.
+- **Submission retrieve queryset** — prefetches `files__edit` so the new persisted edit is delivered with the submission payload.
+
+### Fixed / Infra
+
+- `pre_script` is now removed after invocation so it does not persist into subsequent test runs.
+- Autograder no longer needs the host Docker socket mounted directly on the API container.
+- Anonymous routes are rate-limited; SSO token lookups are cached.
+- Binary file detection switched from extension allow-list to encoding-based detection.
+
+---
+
 ## [3.3.0] — AI Assistance, Analytics & Capabilities
 
 ### Added

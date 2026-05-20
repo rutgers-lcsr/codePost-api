@@ -82,3 +82,51 @@ def test_partial():
         self.assertEqual(parsed[0]["name"], "Partial Credit")
         self.assertEqual(parsed[0]["functionName"], "test_partial")
         self.assertEqual(parsed[0]["points"], 5)
+
+    def test_python_hidden_and_objectives_kwargs(self):
+        script = '''
+@test(name="Reverses", points=2, hidden=True, objectives=["recursion", "lists"])
+def test_reverse():
+    return 1
+'''
+        parsed = self._parse(script, "python")
+
+        self.assertEqual(len(parsed), 1)
+        self.assertIs(parsed[0]["hidden"], True)
+        self.assertEqual(parsed[0]["objectives"], ["recursion", "lists"])
+
+    def test_python_objectives_drops_empty_strings(self):
+        # Empty string elements should be filtered, not silently auto-create blank LearningObjectives.
+        script = '''
+@test(name="x", points=1, objectives=["recursion", "", "lists"])
+def test_x():
+    return 1
+'''
+        parsed = self._parse(script, "python")
+
+        self.assertEqual(parsed[0]["objectives"], ["recursion", "lists"])
+
+    def test_codepost_directive_objectives_with_spaces(self):
+        # `@codepost objectives = a, b, c` should yield three objectives, not one.
+        script = '''
+// @codepost hidden objectives = recursion, edge-cases, lists
+test("Reverses", 2, "desc", function(){ return 1; }, 30);
+'''
+        parsed = self._parse(script, "node")
+
+        self.assertEqual(len(parsed), 1)
+        self.assertIs(parsed[0].get("hidden"), True)
+        self.assertEqual(parsed[0].get("objectives"), ["recursion", "edge-cases", "lists"])
+
+    def test_codepost_directive_objectives_terminates_at_trailing_keyword(self):
+        # `objectives=a,b hidden` should yield exactly [a, b]; "hidden" must not be folded
+        # into the final objective value.
+        script = '''
+// @codepost objectives=a,b hidden
+test("Reverses", 2, "desc", function(){ return 1; }, 30);
+'''
+        parsed = self._parse(script, "node")
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0].get("objectives"), ["a", "b"])
+        self.assertIs(parsed[0].get("hidden"), True)

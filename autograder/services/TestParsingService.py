@@ -10,9 +10,9 @@ logger = logging.getLogger(__name__)
 
 # Regex for inline codepost directives in comments preceding a test definition.
 # Supports: # @codepost hidden objectives=recursion,edge-cases
-# Works with //, #, --, and /* comment styles.
+# Works with //, #, --, /* and ` * ` (block-comment continuation) comment styles.
 _DIRECTIVE_PATTERN = re.compile(
-    r'(?://|#|--|/\*)\s*@codepost\b(.*?)(?:\*/)?$', re.MULTILINE
+    r'(?://|#|--|/\*|\*)\s*@codepost\b(.*?)(?:\*/)?$', re.MULTILINE
 )
 
 
@@ -35,7 +35,10 @@ def _parse_directives(script: str, test_start_pos: int) -> Dict[str, Any]:
             directive_text = m.group(1).strip()
             if 'hidden' in directive_text:
                 result['hidden'] = True
-            obj_match = re.search(r'objectives\s*=\s*(\S+)', directive_text)
+            # Accept both `objectives=foo,bar` and the looser `objectives = foo, bar, baz`.
+            # Each value runs up to the next comma or whitespace; the list is bounded by the
+            # first whitespace that isn't between commas (e.g. trailing `hidden` after the list).
+            obj_match = re.search(r'objectives\s*=\s*([^\s,]+(?:\s*,\s*[^\s,]+)*)', directive_text)
             if obj_match:
                 result['objectives'] = [o.strip() for o in obj_match.group(1).split(',') if o.strip()]
         elif stripped and not stripped.startswith(('#', '//', '--', '/*', '*')):
@@ -115,8 +118,8 @@ class TestParsingService:
                                 elif keyword.arg == 'objectives':
                                     if isinstance(keyword.value, ast.List):
                                         test_info['objectives'] = [
-                                            elt.value for elt in keyword.value.elts
-                                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                                            elt.value.strip() for elt in keyword.value.elts
+                                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value.strip()
                                         ]
                             
                             tests.append(test_info)
@@ -430,9 +433,18 @@ class TestParsingService:
     def _sync_test_objectives(test_case: TestCase, test_data: Dict[str, Any], assignment) -> None:
         """
         Auto-create and link LearningObjective records based on parsed objectives list.
+        Skips the M2M write entirely when the linked set hasn't changed, to avoid the
+        clear+set churn that would otherwise fire on every category save.
         """
-        objective_ids = test_data.get('objectives', [])
-        if not objective_ids:
+        objective_ids = [oid for oid in test_data.get('objectives', []) if oid and oid.strip()]
+
+        current_short_ids = set(test_case.learningObjectives.values_list('shortId', flat=True))
+        desired_short_ids = set(objective_ids)
+
+        if current_short_ids == desired_short_ids:
+            return
+
+        if not desired_short_ids:
             test_case.learningObjectives.clear()
             return
 

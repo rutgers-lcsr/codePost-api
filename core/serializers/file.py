@@ -2,21 +2,21 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
-from core.models import File, SubmissionFile, AssignmentFile, CourseFile, SubmissionFileInstructorEdit
+from core.models import File, SubmissionFile, AssignmentFile, CourseFile, SubmissionFileEdit
 from core.services.file_handlers.notebook import NotebookHandler
 from core.serializers.comment import CommentWithRubricSerializer
 
 
-class SubmissionFileInstructorEditSerializer(serializers.ModelSerializer):
+class SubmissionFileEditSerializer(serializers.ModelSerializer):
     lastEditedBy = serializers.SlugRelatedField(read_only=True, slug_field='email')
 
     class Meta:
-        model = SubmissionFileInstructorEdit
+        model = SubmissionFileEdit
         fields = ('data', 'lastEditedBy', 'created', 'modified')
         read_only_fields = fields
 
 
-class SubmissionFileInstructorEditSaveSerializer(serializers.Serializer):
+class SubmissionFileEditSaveSerializer(serializers.Serializer):
     fileId = serializers.IntegerField(required=True)
     data = serializers.CharField(required=True, trim_whitespace=False, allow_blank=True)  # type: ignore[assignment]
 
@@ -40,13 +40,13 @@ class SubmissionFileSerializer(ModelSerializerWithPOSTCheck):
     Serializer for SubmissionFile objects.
     These are files that belong to student submissions.
     """
-    instructorEdit = SubmissionFileInstructorEditSerializer(read_only=True)
+    edit = SubmissionFileEditSerializer(read_only=True)
 
     class Meta:
         model = SubmissionFile
-        fields = ('name', 'data', 'extension', 'submission', 'id', 'comments', 'path', 
-                  'hiddenBeforePublish', 'created', 'modified', 'instructorEdit')
-        read_only_fields = ('comments', 'created', 'modified', 'instructorEdit')
+        fields = ('name', 'data', 'extension', 'submission', 'id', 'comments', 'path',
+                  'hiddenBeforePublish', 'created', 'modified', 'edit')
+        read_only_fields = ('comments', 'created', 'modified', 'edit')
         POST_permissions_fields = ('submission',)
         extra_kwargs = {
             "data": {"trim_whitespace": False},
@@ -60,12 +60,12 @@ class SubmissionFileWithNestedCommentsSerializer(serializers.ModelSerializer):
     Used by the console-data bulk endpoint to eliminate N+1 fetches.
     """
     comments = CommentWithRubricSerializer(many=True, read_only=True)
-    instructorEdit = SubmissionFileInstructorEditSerializer(read_only=True)
+    edit = SubmissionFileEditSerializer(read_only=True)
 
     class Meta:
         model = SubmissionFile
         fields = ('name', 'data', 'extension', 'submission', 'id', 'comments', 'path',
-                  'hiddenBeforePublish', 'created', 'modified', 'instructorEdit')
+                  'hiddenBeforePublish', 'created', 'modified', 'edit')
         read_only_fields = fields
 
 
@@ -74,13 +74,13 @@ class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
     Serializer for SubmissionFile objects without comments field.
     Used for files-only view where students can see files but not comments.
     """
-    instructorEdit = serializers.SerializerMethodField()
+    edit = serializers.SerializerMethodField()
 
     class Meta:
         model = SubmissionFile
-        fields = ('name', 'data', 'extension', 'submission', 'id', 'path', 
-                  'hiddenBeforePublish', 'created', 'modified', 'comments', 'instructorEdit')
-        read_only_fields = ('created', 'modified', 'instructorEdit')
+        fields = ('name', 'data', 'extension', 'submission', 'id', 'path',
+                  'hiddenBeforePublish', 'created', 'modified', 'comments', 'edit')
+        read_only_fields = ('created', 'modified', 'edit')
 
     comments = serializers.SerializerMethodField()
 
@@ -88,12 +88,12 @@ class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
     def get_comments(self, obj):
         return []
 
-    @extend_schema_field(SubmissionFileInstructorEditSerializer(allow_null=True))
-    def get_instructorEdit(self, obj):
-        instructor_edit = getattr(obj, 'instructorEdit', None)
-        if instructor_edit is None:
+    @extend_schema_field(SubmissionFileEditSerializer(allow_null=True))
+    def get_edit(self, obj):
+        edit = getattr(obj, 'edit', None)
+        if edit is None:
             return None
-        return SubmissionFileInstructorEditSerializer(instructor_edit).data
+        return SubmissionFileEditSerializer(edit).data
 
 
 class SubmissionFileStudentUploadSerializer(ModelSerializerWithPOSTCheck):

@@ -217,8 +217,8 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
       ret['grader'] = None
     
     # Grade masking logic
-    # Only show grade if feedback is released or live feedback mode is on
-    can_view_feedback = assignment.feedbackReleased or assignment.liveFeedbackMode
+    # Only show grade if feedback is released or live feedback mode is on, AND grades are not hidden
+    can_view_feedback = (assignment.feedbackReleased or assignment.liveFeedbackMode) and not assignment.hideGrades
     if not can_view_feedback:
        ret['grade'] = None
 
@@ -334,7 +334,8 @@ class StudentConsoleDataSerializer(serializers.ModelSerializer):
   def to_representation(self, obj):
     ret = super().to_representation(obj)
     assignment = obj.assignment
-    can_view_feedback = assignment.feedbackReleased or assignment.liveFeedbackMode
+    # Only show grade if feedback is released or live feedback mode is on, AND grades are not hidden
+    can_view_feedback = (assignment.feedbackReleased or assignment.liveFeedbackMode) and not assignment.hideGrades
     if not can_view_feedback:
       ret['grade'] = None
     # Hide draft responses

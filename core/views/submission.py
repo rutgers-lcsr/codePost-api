@@ -5,7 +5,7 @@ from core.models import User
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionFilesOnlySerializer, SubmissionConsoleDataSerializer, StudentConsoleDataSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
-from core.serializers.file import SubmissionFileInstructorEditSaveSerializer, SubmissionFileInstructorEditSerializer
+from core.serializers.file import SubmissionFileEditSaveSerializer, SubmissionFileEditSerializer
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -30,7 +30,7 @@ from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, is
 from core.permissions.capabilities import Capability, compute_submission_capabilities, require_capability
 from core.services.audit import record_audit_event
 
-from core.models import SubmissionFileInstructorEdit
+from core.models import SubmissionFileEdit, LearningObjective
 from django.utils.timezone import now
 
 
@@ -420,37 +420,86 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     submissionTests = SubmissionTestSerializer(tests, many=True, context={"request": request}).data
 
-    isStudentView = isStudentOfSub(user, submission) and not (isStaffOfSub(user, submission) and not isStudentMode)
+    # "Student view" = anyone who shouldn't see hidden-test internals: actual students,
+    # plus staff who explicitly opted into isStudentMode.
+    isStudentView = not (isStaffOfSub(user, submission) and not isStudentMode)
 
-    # For student views, sanitize hidden tests
+    # For student views, replace each hidden-test row with one synthetic per-category
+    # summary so the student gets feedback (pass count + point impact) without seeing
+    # the underlying test names, logs, or explanations.
     if isStudentView:
+        tests_by_id = {t.id: t for t in tests}
+        hidden_by_category: dict[int, list] = {}
+        visible_rows = []
         for st_data in submissionTests:
-            # Find the matching submission test to check hidden flag
-            matching = [t for t in tests if t.id == st_data.get('id')]
-            if matching and matching[0].testCase.hidden:
-                st_data['logs'] = ''
-                st_data['results'] = None
+            st = tests_by_id.get(st_data.get('id'))
+            if st is not None and st.testCase.hidden:
+                hidden_by_category.setdefault(st.testCase.testCategory_id, []).append(st)
+            else:
+                visible_rows.append(st_data)
 
-    # Compute learning objective summary for all views
-    from core.models import LearningObjective
-    objectives = LearningObjective.objects.filter(assignment=assignment)
+        synthetic_rows = []
+        for cat_id, hidden_tests in hidden_by_category.items():
+            passed_count = sum(1 for t in hidden_tests if t.passed)
+            total_count = len(hidden_tests)
+            points_earned = sum((t.score or 0) for t in hidden_tests)
+            points_total = sum((t.maxScore or 0) for t in hidden_tests)
+            synthetic_rows.append({
+                # Negative id sentinels distinguish synthetic summary rows from real
+                # SubmissionTests; clients should treat hiddenSummary != null as the
+                # source of truth, not the id.
+                'id': -cat_id,
+                'submission': submission.id,
+                'testCase': None,
+                'testCategory': cat_id,
+                'logs': '',
+                'passed': passed_count == total_count and total_count > 0,
+                'created': None,
+                'modified': None,
+                'isError': False,
+                'score': points_earned,
+                'maxScore': points_total,
+                'results': None,
+                'hiddenSummary': {
+                    'label': 'Hidden tests',
+                    'passedCount': passed_count,
+                    'totalCount': total_count,
+                    'pointsEarned': points_earned,
+                    'pointsTotal': points_total,
+                },
+            })
+        submissionTests = visible_rows + synthetic_rows
+
+    # Compute learning objective summary for all views.
+    # Prefetch testCases.id once per objective rather than re-querying inside the loop.
+    objectives = LearningObjective.objects.filter(assignment=assignment).prefetch_related('testCases')
     objective_summary = []
     for obj in objectives:
-        linked_test_ids = set(obj.testCases.values_list('id', flat=True))
-        # Find submission test results for linked test cases
+        linked_test_ids = {tc.id for tc in obj.testCases.all()}
+        # Submission test results restricted to this objective's linked test cases.
         linked_results = [t for t in tests if t.testCase.id in linked_test_ids]
 
-        # Compute score based on aggregation mode
+        # Skip objectives that have no linked test results in this submission — they would
+        # display as permanently "not met / 0.0" with no signal, which is misleading.
         if not linked_results:
-            score = 0.0
-            met = False
-        elif obj.aggregationMode == 'any':
-            met = any(t.passed for t in linked_results)
+            continue
+
+        passed_count = sum(1 for t in linked_results if t.passed)
+        total_count = len(linked_results)
+        all_passed = passed_count == total_count
+        any_failed = passed_count < total_count
+
+        # Compute score + met. Each mode is intentionally distinct:
+        #   - all:             binary; met iff every linked test passes.
+        #   - any:             binary; met iff at least one linked test passes.
+        #   - percentage:      fractional pass rate; met iff > 50% pass.
+        #   - points_weighted: fractional points share; met iff > 50% of points earned.
+        if obj.aggregationMode == 'any':
+            met = passed_count > 0
             score = 1.0 if met else 0.0
         elif obj.aggregationMode == 'percentage':
-            passed_count = sum(1 for t in linked_results if t.passed)
-            score = passed_count / len(linked_results)
-            met = score >= 1.0
+            score = passed_count / total_count
+            met = score > 0.5
         elif obj.aggregationMode == 'points_weighted':
             total_points = sum(t.testCase.pointsPass for t in linked_results)
             if total_points > 0:
@@ -458,13 +507,10 @@ class SubmissionViewSet(ListProtectedViewSet):
                 score = earned_points / total_points
             else:
                 score = 0.0
-            met = score >= 1.0
+            met = score > 0.5
         else:  # 'all' (default)
-            met = all(t.passed for t in linked_results)
-            score = 1.0 if met else sum(1 for t in linked_results if t.passed) / len(linked_results)
-
-        all_passed = len(linked_results) > 0 and all(t.passed for t in linked_results)
-        any_failed = any(not t.passed for t in linked_results)
+            met = all_passed
+            score = 1.0 if met else 0.0
 
         # For student views, apply visibility mode filtering
         if isStudentView:
@@ -666,7 +712,7 @@ class SubmissionViewSet(ListProtectedViewSet):
           'files__comments__author',
           'files__comments__rubricComment',
           'files__comments__tags',
-          'files__instructorEdit',
+          'files__edit',
           'tests',
       ).get(id=pk)
     except Submission.DoesNotExist:
@@ -693,18 +739,26 @@ class SubmissionViewSet(ListProtectedViewSet):
     return Response(serializer.data)
 
   @extend_schema(
-      request=SubmissionFileInstructorEditSaveSerializer,
-      responses=SubmissionFileInstructorEditSerializer,
-      description="Create or update a persisted instructor edit for a submission file. Staff with grade_submission only.",
+      request=SubmissionFileEditSaveSerializer,
+      responses=SubmissionFileEditSerializer,
+      description=(
+        "Create or update a persisted edit for a submission file. "
+        "Course admins may always save edits; graders may save only when the "
+        "assignment's `gradersCanEditSubmissions` flag is True."
+      ),
   )
   @action(detail=True, methods=['PATCH'], permission_classes=[IsAuthenticated])
-  def saveInstructorEdit(self, request, pk=None):
-    submission = self.get_object()
+  def saveFileEdit(self, request, pk=None):
+    submission: Submission = self.get_object()
     user = request.user
 
     require_capability(user, Capability.GRADE_SUBMISSION, submission)
 
-    serializer = SubmissionFileInstructorEditSaveSerializer(data=request.data)
+    course = submission.assignment.course
+    if not isCourseAdmin(user, course) and not submission.assignment.gradersCanEditSubmissions:
+      return returnForbidden()
+
+    serializer = SubmissionFileEditSaveSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
     file_id = serializer.validated_data['fileId']
@@ -716,15 +770,12 @@ class SubmissionViewSet(ListProtectedViewSet):
       raise serializers.ValidationError({'fileId': 'That file does not belong to this submission.'})
 
     with transaction.atomic():
-      instructor_edit, _created = SubmissionFileInstructorEdit.objects.get_or_create(
+      edit, _created = SubmissionFileEdit.objects.update_or_create(
           file=submission_file,
           defaults={'data': data, 'lastEditedBy': user},
       )
-      instructor_edit.data = data
-      instructor_edit.lastEditedBy = user
-      instructor_edit.save()
 
-    return Response(SubmissionFileInstructorEditSerializer(instructor_edit).data, status.HTTP_200_OK)
+    return Response(SubmissionFileEditSerializer(edit).data, status.HTTP_200_OK)
 
   @extend_schema(
       responses=SuggestedCommentSerializer(many=True),

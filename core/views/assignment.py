@@ -602,6 +602,12 @@ class AssignmentViewSet(ListProtectedViewSet):
     else:
       test_cases = TestCase.objects.filter(testCategory__assignment=assignment, exposed=True).exclude(type="external")
 
+    # Hidden test cases must not be visible to students, but graders and instructors do
+    # need to see them (so they can read the description, run them from the code console,
+    # and reason about the grade). Filter on isCourseStaff so anyone below grader is excluded.
+    if not isCourseStaff(user, assignment.course):
+      test_cases = test_cases.exclude(hidden=True)
+
     test_categories = list(set(map(lambda test_case: test_case.testCategory, test_cases)))  # remove duplicates
 
     case_serializer = TestCaseStudentSerializer(test_cases, many=True, context={'request': request})

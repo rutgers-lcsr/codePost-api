@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='SubmissionFileInstructorEdit',
+            name='SubmissionFileEdit',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('created', models.DateTimeField(default=now, editable=False)),
@@ -24,15 +24,15 @@ class Migration(migrations.Migration):
                     'data',
                     models.TextField(
                         default='',
-                        help_text='The persisted instructor-edited contents for this submission file.',
+                        help_text='The persisted edited contents for this submission file (set by an instructor or, if allowed, a grader).',
                     ),
                 ),
                 (
                     'file',
                     models.OneToOneField(
-                        help_text='The submission file this persisted instructor edit belongs to.',
+                        help_text='The submission file this persisted edit belongs to.',
                         on_delete=CASCADE,
-                        related_name='instructorEdit',
+                        related_name='edit',
                         to='core.submissionfile',
                     ),
                 ),
@@ -40,7 +40,7 @@ class Migration(migrations.Migration):
                     'lastEditedBy',
                     models.ForeignKey(
                         blank=True,
-                        help_text='The most recent user to save this persisted instructor edit.',
+                        help_text='The most recent user to save this persisted edit.',
                         null=True,
                         on_delete=SET_NULL,
                         related_name='submission_file_edits',
