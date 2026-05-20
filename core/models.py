@@ -989,8 +989,6 @@ class SubmissionFile(File):
 class SubmissionFileEdit(BaseModel):
   if TYPE_CHECKING:
     id: int
-    file: SubmissionFile
-    lastEditedBy: User | None
 
   file: models.OneToOneField[SubmissionFile, SubmissionFile] = models.OneToOneField(
     SubmissionFile,
