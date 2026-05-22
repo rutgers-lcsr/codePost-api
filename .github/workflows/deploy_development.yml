@@ -28,6 +28,7 @@ jobs:
             API_PASSWORD: ${{ secrets.API_PASSWORD }}
             NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
             NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
+            DEV_DOCKER: ${{ vars.DEV_DOCKER }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
@@ -57,6 +58,7 @@ jobs:
         runs-on: development-api
         env:
             DEBUG: true
+            DEV_DOCKER: true
             API_URL: ${{ vars.API_URL }}
             CLIENT_URL: ${{ vars.CLIENT_URL }}
             DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
@@ -116,6 +118,7 @@ jobs:
         runs-on: development-workers
         env:
             DEBUG: true
+            DEV_DOCKER: true
             API_URL: ${{ vars.API_URL }}
             CLIENT_URL: ${{ vars.CLIENT_URL }}
             DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
@@ -135,6 +138,7 @@ jobs:
               run: |
                   cat <<EOF > .env
                   DEBUG=${{ env.DEBUG }}
+                  DEV_DOCKER=${{ env.DEV_DOCKER }}
                   API_URL=${{ vars.API_URL }}
                   CLIENT_URL=${{ vars.CLIENT_URL }}
                   SECRET_KEY=${{ secrets.SECRET_KEY }}
