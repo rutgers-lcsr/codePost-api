@@ -555,6 +555,11 @@ class SubmissionTestPermissions(TemplatePermission):
             if isStaffOfSub(user, submission):
                 return True
             if isStudentOfSub(user, submission):
+                # Hidden tests are never directly readable by students; they receive
+                # per-category synthetic summaries via /submissions/{id}/testResults/.
+                testCase = obj.testCase
+                if testCase is not None and testCase.hidden:
+                    return False
                 return True
             return False
 

@@ -1,9 +1,10 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.http import HttpResponseRedirect, JsonResponse
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from core.serializers.sso import CheckSSOAvailabilityResponseSerializer, MainOrgSSOConfigSerializer, OrgSSOConfigSerializer
+from core.throttles import AuthAnonRateThrottle
 from django.conf import settings
 from django.core.cache import cache
 from core.models import Organization, User
@@ -59,6 +60,7 @@ def get_service_url(request, provider, org_id=None):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def initiate_sso(request, provider):
     """
     Redirects user to the SSO provider's login page.
@@ -176,6 +178,7 @@ def initiate_sso(request, provider):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def sso_callback(request, provider):
     """
     Handles the callback from the SSO provider.
@@ -412,6 +415,7 @@ def sso_callback(request, provider):
 @extend_schema(responses={200: CheckSSOAvailabilityResponseSerializer})
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def check_sso_availability(request):
     """
     Checks if the given email belongs to an SSO-enabled organization.
@@ -453,6 +457,7 @@ def check_sso_availability(request):
 @extend_schema(responses={200: MainOrgSSOConfigSerializer})
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def get_sso_config(request):
     """
     Returns SSO configuration for the main/default organization.
@@ -478,6 +483,7 @@ def get_sso_config(request):
 @extend_schema(responses={200: OrgSSOConfigSerializer})
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def get_org_sso_config(request, shortname):
     """
     Returns SSO configuration for a specific organization by shortname.

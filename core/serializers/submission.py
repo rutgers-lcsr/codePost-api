@@ -301,6 +301,15 @@ class SubmissionConsoleDataSerializer(serializers.ModelSerializer):
     tz = pytz.timezone(obj.assignment.course.timezone)
     return obj.dateEdited.astimezone(tz)
 
+  def to_representation(self, obj):
+    ret = super().to_representation(obj)
+    # Mirror retrieve's anonymization: when the caller cannot view unanonymized
+    # submissions, strip student identities. The grader is the viewer themselves
+    # so it stays.
+    if self.context.get('anonymize'):
+      ret['students'] = []
+    return ret
+
 
 class StudentConsoleDataSerializer(serializers.ModelSerializer):
   """

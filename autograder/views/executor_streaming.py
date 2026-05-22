@@ -9,6 +9,7 @@ which publishes progress to a Redis pub/sub channel; this view subscribes and re
 
 import json
 import logging
+import time
 import uuid
 from typing import Generator
 
@@ -179,8 +180,16 @@ class ExecuteFileStreaming(GenericAPIView):
             
             # Dispatch execution to Celery worker and relay via Redis pub/sub
             channel = f"exec:stream:{uuid.uuid4().hex}"
-            
+
             from autograder.tasks import run_file_streaming_task, _get_redis_client
+
+            # Subscribe BEFORE dispatching the task. Redis pub/sub does not queue
+            # messages for late subscribers, so any event published between delay()
+            # and subscribe() would be silently lost.
+            r = _get_redis_client()
+            pubsub = r.pubsub()
+            pubsub.subscribe(channel)
+
             run_file_streaming_task.delay(
                 channel=channel,
                 file_id=file_obj.id,
@@ -190,16 +199,22 @@ class ExecuteFileStreaming(GenericAPIView):
                 test_code=test_code,
                 code_override=code_override,
             )
-            
-            # Subscribe to the Redis channel and relay messages
-            r = _get_redis_client()
-            pubsub = r.pubsub()
-            pubsub.subscribe(channel)
-            
+
+            # Overall deadline: task soft-limit + buffer for queue wait and Redis hop.
+            # If the worker dies or the task hangs, we must not leave the client
+            # connection open indefinitely.
+            deadline = time.monotonic() + timeout + 60
+
             try:
-                # Relay messages from worker until _done sentinel
-                for message in pubsub.listen():
-                    if message["type"] != "message":
+                while True:
+                    if time.monotonic() >= deadline:
+                        logger.warning(f"[ExecuteFileStreaming] Worker timeout on channel {channel}")
+                        yield self._sse_message("error", {"error": "Worker timeout — no response from executor."})
+                        break
+                    message = pubsub.get_message(ignore_subscribe_messages=True, timeout=5.0)
+                    if message is None:
+                        continue
+                    if message.get("type") != "message":
                         continue
                     payload = json.loads(message["data"])
                     event = payload["event"]

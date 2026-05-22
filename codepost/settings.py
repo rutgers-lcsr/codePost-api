@@ -247,13 +247,16 @@ See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python)
 # https://pypi.org/project/django-cors-headers/
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG
+# Allow DEBUG-mode dev inside Docker only when the operator opts in explicitly via
+# DEV_DOCKER=TRUE. Without that opt-in we fail loud, so a prod image that ships
+# with DEBUG=TRUE by mistake cannot silently allow every origin.
 if CORS_ALLOW_ALL_ORIGINS and DOCKER:
-    import warnings
-    warnings.warn(
-        "CORS_ALLOW_ALL_ORIGINS is True in a Docker environment. "
-        "Set DEBUG=FALSE or configure CORS_ALLOWED_ORIGINS for production.",
-        stacklevel=1,
-    )
+    if os.environ.get("DEV_DOCKER", "FALSE").upper() != "TRUE":
+        raise ImproperlyConfigured(
+            "CORS_ALLOW_ALL_ORIGINS is True in a Docker environment. "
+            "Set DEBUG=FALSE for production, or set DEV_DOCKER=TRUE to acknowledge "
+            "this is an intentional Docker-based dev environment."
+        )
 CORS_ALLOWED_ORIGINS = [CLIENT_URL, API_URL]
 _extra_cors = os.environ.get("EXTRA_CORS_ORIGINS", "")
 if _extra_cors:

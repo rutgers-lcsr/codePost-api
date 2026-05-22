@@ -721,6 +721,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     course = submission.assignment.course
 
     # Use the same permission/serializer logic as retrieve
+    context = {'request': request}
     if isCourseAdmin(user, course):
       serializer_class = SubmissionConsoleDataSerializer
     elif isCourseStaff(user, course):
@@ -730,12 +731,13 @@ class SubmissionViewSet(ListProtectedViewSet):
         serializer_class = SubmissionConsoleDataSerializer
       else:
         serializer_class = SubmissionConsoleDataSerializer
+        context['anonymize'] = True
     elif isStudentOfSub(user, submission):
       serializer_class = StudentConsoleDataSerializer
     else:
       return returnForbidden()
 
-    serializer = serializer_class(submission, context={'request': request})
+    serializer = serializer_class(submission, context=context)
     return Response(serializer.data)
 
   @extend_schema(
