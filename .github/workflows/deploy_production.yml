@@ -7,7 +7,8 @@
 # Release flow:
 #   1. Run "Create Release Branch" workflow to cut release/<version> from main
 #   2. Test on the release branch (CI runs automatically)
-#   3. Run THIS workflow with ref=release/<version> and version=<version>
+#   3. Run THIS workflow with "Use workflow from" set to release/<version>
+#      (the branch name itself determines the version tag)
 #   4. This deploys to production, creates a git tag v<version>, creates a
 #      GitHub Release, and triggers SDK regeneration in codePost-ui and
 #      codepost-python via repository_dispatch
@@ -15,7 +16,8 @@
 # Hotfix flow:
 #   1. Fix the bug on main first
 #   2. Cherry-pick the fix onto the active release branch
-#   3. Re-run THIS workflow with the same ref and an incremented patch version
+#   3. Bump the release branch to release/<new-version> (or re-cut) and re-run
+#      this workflow against it
 #
 # Runners: production-data, production-api, production-workers, testing-codepost
 
@@ -23,20 +25,30 @@ name: Deploy to Production Server
 
 on:
     workflow_dispatch:
-        inputs:
-            ref:
-                description: "Branch or tag to deploy (e.g., release/3.4.0)"
-                required: true
-            version:
-                description: "Version tag to create after deploy (e.g., 3.4.0)"
-                required: true
 
 concurrency:
     group: deploy-production-api
     cancel-in-progress: false
 
 jobs:
+    prepare:
+        runs-on: testing-codepost
+        outputs:
+            version: ${{ steps.meta.outputs.version }}
+        steps:
+            - name: Validate branch and derive version
+              id: meta
+              run: |
+                  if [[ "${GITHUB_REF_NAME}" != release/* ]]; then
+                      echo "::error::Production deploys must run from a release/<version> branch. Got: ${GITHUB_REF_NAME}"
+                      exit 1
+                  fi
+                  version="${GITHUB_REF_NAME#release/}"
+                  echo "version=${version}" >> "$GITHUB_OUTPUT"
+                  echo "Deploying ${GITHUB_REF_NAME} as v${version}"
+
     deploy_data:
+        needs: [prepare]
         environment: production
         runs-on: production-data
         env:
@@ -50,8 +62,6 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
-              with:
-                  ref: ${{ inputs.ref }}
 
             - name: Set up .env
               run: |
@@ -94,8 +104,6 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
-              with:
-                  ref: ${{ inputs.ref }}
 
             - name: Set up Certs
               run: |
@@ -151,8 +159,6 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
-              with:
-                  ref: ${{ inputs.ref }}
 
             - name: Set up .env
               run: |
@@ -187,29 +193,30 @@ jobs:
               run: echo "Workers deployment to production server successful!"
 
     tag-and-notify:
-        needs: [deploy_workers]
+        needs: [prepare, deploy_workers]
         runs-on: testing-codepost
         permissions:
             contents: write
+        env:
+            VERSION: ${{ needs.prepare.outputs.version }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
               with:
-                  ref: ${{ inputs.ref }}
                   fetch-depth: 0
 
             - name: Create and push version tag
               run: |
-                  git tag "v${{ inputs.version }}"
-                  git push origin "v${{ inputs.version }}"
+                  git tag "v${VERSION}"
+                  git push origin "v${VERSION}"
 
             - name: Create GitHub Release
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  gh release create "v${{ inputs.version }}" \
-                    --target "${{ inputs.ref }}" \
-                    --title "v${{ inputs.version }}" \
+                  gh release create "v${VERSION}" \
+                    --target "${GITHUB_REF_NAME}" \
+                    --title "v${VERSION}" \
                     --generate-notes
 
             - name: Trigger TypeScript client update
@@ -217,9 +224,9 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
               run: |
-                  gh api repos/${{ github.repository_owner }}/codePost-ui/dispatches \
+                  gh api "repos/${{ github.repository_owner }}/codePost-ui/dispatches" \
                     -f event_type=api-release \
-                    -f 'client_payload[version]=v${{ inputs.version }}' \
+                    -f "client_payload[version]=v${VERSION}" \
                     -f 'client_payload[schema_url]=https://codepost-api.cs.rutgers.edu/api/schema/'
 
             - name: Trigger Python SDK update
@@ -227,7 +234,7 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
               run: |
-                  gh api repos/${{ github.repository_owner }}/codepost-python/dispatches \
+                  gh api "repos/${{ github.repository_owner }}/codepost-python/dispatches" \
                     -f event_type=api-release \
-                    -f 'client_payload[version]=v${{ inputs.version }}' \
+                    -f "client_payload[version]=v${VERSION}" \
                     -f 'client_payload[schema_url]=https://codepost-api.cs.rutgers.edu/api/schema/'

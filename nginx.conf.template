@@ -1,6 +1,9 @@
 events {}
 
 http {
+    # Docker DNS — paired with $var in proxy_pass to force runtime re-resolution.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
     map $http_upgrade $connection_upgrade {
         default upgrade;
         '' close;
@@ -17,12 +20,13 @@ http {
         ssl_certificate /etc/ssl/certs/fullchain.pem;
         ssl_certificate_key /etc/ssl/certs/privkey.pem;
         client_max_body_size 6M;
-        
-        
+
+
         error_log /var/log/nginx/error.log debug;
 
         location /ws/ {
-            proxy_pass http://codepost-api:8000;
+            set $upstream_ws codepost-api;
+            proxy_pass http://$upstream_ws:8000;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
@@ -35,7 +39,8 @@ http {
 
         location / {
             # Let Django handle CORS - don't add CORS headers in nginx
-            proxy_pass http://codepost-api:8000;
+            set $upstream codepost-api;
+            proxy_pass http://$upstream:8000;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
