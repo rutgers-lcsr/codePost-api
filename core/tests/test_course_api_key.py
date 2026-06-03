@@ -310,6 +310,91 @@ class TestOTTCourseScoping:
 
 
 # ---------------------------------------------------------------------------
+# Jupyter OTT flow (end-to-end)
+# ---------------------------------------------------------------------------
+
+class TestJupyterOTTFlow:
+    """End-to-end OTT flow used by Jupyter servers: a course admin mints an OTT
+    for a user, the (unauthenticated) Jupyter server exchanges it for a
+    long-lived JWT, then uses that JWT to act as the user."""
+
+    def test_full_jupyter_flow(self, course_a, admin_of_a, student_of_a, api_client):
+        # 1. Course admin mints an OTT for the student.
+        api_client.force_authenticate(user=admin_of_a)
+        gen = api_client.post(
+            "/ott/generate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        assert gen.status_code == status.HTTP_200_OK
+        assert gen.data["token"]
+        assert gen.data["expires_at"]
+        ott_token = gen.data["token"]
+
+        # 2. The Jupyter server (unauthenticated) exchanges the OTT for a JWT.
+        jupyter = APIClient()
+        val = jupyter.post(
+            "/ott/validate/",
+            {"token": ott_token},
+            format="json",
+        )
+        assert val.status_code == status.HTTP_200_OK
+        # The returned user data identifies the student.
+        assert val.data["id"] == student_of_a.id
+        assert val.data["email"] == student_of_a.email
+        jwt_str = val.data["token"]
+
+        # The JWT identifies the student, carries no course scope, and is long-lived.
+        import jwt as pyjwt
+        from datetime import datetime, timezone, timedelta
+
+        payload = pyjwt.decode(jwt_str, options={"verify_signature": False})
+        assert payload["user_id"] == student_of_a.id
+        assert "course_id" not in payload
+        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        assert exp - datetime.now(timezone.utc) > timedelta(days=300)
+
+        # 3. The Jupyter server uses the JWT to act as the student.
+        jupyter.credentials(HTTP_AUTHORIZATION=f"Bearer {jwt_str}")
+        resp = jupyter.get(f"/courses/{course_a.id}/")
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_ott_is_single_use(self, course_a, admin_of_a, student_of_a, api_client):
+        """An OTT may only be exchanged once; a replay is rejected."""
+        api_client.force_authenticate(user=admin_of_a)
+        gen = api_client.post(
+            "/ott/generate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        ott_token = gen.data["token"]
+
+        jupyter = APIClient()
+        first = jupyter.post("/ott/validate/", {"token": ott_token}, format="json")
+        assert first.status_code == status.HTTP_200_OK
+
+        second = jupyter.post("/ott/validate/", {"token": ott_token}, format="json")
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_generate_requires_permission(self, course_a, student_of_a, api_client):
+        """A non-admin cannot mint an OTT for another user."""
+        api_client.force_authenticate(user=student_of_a)
+        other = course_a.courseAdmins.first()
+        resp = api_client.post(
+            "/ott/generate/",
+            {"username": other.username},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_validate_invalid_token_rejected(self, db):
+        """An unknown OTT is rejected."""
+        jupyter = APIClient()
+        resp = jupyter.post("/ott/validate/", {"token": "not-a-real-token"}, format="json")
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+
+# ---------------------------------------------------------------------------
 # Impersonation → Course-scoped JWT
 # ---------------------------------------------------------------------------
 
