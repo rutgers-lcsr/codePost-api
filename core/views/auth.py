@@ -283,7 +283,7 @@ def validate_one_time_token(request):
 
   # Propagate course scope from the OTT into the JWT
   ott_course_id = token_obj.course_id if token_obj.course_id else None
-  jwt_token = JWTSerializer.get_token(user, course_id=ott_course_id)
+  jwt_token = JWTSerializer.get_token(user, never_expire=True, course_id=ott_course_id)
 
   data = serializer.data
   data['token'] = str(jwt_token)

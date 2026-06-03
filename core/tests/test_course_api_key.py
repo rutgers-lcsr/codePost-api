@@ -246,6 +246,34 @@ class TestOTTCourseScoping:
         resp = client2.get(f"/courses/{course_a.id}/")
         assert resp.status_code == status.HTTP_200_OK
 
+    def test_ott_validated_jwt_is_long_lived(self, api_client, raw_key_a, student_of_a):
+        """The JWT issued from an OTT must be long-lived (≈1 year) for Jupyter sessions,
+        not the SimpleJWT 5-minute default. Regression guard for the dropped never_expire."""
+        import jwt as pyjwt
+        from datetime import datetime, timezone, timedelta
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        gen_resp = api_client.post(
+            "/ott/generate/",
+            {"username": student_of_a.username},
+            format="json",
+        )
+        ott_token = gen_resp.data["token"]
+
+        client2 = APIClient()
+        val_resp = client2.post(
+            "/ott/validate/",
+            {"token": ott_token},
+            format="json",
+        )
+        assert val_resp.status_code == status.HTTP_200_OK
+        jwt_str = val_resp.data["token"]
+
+        payload = pyjwt.decode(jwt_str, options={"verify_signature": False})
+        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        # Should be far in the future (much longer than the 5-min default).
+        assert exp - datetime.now(timezone.utc) > timedelta(days=300)
+
     def test_ott_scoped_jwt_blocked_on_other_course(self, course_a, course_b, api_client, raw_key_a, student_of_a):
         """A course-scoped JWT obtained via OTT should not access another course."""
         api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
