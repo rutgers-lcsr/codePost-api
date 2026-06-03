@@ -359,8 +359,12 @@ class TestJupyterOTTFlow:
         resp = jupyter.get(f"/courses/{course_a.id}/")
         assert resp.status_code == status.HTTP_200_OK
 
-    def test_ott_is_single_use(self, course_a, admin_of_a, student_of_a, api_client):
-        """An OTT may only be exchanged once; a replay is rejected."""
+    def test_ott_is_single_use(self, course_a, admin_of_a, student_of_a, api_client, monkeypatch):
+        """An OTT may only be exchanged once; a replay is rejected.
+
+        Pin DEBUG=False — the validate view deliberately allows OTT reuse in
+        debug mode, so the single-use guarantee only holds in production."""
+        monkeypatch.setattr("core.views.auth.DEBUG", False)
         api_client.force_authenticate(user=admin_of_a)
         gen = api_client.post(
             "/ott/generate/",
