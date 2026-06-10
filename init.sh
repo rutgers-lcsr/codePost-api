@@ -23,7 +23,8 @@ from django.db import OperationalError
 
 try:
     username = "${API_USER}"
-    email = "${API_USER}" + "@example.com"
+    # API_USER may already be an email address (install.sh prompts for one)
+    email = username if "@" in username else username + "@example.com"
     password = "${API_PASSWORD}"
 
     if not User.objects.filter(username=username).exists():

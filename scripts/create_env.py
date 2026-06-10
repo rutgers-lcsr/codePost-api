@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import os
 import secrets
 import sys
 from pathlib import Path
@@ -9,6 +11,11 @@ from pathlib import Path
 
 def random_secret() -> str:
     return secrets.token_urlsafe(48)
+
+
+def random_fernet_key() -> str:
+    # FIELD_ENCRYPTION_KEY must be a valid Fernet key: urlsafe base64 of 32 bytes.
+    return base64.urlsafe_b64encode(os.urandom(32)).decode()
 
 
 def prompt_with_default(prompt: str, default: str, non_interactive: bool) -> str:
@@ -78,7 +85,7 @@ def main() -> int:
     print(f"[env] Creating {output_path}")
 
     default_secret_key = random_secret()
-    default_field_key = random_secret()
+    default_field_key = random_fernet_key()
     default_worker_secret = random_secret()
 
     debug = "False"
