@@ -2091,6 +2091,7 @@ class AIUsageRecord(BaseModel):
       ('suggested_comments', 'Suggested Comments'),
       ('submission_summary', 'Submission Summary'),
       ('assignment_description', 'Assignment Description'),
+      ('quiz_generation', 'Quiz Question Suggestions'),
       ('code_review', 'Code Review'),
       ('feedback', 'Feedback'),
       ('other', 'Other'),
@@ -2706,3 +2707,451 @@ class CourseAPIKey(BaseModel):
 
   def __str__(self):
     return f"CourseAPIKey '{self.name}' for course {self.course_id}"
+
+
+############# Quizzes #############################################################
+# Phase 1 (authoring): instructors create/manage quiz questions, reusable question
+# banks, and quizzes; import from Canvas (QTI); attach a quiz to an assignment; and
+# get AI-suggested questions (mirrors SuggestedComment). No student-taking yet.
+
+# Where a quiz record originated. Pure provenance — staff-internal, never restricts
+# editing and never surfaced to students.
+QUIZ_SOURCE_CHOICES = [
+    ('manual', 'Manually authored'),
+    ('imported', 'Imported'),
+    ('ai', 'Accepted from an AI suggestion'),
+]
+
+QUESTION_TYPE_CHOICES = [
+    ('multiple_choice', 'Multiple Choice (one correct)'),
+    ('multiple_answers', 'Multiple Answers (several correct)'),
+    ('true_false', 'True / False'),
+    ('short_answer', 'Short Answer'),
+    ('essay', 'Essay'),
+    ('numerical', 'Numerical'),
+    ('code', 'Code'),
+]
+
+
+class QuestionBank(BaseModel):
+  """A course-level pool of quiz questions. Each question belongs to exactly one bank
+  (see Question.bank); reusing a question elsewhere copies it."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    questions: RelatedManager[Question]
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="questionBanks", help_text=("The related course_id."))
+  name = models.CharField(max_length=128, help_text=("The name of the question bank."))
+  description = models.TextField(blank=True, help_text=("Optional description of the bank."))
+  assignments = models.ManyToManyField('Assignment', related_name="questionBanks", blank=True,
+      help_text=("Assignments this bank serves. Auto-added when the bank is used in a quiz attached "
+                 "to an assignment; editable by instructors. Used as AI-generation context."))
+  source = models.CharField(max_length=16, choices=QUIZ_SOURCE_CHOICES, default='manual',
+      help_text=("Where this bank originated (staff-internal provenance)."))
+  createdBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="created_question_banks", help_text=("The staff user who created this bank."))
+
+  class Meta:
+    unique_together = ('course', 'name')
+    ordering = ('name',)
+
+  def __str__(self):
+    return f"QuestionBank '{self.name}' (course {self.course_id})"
+
+
+class Question(BaseModel):
+  """A reusable quiz question that lives in exactly one bank (and may be used in
+  multiple quizzes via QuizQuestion). 'Reusing' a question in another bank is a copy."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    bank: QuestionBank
+    choices: RelatedManager[QuestionChoice]
+    quizMemberships: RelatedManager[QuizQuestion]
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="questions", help_text=("The related course_id (mirrors bank.course)."))
+  bank: QuestionBank = models.ForeignKey(QuestionBank, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="questions", help_text=("The bank this question belongs to (exactly one)."))
+  questionType = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES,
+      default='multiple_choice', help_text=("The type of question."))
+  text = models.TextField(help_text=("The question stem/prompt — single font (may contain HTML from Canvas)."))
+  description = models.TextField(blank=True, help_text=(
+      "Optional Markdown description shown beneath the stem (rich content: code blocks, lists, formatting)."))
+  points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
+      help_text=("Point value of the question."))
+  generalFeedback = models.TextField(blank=True, help_text=("Feedback shown regardless of answer."))
+  # Code-question fields (used only when questionType == 'code').
+  language = models.CharField(max_length=25, blank=True, null=True,
+      help_text=("For code questions: the language (matches Environment.language values). "
+                 "When null, resolve from the attached assignment's environment."))
+  starterCode = models.TextField(blank=True, null=True,
+      help_text=("For code questions: optional starter code shown to students."))
+  referenceSolution = models.TextField(blank=True, null=True,
+      help_text=("For code questions: optional reference solution (authoring-only, not auto-graded)."))
+  source = models.CharField(max_length=16, choices=QUIZ_SOURCE_CHOICES, default='manual',
+      help_text=("Where this question originated (staff-internal provenance)."))
+  createdBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="created_questions", help_text=("The staff user who authored/accepted this question."))
+  metadata = JSONField(default=dict, blank=True,
+      help_text=("Staff-internal metadata (Canvas IDs, AI provenance). Never shown to students."))
+
+  class Meta:
+    ordering = ('id',)
+
+  def __str__(self):
+    return f"Question [{self.questionType}] (course {self.course_id})"
+
+
+class QuestionChoice(BaseModel):
+  """An answer option for a question. For short_answer/numerical the accepted answers
+  are stored as isCorrect=True choices; essay and code questions have no choices."""
+  if TYPE_CHECKING:
+    id: int
+    question: Question
+
+  question: Question = models.ForeignKey(Question, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="choices", help_text=("The related question_id."))
+  text = models.TextField(help_text=("The choice text (or accepted answer value)."))
+  isCorrect = models.BooleanField(default=False, help_text=("Whether this choice is a correct answer."))
+  sortKey = models.IntegerField(default=0, help_text=("Order of this choice within the question."))
+  feedback = models.TextField(blank=True, help_text=("Optional per-choice feedback."))
+
+  course = property(lambda self: self.question.course)
+
+  class Meta:
+    ordering = ('sortKey', 'id')
+
+  def __str__(self):
+    return f"QuestionChoice (question {self.question_id})"
+
+
+class Quiz(BaseModel):
+  """An authoring container of questions. Optionally attached to one assignment."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    assignment: Assignment | None
+    quizQuestions: RelatedManager[QuizQuestion]
+    questionGroups: RelatedManager[QuizQuestionGroup]
+
+  ASSIGNMENT_TRIGGER_CHOICES = [
+      ('during', 'During the assignment'),
+      ('after_assignment', 'After the assignment closes'),
+      ('after_submission', 'After the student submits'),
+      ('after_feedback', 'After feedback is released'),
+  ]
+  SHOW_ANSWERS_CHOICES = [
+      ('never', 'Never'),
+      ('after_submit', 'After submitting'),
+      ('after_close', 'After the quiz closes'),
+  ]
+  PASSING_SCORE_UNIT_CHOICES = [
+      ('percent', 'Percent'),
+      ('points', 'Points'),
+  ]
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quizzes", help_text=("The related course_id."))
+  assignment: Assignment | None = models.ForeignKey(Assignment, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.SET_NULL, related_name="quizzes",
+      help_text=("The assignment this quiz is attached to, if any."))
+  title = models.CharField(max_length=128, help_text=("The quiz title."))
+  description = models.TextField(blank=True, help_text=("Optional quiz description."))
+  questions = models.ManyToManyField(Question, through='QuizQuestion', related_name="quizzes",
+      help_text=("The questions in this quiz (ordered via QuizQuestion)."))
+  source = models.CharField(max_length=16, choices=QUIZ_SOURCE_CHOICES, default='manual',
+      help_text=("Where this quiz originated (staff-internal provenance)."))
+  createdBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="created_quizzes", help_text=("The staff user who created this quiz."))
+  metadata = JSONField(default=dict, blank=True,
+      help_text=("Staff-internal metadata (Canvas IDs, etc.)."))
+
+  # --- Availability ---
+  # Attached quizzes open relative to the assignment lifecycle (assignmentTrigger);
+  # standalone quizzes use an explicit window (availableFrom/availableUntil).
+  assignmentTrigger = models.CharField(max_length=20, choices=ASSIGNMENT_TRIGGER_CHOICES,
+      default='during',
+      help_text=("When an attached quiz becomes available, relative to the assignment lifecycle. "
+                 "Ignored for standalone quizzes."))
+  availableFrom = models.DateTimeField(null=True, blank=True,
+      help_text=("Standalone quizzes: when the quiz opens."))
+  availableUntil = models.DateTimeField(null=True, blank=True,
+      help_text=("Standalone quizzes: when the quiz closes / is due."))
+
+  # --- Standard options (apply to every quiz) ---
+  timeLimitMinutes = models.PositiveIntegerField(null=True, blank=True,
+      help_text=("Time limit in minutes. Null = untimed."))
+  attemptsAllowed = models.PositiveIntegerField(default=1,
+      help_text=("Number of attempts allowed. 0 = unlimited."))
+  shuffleQuestions = models.BooleanField(default=False,
+      help_text=("Randomize question order per attempt."))
+  showCorrectAnswers = models.CharField(max_length=16, choices=SHOW_ANSWERS_CHOICES,
+      default='after_submit', help_text=("When students may see the correct answers."))
+  passingScore = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True,
+      help_text=("Optional pass threshold. Interpreted per passingScoreUnit "
+                 "(a percentage 0–100, or an absolute point value)."))
+  passingScoreUnit = models.CharField(max_length=8, choices=PASSING_SCORE_UNIT_CHOICES,
+      default='percent', help_text=("Whether passingScore is a percentage or an absolute point value."))
+  isPublished = models.BooleanField(default=False,
+      help_text=("If false the quiz is a draft (author-only); students only see published quizzes."))
+
+  class Meta:
+    ordering = ('title',)
+
+  def __str__(self):
+    return f"Quiz '{self.title}' (course {self.course_id})"
+
+
+class QuizQuestion(BaseModel):
+  """Through model linking a Quiz to a Question, with ordering and optional point override.
+  Questions are reusable across quizzes."""
+  if TYPE_CHECKING:
+    id: int
+    quiz: Quiz
+    question: Question
+
+  quiz: Quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quizQuestions", help_text=("The related quiz_id."))
+  question: Question = models.ForeignKey(Question, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quizMemberships", help_text=("The related question_id."))
+  sortKey = models.IntegerField(default=0, help_text=("Order of this question within the quiz."))
+  pointsOverride = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True,
+      help_text=("Optional per-quiz point override. Null uses Question.points."))
+
+  course = property(lambda self: self.quiz.course)
+
+  class Meta:
+    unique_together = ('quiz', 'question')
+    ordering = ('sortKey', 'id')
+
+  def __str__(self):
+    return f"QuizQuestion quiz={self.quiz_id} question={self.question_id}"
+
+
+class QuizQuestionGroup(BaseModel):
+  """A 'random draw' on a quiz: at quiz time, pick ``pickCount`` random questions from
+  ``bank``, each worth ``pointsPerQuestion`` (Canvas-style question group). Phase 1 is
+  authoring-only — the per-attempt random selection happens in the student-taking phase."""
+  if TYPE_CHECKING:
+    id: int
+    quiz: Quiz
+    bank: QuestionBank
+
+  quiz: Quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="questionGroups", help_text=("The related quiz_id."))
+  bank: QuestionBank = models.ForeignKey(QuestionBank, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quiz_groups", help_text=("The bank questions are drawn from."))
+  name = models.CharField(max_length=128, blank=True,
+      help_text=("Optional label for this group (e.g. 'Chapter 3 — pick 3')."))
+  pickCount = models.PositiveIntegerField(default=1,
+      help_text=("How many questions to randomly draw from the bank."))
+  pointsPerQuestion = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
+      help_text=("Points each drawn question is worth."))
+  sortKey = models.IntegerField(default=0, help_text=("Order of this group within the quiz."))
+
+  course = property(lambda self: self.quiz.course)
+
+  class Meta:
+    ordering = ('sortKey', 'id')
+
+  def __str__(self):
+    return f"QuizQuestionGroup quiz={self.quiz_id} bank={self.bank_id} pick={self.pickCount}"
+
+
+class SuggestedQuizQuestion(BaseModel):
+  """An AI-generated quiz question suggestion for instructors. Not a quiz question until
+  accepted. Mirrors SuggestedComment's pending/accepted/rejected workflow."""
+  if TYPE_CHECKING:
+    id: int
+    assignment: Assignment | None
+    sourceQuestion: Question | None
+    acceptedQuestion: Question | None
+    acceptedBy: User | None
+    promptVariant: 'SystemPromptVariant | None'
+
+  SUGGESTION_STATUS_CHOICES = [
+      ('pending', 'Pending'),
+      ('accepted', 'Accepted'),
+      ('rejected', 'Rejected'),
+  ]
+
+  assignment: Assignment | None = models.ForeignKey(Assignment, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.CASCADE, related_name="suggested_quiz_questions",
+      help_text=("The assignment this suggestion was generated for (fresh generation)."))
+  sourceQuestion: Question | None = models.ForeignKey(Question, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.SET_NULL, related_name="regeneration_suggestions",
+      help_text=("The existing question this suggestion was generated from (cross-semester refresh)."))
+  questionType = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES,
+      default='multiple_choice', help_text=("The suggested question type."))
+  text = models.TextField(help_text=("The suggested question stem/prompt."))
+  choicesData = JSONField(default=list, blank=True,
+      help_text=("Proposed choices: list of {text, isCorrect, feedback}."))
+  points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
+      help_text=("Suggested point value."))
+  language = models.CharField(max_length=25, blank=True, null=True,
+      help_text=("For code suggestions: the language."))
+  starterCode = models.TextField(blank=True, null=True, help_text=("Suggested starter code."))
+  referenceSolution = models.TextField(blank=True, null=True, help_text=("Suggested reference solution."))
+  status = models.CharField(max_length=10, choices=SUGGESTION_STATUS_CHOICES, default='pending',
+      help_text=("Current status of this suggestion."))
+  acceptedBy: User | None = models.ForeignKey(User, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.SET_NULL, related_name="accepted_quiz_suggestions",
+      help_text=("The instructor who accepted this suggestion."))
+  acceptedQuestion: Question | None = models.ForeignKey(Question, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.SET_NULL, related_name="source_suggestion",
+      help_text=("The real Question created or updated when this suggestion was accepted."))
+  generationMetadata = JSONField(null=True, blank=True,
+      help_text=("Metadata about the generation (model, tokens, etc.). Staff-internal."))
+  promptVariant: 'SystemPromptVariant | None' = models.ForeignKey('SystemPromptVariant',  # type: ignore[assignment]
+      null=True, blank=True, on_delete=models.SET_NULL, related_name="suggested_quiz_questions",
+      help_text=("The prompt variant used to generate this suggestion."))
+  generationBatch = models.UUIDField(null=True, blank=True,
+      help_text=("UUID grouping all suggestions from a single generation call."))
+
+  @property
+  def course(self):
+    if self.assignment_id is not None:
+      return self.assignment.course
+    if self.sourceQuestion_id is not None:
+      return self.sourceQuestion.course
+    return None
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [
+        models.Index(fields=['assignment', 'status']),
+        models.Index(fields=['sourceQuestion', 'status']),
+        models.Index(fields=['generationBatch']),
+    ]
+
+  def __str__(self):
+    return f"SuggestedQuizQuestion [{self.status}] ({self.questionType})"
+
+
+def quiz_import_upload_path(instance: QuizImportJob, filename: str) -> str:
+  """Hierarchical upload path for Canvas QTI import files:
+  quiz_imports/<org_shortname>/<course_name>/<filename>"""
+  course = instance.course
+  org = course.organization
+  org_safe = slugify(org.shortname)
+  course_safe = slugify(course.name)
+  filename_safe = os.path.basename(filename)
+  return f'quiz_imports/{org_safe}/{course_safe}/{filename_safe}'
+
+
+class QuizImportJob(BaseModel):
+  """Tracks an async QTI / Common Cartridge import (status + audit)."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    targetBank: QuestionBank | None
+
+  JOB_STATUS_CHOICES = [
+      ('pending', 'Pending'),
+      ('running', 'Running'),
+      ('completed', 'Completed'),
+      ('failed', 'Failed'),
+  ]
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quiz_import_jobs", help_text=("The related course_id."))
+  createdBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="created_quiz_import_jobs", help_text=("The staff user who started the import."))
+  file = models.FileField(upload_to=quiz_import_upload_path,
+      help_text=("The uploaded QTI / Common Cartridge export."))
+  status = models.CharField(max_length=16, choices=JOB_STATUS_CHOICES, default='pending',
+      help_text=("Current status of the import job."))
+  taskId = models.CharField(max_length=191, blank=True, help_text=("Celery task id for polling."))
+  targetBank: QuestionBank | None = models.ForeignKey(QuestionBank, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.SET_NULL, related_name="import_jobs",
+      help_text=("The bank imported questions land in. Created if absent."))
+  createdQuizCount = models.PositiveIntegerField(default=0, help_text=("Number of quizzes created."))
+  createdQuestionCount = models.PositiveIntegerField(default=0, help_text=("Number of questions created."))
+  errorMessage = models.TextField(blank=True, help_text=("Error detail if the job failed."))
+  summary = JSONField(default=dict, blank=True,
+      help_text=("Per-item parse report, including skipped/unsupported types."))
+
+  class Meta:
+    ordering = ('-created',)
+
+  def __str__(self):
+    return f"QuizImportJob [{self.status}] (course {self.course_id})"
+
+
+# --- Auto-link assignments to question banks ---------------------------------
+# When a bank is used in a quiz that's attached to an assignment, that assignment is
+# added to the bank's `assignments` (instructors can remove it). This drives the
+# AI-generation context for "Suggest questions" on the bank page.
+
+@receiver(post_save, sender=QuizQuestion)
+def _autolink_bank_from_quiz_question(sender, instance, **kwargs):
+  aid = instance.quiz.assignment_id
+  if aid:
+    instance.question.bank.assignments.add(aid)
+
+
+@receiver(post_save, sender=QuizQuestionGroup)
+def _autolink_bank_from_quiz_group(sender, instance, **kwargs):
+  aid = instance.quiz.assignment_id
+  if aid:
+    instance.bank.assignments.add(aid)
+
+
+@receiver(post_save, sender=Quiz)
+def _autolink_banks_on_quiz_attach(sender, instance, update_fields=None, **kwargs):
+  # Only act when the quiz is attached to an assignment and that link may have just
+  # changed (create => update_fields is None; attach => 'assignment' in update_fields).
+  if not instance.assignment_id:
+    return
+  if update_fields is not None and 'assignment' not in update_fields:
+    return
+  aid = instance.assignment_id
+  for qq in instance.quizQuestions.select_related('question__bank').all():
+    qq.question.bank.assignments.add(aid)
+  for g in instance.questionGroups.select_related('bank').all():
+    g.bank.assignments.add(aid)
+
+
+def quiz_image_upload_path(instance: 'QuizImage', filename: str) -> str:
+  """Upload path for description images: quiz_images/<org>/<course>/<token><ext>."""
+  course = instance.course
+  org = course.organization
+  ext = os.path.splitext(filename)[1].lower()
+  return f'quiz_images/{slugify(org.shortname)}/{slugify(course.name)}/{instance.token.hex}{ext}'
+
+
+class QuizImage(BaseModel):
+  """An instructor-uploaded image referenced from a quiz/question/bank Markdown
+  description. Served publicly at an unguessable token URL so it renders inline
+  in Markdown (browsers can't send the Authorization header on <img> requests)."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quiz_images", help_text=("The related course_id."))
+  token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True,
+      help_text=("Unguessable public token used in the image URL."))
+  image = models.ImageField(upload_to=quiz_image_upload_path, help_text=("The uploaded image file."))
+  originalName = models.CharField(max_length=255, blank=True, help_text=("Original filename."))
+  contentType = models.CharField(max_length=100, blank=True, help_text=("Image MIME type."))
+  uploadedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="uploaded_quiz_images", help_text=("The staff user who uploaded it."))
+
+  class Meta:
+    ordering = ('-created',)
+
+  def delete(self, *args, **kwargs):
+    # Remove the file from storage when the record is deleted.
+    if self.image:
+      try:
+        self.image.delete(save=False)
+      except Exception:
+        pass
+    super().delete(*args, **kwargs)
+
+  def __str__(self):
+    return f"QuizImage {self.token} (course {self.course_id})"

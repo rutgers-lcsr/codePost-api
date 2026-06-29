@@ -176,6 +176,33 @@ SPECTACULAR_SETTINGS = {
         'drf_spectacular.hooks.postprocess_schema_enums',
         'codepost.schema_hooks.restore_underscore_operation_ids',
     ],
+    # Stable names for enums whose value sets are shared across multiple fields
+    # (otherwise drf-spectacular assigns hash-suffixed names that change between
+    # runs and break the generated TS client's named enum imports).
+    'ENUM_NAME_OVERRIDES': {
+        # pending/accepted/rejected — shared by SuggestedComment and SuggestedQuizQuestion.
+        'SuggestedCommentStatusEnum': [
+            ('pending', 'Pending'), ('accepted', 'Accepted'), ('rejected', 'Rejected'),
+        ],
+        # Quiz import job lifecycle.
+        'QuizImportJobStatusEnum': [
+            ('pending', 'Pending'), ('running', 'Running'),
+            ('completed', 'Completed'), ('failed', 'Failed'),
+        ],
+        # Quiz record provenance — shared by QuestionBank, Question, and Quiz.
+        'QuizSourceEnum': 'core.models.QUIZ_SOURCE_CHOICES',
+        # Quiz availability / answer-reveal settings.
+        'QuizAssignmentTriggerEnum': [
+            ('during', 'During the assignment'), ('after_assignment', 'After the assignment closes'),
+            ('after_submission', 'After the student submits'), ('after_feedback', 'After feedback is released'),
+        ],
+        'QuizShowAnswersEnum': [
+            ('never', 'Never'), ('after_submit', 'After submitting'), ('after_close', 'After the quiz closes'),
+        ],
+        'QuizPassingScoreUnitEnum': [
+            ('percent', 'Percent'), ('points', 'Points'),
+        ],
+    },
     'TITLE': 'codePost API',
     'DESCRIPTION': """
 An API for administrators to mine course data and automate common tasks.

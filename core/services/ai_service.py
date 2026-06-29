@@ -252,6 +252,53 @@ class AIService:
             self.base_url = course.ai_base_url
             self.model = course.ai_model or self._get_default_model()
 
+        # Optional request context, attached to outbound provider requests as
+        # observability metadata (currently consumed by Portkey). Populated by
+        # callers via set_request_context() right before generating.
+        self.request_user: Optional[User] = None
+        self.request_type: Optional[str] = None
+        self.request_instructions: str = ''
+        self._trace_id: Optional[str] = None
+
+    def set_request_context(
+        self,
+        user: Optional[User] = None,
+        request_type: Optional[str] = None,
+        instructions: str = '',
+    ) -> 'AIService':
+        """Attach caller context for provider-side observability.
+
+        ``user`` and ``request_type`` mirror the values passed to
+        ``record_usage``; ``instructions`` is the user's free-text request.
+        Generates a fresh trace id per call. Returns ``self`` for chaining.
+        """
+        import uuid
+        self.request_user = user
+        self.request_type = request_type
+        self.request_instructions = instructions or ''
+        self._trace_id = str(uuid.uuid4())
+        return self
+
+    def _build_portkey_metadata(self) -> dict[str, str]:
+        """Build the Portkey metadata dict from the current request context.
+
+        Portkey metadata values must be strings; ``_user`` is Portkey's
+        reserved key for per-user analytics. Free text is truncated to keep
+        within Portkey's per-value size limits.
+        """
+        md: dict[str, str] = {}
+        if self.request_user is not None:
+            md['_user'] = self.request_user.email or str(self.request_user.id)
+        if self.request_type:
+            md['feature'] = self.request_type
+        if self.course is not None:
+            md['course'] = str(self.course.id)
+        if self.assignment is not None:
+            md['assignment'] = str(self.assignment.id)
+        if self.request_instructions:
+            md['instructions'] = self.request_instructions[:200]
+        return md
+
     @staticmethod
     def _org_allows_course(org, course: Course) -> bool:
         """Check if the org's course policy allows this course to use the org AI key."""
@@ -1248,7 +1295,8 @@ end"""
         The endpoint is OpenAI-compatible: POST /v1/chat/completions.
         """
         import httpx
-        
+        import json
+
         base_url = (self.base_url or DEFAULT_PORTKEY_URL).rstrip('/')
         # Ensure the URL doesn't already end with /v1 when we append the path
         if base_url.endswith('/v1'):
@@ -1262,6 +1310,16 @@ end"""
         # API key is optional for self-hosted Portkey gateways
         if self.api_key:
             headers["x-portkey-api-key"] = self.api_key
+
+        # Attach request context as Portkey observability metadata. Only emitted
+        # when a caller set the context (signalled by _trace_id), so un-wired
+        # paths keep the original bare request. Guarded to the portkey provider
+        # so the shared 'custom' OpenAI-compatible path stays vendor-neutral.
+        if self.provider == 'portkey' and self._trace_id is not None:
+            metadata = self._build_portkey_metadata()
+            if metadata:
+                headers["x-portkey-metadata"] = json.dumps(metadata)
+                headers["x-portkey-trace-id"] = self._trace_id
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -1778,6 +1836,137 @@ Provide a concise markdown summary following the guidelines in your instructions
         result = await self._generate(system_prompt, user_prompt, label='assignment description generation')
         if result.success:
             result.text = result.text.strip()
+        return result
+
+    async def generate_quiz_questions(
+        self,
+        assignment=None,
+        num_questions: int = 5,
+        question_types: Optional[list[str]] = None,
+        source_question=None,
+        instructions: str = '',
+    ) -> GenerationResult:
+        """Generate suggested quiz questions from an assignment and course material.
+
+        Two modes:
+        - Fresh generation (default): produce ``num_questions`` new questions from the
+          assignment + course context.
+        - Refresh (``source_question`` set): produce one improved variant of an existing
+          question — the cross-semester "update this question" path.
+
+        Returns a ``GenerationResult`` whose ``text`` is a JSON array of question objects.
+        """
+        from asgiref.sync import sync_to_async
+        from core.models import RubricCategory
+
+        assignment = assignment or self.assignment
+        if question_types is None:
+            question_types = ['multiple_choice', 'true_false', 'short_answer', 'essay', 'code']
+
+        CONTEXT_BUDGET = 60000  # chars — stay well under model token limits
+
+        def _collect_context():
+            language = ''
+            tpl_parts: list[str] = []
+            tst_parts: list[str] = []
+            rub_parts: list[str] = []
+            if assignment is not None:
+                for af in assignment.files.filter(hidden=False, is_test_resource=False):
+                    content = af.data
+                    if len(content) > 15000:
+                        content = content[:15000] + "\n... (truncated)"
+                    tpl_parts.append(f"### {af.name}\n```\n{content}\n```")
+                for tc in assignment.testCategories.all():
+                    for test in tc.testCases.all():
+                        desc = getattr(test, 'description', '') or ''
+                        tst_parts.append(f"- {desc or test.text[:100]}")
+                for category in RubricCategory.objects.filter(assignment=assignment).prefetch_related('rubricComments'):
+                    cat_text = f"### {category.name}\n"
+                    for rc in category.rubricComments.all():
+                        cat_text += f"  - {rc.name or rc.text[:60]}\n"
+                    rub_parts.append(cat_text)
+                try:
+                    language = assignment.environment.language or ''
+                except Exception:
+                    language = ''
+
+            # Course-level material (CourseFile), bounded by the remaining budget.
+            mat_parts: list[str] = []
+            used = sum(len(p) for p in tpl_parts)
+            for cf in self.course.files.all():
+                if used >= CONTEXT_BUDGET:
+                    break
+                content = cf.data
+                budget_left = CONTEXT_BUDGET - used
+                if len(content) > budget_left:
+                    content = content[:budget_left] + "\n... (truncated)"
+                mat_parts.append(f"### {cf.name}\n```\n{content}\n```")
+                used += len(content)
+
+            # Serialize an existing question for refresh mode.
+            existing = ''
+            if source_question is not None:
+                stype = source_question.questionType
+                lines = [
+                    "--- Existing question to refresh ---",
+                    f"Type: {stype}",
+                    f"Points: {source_question.points}",
+                    f"Stem: {source_question.text}",
+                ]
+                choices = list(source_question.choices.all())
+                if choices:
+                    lines.append("Current choices:")
+                    for ch in choices:
+                        mark = " (correct)" if ch.isCorrect else ""
+                        lines.append(f"  - {ch.text}{mark}")
+                if source_question.referenceSolution:
+                    lines.append(f"Reference solution:\n{source_question.referenceSolution}")
+                if stype in ('multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'):
+                    lines.append(
+                        f"Keep the type `{stype}`. Your updated version MUST include a non-empty "
+                        "`choices` array — regenerate the options to match the new stem and mark the "
+                        "correct one(s). Do not return an empty choices array."
+                    )
+                existing = "\n".join(lines)
+                if not language:
+                    language = source_question.language or ''
+
+            return tpl_parts, tst_parts, rub_parts, mat_parts, existing, language
+
+        template_parts, test_parts, rubric_parts, material_parts, existing_question, language = \
+            await sync_to_async(_collect_context)()
+
+        system_prompt, variant_id = await self._resolve_and_format_prompt(
+            'quiz_generation',
+            dict(
+                assignment_name=(assignment.name if assignment is not None else '(no assignment)'),
+                explanation=(assignment.explanation if assignment is not None and assignment.explanation
+                             else "(No student-facing instructions provided)"),
+                template_files="\n".join(template_parts) if template_parts else "No template files.",
+                test_cases="Test cases:\n" + "\n".join(test_parts) if test_parts else "No test cases defined.",
+                rubric="Rubric:\n" + "\n".join(rubric_parts) if rubric_parts else "No rubric defined.",
+                course_materials="Course materials:\n" + "\n".join(material_parts)
+                if material_parts else "No additional course materials.",
+                language=language or "(unspecified)",
+                num_questions=num_questions,
+                question_types=", ".join(question_types),
+                existing_question=existing_question,
+                instructions=instructions or "(none)",
+            ),
+        )
+
+        # The user_prompt is always sent regardless of the (DB-overridable) system prompt,
+        # so it's the reliable place to enforce the choices contract.
+        user_prompt = (
+            "Generate the quiz questions now as a JSON array, following the format exactly. "
+            "CRITICAL: every multiple_choice, multiple_answers, true_false, short_answer, and numerical "
+            'question MUST include a non-empty "choices" array (each item: {"text": ..., "is_correct": ...}). '
+            "Only essay and code questions omit choices."
+        )
+        result = await self._generate(system_prompt, user_prompt, label='quiz question generation')
+        if result.success:
+            result.text = result.text.strip()
+            result.variant_id = variant_id
         return result
 
 

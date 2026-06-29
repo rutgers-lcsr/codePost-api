@@ -6,10 +6,13 @@ Tests for AIService:
 - Usage recording
 - is_configured property
 """
+import json
 from types import SimpleNamespace
 from typing import cast
 from decimal import Decimal
+from unittest.mock import patch
 
+from asgiref.sync import async_to_sync
 from django.test import TestCase
 from django.db.models.signals import post_save
 
@@ -350,3 +353,123 @@ class TestRecordUsage(TestCase):
             svc.record_usage(result, self.user)
 
         self.assertEqual(AIUsageRecord.objects.filter(course=self.course).count(), 3)
+
+
+# ===========================================================================
+# Portkey request metadata (observability headers)
+# ===========================================================================
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncClient:
+    """Stand-in for httpx.AsyncClient that records the outbound request."""
+
+    def __init__(self, capture):
+        self._capture = capture
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, headers=None, json=None, timeout=None):
+        self._capture['url'] = url
+        self._capture['headers'] = headers
+        self._capture['json'] = json
+        return _FakeResponse({
+            'choices': [{'message': {'content': 'hello'}}],
+            'usage': {'prompt_tokens': 5, 'completion_tokens': 3, 'total_tokens': 8},
+        })
+
+
+def _portkey_course(**overrides):
+    defaults = dict(
+        ai_use_own_settings=True,
+        ai_provider='portkey',
+        ai_api_key='pk-test-key',
+        ai_base_url='https://portkey.rutgers.edu/v1',
+        ai_model='gpt-4o',
+        id=7,
+    )
+    defaults.update(overrides)
+    return _make_course(**defaults)
+
+
+class TestPortkeyRequestMetadata(TestCase):
+    """The Portkey call should emit request context as x-portkey-metadata."""
+
+    def _call(self, svc):
+        """Drive _call_portkey with a mocked client; return the captured request."""
+        capture: dict = {}
+        with patch('httpx.AsyncClient', lambda *a, **k: _FakeAsyncClient(capture)):
+            text, *_ = async_to_sync(svc._call_portkey)('system', 'user')
+        capture['text'] = text
+        return capture
+
+    def test_metadata_header_includes_full_context(self):
+        svc = AIService(cast(Course, _portkey_course()))
+        user = SimpleNamespace(email='grader@rutgers.edu', id=42)
+        svc.set_request_context(
+            user=cast('object', user),
+            request_type='quiz_generation',
+            instructions='make it harder',
+        )
+
+        capture = self._call(svc)
+
+        self.assertEqual(capture['text'], 'hello')
+        headers = capture['headers']
+        self.assertIn('x-portkey-metadata', headers)
+        metadata = json.loads(headers['x-portkey-metadata'])
+        self.assertEqual(metadata['_user'], 'grader@rutgers.edu')
+        self.assertEqual(metadata['feature'], 'quiz_generation')
+        self.assertEqual(metadata['course'], '7')
+        self.assertEqual(metadata['instructions'], 'make it harder')
+        # No assignment passed → key omitted
+        self.assertNotIn('assignment', metadata)
+        # Trace id present and non-empty
+        self.assertTrue(headers.get('x-portkey-trace-id'))
+
+    def test_no_context_omits_metadata_headers(self):
+        """Without set_request_context the request stays as before (no metadata)."""
+        svc = AIService(cast(Course, _portkey_course()))
+
+        capture = self._call(svc)
+
+        headers = capture['headers']
+        self.assertNotIn('x-portkey-metadata', headers)
+        self.assertNotIn('x-portkey-trace-id', headers)
+        # Auth header still set
+        self.assertEqual(headers['x-portkey-api-key'], 'pk-test-key')
+
+    def test_instructions_truncated_to_200_chars(self):
+        svc = AIService(cast(Course, _portkey_course()))
+        svc.set_request_context(request_type='quiz_generation', instructions='x' * 250)
+
+        capture = self._call(svc)
+
+        metadata = json.loads(capture['headers']['x-portkey-metadata'])
+        self.assertEqual(len(metadata['instructions']), 200)
+
+    def test_custom_provider_omits_portkey_metadata(self):
+        """The shared 'custom' path must not emit vendor-specific headers."""
+        svc = AIService(cast(Course, _portkey_course(ai_provider='custom')))
+        svc.set_request_context(
+            user=cast('object', SimpleNamespace(email='g@r.edu', id=1)),
+            request_type='quiz_generation',
+            instructions='hi',
+        )
+
+        capture = self._call(svc)
+
+        self.assertNotIn('x-portkey-metadata', capture['headers'])

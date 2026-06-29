@@ -607,3 +607,117 @@ class SubmissionSummaryPermissions(TemplatePermission):
         user = cast(User, request.user)
         submission = obj.submission
         return isStaffOfSub(user, submission)
+
+
+# =============================================================================
+# QUIZZES (Phase 1: authoring, staff-only)
+# =============================================================================
+
+def _quiz_authoring_permission(user, course, method):
+    """Phase 1 authoring policy: course staff read+write, admins (or superuser) delete.
+    No student access. ``course`` may be ``None`` (unresolvable) → deny."""
+    if user.is_superuser:
+        return True
+    if course is None:
+        return False
+    if method == "DELETE":
+        return isCourseAdmin(user, course)
+    return isCourseStaff(user, course)
+
+
+class QuestionBankPermissions(TemplatePermission):
+    """Course staff may author question banks; admins may delete."""
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return _quiz_authoring_permission(user, obj.course, request.method)
+
+
+class QuestionPermissions(TemplatePermission):
+    """Course staff may author questions; admins may delete."""
+
+    def has_permission(self, request, view):
+        # These POST actions don't carry a `course` for the POST-check; they validate
+        # access themselves (on the existing question / target bank's course).
+        if request.method == 'POST' and getattr(view, 'action', None) in (
+            'regenerateSuggestion', 'moveToBank', 'copyToBank',
+        ):
+            return True
+        return super().has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return _quiz_authoring_permission(user, obj.course, request.method)
+
+
+class QuizPermissions(TemplatePermission):
+    """Course staff may author quizzes; admins may delete."""
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return _quiz_authoring_permission(user, obj.course, request.method)
+
+
+class QuizQuestionPermissions(TemplatePermission):
+    """Membership edits follow the quiz's course authoring policy."""
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        # ``QuizQuestion.course`` derives from its quiz; set for both saved rows and
+        # the lightweight POST-check instance (which carries the quiz).
+        return _quiz_authoring_permission(user, obj.course, request.method)
+
+
+class QuizQuestionGroupPermissions(TemplatePermission):
+    """Random-draw groups follow the quiz's course authoring policy."""
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return _quiz_authoring_permission(user, obj.course, request.method)
+
+
+class SuggestedQuizQuestionPermissions(TemplatePermission):
+    """AI quiz-question suggestions are staff-only. Course staff may view, edit pending
+    suggestions, and accept/reject them. Students never see these."""
+
+    def has_permission(self, request, view):
+        # accept/reject act on existing objects — checked in has_object_permission.
+        if request.method == 'POST' and view.action in ('accept', 'reject'):
+            return True
+        return super().has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        course = obj.course
+        if course is None:
+            return False
+        return user.is_superuser or isCourseStaff(user, course)
+
+
+class QuizImportPermissions(TemplatePermission):
+    """Course staff may start and view Canvas QTI imports. The create endpoint
+    validates course staff explicitly (multipart upload)."""
+
+    def has_permission(self, request, view):
+        if request.method == 'POST':
+            return True  # QuizImportJobViewSet.create() checks course staff
+        return super().has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return user.is_superuser or isCourseStaff(user, obj.course)
+
+
+class QuizImagePermissions(TemplatePermission):
+    """Course staff may upload and manage description images. The create endpoint
+    validates course staff explicitly (multipart upload). Public read is handled by
+    the separate token-based serve view, not this permission."""
+
+    def has_permission(self, request, view):
+        if request.method == 'POST':
+            return True  # QuizImageViewSet.create() checks course staff
+        return super().has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return user.is_superuser or isCourseStaff(user, obj.course)

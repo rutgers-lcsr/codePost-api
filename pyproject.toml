@@ -45,6 +45,7 @@ requests = "^2.32"
 structlog = "^25.4"
 uvicorn = "^0.41"
 whitenoise = "^6.12"
+defusedxml = "^0.7"
 
 
 [tool.semantic_release]

@@ -1156,6 +1156,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/GenerateDescriptionResponse'
           description: ''
+  /assignments/{id}/generateQuizQuestions/:
+    post:
+      operationId: assignments_generateQuizQuestionsCreate
+      description: Enqueue AI generation of suggested quiz questions for this assignment.
+        Instructors review the suggestions and accept the good ones.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateQuizQuestionsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GenerateQuizQuestionsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GenerateQuizQuestionsRequest'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateQuizQuestionsResponse'
+          description: ''
   /assignments/{id}/generateTest/:
     post:
       operationId: assignments_generateTestCreate
@@ -1251,6 +1288,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssignmentQueueLengthResponse'
+          description: ''
+  /assignments/{id}/quizzes/:
+    get:
+      operationId: assignments_quizzesList
+      description: List the quizzes attached to this assignment (staff only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quiz'
           description: ''
   /assignments/{id}/rubric/:
     get:
@@ -1574,6 +1638,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedSubmissionList'
+          description: ''
+  /assignments/{id}/suggestedQuizQuestions/:
+    get:
+      operationId: assignments_suggestedQuizQuestionsList
+      description: List pending AI quiz-question suggestions for this assignment (staff
+        only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment.
+        required: true
+      tags:
+      - assignments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SuggestedQuizQuestion'
           description: ''
   /auth/sso/callback/{provider}/:
     get:
@@ -4218,6 +4310,87 @@ paths:
       responses:
         '204':
           description: No response body
+  /courses/{id}/questionBanks/:
+    get:
+      operationId: courses_questionBanksList
+      description: List the course's quiz question banks (staff only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuestionBank'
+          description: ''
+  /courses/{id}/questions/:
+    get:
+      operationId: courses_questionsList
+      description: List the course's quiz questions (staff only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Question'
+          description: ''
+  /courses/{id}/quizzes/:
+    get:
+      operationId: courses_quizzesList
+      description: List the course's quizzes (staff only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quiz'
+          description: ''
   /courses/{id}/removeFromRoster/:
     patch:
       operationId: courses_removeFromRosterPartialUpdate
@@ -7347,6 +7520,1456 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
+          description: ''
+  /questionBanks/:
+    get:
+      operationId: questionBanks_list
+      description: Course-level pools of quiz questions; each question belongs to
+        exactly one bank.
+      tags:
+      - questionBanks
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuestionBank'
+          description: ''
+    post:
+      operationId: questionBanks_create
+      description: Course-level pools of quiz questions; each question belongs to
+        exactly one bank.
+      tags:
+      - questionBanks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionBank'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuestionBank'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuestionBank'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBank'
+          description: ''
+  /questionBanks/{id}/:
+    get:
+      operationId: questionBanks_retrieve
+      description: Course-level pools of quiz questions; each question belongs to
+        exactly one bank.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question bank.
+        required: true
+      tags:
+      - questionBanks
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBank'
+          description: ''
+    put:
+      operationId: questionBanks_update
+      description: Course-level pools of quiz questions; each question belongs to
+        exactly one bank.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question bank.
+        required: true
+      tags:
+      - questionBanks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionBank'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuestionBank'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuestionBank'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBank'
+          description: ''
+    patch:
+      operationId: questionBanks_partialUpdate
+      description: Course-level pools of quiz questions; each question belongs to
+        exactly one bank.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question bank.
+        required: true
+      tags:
+      - questionBanks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuestionBank'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuestionBank'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuestionBank'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBank'
+          description: ''
+    delete:
+      operationId: questionBanks_destroy
+      description: |-
+        Delete a bank. Blocked (409) if it's used by any quiz — either as a random-draw
+        source or because one of its questions is in a quiz — unless ``force=true``. Deleting
+        cascades: its questions (and their quiz memberships) and any random-draw groups go too.
+      parameters:
+      - in: query
+        name: force
+        schema:
+          type: boolean
+        description: Delete even if the bank is used by a quiz (detaches its questions
+          first).
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question bank.
+        required: true
+      tags:
+      - questionBanks
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /questionBanks/{id}/questions/:
+    get:
+      operationId: questionBanks_questionsList
+      description: List the questions in this bank.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question bank.
+        required: true
+      tags:
+      - questionBanks
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Question'
+          description: ''
+  /questions/:
+    get:
+      operationId: questions_list
+      description: Quiz questions, each living in exactly one bank (with nested, writable
+        choices).
+      tags:
+      - questions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Question'
+          description: ''
+    post:
+      operationId: questions_create
+      description: Quiz questions, each living in exactly one bank (with nested, writable
+        choices).
+      tags:
+      - questions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Question'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Question'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Question'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+          description: ''
+  /questions/{id}/:
+    get:
+      operationId: questions_retrieve
+      description: Quiz questions, each living in exactly one bank (with nested, writable
+        choices).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question.
+        required: true
+      tags:
+      - questions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+          description: ''
+    put:
+      operationId: questions_update
+      description: Quiz questions, each living in exactly one bank (with nested, writable
+        choices).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question.
+        required: true
+      tags:
+      - questions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Question'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Question'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Question'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+          description: ''
+    patch:
+      operationId: questions_partialUpdate
+      description: Quiz questions, each living in exactly one bank (with nested, writable
+        choices).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question.
+        required: true
+      tags:
+      - questions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuestion'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+          description: ''
+    delete:
+      operationId: questions_destroy
+      description: Quiz questions, each living in exactly one bank (with nested, writable
+        choices).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question.
+        required: true
+      tags:
+      - questions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /questions/{id}/regenerateSuggestion/:
+    post:
+      operationId: questions_regenerateSuggestionCreate
+      description: Generate a refreshed AI suggestion seeded from this existing question
+        (cross-semester update). The instructor reviews and accepts the suggestion.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question.
+        required: true
+      tags:
+      - questions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegenerateSuggestionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RegenerateSuggestionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RegenerateSuggestionRequest'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegenerateSuggestionResponse'
+          description: ''
+  /questions/{id}/regenerationSuggestions/:
+    get:
+      operationId: questions_regenerationSuggestionsList
+      description: Pending AI refresh suggestions seeded from this question (for review/accept).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this question.
+        required: true
+      tags:
+      - questions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SuggestedQuizQuestion'
+          description: ''
+  /questions/copyToBank/:
+    post:
+      operationId: questions_copyToBankCreate
+      description: Copy the given questions (with their choices) into another bank
+        as new questions.
+      tags:
+      - questions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BankCopyRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BankCopyRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BankCopyRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Question'
+          description: ''
+  /questions/moveToBank/:
+    post:
+      operationId: questions_moveToBankCreate
+      description: Move the given questions into another bank (re-points each question's
+        bank).
+      tags:
+      - questions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BankQuestionsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BankQuestionsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BankQuestionsRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Question'
+          description: ''
+  /quizImages/:
+    get:
+      operationId: quizImages_list
+      description: Instructor-uploaded images for quiz/question/bank Markdown descriptions.
+      tags:
+      - quizImages
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizImage'
+          description: ''
+    post:
+      operationId: quizImages_create
+      description: Instructor-uploaded images for quiz/question/bank Markdown descriptions.
+      tags:
+      - quizImages
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizImage'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizImage'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImage'
+          description: ''
+  /quizImages/{id}/:
+    get:
+      operationId: quizImages_retrieve
+      description: Instructor-uploaded images for quiz/question/bank Markdown descriptions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz image.
+        required: true
+      tags:
+      - quizImages
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImage'
+          description: ''
+    put:
+      operationId: quizImages_update
+      description: Instructor-uploaded images for quiz/question/bank Markdown descriptions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz image.
+        required: true
+      tags:
+      - quizImages
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizImage'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizImage'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImage'
+          description: ''
+    patch:
+      operationId: quizImages_partialUpdate
+      description: Instructor-uploaded images for quiz/question/bank Markdown descriptions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz image.
+        required: true
+      tags:
+      - quizImages
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizImage'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizImage'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImage'
+          description: ''
+    delete:
+      operationId: quizImages_destroy
+      description: Instructor-uploaded images for quiz/question/bank Markdown descriptions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz image.
+        required: true
+      tags:
+      - quizImages
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /quizImportJobs/:
+    get:
+      operationId: quizImportJobs_list
+      description: |-
+        Import quizzes/question banks from a QTI / Common Cartridge export
+        (e.g. exported from Canvas or another LMS).
+
+        create:
+        Upload a QTI / Common Cartridge export (multipart ``file``) for a ``course``. Optionally
+        target an existing bank (``targetBankId``) or name a new one (``bankName``). Parsing runs
+        asynchronously; poll the returned job via ``retrieve``.
+
+        retrieve:
+        Return the import job's current status, counts, and parse summary.
+      tags:
+      - quizImportJobs
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizImportJob'
+          description: ''
+    post:
+      operationId: quizImportJobs_create
+      description: |-
+        Import quizzes/question banks from a QTI / Common Cartridge export
+        (e.g. exported from Canvas or another LMS).
+
+        create:
+        Upload a QTI / Common Cartridge export (multipart ``file``) for a ``course``. Optionally
+        target an existing bank (``targetBankId``) or name a new one (``bankName``). Parsing runs
+        asynchronously; poll the returned job via ``retrieve``.
+
+        retrieve:
+        Return the import job's current status, counts, and parse summary.
+      tags:
+      - quizImportJobs
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizImportJob'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizImportJob'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizImportJob'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImportJob'
+          description: ''
+  /quizImportJobs/{id}/:
+    get:
+      operationId: quizImportJobs_retrieve
+      description: |-
+        Import quizzes/question banks from a QTI / Common Cartridge export
+        (e.g. exported from Canvas or another LMS).
+
+        create:
+        Upload a QTI / Common Cartridge export (multipart ``file``) for a ``course``. Optionally
+        target an existing bank (``targetBankId``) or name a new one (``bankName``). Parsing runs
+        asynchronously; poll the returned job via ``retrieve``.
+
+        retrieve:
+        Return the import job's current status, counts, and parse summary.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz import job.
+        required: true
+      tags:
+      - quizImportJobs
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImportJob'
+          description: ''
+    put:
+      operationId: quizImportJobs_update
+      description: |-
+        Import quizzes/question banks from a QTI / Common Cartridge export
+        (e.g. exported from Canvas or another LMS).
+
+        create:
+        Upload a QTI / Common Cartridge export (multipart ``file``) for a ``course``. Optionally
+        target an existing bank (``targetBankId``) or name a new one (``bankName``). Parsing runs
+        asynchronously; poll the returned job via ``retrieve``.
+
+        retrieve:
+        Return the import job's current status, counts, and parse summary.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz import job.
+        required: true
+      tags:
+      - quizImportJobs
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizImportJob'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizImportJob'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizImportJob'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImportJob'
+          description: ''
+    patch:
+      operationId: quizImportJobs_partialUpdate
+      description: |-
+        Import quizzes/question banks from a QTI / Common Cartridge export
+        (e.g. exported from Canvas or another LMS).
+
+        create:
+        Upload a QTI / Common Cartridge export (multipart ``file``) for a ``course``. Optionally
+        target an existing bank (``targetBankId``) or name a new one (``bankName``). Parsing runs
+        asynchronously; poll the returned job via ``retrieve``.
+
+        retrieve:
+        Return the import job's current status, counts, and parse summary.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz import job.
+        required: true
+      tags:
+      - quizImportJobs
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizImportJob'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizImportJob'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizImportJob'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizImportJob'
+          description: ''
+    delete:
+      operationId: quizImportJobs_destroy
+      description: |-
+        Import quizzes/question banks from a QTI / Common Cartridge export
+        (e.g. exported from Canvas or another LMS).
+
+        create:
+        Upload a QTI / Common Cartridge export (multipart ``file``) for a ``course``. Optionally
+        target an existing bank (``targetBankId``) or name a new one (``bankName``). Parsing runs
+        asynchronously; poll the returned job via ``retrieve``.
+
+        retrieve:
+        Return the import job's current status, counts, and parse summary.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz import job.
+        required: true
+      tags:
+      - quizImportJobs
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /quizQuestionGroups/:
+    get:
+      operationId: quizQuestionGroups_list
+      description: |-
+        Random-draw groups on a quiz: pick N random questions from a bank, P points each.
+        POST to add (with quiz + bank + pickCount + pointsPerQuestion), PATCH to edit, DELETE to remove.
+      tags:
+      - quizQuestionGroups
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizQuestionGroup'
+          description: ''
+    post:
+      operationId: quizQuestionGroups_create
+      description: |-
+        Random-draw groups on a quiz: pick N random questions from a bank, P points each.
+        POST to add (with quiz + bank + pickCount + pointsPerQuestion), PATCH to edit, DELETE to remove.
+      tags:
+      - quizQuestionGroups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizQuestionGroup'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizQuestionGroup'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizQuestionGroup'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestionGroup'
+          description: ''
+  /quizQuestionGroups/{id}/:
+    get:
+      operationId: quizQuestionGroups_retrieve
+      description: |-
+        Random-draw groups on a quiz: pick N random questions from a bank, P points each.
+        POST to add (with quiz + bank + pickCount + pointsPerQuestion), PATCH to edit, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question group.
+        required: true
+      tags:
+      - quizQuestionGroups
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestionGroup'
+          description: ''
+    put:
+      operationId: quizQuestionGroups_update
+      description: |-
+        Random-draw groups on a quiz: pick N random questions from a bank, P points each.
+        POST to add (with quiz + bank + pickCount + pointsPerQuestion), PATCH to edit, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question group.
+        required: true
+      tags:
+      - quizQuestionGroups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizQuestionGroup'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizQuestionGroup'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizQuestionGroup'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestionGroup'
+          description: ''
+    patch:
+      operationId: quizQuestionGroups_partialUpdate
+      description: |-
+        Random-draw groups on a quiz: pick N random questions from a bank, P points each.
+        POST to add (with quiz + bank + pickCount + pointsPerQuestion), PATCH to edit, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question group.
+        required: true
+      tags:
+      - quizQuestionGroups
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizQuestionGroup'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizQuestionGroup'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizQuestionGroup'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestionGroup'
+          description: ''
+    delete:
+      operationId: quizQuestionGroups_destroy
+      description: |-
+        Random-draw groups on a quiz: pick N random questions from a bank, P points each.
+        POST to add (with quiz + bank + pickCount + pointsPerQuestion), PATCH to edit, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question group.
+        required: true
+      tags:
+      - quizQuestionGroups
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /quizQuestions/:
+    get:
+      operationId: quizQuestions_list
+      description: |-
+        Add/remove/reorder a Question within a Quiz. POST to add (with quiz + question),
+        PATCH ``sortKey``/``pointsOverride`` to reorder/override, DELETE to remove.
+      tags:
+      - quizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+    post:
+      operationId: quizQuestions_create
+      description: |-
+        Add/remove/reorder a Question within a Quiz. POST to add (with quiz + question),
+        PATCH ``sortKey``/``pointsOverride`` to reorder/override, DELETE to remove.
+      tags:
+      - quizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizQuestion'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+  /quizQuestions/{id}/:
+    get:
+      operationId: quizQuestions_retrieve
+      description: |-
+        Add/remove/reorder a Question within a Quiz. POST to add (with quiz + question),
+        PATCH ``sortKey``/``pointsOverride`` to reorder/override, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question.
+        required: true
+      tags:
+      - quizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+    put:
+      operationId: quizQuestions_update
+      description: |-
+        Add/remove/reorder a Question within a Quiz. POST to add (with quiz + question),
+        PATCH ``sortKey``/``pointsOverride`` to reorder/override, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question.
+        required: true
+      tags:
+      - quizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizQuestion'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+    patch:
+      operationId: quizQuestions_partialUpdate
+      description: |-
+        Add/remove/reorder a Question within a Quiz. POST to add (with quiz + question),
+        PATCH ``sortKey``/``pointsOverride`` to reorder/override, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question.
+        required: true
+      tags:
+      - quizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizQuestion'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+    delete:
+      operationId: quizQuestions_destroy
+      description: |-
+        Add/remove/reorder a Question within a Quiz. POST to add (with quiz + question),
+        PATCH ``sortKey``/``pointsOverride`` to reorder/override, DELETE to remove.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz question.
+        required: true
+      tags:
+      - quizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /quizzes/:
+    get:
+      operationId: quizzes_list
+      description: |-
+        Quizzes: authoring containers of questions, optionally attached to an assignment.
+
+        Attach a quiz to an existing assignment by PATCHing its ``assignment`` field.
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quiz'
+          description: ''
+    post:
+      operationId: quizzes_create
+      description: |-
+        Quizzes: authoring containers of questions, optionally attached to an assignment.
+
+        Attach a quiz to an existing assignment by PATCHing its ``assignment`` field.
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Quiz'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Quiz'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Quiz'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quiz'
+          description: ''
+  /quizzes/{id}/:
+    get:
+      operationId: quizzes_retrieve
+      description: |-
+        Quizzes: authoring containers of questions, optionally attached to an assignment.
+
+        Attach a quiz to an existing assignment by PATCHing its ``assignment`` field.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quiz'
+          description: ''
+    put:
+      operationId: quizzes_update
+      description: |-
+        Quizzes: authoring containers of questions, optionally attached to an assignment.
+
+        Attach a quiz to an existing assignment by PATCHing its ``assignment`` field.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Quiz'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Quiz'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Quiz'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quiz'
+          description: ''
+    patch:
+      operationId: quizzes_partialUpdate
+      description: |-
+        Quizzes: authoring containers of questions, optionally attached to an assignment.
+
+        Attach a quiz to an existing assignment by PATCHing its ``assignment`` field.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuiz'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuiz'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuiz'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quiz'
+          description: ''
+    delete:
+      operationId: quizzes_destroy
+      description: |-
+        Quizzes: authoring containers of questions, optionally attached to an assignment.
+
+        Attach a quiz to an existing assignment by PATCHing its ``assignment`` field.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /quizzes/{id}/questions/:
+    get:
+      operationId: quizzes_questionsList
+      description: List this quiz's question memberships, in order.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizQuestion'
           description: ''
   /registration/checkStatusNewAdminUser/:
     get:
@@ -10543,6 +12166,259 @@ paths:
               schema:
                 $ref: '#/components/schemas/SuggestedComment'
           description: ''
+  /suggestedQuizQuestions/:
+    get:
+      operationId: suggestedQuizQuestions_list
+      description: |-
+        AI-suggested quiz questions for instructors. Staff-only.
+
+        A pending suggestion can be edited (PATCH) and then accepted into a real, editable
+        Question (authored by the instructor) or rejected.
+      tags:
+      - suggestedQuizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SuggestedQuizQuestion'
+          description: ''
+    post:
+      operationId: suggestedQuizQuestions_create
+      description: |-
+        AI-suggested quiz questions for instructors. Staff-only.
+
+        A pending suggestion can be edited (PATCH) and then accepted into a real, editable
+        Question (authored by the instructor) or rejected.
+      tags:
+      - suggestedQuizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedQuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuggestedQuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuggestedQuizQuestion'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedQuizQuestion'
+          description: ''
+  /suggestedQuizQuestions/{id}/:
+    get:
+      operationId: suggestedQuizQuestions_retrieve
+      description: |-
+        AI-suggested quiz questions for instructors. Staff-only.
+
+        A pending suggestion can be edited (PATCH) and then accepted into a real, editable
+        Question (authored by the instructor) or rejected.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested quiz question.
+        required: true
+      tags:
+      - suggestedQuizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedQuizQuestion'
+          description: ''
+    put:
+      operationId: suggestedQuizQuestions_update
+      description: |-
+        AI-suggested quiz questions for instructors. Staff-only.
+
+        A pending suggestion can be edited (PATCH) and then accepted into a real, editable
+        Question (authored by the instructor) or rejected.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested quiz question.
+        required: true
+      tags:
+      - suggestedQuizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestedQuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuggestedQuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuggestedQuizQuestion'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedQuizQuestion'
+          description: ''
+    patch:
+      operationId: suggestedQuizQuestions_partialUpdate
+      description: |-
+        AI-suggested quiz questions for instructors. Staff-only.
+
+        A pending suggestion can be edited (PATCH) and then accepted into a real, editable
+        Question (authored by the instructor) or rejected.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested quiz question.
+        required: true
+      tags:
+      - suggestedQuizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSuggestedQuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSuggestedQuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSuggestedQuizQuestion'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedQuizQuestion'
+          description: ''
+    delete:
+      operationId: suggestedQuizQuestions_destroy
+      description: |-
+        AI-suggested quiz questions for instructors. Staff-only.
+
+        A pending suggestion can be edited (PATCH) and then accepted into a real, editable
+        Question (authored by the instructor) or rejected.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested quiz question.
+        required: true
+      tags:
+      - suggestedQuizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /suggestedQuizQuestions/{id}/accept/:
+    post:
+      operationId: suggestedQuizQuestions_acceptCreate
+      description: Accept this suggestion. A fresh suggestion creates a new Question
+        in the given bank (bankId required); a refresh (sourceQuestion set) updates
+        that existing question in place. The resulting question is authored by the
+        instructor.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested quiz question.
+        required: true
+      tags:
+      - suggestedQuizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptSuggestionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AcceptSuggestionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AcceptSuggestionRequest'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+          description: ''
+  /suggestedQuizQuestions/{id}/reject/:
+    post:
+      operationId: suggestedQuizQuestions_rejectCreate
+      description: Reject this suggestion.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this suggested quiz question.
+        required: true
+      tags:
+      - suggestedQuizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestedQuizQuestion'
+          description: ''
   /system/activity/:
     get:
       operationId: system_activityRetrieve
@@ -12426,6 +14302,11 @@ components:
       - startDate
       - timeSeries
       - totalTokens
+    AcceptSuggestionRequest:
+      type: object
+      properties:
+        bankId:
+          type: integer
     ActivateCipResponse:
       type: object
       properties:
@@ -13469,6 +15350,30 @@ components:
       required:
       - status
       - task_id
+    BankCopyRequest:
+      type: object
+      properties:
+        questionIds:
+          type: array
+          items:
+            type: integer
+        bankId:
+          type: integer
+      required:
+      - bankId
+      - questionIds
+    BankQuestionsRequest:
+      type: object
+      properties:
+        questionIds:
+          type: array
+          items:
+            type: integer
+        bankId:
+          type: integer
+      required:
+      - bankId
+      - questionIds
     BatchCapabilitiesRequest:
       type: object
       description: |-
@@ -15121,6 +17026,27 @@ components:
       required:
       - expires_at
       - token
+    GenerateQuizQuestionsRequest:
+      type: object
+      properties:
+        num_questions:
+          type: integer
+        question_types:
+          type: array
+          items:
+            type: string
+        instructions:
+          type: string
+    GenerateQuizQuestionsResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        status:
+          type: string
+      required:
+      - status
+      - task_id
     GranularityEnum:
       enum:
       - hourly
@@ -16798,6 +18724,402 @@ components:
           type: string
           format: date-time
           readOnly: true
+    PatchedQuestion:
+      type: object
+      description: |-
+        A quiz question that lives in exactly one bank, with nested writable choices.
+
+        Choices are synced atomically on create/update — a question and its options are
+        authored as a unit (a multiple-choice question is meaningless without them).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id (mirrors bank.course).
+        bank:
+          type: integer
+          description: The bank this question belongs to (exactly one).
+        questionType:
+          allOf:
+          - $ref: '#/components/schemas/QuestionTypeEnum'
+          description: |-
+            The type of question.
+
+            * `multiple_choice` - Multiple Choice (one correct)
+            * `multiple_answers` - Multiple Answers (several correct)
+            * `true_false` - True / False
+            * `short_answer` - Short Answer
+            * `essay` - Essay
+            * `numerical` - Numerical
+            * `code` - Code
+        text:
+          type: string
+          description: The question stem/prompt — single font (may contain HTML from
+            Canvas).
+        description:
+          type: string
+          description: 'Optional Markdown description shown beneath the stem (rich
+            content: code blocks, lists, formatting).'
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Point value of the question.
+        generalFeedback:
+          type: string
+          description: Feedback shown regardless of answer.
+        language:
+          type: string
+          nullable: true
+          description: 'For code questions: the language (matches Environment.language
+            values). When null, resolve from the attached assignment''s environment.'
+          maxLength: 25
+        starterCode:
+          type: string
+          nullable: true
+          description: 'For code questions: optional starter code shown to students.'
+        referenceSolution:
+          type: string
+          nullable: true
+          description: 'For code questions: optional reference solution (authoring-only,
+            not auto-graded).'
+        source:
+          allOf:
+          - $ref: '#/components/schemas/QuizSourceEnum'
+          readOnly: true
+          description: |-
+            Where this question originated (staff-internal provenance).
+
+            * `manual` - Manually authored
+            * `imported` - Imported
+            * `ai` - Accepted from an AI suggestion
+        createdBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff user who authored/accepted this question.
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionChoice'
+        metadata:
+          type: string
+          readOnly: true
+          description: Staff-internal metadata (Canvas IDs, AI provenance). Never
+            shown to students.
+    PatchedQuestionBank:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id.
+        name:
+          type: string
+          description: The name of the question bank.
+          maxLength: 128
+        description:
+          type: string
+          description: Optional description of the bank.
+        assignments:
+          type: array
+          items:
+            type: integer
+          description: Assignments this bank serves. Auto-added when the bank is used
+            in a quiz attached to an assignment; editable by instructors. Used as
+            AI-generation context.
+        source:
+          allOf:
+          - $ref: '#/components/schemas/QuizSourceEnum'
+          readOnly: true
+          description: |-
+            Where this bank originated (staff-internal provenance).
+
+            * `manual` - Manually authored
+            * `imported` - Imported
+            * `ai` - Accepted from an AI suggestion
+        createdBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff user who created this bank.
+        questionCount:
+          type: integer
+          readOnly: true
+    PatchedQuiz:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id.
+        assignment:
+          type: integer
+          nullable: true
+          description: The assignment this quiz is attached to, if any.
+        title:
+          type: string
+          description: The quiz title.
+          maxLength: 128
+        description:
+          type: string
+          description: Optional quiz description.
+        assignmentTrigger:
+          allOf:
+          - $ref: '#/components/schemas/QuizAssignmentTriggerEnum'
+          description: |-
+            When an attached quiz becomes available, relative to the assignment lifecycle. Ignored for standalone quizzes.
+
+            * `during` - During the assignment
+            * `after_assignment` - After the assignment closes
+            * `after_submission` - After the student submits
+            * `after_feedback` - After feedback is released
+        availableFrom:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Standalone quizzes: when the quiz opens.'
+        availableUntil:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Standalone quizzes: when the quiz closes / is due.'
+        timeLimitMinutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: Time limit in minutes. Null = untimed.
+        attemptsAllowed:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: Number of attempts allowed. 0 = unlimited.
+        shuffleQuestions:
+          type: boolean
+          description: Randomize question order per attempt.
+        showCorrectAnswers:
+          allOf:
+          - $ref: '#/components/schemas/QuizShowAnswersEnum'
+          description: |-
+            When students may see the correct answers.
+
+            * `never` - Never
+            * `after_submit` - After submitting
+            * `after_close` - After the quiz closes
+        passingScore:
+          type: number
+          format: double
+          maximum: 100000
+          minimum: -100000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Optional pass threshold. Interpreted per passingScoreUnit (a
+            percentage 0–100, or an absolute point value).
+        passingScoreUnit:
+          allOf:
+          - $ref: '#/components/schemas/QuizPassingScoreUnitEnum'
+          description: |-
+            Whether passingScore is a percentage or an absolute point value.
+
+            * `percent` - Percent
+            * `points` - Points
+        isPublished:
+          type: boolean
+          description: If false the quiz is a draft (author-only); students only see
+            published quizzes.
+        quizQuestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizQuestion'
+          readOnly: true
+        questionGroups:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizQuestionGroup'
+          readOnly: true
+        source:
+          allOf:
+          - $ref: '#/components/schemas/QuizSourceEnum'
+          readOnly: true
+          description: |-
+            Where this quiz originated (staff-internal provenance).
+
+            * `manual` - Manually authored
+            * `imported` - Imported
+            * `ai` - Accepted from an AI suggestion
+        createdBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff user who created this quiz.
+        metadata:
+          type: string
+          readOnly: true
+          description: Staff-internal metadata (Canvas IDs, etc.).
+    PatchedQuizImage:
+      type: object
+      description: |-
+        Read view of an uploaded description image. ``url`` is the public, token-based
+        endpoint that renders inline in Markdown.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id.
+        token:
+          type: string
+          format: uuid
+          readOnly: true
+          description: Unguessable public token used in the image URL.
+        url:
+          type: string
+          readOnly: true
+        originalName:
+          type: string
+          readOnly: true
+          description: Original filename.
+        contentType:
+          type: string
+          readOnly: true
+          description: Image MIME type.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedQuizImportJob:
+      type: object
+      description: Read-only view of a QTI / Common Cartridge import job (for status
+        polling).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          readOnly: true
+          description: The related course_id.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/QuizImportJobStatusEnum'
+          readOnly: true
+          description: |-
+            Current status of the import job.
+
+            * `pending` - Pending
+            * `running` - Running
+            * `completed` - Completed
+            * `failed` - Failed
+        taskId:
+          type: string
+          readOnly: true
+          description: Celery task id for polling.
+        targetBank:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The bank imported questions land in. Created if absent.
+        createdQuizCount:
+          type: integer
+          readOnly: true
+          description: Number of quizzes created.
+        createdQuestionCount:
+          type: integer
+          readOnly: true
+          description: Number of questions created.
+        errorMessage:
+          type: string
+          readOnly: true
+          description: Error detail if the job failed.
+        summary:
+          type: string
+          readOnly: true
+          description: Per-item parse report, including skipped/unsupported types.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedQuizQuestion:
+      type: object
+      description: Membership of a Question in a Quiz, with ordering and optional
+        point override.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The related quiz_id.
+        question:
+          type: integer
+          description: The related question_id.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this question within the quiz.
+        pointsOverride:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Optional per-quiz point override. Null uses Question.points.
+    PatchedQuizQuestionGroup:
+      type: object
+      description: 'A random-draw group on a quiz: pick N questions from a bank, each
+        worth P points.'
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The related quiz_id.
+        bank:
+          type: integer
+          description: The bank questions are drawn from.
+        name:
+          type: string
+          description: Optional label for this group (e.g. 'Chapter 3 — pick 3').
+          maxLength: 128
+        pickCount:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: How many questions to randomly draw from the bank.
+        pointsPerQuestion:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Points each drawn question is worth.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this group within the quiz.
     PatchedRubricCategory:
       type: object
       properties:
@@ -17224,6 +19546,96 @@ components:
           format: date-time
           readOnly: true
         modified:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedSuggestedQuizQuestion:
+      type: object
+      description: |-
+        An AI quiz-question suggestion. Staff-only. A pending suggestion's content may be
+        edited (PATCH) before it is accepted into a real Question. ``status`` and the link
+        fields are system-managed via the accept/reject actions.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The assignment this suggestion was generated for (fresh generation).
+        sourceQuestion:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The existing question this suggestion was generated from (cross-semester
+            refresh).
+        questionType:
+          allOf:
+          - $ref: '#/components/schemas/QuestionTypeEnum'
+          description: |-
+            The suggested question type.
+
+            * `multiple_choice` - Multiple Choice (one correct)
+            * `multiple_answers` - Multiple Answers (several correct)
+            * `true_false` - True / False
+            * `short_answer` - Short Answer
+            * `essay` - Essay
+            * `numerical` - Numerical
+            * `code` - Code
+        text:
+          type: string
+          description: The suggested question stem/prompt.
+        choicesData: {}
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Suggested point value.
+        language:
+          type: string
+          nullable: true
+          description: 'For code suggestions: the language.'
+          maxLength: 25
+        starterCode:
+          type: string
+          nullable: true
+          description: Suggested starter code.
+        referenceSolution:
+          type: string
+          nullable: true
+          description: Suggested reference solution.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/SuggestedCommentStatusEnum'
+          readOnly: true
+          description: |-
+            Current status of this suggestion.
+
+            * `pending` - Pending
+            * `accepted` - Accepted
+            * `rejected` - Rejected
+        acceptedBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The instructor who accepted this suggestion.
+        acceptedQuestion:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The real Question created or updated when this suggestion was
+            accepted.
+        generationBatch:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          description: UUID grouping all suggestions from a single generation call.
+        created:
           type: string
           format: date-time
           readOnly: true
@@ -17715,6 +20127,568 @@ components:
       - modified
       - promptType
       - user
+    Question:
+      type: object
+      description: |-
+        A quiz question that lives in exactly one bank, with nested writable choices.
+
+        Choices are synced atomically on create/update — a question and its options are
+        authored as a unit (a multiple-choice question is meaningless without them).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id (mirrors bank.course).
+        bank:
+          type: integer
+          description: The bank this question belongs to (exactly one).
+        questionType:
+          allOf:
+          - $ref: '#/components/schemas/QuestionTypeEnum'
+          description: |-
+            The type of question.
+
+            * `multiple_choice` - Multiple Choice (one correct)
+            * `multiple_answers` - Multiple Answers (several correct)
+            * `true_false` - True / False
+            * `short_answer` - Short Answer
+            * `essay` - Essay
+            * `numerical` - Numerical
+            * `code` - Code
+        text:
+          type: string
+          description: The question stem/prompt — single font (may contain HTML from
+            Canvas).
+        description:
+          type: string
+          description: 'Optional Markdown description shown beneath the stem (rich
+            content: code blocks, lists, formatting).'
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Point value of the question.
+        generalFeedback:
+          type: string
+          description: Feedback shown regardless of answer.
+        language:
+          type: string
+          nullable: true
+          description: 'For code questions: the language (matches Environment.language
+            values). When null, resolve from the attached assignment''s environment.'
+          maxLength: 25
+        starterCode:
+          type: string
+          nullable: true
+          description: 'For code questions: optional starter code shown to students.'
+        referenceSolution:
+          type: string
+          nullable: true
+          description: 'For code questions: optional reference solution (authoring-only,
+            not auto-graded).'
+        source:
+          allOf:
+          - $ref: '#/components/schemas/QuizSourceEnum'
+          readOnly: true
+          description: |-
+            Where this question originated (staff-internal provenance).
+
+            * `manual` - Manually authored
+            * `imported` - Imported
+            * `ai` - Accepted from an AI suggestion
+        createdBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff user who authored/accepted this question.
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionChoice'
+        metadata:
+          type: string
+          readOnly: true
+          description: Staff-internal metadata (Canvas IDs, AI provenance). Never
+            shown to students.
+      required:
+      - bank
+      - course
+      - createdBy
+      - id
+      - metadata
+      - source
+      - text
+    QuestionBank:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id.
+        name:
+          type: string
+          description: The name of the question bank.
+          maxLength: 128
+        description:
+          type: string
+          description: Optional description of the bank.
+        assignments:
+          type: array
+          items:
+            type: integer
+          description: Assignments this bank serves. Auto-added when the bank is used
+            in a quiz attached to an assignment; editable by instructors. Used as
+            AI-generation context.
+        source:
+          allOf:
+          - $ref: '#/components/schemas/QuizSourceEnum'
+          readOnly: true
+          description: |-
+            Where this bank originated (staff-internal provenance).
+
+            * `manual` - Manually authored
+            * `imported` - Imported
+            * `ai` - Accepted from an AI suggestion
+        createdBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff user who created this bank.
+        questionCount:
+          type: integer
+          readOnly: true
+      required:
+      - course
+      - createdBy
+      - id
+      - name
+      - questionCount
+      - source
+    QuestionChoice:
+      type: object
+      properties:
+        id:
+          type: integer
+        text:
+          type: string
+          description: The choice text (or accepted answer value).
+        isCorrect:
+          type: boolean
+          description: Whether this choice is a correct answer.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this choice within the question.
+        feedback:
+          type: string
+          description: Optional per-choice feedback.
+      required:
+      - text
+    QuestionTypeEnum:
+      enum:
+      - multiple_choice
+      - multiple_answers
+      - true_false
+      - short_answer
+      - essay
+      - numerical
+      - code
+      type: string
+      description: |-
+        * `multiple_choice` - Multiple Choice (one correct)
+        * `multiple_answers` - Multiple Answers (several correct)
+        * `true_false` - True / False
+        * `short_answer` - Short Answer
+        * `essay` - Essay
+        * `numerical` - Numerical
+        * `code` - Code
+    Quiz:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id.
+        assignment:
+          type: integer
+          nullable: true
+          description: The assignment this quiz is attached to, if any.
+        title:
+          type: string
+          description: The quiz title.
+          maxLength: 128
+        description:
+          type: string
+          description: Optional quiz description.
+        assignmentTrigger:
+          allOf:
+          - $ref: '#/components/schemas/QuizAssignmentTriggerEnum'
+          description: |-
+            When an attached quiz becomes available, relative to the assignment lifecycle. Ignored for standalone quizzes.
+
+            * `during` - During the assignment
+            * `after_assignment` - After the assignment closes
+            * `after_submission` - After the student submits
+            * `after_feedback` - After feedback is released
+        availableFrom:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Standalone quizzes: when the quiz opens.'
+        availableUntil:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Standalone quizzes: when the quiz closes / is due.'
+        timeLimitMinutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: Time limit in minutes. Null = untimed.
+        attemptsAllowed:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: Number of attempts allowed. 0 = unlimited.
+        shuffleQuestions:
+          type: boolean
+          description: Randomize question order per attempt.
+        showCorrectAnswers:
+          allOf:
+          - $ref: '#/components/schemas/QuizShowAnswersEnum'
+          description: |-
+            When students may see the correct answers.
+
+            * `never` - Never
+            * `after_submit` - After submitting
+            * `after_close` - After the quiz closes
+        passingScore:
+          type: number
+          format: double
+          maximum: 100000
+          minimum: -100000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Optional pass threshold. Interpreted per passingScoreUnit (a
+            percentage 0–100, or an absolute point value).
+        passingScoreUnit:
+          allOf:
+          - $ref: '#/components/schemas/QuizPassingScoreUnitEnum'
+          description: |-
+            Whether passingScore is a percentage or an absolute point value.
+
+            * `percent` - Percent
+            * `points` - Points
+        isPublished:
+          type: boolean
+          description: If false the quiz is a draft (author-only); students only see
+            published quizzes.
+        quizQuestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizQuestion'
+          readOnly: true
+        questionGroups:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizQuestionGroup'
+          readOnly: true
+        source:
+          allOf:
+          - $ref: '#/components/schemas/QuizSourceEnum'
+          readOnly: true
+          description: |-
+            Where this quiz originated (staff-internal provenance).
+
+            * `manual` - Manually authored
+            * `imported` - Imported
+            * `ai` - Accepted from an AI suggestion
+        createdBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff user who created this quiz.
+        metadata:
+          type: string
+          readOnly: true
+          description: Staff-internal metadata (Canvas IDs, etc.).
+      required:
+      - course
+      - createdBy
+      - id
+      - metadata
+      - questionGroups
+      - quizQuestions
+      - source
+      - title
+    QuizAssignmentTriggerEnum:
+      enum:
+      - during
+      - after_assignment
+      - after_submission
+      - after_feedback
+      type: string
+      description: |-
+        * `during` - During the assignment
+        * `after_assignment` - After the assignment closes
+        * `after_submission` - After the student submits
+        * `after_feedback` - After feedback is released
+    QuizImage:
+      type: object
+      description: |-
+        Read view of an uploaded description image. ``url`` is the public, token-based
+        endpoint that renders inline in Markdown.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id.
+        token:
+          type: string
+          format: uuid
+          readOnly: true
+          description: Unguessable public token used in the image URL.
+        url:
+          type: string
+          readOnly: true
+        originalName:
+          type: string
+          readOnly: true
+          description: Original filename.
+        contentType:
+          type: string
+          readOnly: true
+          description: Image MIME type.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - contentType
+      - course
+      - created
+      - id
+      - originalName
+      - token
+      - url
+    QuizImportJob:
+      type: object
+      description: Read-only view of a QTI / Common Cartridge import job (for status
+        polling).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          readOnly: true
+          description: The related course_id.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/QuizImportJobStatusEnum'
+          readOnly: true
+          description: |-
+            Current status of the import job.
+
+            * `pending` - Pending
+            * `running` - Running
+            * `completed` - Completed
+            * `failed` - Failed
+        taskId:
+          type: string
+          readOnly: true
+          description: Celery task id for polling.
+        targetBank:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The bank imported questions land in. Created if absent.
+        createdQuizCount:
+          type: integer
+          readOnly: true
+          description: Number of quizzes created.
+        createdQuestionCount:
+          type: integer
+          readOnly: true
+          description: Number of questions created.
+        errorMessage:
+          type: string
+          readOnly: true
+          description: Error detail if the job failed.
+        summary:
+          type: string
+          readOnly: true
+          description: Per-item parse report, including skipped/unsupported types.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - course
+      - created
+      - createdQuestionCount
+      - createdQuizCount
+      - errorMessage
+      - id
+      - status
+      - summary
+      - targetBank
+      - taskId
+    QuizImportJobStatusEnum:
+      enum:
+      - pending
+      - running
+      - completed
+      - failed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `running` - Running
+        * `completed` - Completed
+        * `failed` - Failed
+    QuizPassingScoreUnitEnum:
+      enum:
+      - percent
+      - points
+      type: string
+      description: |-
+        * `percent` - Percent
+        * `points` - Points
+    QuizQuestion:
+      type: object
+      description: Membership of a Question in a Quiz, with ordering and optional
+        point override.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The related quiz_id.
+        question:
+          type: integer
+          description: The related question_id.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this question within the quiz.
+        pointsOverride:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Optional per-quiz point override. Null uses Question.points.
+      required:
+      - id
+      - question
+      - quiz
+    QuizQuestionGroup:
+      type: object
+      description: 'A random-draw group on a quiz: pick N questions from a bank, each
+        worth P points.'
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The related quiz_id.
+        bank:
+          type: integer
+          description: The bank questions are drawn from.
+        name:
+          type: string
+          description: Optional label for this group (e.g. 'Chapter 3 — pick 3').
+          maxLength: 128
+        pickCount:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: How many questions to randomly draw from the bank.
+        pointsPerQuestion:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Points each drawn question is worth.
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this group within the quiz.
+      required:
+      - bank
+      - id
+      - quiz
+    QuizShowAnswersEnum:
+      enum:
+      - never
+      - after_submit
+      - after_close
+      type: string
+      description: |-
+        * `never` - Never
+        * `after_submit` - After submitting
+        * `after_close` - After the quiz closes
+    QuizSourceEnum:
+      enum:
+      - manual
+      - imported
+      - ai
+      type: string
+      description: |-
+        * `manual` - Manually authored
+        * `imported` - Imported
+        * `ai` - Accepted from an AI suggestion
+    RegenerateSuggestionRequest:
+      type: object
+      properties:
+        assignment_id:
+          type: integer
+        num_questions:
+          type: integer
+        question_types:
+          type: array
+          items:
+            type: string
+        instructions:
+          type: string
+    RegenerateSuggestionResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        status:
+          type: string
+      required:
+      - status
+      - task_id
     RegisterAndSetPasswordRequest:
       type: object
       properties:
@@ -18944,6 +21918,106 @@ components:
         * `pending` - Pending
         * `accepted` - Accepted
         * `rejected` - Rejected
+    SuggestedQuizQuestion:
+      type: object
+      description: |-
+        An AI quiz-question suggestion. Staff-only. A pending suggestion's content may be
+        edited (PATCH) before it is accepted into a real Question. ``status`` and the link
+        fields are system-managed via the accept/reject actions.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The assignment this suggestion was generated for (fresh generation).
+        sourceQuestion:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The existing question this suggestion was generated from (cross-semester
+            refresh).
+        questionType:
+          allOf:
+          - $ref: '#/components/schemas/QuestionTypeEnum'
+          description: |-
+            The suggested question type.
+
+            * `multiple_choice` - Multiple Choice (one correct)
+            * `multiple_answers` - Multiple Answers (several correct)
+            * `true_false` - True / False
+            * `short_answer` - Short Answer
+            * `essay` - Essay
+            * `numerical` - Numerical
+            * `code` - Code
+        text:
+          type: string
+          description: The suggested question stem/prompt.
+        choicesData: {}
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Suggested point value.
+        language:
+          type: string
+          nullable: true
+          description: 'For code suggestions: the language.'
+          maxLength: 25
+        starterCode:
+          type: string
+          nullable: true
+          description: Suggested starter code.
+        referenceSolution:
+          type: string
+          nullable: true
+          description: Suggested reference solution.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/SuggestedCommentStatusEnum'
+          readOnly: true
+          description: |-
+            Current status of this suggestion.
+
+            * `pending` - Pending
+            * `accepted` - Accepted
+            * `rejected` - Rejected
+        acceptedBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The instructor who accepted this suggestion.
+        acceptedQuestion:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The real Question created or updated when this suggestion was
+            accepted.
+        generationBatch:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          description: UUID grouping all suggestions from a single generation call.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - acceptedBy
+      - acceptedQuestion
+      - assignment
+      - created
+      - generationBatch
+      - id
+      - sourceQuestion
+      - status
+      - text
     SystemActivityResponse:
       type: object
       properties:

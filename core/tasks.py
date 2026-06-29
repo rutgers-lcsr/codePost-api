@@ -75,6 +75,10 @@ def generate_ai_grading_assistance(submission_id: int):
         # Clear existing pending suggestions to prevent duplicates on re-trigger
         SuggestedComment.objects.filter(submission=submission, status='pending').delete()
 
+        service.set_request_context(
+            user=submission.grader or submission.students.first(),
+            request_type='suggested_comments',
+        )
         if main_file:
             # Focus on the detected main file
             results = async_to_sync(service.generate_file_suggestions)(submission, main_file)
@@ -136,6 +140,10 @@ def generate_ai_grading_assistance(submission_id: int):
     # --- Generate submission summary ---
     if summary_enabled:
       try:
+        service.set_request_context(
+            user=submission.grader or submission.students.first(),
+            request_type='submission_summary',
+        )
         result = async_to_sync(service.generate_submission_summary)(submission, target_file=main_file)
         if result.success and result.text:
             SubmissionSummary.objects.update_or_create(
@@ -175,6 +183,10 @@ def generate_ai_grading_assistance(submission_id: int):
                 logger.debug(f"[AIGrading] Description already generated for assignment {assignment.id}, skipping.")
             else:
               try:
+                service.set_request_context(
+                    user=submission.grader or submission.students.first(),
+                    request_type='assignment_description',
+                )
                 result = async_to_sync(service.generate_assignment_description)(assignment)
                 if result.success and result.text:
                     # Re-fetch to avoid race conditions
@@ -266,3 +278,286 @@ def auto_improve_prompt_threshold(prompt_type: str):
             )
     except Exception:
         logger.exception(f"[AutoImprove] Threshold run failed for {prompt_type}")
+
+
+# --------------------------------------------------------------------------- #
+# Quizzes
+# --------------------------------------------------------------------------- #
+
+def _parse_json_questions(text: str) -> list:
+    """Parse a model's JSON array of questions, tolerating ```json fences."""
+    import json
+    cleaned = (text or '').strip()
+    if cleaned.startswith('```'):
+        # Strip a leading ```json / ``` fence and trailing ```.
+        cleaned = cleaned.split('\n', 1)[-1] if '\n' in cleaned else cleaned
+        if cleaned.endswith('```'):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+    data = json.loads(cleaned)
+    return data if isinstance(data, list) else []
+
+
+def _normalize_choices(raw_choices) -> list:
+    """Normalize AI choice entries to the {text, isCorrect, feedback} shape.
+
+    Tolerates models that return choices as plain strings or use alternate keys
+    (``value``/``answer`` for text, ``correct`` for correctness)."""
+    out = []
+    for c in raw_choices or []:
+        if isinstance(c, str):
+            out.append({'text': c, 'isCorrect': False, 'feedback': ''})
+            continue
+        if not isinstance(c, dict):
+            continue
+        text = c.get('text', c.get('value', c.get('answer', '')))
+        is_correct = c.get('isCorrect', c.get('is_correct', c.get('correct', False)))
+        out.append({
+            'text': text or '',
+            'isCorrect': bool(is_correct),
+            'feedback': c.get('feedback', '') or '',
+        })
+    return out
+
+
+@shared_task
+def generate_quiz_question_suggestions(
+    requested_by_id: int,
+    assignment_id: int | None = None,
+    source_question_id: int | None = None,
+    num_questions: int = 5,
+    question_types: list | None = None,
+    instructions: str = '',
+):
+    """Generate AI quiz-question suggestions for an instructor to review and accept.
+
+    Two entry points:
+    - Fresh, assignment-seeded (``assignment_id``): clears prior pending suggestions
+      for that assignment and proposes ``num_questions`` new questions.
+    - Refresh, question-seeded (``source_question_id``): proposes one improved variant
+      of an existing question (cross-semester update).
+    """
+    import uuid
+    from asgiref.sync import async_to_sync
+    from core.models import Assignment, Question, SuggestedQuizQuestion, User
+
+    user = User.objects.filter(id=requested_by_id).first()
+    assignment = Assignment.objects.filter(id=assignment_id).select_related(
+        'course', 'course__organization').first() if assignment_id else None
+    source_question = Question.objects.filter(id=source_question_id).select_related(
+        'course', 'course__organization').first() if source_question_id else None
+
+    course = (assignment.course if assignment else None) or (source_question.course if source_question else None)
+    if course is None:
+        logger.warning("[QuizGen] No course resolvable (assignment/source_question missing). Skipping.")
+        return
+
+    from core.services.ai_service import AIService
+    service = AIService(course, assignment)
+    if not service.is_configured or service.is_globally_disabled:
+        logger.debug(f"[QuizGen] AI not configured/disabled for course {course.id}. Skipping.")
+        return
+    if not service.is_feature_enabled('quiz_generation'):
+        logger.debug(f"[QuizGen] quiz_generation disabled for course {course.id}. Skipping.")
+        return
+
+    # Replace any prior pending suggestions for this seed (assignment for fresh
+    # generation, or the source question for a refresh) so there's a single batch.
+    if source_question is not None:
+        SuggestedQuizQuestion.objects.filter(sourceQuestion=source_question, status='pending').delete()
+    elif assignment is not None:
+        SuggestedQuizQuestion.objects.filter(assignment=assignment, status='pending').delete()
+
+    service.set_request_context(
+        user=user, request_type='quiz_generation', instructions=instructions,
+    )
+    try:
+        result = async_to_sync(service.generate_quiz_questions)(
+            assignment=assignment,
+            num_questions=num_questions,
+            question_types=question_types,
+            source_question=source_question,
+            instructions=instructions,
+        )
+    except Exception as e:
+        logger.error(f"[QuizGen] Generation failed for course {course.id}: {e}", exc_info=True)
+        return
+
+    if not result.success or not result.text:
+        logger.warning(f"[QuizGen] Empty/failed generation for course {course.id}: {result.error}")
+        service.record_usage(result, user=user, request_type='quiz_generation')
+        return
+
+    try:
+        questions = _parse_json_questions(result.text)
+    except Exception as e:
+        logger.error(f"[QuizGen] Could not parse model output as JSON: {e}", exc_info=True)
+        service.record_usage(result, user=user, request_type='quiz_generation')
+        return
+
+    batch = uuid.uuid4()
+    prompt_variant_id = result.variant_id
+    metadata = {
+        'provider': service.provider,
+        'model': service.model,
+        'input_tokens': result.input_tokens,
+        'output_tokens': result.output_tokens,
+    }
+    CHOICE_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
+    created = 0
+    missing_choices = 0
+    for q in questions:
+        if not isinstance(q, dict) or not q.get('text'):
+            continue
+        qtype = q.get('type', 'multiple_choice')
+        choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
+        if qtype in CHOICE_TYPES and not choices:
+            missing_choices += 1
+        SuggestedQuizQuestion.objects.create(
+            assignment=assignment,
+            sourceQuestion=source_question,
+            questionType=qtype,
+            text=q.get('text', ''),
+            choicesData=choices,
+            points=q.get('points', 1) or 1,
+            language=q.get('language') or (source_question.language if source_question else None),
+            starterCode=q.get('starter_code'),
+            referenceSolution=q.get('reference_solution'),
+            generationMetadata=metadata,
+            promptVariant_id=prompt_variant_id,
+            generationBatch=batch,
+        )
+        created += 1
+
+    logger.info(f"[QuizGen] Created {created} suggested quiz questions for course {course.id} (batch {batch})")
+    if missing_choices:
+        # Diagnostic: the model returned choice-type questions without choices. Logging the
+        # raw output helps tell whether to adjust the active quiz_generation prompt variant.
+        logger.warning(
+            f"[QuizGen] {missing_choices}/{created} choice-type questions had no choices. "
+            f"Raw model output (truncated): {(result.text or '')[:1500]}"
+        )
+    service.record_usage(result, user=user, request_type='quiz_generation')
+
+
+@shared_task
+def import_quiz_qti(job_id: int, import_quizzes: bool = False):
+    """Parse an uploaded Canvas QTI export and import its questions into a bank.
+
+    By default only questions are imported (Canvas exports wrap question banks as
+    ``<assessment>`` elements, so we would otherwise create surprise quizzes). When
+    ``import_quizzes`` is True, any Canvas quizzes (assessments) are recreated too."""
+    import io
+    from decimal import Decimal
+    from django.db import transaction
+    from core.models import QuestionBank, Question, QuestionChoice, Quiz, QuizQuestion, QuizImportJob
+    from core.services.canvas_qti_import import parse_canvas_export
+
+    try:
+        job = QuizImportJob.objects.select_related('course', 'targetBank').get(id=job_id)
+    except QuizImportJob.DoesNotExist:
+        logger.warning(f"[QuizImport] Job {job_id} not found. Skipping.")
+        return
+
+    job.status = 'running'
+    job.save(update_fields=['status', 'modified'])
+
+    try:
+        with job.file.open('rb') as fh:
+            raw = fh.read()
+        parsed = parse_canvas_export(io.BytesIO(raw))
+
+        with transaction.atomic():
+            bank = job.targetBank
+            if bank is None:
+                bank, _ = QuestionBank.objects.get_or_create(
+                    course=job.course,
+                    name=f'Imported {job.created:%Y-%m-%d %H:%M}',
+                    defaults={'source': 'imported', 'createdBy': job.createdBy},
+                )
+
+            # Content signature for dedup (consistent with the parser). Re-importing the
+            # same export into a bank that already holds the questions reuses them rather
+            # than creating duplicates.
+            def _sig_db(question, choices):
+                ch = tuple(sorted(((c.text or '').strip(), bool(c.isCorrect)) for c in choices))
+                return (question.questionType, (question.text or '').strip(), ch)
+
+            def _sig_parsed(q):
+                ch = tuple(sorted(
+                    ((c.get('text') or '').strip(), bool(c.get('isCorrect'))) for c in q.get('choices', [])
+                ))
+                return (q['type'], (q.get('text') or '').strip(), ch)
+
+            existing_by_sig = {
+                _sig_db(eq, list(eq.choices.all())): eq
+                for eq in bank.questions.prefetch_related('choices')
+            }
+
+            ident_to_question: dict[str, Question] = {}
+            created_count = 0
+            reused_count = 0
+            for q in parsed['questions']:
+                sig = _sig_parsed(q)
+                existing = existing_by_sig.get(sig)
+                if existing is not None:
+                    ident_to_question[q['ident']] = existing
+                    reused_count += 1
+                    continue
+                question = Question.objects.create(
+                    course=job.course,
+                    bank=bank,
+                    questionType=q['type'],
+                    text=q['text'],
+                    points=Decimal(str(q.get('points', 1))),
+                    source='imported',
+                    createdBy=job.createdBy,
+                    metadata=q.get('metadata', {}),
+                )
+                for i, c in enumerate(q.get('choices', [])):
+                    QuestionChoice.objects.create(
+                        question=question,
+                        text=c.get('text', ''),
+                        isCorrect=bool(c.get('isCorrect')),
+                        sortKey=i,
+                        feedback=c.get('feedback', '') or '',
+                    )
+                existing_by_sig[sig] = question
+                ident_to_question[q['ident']] = question
+                created_count += 1
+
+            quiz_count = 0
+            if import_quizzes:
+                for quiz_data in parsed['quizzes']:
+                    quiz = Quiz.objects.create(
+                        course=job.course,
+                        title=quiz_data['title'] or 'Imported Quiz',
+                        source='imported',
+                        createdBy=job.createdBy,
+                    )
+                    seen_qids: set[int] = set()
+                    for i, ident in enumerate(quiz_data['question_idents']):
+                        question = ident_to_question.get(ident)
+                        if question is not None and question.id not in seen_qids:
+                            seen_qids.add(question.id)
+                            QuizQuestion.objects.create(quiz=quiz, question=question, sortKey=i)
+                    quiz_count += 1
+
+            job.targetBank = bank
+            job.createdQuestionCount = created_count
+            job.createdQuizCount = quiz_count
+            job.summary = {
+                'imported_questions': created_count,
+                'reused_questions': reused_count,
+                'imported_quizzes': quiz_count,
+                'skipped': parsed['skipped'],
+            }
+            job.status = 'completed'
+            job.save()
+        logger.info(f"[QuizImport] Job {job_id} completed: "
+                    f"{job.createdQuestionCount} questions, {job.createdQuizCount} quizzes.")
+    except Exception as e:
+        logger.error(f"[QuizImport] Job {job_id} failed: {e}", exc_info=True)
+        job.status = 'failed'
+        job.errorMessage = str(e)
+        job.save(update_fields=['status', 'errorMessage', 'modified'])

@@ -239,6 +239,9 @@ class CommentViewSet(ListProtectedViewSet):
         context.rubric_context = request_context.get('rubric_context', '')
         
         # Generate comment
+        service.set_request_context(
+            user=user, request_type='comment_generation', instructions=existing_text,
+        )
         result = async_to_sync(service.generate_comment)(context)
 
         # Record AI usage

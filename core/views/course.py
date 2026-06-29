@@ -11,6 +11,9 @@ from core.serializers.course import (
     CourseStudentCaptionsSerializer,
 )
 from core.serializers.section import SectionSerializer
+from core.serializers.questionBank import QuestionBankSerializer
+from core.serializers.question import QuestionSerializer
+from core.serializers.quiz import QuizSerializer
 from core.views.template import SuperUserListProtectedViewSet
 
 from rest_framework.response import Response
@@ -849,6 +852,36 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         api_key.save()
         serializer = CourseAPIKeyReadSerializer(api_key)
         return Response(serializer.data)
+
+    @extend_schema(responses=QuestionBankSerializer(many=True))
+    @action(detail=True, methods=["GET"], url_path="questionBanks")
+    def questionBanks(self, request, pk=None):
+        """List the course's quiz question banks (staff only)."""
+        course = self.get_object()
+        if not (request.user.is_superuser or isCourseStaff(request.user, course)):
+            return returnForbidden()
+        banks = course.questionBanks.all()
+        return Response(QuestionBankSerializer(banks, many=True, context={"request": request}).data)
+
+    @extend_schema(responses=QuizSerializer(many=True))
+    @action(detail=True, methods=["GET"])
+    def quizzes(self, request, pk=None):
+        """List the course's quizzes (staff only)."""
+        course = self.get_object()
+        if not (request.user.is_superuser or isCourseStaff(request.user, course)):
+            return returnForbidden()
+        quizzes = course.quizzes.all()
+        return Response(QuizSerializer(quizzes, many=True, context={"request": request}).data)
+
+    @extend_schema(responses=QuestionSerializer(many=True))
+    @action(detail=True, methods=["GET"])
+    def questions(self, request, pk=None):
+        """List the course's quiz questions (staff only)."""
+        course = self.get_object()
+        if not (request.user.is_superuser or isCourseStaff(request.user, course)):
+            return returnForbidden()
+        questions = course.questions.prefetch_related("choices").all()
+        return Response(QuestionSerializer(questions, many=True, context={"request": request}).data)
 
 
 def add_admin_privileges(user):

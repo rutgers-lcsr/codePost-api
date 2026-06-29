@@ -892,6 +892,8 @@ class SubmissionViewSet(ListProtectedViewSet):
     if not service.is_feature_enabled('suggested_comments'):
         return Response({'error': 'Suggested comments are disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    service.set_request_context(user=user, request_type='file_suggestions')
+
     # Check for A/B experiment
     experiment = AIService.check_experiment('suggested_comments')
     is_custom = bool(submission.assignment.ai_system_prompt)
@@ -1020,6 +1022,8 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     if not service.is_feature_enabled('submission_summary'):
         return Response({'error': 'Submission summaries are disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    service.set_request_context(user=user, request_type='submission_summary')
 
     # Check for A/B experiment
     experiment = AIService.check_experiment('submission_summary')

@@ -4,6 +4,7 @@
 from core.ai_features import (  # noqa: F401
     assignment_description,
     comment_generation,
+    quiz_generation,
     submission_summary,
     suggested_comments,
     test_generation,

@@ -43,6 +43,14 @@ from core.views.assignmentDataSet import AssignmentDataSetViewSet
 from core.views.dashboard import DashboardViewSet
 from core.views.commentTemplate import CommentTemplateViewSet
 from core.views.suggested_comment import SuggestedCommentViewSet
+from core.views.questionBank import QuestionBankViewSet
+from core.views.question import QuestionViewSet
+from core.views.quiz import QuizViewSet
+from core.views.quizQuestion import QuizQuestionViewSet
+from core.views.quizQuestionGroup import QuizQuestionGroupViewSet
+from core.views.suggestedQuizQuestion import SuggestedQuizQuestionViewSet
+from core.views.quizImportJob import QuizImportJobViewSet
+from core.views.quizImage import QuizImageViewSet, serve_quiz_image
 from core.views.prompt_variant import SystemPromptVariantViewSet
 from core.views.prompt_experiment import PromptExperimentViewSet
 from core.views.prompt_feedback import PromptFeedbackViewSet
@@ -102,6 +110,14 @@ router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
 router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 router.register(r'commentTemplates', CommentTemplateViewSet, basename='commentTemplate')
 router.register(r'suggestedComments', SuggestedCommentViewSet)
+router.register(r'questionBanks', QuestionBankViewSet)
+router.register(r'questions', QuestionViewSet)
+router.register(r'quizzes', QuizViewSet)
+router.register(r'quizQuestions', QuizQuestionViewSet)
+router.register(r'quizQuestionGroups', QuizQuestionGroupViewSet)
+router.register(r'suggestedQuizQuestions', SuggestedQuizQuestionViewSet)
+router.register(r'quizImportJobs', QuizImportJobViewSet)
+router.register(r'quizImages', QuizImageViewSet)
 router.register(r'promptVariants', SystemPromptVariantViewSet)
 router.register(r'promptExperiments', PromptExperimentViewSet)
 router.register(r'promptFeedback', PromptFeedbackViewSet)
@@ -146,6 +162,10 @@ urlpatterns = [
     path('capabilities/batch/', BatchCapabilitiesView.as_view(), name='batch_capabilities'),
     path('promptTypes/', PromptTypeListView.as_view(), name='prompt_types'),
     path('aiFeatures/', AIFeatureListView.as_view(), name='ai_features'),
+    # Public (token-based) serving of quiz description images — must precede the router
+    # so it isn't shadowed, and is intentionally unauthenticated (browsers send no auth
+    # header on <img> requests; the unguessable token is the access control).
+    path('quizImages/raw/<uuid:token>/', serve_quiz_image, name='quiz_image_raw'),
     re_path('', include(router.urls)),
 ]
 

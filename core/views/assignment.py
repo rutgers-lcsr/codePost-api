@@ -11,6 +11,8 @@ from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
 from core.serializers.rubricComment import RubricCommentSerializer
+from core.serializers.quiz import QuizSerializer
+from core.serializers.suggestedQuizQuestion import SuggestedQuizQuestionSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.comment import CommentSerializer
 
@@ -351,6 +353,55 @@ class AssignmentViewSet(ListProtectedViewSet):
     }
 
     return Response(toRet)
+
+  @extend_schema(responses=QuizSerializer(many=True))
+  @action(detail=True, methods=['GET'], permission_classes=[IsAuthenticated])
+  def quizzes(self, request, pk=None):
+    """List the quizzes attached to this assignment (staff only)."""
+    assignment = self.get_object()
+    if not isCourseStaff(request.user, assignment.course):
+      return returnForbidden()
+    quizzes = assignment.quizzes.all()
+    return Response(QuizSerializer(quizzes, many=True, context={'request': request}).data)
+
+  @extend_schema(responses=SuggestedQuizQuestionSerializer(many=True))
+  @action(detail=True, methods=['GET'], permission_classes=[IsAuthenticated])
+  def suggestedQuizQuestions(self, request, pk=None):
+    """List pending AI quiz-question suggestions for this assignment (staff only)."""
+    assignment = self.get_object()
+    if not isCourseStaff(request.user, assignment.course):
+      return returnForbidden()
+    suggestions = assignment.suggested_quiz_questions.filter(status='pending')
+    return Response(SuggestedQuizQuestionSerializer(suggestions, many=True, context={'request': request}).data)
+
+  @extend_schema(
+      request=inline_serializer('GenerateQuizQuestionsRequest', fields={
+          'num_questions': serializers.IntegerField(required=False),
+          'question_types': serializers.ListField(child=serializers.CharField(), required=False),
+          'instructions': serializers.CharField(required=False),
+      }),
+      responses=inline_serializer('GenerateQuizQuestionsResponse', fields={
+          'task_id': serializers.CharField(),
+          'status': serializers.CharField(),
+      }),
+      description="Enqueue AI generation of suggested quiz questions for this assignment. "
+                  "Instructors review the suggestions and accept the good ones.",
+  )
+  @action(detail=True, methods=['POST'], permission_classes=[IsAuthenticated])
+  def generateQuizQuestions(self, request, pk=None):
+    """Generate AI quiz-question suggestions from this assignment and course material."""
+    assignment = self.get_object()
+    if not isCourseStaff(request.user, assignment.course):
+      return returnForbidden()
+    from core.tasks import generate_quiz_question_suggestions
+    task = generate_quiz_question_suggestions.delay(
+        requested_by_id=request.user.id,
+        assignment_id=assignment.id,
+        num_questions=request.data.get('num_questions', 5),
+        question_types=request.data.get('question_types'),
+        instructions=request.data.get('instructions', '') or '',
+    )
+    return Response({'task_id': task.id, 'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(responses=SubmissionSerializer(many=True))
   @action(detail=True, methods=['GET'])
@@ -1065,8 +1116,11 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     try:
         # Generate script
+        service.set_request_context(
+            user=cast(User, user), request_type='test_generation', instructions=rubric_text,
+        )
         result = async_to_sync(service.generate_test_script)(
-            context_file_content=context_content, 
+            context_file_content=context_content,
             context_filename=context_name,
             target_filename=target_filename,
             target_code=target_code or '',
@@ -1142,6 +1196,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       return Response({'error': 'Assignment description generation is disabled for this course.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
+      service.set_request_context(user=user, request_type='assignment_description')
       result = async_to_sync(service.generate_assignment_description)(assignment)
 
       if not result.success:
