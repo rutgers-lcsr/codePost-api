@@ -258,6 +258,8 @@ class TestQuizAuthoring:
         assert resp.data['showCorrectAnswers'] == 'after_submit'
         assert resp.data['timeLimitMinutes'] is None
         assert resp.data['passingScoreUnit'] == 'percent'
+        assert resp.data['oneQuestionAtATime'] is False
+        assert resp.data['allowBacktracking'] is True
         quiz_id = resp.data['id']
 
         patch = api_client.patch(f'/quizzes/{quiz_id}/', {
@@ -267,6 +269,8 @@ class TestQuizAuthoring:
             'timeLimitMinutes': 30,
             'attemptsAllowed': 0,
             'shuffleQuestions': True,
+            'oneQuestionAtATime': True,
+            'allowBacktracking': False,
             'showCorrectAnswers': 'after_close',
             'passingScore': '70.00',
             'isPublished': True,
@@ -278,6 +282,8 @@ class TestQuizAuthoring:
         assert quiz.timeLimitMinutes == 30
         assert quiz.attemptsAllowed == 0
         assert quiz.shuffleQuestions is True
+        assert quiz.oneQuestionAtATime is True
+        assert quiz.allowBacktracking is False
         assert quiz.showCorrectAnswers == 'after_close'
         assert str(quiz.passingScore) == '70.00'
         assert quiz.isPublished is True

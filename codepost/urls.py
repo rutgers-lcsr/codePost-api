@@ -51,6 +51,7 @@ from core.views.quizQuestionGroup import QuizQuestionGroupViewSet
 from core.views.suggestedQuizQuestion import SuggestedQuizQuestionViewSet
 from core.views.quizImportJob import QuizImportJobViewSet
 from core.views.quizImage import QuizImageViewSet, serve_quiz_image
+from core.views.quizAttempt import QuizAttemptViewSet
 from core.views.prompt_variant import SystemPromptVariantViewSet
 from core.views.prompt_experiment import PromptExperimentViewSet
 from core.views.prompt_feedback import PromptFeedbackViewSet
@@ -118,6 +119,7 @@ router.register(r'quizQuestionGroups', QuizQuestionGroupViewSet)
 router.register(r'suggestedQuizQuestions', SuggestedQuizQuestionViewSet)
 router.register(r'quizImportJobs', QuizImportJobViewSet)
 router.register(r'quizImages', QuizImageViewSet)
+router.register(r'quizAttempts', QuizAttemptViewSet)
 router.register(r'promptVariants', SystemPromptVariantViewSet)
 router.register(r'promptExperiments', PromptExperimentViewSet)
 router.register(r'promptFeedback', PromptFeedbackViewSet)

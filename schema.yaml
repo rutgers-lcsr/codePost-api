@@ -8028,6 +8028,178 @@ paths:
                 items:
                   $ref: '#/components/schemas/Question'
           description: ''
+  /quizAttempts/:
+    post:
+      operationId: quizAttempts_create
+      description: Start a new attempt, or resume the student's in-progress one, for
+        ``quiz``.
+      tags:
+      - quizAttempts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartQuizAttemptRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StartQuizAttemptRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StartQuizAttemptRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentQuizAttempt'
+          description: ''
+  /quizAttempts/{id}/:
+    get:
+      operationId: quizAttempts_retrieve
+      description: A student's quiz attempts. Students operate only on their own;
+        staff may read.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentQuizAttempt'
+          description: ''
+  /quizAttempts/{id}/saveAnswer/:
+    patch:
+      operationId: quizAttempts_saveAnswerPartialUpdate
+      description: Autosave a single response within an in-progress, not-yet-expired
+        attempt.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSaveQuizAnswerRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSaveQuizAnswerRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSaveQuizAnswerRequest'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentQuizResponse'
+          description: ''
+  /quizAttempts/{id}/submit/:
+    post:
+      operationId: quizAttempts_submitCreate
+      description: Finalize and auto-grade the attempt.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentQuizAttempt'
+          description: ''
+  /quizAttempts/availableQuizzes/:
+    get:
+      operationId: quizAttempts_availableQuizzesList
+      description: Published quizzes in ``course`` the caller can take now (or has
+        already attempted).
+      parameters:
+      - in: query
+        name: course
+        schema:
+          type: integer
+        required: true
+      tags:
+      - quizAttempts
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentQuiz'
+          description: ''
+  /quizAttempts/myAttempts/:
+    get:
+      operationId: quizAttempts_myAttemptsList
+      description: The calling student's attempts for ``quiz``.
+      parameters:
+      - in: query
+        name: quiz
+        schema:
+          type: integer
+        required: true
+      tags:
+      - quizAttempts
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentQuizAttempt'
+          description: ''
   /quizImages/:
     get:
       operationId: quizImages_list
@@ -18909,6 +19081,13 @@ components:
         shuffleQuestions:
           type: boolean
           description: Randomize question order per attempt.
+        oneQuestionAtATime:
+          type: boolean
+          description: 'Sequential mode: show one question at a time instead of all
+            on one page.'
+        allowBacktracking:
+          type: boolean
+          description: When sequential, whether students may return to previous questions.
         showCorrectAnswers:
           allOf:
           - $ref: '#/components/schemas/QuizShowAnswersEnum'
@@ -18936,6 +19115,15 @@ components:
 
             * `percent` - Percent
             * `points` - Points
+        scoringPolicy:
+          allOf:
+          - $ref: '#/components/schemas/QuizScoringPolicyEnum'
+          description: |-
+            Which attempt counts as the official score when multiple attempts are allowed.
+
+            * `highest` - Highest attempt counts
+            * `latest` - Latest attempt counts
+            * `average` - Average of attempts
         isPublished:
           type: boolean
           description: If false the quiz is a draft (author-only); students only see
@@ -19201,6 +19389,17 @@ components:
           type: string
           nullable: true
           maxLength: 255
+    PatchedSaveQuizAnswerRequest:
+      type: object
+      properties:
+        response:
+          type: integer
+        answerText:
+          type: string
+        selectedChoices:
+          type: array
+          items:
+            type: integer
     PatchedSection:
       type: object
       properties:
@@ -20367,6 +20566,13 @@ components:
         shuffleQuestions:
           type: boolean
           description: Randomize question order per attempt.
+        oneQuestionAtATime:
+          type: boolean
+          description: 'Sequential mode: show one question at a time instead of all
+            on one page.'
+        allowBacktracking:
+          type: boolean
+          description: When sequential, whether students may return to previous questions.
         showCorrectAnswers:
           allOf:
           - $ref: '#/components/schemas/QuizShowAnswersEnum'
@@ -20394,6 +20600,15 @@ components:
 
             * `percent` - Percent
             * `points` - Points
+        scoringPolicy:
+          allOf:
+          - $ref: '#/components/schemas/QuizScoringPolicyEnum'
+          description: |-
+            Which attempt counts as the official score when multiple attempts are allowed.
+
+            * `highest` - Highest attempt counts
+            * `latest` - Latest attempt counts
+            * `average` - Average of attempts
         isPublished:
           type: boolean
           description: If false the quiz is a draft (author-only); students only see
@@ -20448,6 +20663,26 @@ components:
         * `after_assignment` - After the assignment closes
         * `after_submission` - After the student submits
         * `after_feedback` - After feedback is released
+    QuizAttemptStatusEnum:
+      enum:
+      - in_progress
+      - submitted
+      type: string
+      description: |-
+        * `in_progress` - In progress
+        * `submitted` - Submitted
+    QuizAvailability:
+      type: object
+      description: Shape of StudentQuiz.availability (documents the SerializerMethodField
+        for the client).
+      properties:
+        isOpen:
+          type: boolean
+        reason:
+          type: string
+      required:
+      - isOpen
+      - reason
     QuizImage:
       type: object
       description: |-
@@ -20646,6 +20881,16 @@ components:
       - bank
       - id
       - quiz
+    QuizScoringPolicyEnum:
+      enum:
+      - highest
+      - latest
+      - average
+      type: string
+      description: |-
+        * `highest` - Highest attempt counts
+        * `latest` - Latest attempt counts
+        * `average` - Average of attempts
     QuizShowAnswersEnum:
       enum:
       - never
@@ -20929,6 +21174,13 @@ components:
           type: number
           format: double
           nullable: true
+    StartQuizAttemptRequest:
+      type: object
+      properties:
+        quiz:
+          type: integer
+      required:
+      - quiz
     Status4a6Enum:
       enum:
       - draft
@@ -20951,6 +21203,302 @@ components:
         * `ok` - ok
         * `warning` - warning
         * `error` - error
+    StudentQuestion:
+      type: object
+      description: A question as a student sees it — no provenance; correct answers
+        gated by `reveal`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        questionType:
+          allOf:
+          - $ref: '#/components/schemas/QuestionTypeEnum'
+          description: |-
+            The type of question.
+
+            * `multiple_choice` - Multiple Choice (one correct)
+            * `multiple_answers` - Multiple Answers (several correct)
+            * `true_false` - True / False
+            * `short_answer` - Short Answer
+            * `essay` - Essay
+            * `numerical` - Numerical
+            * `code` - Code
+        text:
+          type: string
+          description: The question stem/prompt — single font (may contain HTML from
+            Canvas).
+        description:
+          type: string
+          description: 'Optional Markdown description shown beneath the stem (rich
+            content: code blocks, lists, formatting).'
+        starterCode:
+          type: string
+          nullable: true
+          description: 'For code questions: optional starter code shown to students.'
+        language:
+          type: string
+          nullable: true
+          description: 'For code questions: the language (matches Environment.language
+            values). When null, resolve from the attached assignment''s environment.'
+          maxLength: 25
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudentQuestionChoice'
+          readOnly: true
+        generalFeedback:
+          type: string
+          description: Feedback shown regardless of answer.
+      required:
+      - choices
+      - id
+      - text
+    StudentQuestionChoice:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        text:
+          type: string
+          description: The choice text (or accepted answer value).
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this choice within the question.
+        isCorrect:
+          type: boolean
+          description: Whether this choice is a correct answer.
+        feedback:
+          type: string
+          description: Optional per-choice feedback.
+      required:
+      - id
+      - text
+    StudentQuiz:
+      type: object
+      description: 'Summary of a quiz for a student: settings, availability, and the
+        caller''s attempt usage.'
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          description: The related course_id.
+        assignment:
+          type: integer
+          nullable: true
+          description: The assignment this quiz is attached to, if any.
+        title:
+          type: string
+          description: The quiz title.
+          maxLength: 128
+        description:
+          type: string
+          description: Optional quiz description.
+        timeLimitMinutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          nullable: true
+          description: Time limit in minutes. Null = untimed.
+        attemptsAllowed:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: Number of attempts allowed. 0 = unlimited.
+        scoringPolicy:
+          allOf:
+          - $ref: '#/components/schemas/QuizScoringPolicyEnum'
+          description: |-
+            Which attempt counts as the official score when multiple attempts are allowed.
+
+            * `highest` - Highest attempt counts
+            * `latest` - Latest attempt counts
+            * `average` - Average of attempts
+        passingScore:
+          type: number
+          format: double
+          maximum: 100000
+          minimum: -100000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Optional pass threshold. Interpreted per passingScoreUnit (a
+            percentage 0–100, or an absolute point value).
+        passingScoreUnit:
+          allOf:
+          - $ref: '#/components/schemas/QuizPassingScoreUnitEnum'
+          description: |-
+            Whether passingScore is a percentage or an absolute point value.
+
+            * `percent` - Percent
+            * `points` - Points
+        showCorrectAnswers:
+          allOf:
+          - $ref: '#/components/schemas/QuizShowAnswersEnum'
+          description: |-
+            When students may see the correct answers.
+
+            * `never` - Never
+            * `after_submit` - After submitting
+            * `after_close` - After the quiz closes
+        questionCount:
+          type: integer
+          readOnly: true
+        availability:
+          allOf:
+          - $ref: '#/components/schemas/QuizAvailability'
+          readOnly: true
+        attemptsUsed:
+          type: integer
+          readOnly: true
+      required:
+      - attemptsUsed
+      - availability
+      - course
+      - id
+      - questionCount
+      - title
+    StudentQuizAttempt:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The quiz being attempted.
+        attemptNumber:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: 1-based attempt index for this (quiz, student).
+        status:
+          allOf:
+          - $ref: '#/components/schemas/QuizAttemptStatusEnum'
+          description: |-
+            Attempt lifecycle state.
+
+            * `in_progress` - In progress
+            * `submitted` - Submitted
+        startedAt:
+          type: string
+          format: date-time
+          description: When the student started this attempt.
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: Hard stop = startedAt + quiz.timeLimitMinutes. Null when untimed.
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the attempt was submitted.
+        score:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Auto-graded points earned (set on submit).
+        maxScore:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Total points possible in this attempt (snapshot).
+        needsManualGrading:
+          type: boolean
+          description: True if any response (essay/code) awaits manual grading.
+        passed:
+          type: boolean
+          nullable: true
+          description: Whether the attempt met quiz.passingScore. Null until fully
+            graded or if no threshold.
+        oneQuestionAtATime:
+          type: boolean
+          readOnly: true
+        allowBacktracking:
+          type: boolean
+          readOnly: true
+        responses:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudentQuizResponse'
+          readOnly: true
+      required:
+      - allowBacktracking
+      - id
+      - oneQuestionAtATime
+      - quiz
+      - responses
+    StudentQuizResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        question:
+          allOf:
+          - $ref: '#/components/schemas/StudentQuestion'
+          readOnly: true
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Presentation order within the attempt (randomized when shuffleQuestions).
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Points this question is worth in this attempt (snapshot of
+            override/base).
+        answerText:
+          type: string
+          description: Typed answer for short-answer/numerical/essay/code questions.
+        selectedChoices:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+        pointsEarned:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Points awarded after grading. Null until graded.
+        isCorrect:
+          type: boolean
+          nullable: true
+          description: Whether the auto-graded answer was correct. Null for manual/ungraded.
+        needsManualGrading:
+          type: boolean
+          description: True for essay/code responses awaiting manual grading.
+      required:
+      - id
+      - question
+      - selectedChoices
     StudentSubmission:
       type: object
       properties:

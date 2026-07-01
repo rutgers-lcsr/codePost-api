@@ -26,7 +26,8 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         'assignmentTrigger', 'availableFrom', 'availableUntil',
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
-        'showCorrectAnswers', 'passingScore', 'passingScoreUnit', 'isPublished',
+        'oneQuestionAtATime', 'allowBacktracking',
+        'showCorrectAnswers', 'passingScore', 'passingScoreUnit', 'scoringPolicy', 'isPublished',
         'quizQuestions', 'questionGroups', 'source', 'createdBy', 'metadata',
     )
     read_only_fields = ('source', 'createdBy', 'metadata', 'quizQuestions', 'questionGroups')

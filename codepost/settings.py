@@ -202,6 +202,13 @@ SPECTACULAR_SETTINGS = {
         'QuizPassingScoreUnitEnum': [
             ('percent', 'Percent'), ('points', 'Points'),
         ],
+        'QuizScoringPolicyEnum': [
+            ('highest', 'Highest attempt counts'), ('latest', 'Latest attempt counts'),
+            ('average', 'Average of attempts'),
+        ],
+        'QuizAttemptStatusEnum': [
+            ('in_progress', 'In progress'), ('submitted', 'Submitted'),
+        ],
     },
     'TITLE': 'codePost API',
     'DESCRIPTION': """

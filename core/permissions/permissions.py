@@ -721,3 +721,26 @@ class QuizImagePermissions(TemplatePermission):
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
         return user.is_superuser or isCourseStaff(user, obj.course)
+
+
+# =============================================================================
+# QUIZZES (Phase 2: student taking)
+# =============================================================================
+
+class QuizAttemptPermissions(TemplatePermission):
+    """Students take and view their OWN attempts; course staff may read attempts (for
+    the later grading UI). The student-entry actions (start/myAttempts/availableQuizzes)
+    validate enrollment + availability in the view body, so all this gates is auth +
+    per-attempt ownership."""
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        if user == obj.student:
+            return True
+        # Staff may read (never mutate) a student's attempt.
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return user.is_superuser or isCourseStaff(user, obj.quiz.course)
+        return False

@@ -2852,6 +2852,11 @@ class Quiz(BaseModel):
       ('percent', 'Percent'),
       ('points', 'Points'),
   ]
+  SCORING_POLICY_CHOICES = [
+      ('highest', 'Highest attempt counts'),
+      ('latest', 'Latest attempt counts'),
+      ('average', 'Average of attempts'),
+  ]
 
   course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
       related_name="quizzes", help_text=("The related course_id."))
@@ -2888,6 +2893,10 @@ class Quiz(BaseModel):
       help_text=("Number of attempts allowed. 0 = unlimited."))
   shuffleQuestions = models.BooleanField(default=False,
       help_text=("Randomize question order per attempt."))
+  oneQuestionAtATime = models.BooleanField(default=False,
+      help_text=("Sequential mode: show one question at a time instead of all on one page."))
+  allowBacktracking = models.BooleanField(default=True,
+      help_text=("When sequential, whether students may return to previous questions."))
   showCorrectAnswers = models.CharField(max_length=16, choices=SHOW_ANSWERS_CHOICES,
       default='after_submit', help_text=("When students may see the correct answers."))
   passingScore = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True,
@@ -2895,6 +2904,8 @@ class Quiz(BaseModel):
                  "(a percentage 0–100, or an absolute point value)."))
   passingScoreUnit = models.CharField(max_length=8, choices=PASSING_SCORE_UNIT_CHOICES,
       default='percent', help_text=("Whether passingScore is a percentage or an absolute point value."))
+  scoringPolicy = models.CharField(max_length=8, choices=SCORING_POLICY_CHOICES, default='highest',
+      help_text=("Which attempt counts as the official score when multiple attempts are allowed."))
   isPublished = models.BooleanField(default=False,
       help_text=("If false the quiz is a draft (author-only); students only see published quizzes."))
 
@@ -2959,6 +2970,89 @@ class QuizQuestionGroup(BaseModel):
 
   def __str__(self):
     return f"QuizQuestionGroup quiz={self.quiz_id} bank={self.bank_id} pick={self.pickCount}"
+
+
+class QuizAttempt(BaseModel):
+  """One student's attempt at a Quiz. Auto-gradable responses are scored on submit;
+  essay/code responses are flagged for manual grading (a later slice)."""
+  if TYPE_CHECKING:
+    id: int
+    quiz: Quiz
+    responses: RelatedManager[QuizResponse]
+
+  STATUS_CHOICES = [
+      ('in_progress', 'In progress'),
+      ('submitted', 'Submitted'),
+  ]
+
+  quiz: Quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="attempts", help_text=("The quiz being attempted."))
+  student = models.ForeignKey(User, on_delete=models.CASCADE,
+      related_name="quiz_attempts", help_text=("The student taking the quiz."))
+  attemptNumber = models.PositiveIntegerField(default=1,
+      help_text=("1-based attempt index for this (quiz, student)."))
+  status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='in_progress',
+      help_text=("Attempt lifecycle state."))
+  startedAt = models.DateTimeField(default=now,
+      help_text=("When the student started this attempt."))
+  deadline = models.DateTimeField(null=True, blank=True,
+      help_text=("Hard stop = startedAt + quiz.timeLimitMinutes. Null when untimed."))
+  submittedAt = models.DateTimeField(null=True, blank=True,
+      help_text=("When the attempt was submitted."))
+  score = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True,
+      help_text=("Auto-graded points earned (set on submit)."))
+  maxScore = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True,
+      help_text=("Total points possible in this attempt (snapshot)."))
+  needsManualGrading = models.BooleanField(default=False,
+      help_text=("True if any response (essay/code) awaits manual grading."))
+  passed = models.BooleanField(null=True, blank=True,
+      help_text=("Whether the attempt met quiz.passingScore. Null until fully graded or if no threshold."))
+
+  course = property(lambda self: self.quiz.course)
+
+  class Meta:
+    unique_together = ('quiz', 'student', 'attemptNumber')
+    ordering = ('attemptNumber',)
+
+  def __str__(self):
+    return f"QuizAttempt quiz={self.quiz_id} student={self.student_id} #{self.attemptNumber}"
+
+
+class QuizResponse(BaseModel):
+  """A student's answer to one question within a QuizAttempt. Snapshots the presented
+  question and its point value so the attempt is stable across reloads and later edits."""
+  if TYPE_CHECKING:
+    id: int
+    attempt: QuizAttempt
+    question: Question
+
+  attempt: QuizAttempt = models.ForeignKey(QuizAttempt, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="responses", help_text=("The attempt this response belongs to."))
+  question: Question = models.ForeignKey(Question, on_delete=models.PROTECT,  # type: ignore[assignment]
+      related_name="+", help_text=("The question presented (snapshot)."))
+  sortKey = models.IntegerField(default=0,
+      help_text=("Presentation order within the attempt (randomized when shuffleQuestions)."))
+  points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
+      help_text=("Points this question is worth in this attempt (snapshot of override/base)."))
+  selectedChoices = models.ManyToManyField(QuestionChoice, blank=True, related_name="+",
+      help_text=("Selected option(s) for choice-based questions."))
+  answerText = models.TextField(blank=True,
+      help_text=("Typed answer for short-answer/numerical/essay/code questions."))
+  pointsEarned = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True,
+      help_text=("Points awarded after grading. Null until graded."))
+  isCorrect = models.BooleanField(null=True, blank=True,
+      help_text=("Whether the auto-graded answer was correct. Null for manual/ungraded."))
+  needsManualGrading = models.BooleanField(default=False,
+      help_text=("True for essay/code responses awaiting manual grading."))
+
+  course = property(lambda self: self.attempt.quiz.course)
+
+  class Meta:
+    unique_together = ('attempt', 'question')
+    ordering = ('sortKey', 'id')
+
+  def __str__(self):
+    return f"QuizResponse attempt={self.attempt_id} question={self.question_id}"
 
 
 class SuggestedQuizQuestion(BaseModel):
