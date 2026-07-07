@@ -8085,6 +8085,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/StudentQuizAttempt'
           description: ''
+  /quizAttempts/{id}/gradeResponse/:
+    post:
+      operationId: quizAttempts_gradeResponseCreate
+      description: |-
+        Manually grade one essay/code response (quiz graders and course admins only —
+        gated by QuizAttemptPermissions). Recomputes the attempt's score and pass state.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GradeQuizResponseRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GradeQuizResponseRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GradeQuizResponseRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffQuizAttempt'
+          description: ''
   /quizAttempts/{id}/saveAnswer/:
     patch:
       operationId: quizAttempts_saveAnswerPartialUpdate
@@ -8150,8 +8189,12 @@ paths:
   /quizAttempts/availableQuizzes/:
     get:
       operationId: quizAttempts_availableQuizzesList
-      description: Published quizzes in ``course`` the caller can take now (or has
-        already attempted).
+      description: |-
+        Published quizzes in ``course`` the caller should see.
+
+        Attached quizzes surface once their assignment is released — even while the quiz
+        itself is still locked — so the assignment card can show them with a reason.
+        Standalone quizzes surface only when open now or already attempted.
       parameters:
       - in: query
         name: course
@@ -9116,6 +9159,39 @@ paths:
       responses:
         '204':
           description: No response body
+  /quizzes/{id}/attempts/:
+    get:
+      operationId: quizzes_attemptsList
+      description: Submitted attempts on this quiz, for grading — quiz graders and
+        course admins only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      - in: query
+        name: needsGrading
+        schema:
+          type: boolean
+        description: Only attempts awaiting manual grading.
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaffQuizAttempt'
+          description: ''
   /quizzes/{id}/questions/:
     get:
       operationId: quizzes_questionsList
@@ -16466,6 +16542,11 @@ components:
           readOnly: true
           nullable: true
           description: The submission associated with this event
+        quiz:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The quiz associated with this event
         user:
           type: integer
           readOnly: true
@@ -16475,6 +16556,9 @@ components:
           type: string
           readOnly: true
         assignmentName:
+          type: string
+          readOnly: true
+        quizTitle:
           type: string
           readOnly: true
         eventType:
@@ -16496,6 +16580,8 @@ components:
       - eventType
       - id
       - meta
+      - quiz
+      - quizTitle
       - submission
       - user
       - userEmail
@@ -16589,6 +16675,13 @@ components:
             format: email
             title: Email address
             nullable: true
+        quizGraders:
+          type: array
+          items:
+            type: string
+            format: email
+            title: Email address
+            nullable: true
         courseAdmins:
           type: array
           items:
@@ -16634,6 +16727,7 @@ components:
       - not_activated
       - organization
       - period
+      - quizGraders
       - rubricEditors
       - students
       - superGraders
@@ -17219,6 +17313,23 @@ components:
       required:
       - status
       - task_id
+    GradeQuizResponseRequest:
+      type: object
+      properties:
+        response:
+          type: integer
+        pointsEarned:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+        graderFeedback:
+          type: string
+      required:
+      - pointsEarned
+      - response
     GranularityEnum:
       enum:
       - hourly
@@ -19054,7 +19165,8 @@ components:
             * `during` - During the assignment
             * `after_assignment` - After the assignment closes
             * `after_submission` - After the student submits
-            * `after_feedback` - After feedback is released
+            * `after_feedback` - After feedback is released (whole assignment)
+            * `after_student_feedback` - After each student's feedback is ready (self-paced)
         availableFrom:
           type: string
           format: date-time
@@ -19064,7 +19176,30 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: 'Standalone quizzes: when the quiz closes / is due.'
+          description: 'Standalone quizzes: when the quiz closes / is due. Also the
+            close time when an attached quiz''s closeEvent is ''fixed_date''.'
+        closeEvent:
+          allOf:
+          - $ref: '#/components/schemas/QuizCloseEventEnum'
+          description: |-
+            When an attached quiz closes. Ignored for standalone quizzes.
+
+            * `none` - No automatic close
+            * `assignment_due` - At the assignment's deadline
+            * `submission` - After the student submits
+            * `feedback_released` - When feedback is released
+            * `fixed_date` - At a fixed date & time
+        closeOffsetMinutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: Minutes added to the close event (e.g. 10080 = one week after).
+            Ignored for 'none' and 'fixed_date'.
+        endAttemptsAtClose:
+          type: boolean
+          description: If true, reaching the close time ends/auto-submits in-progress
+            attempts (hard deadline); if false it only blocks new attempts.
         timeLimitMinutes:
           type: integer
           maximum: 9223372036854775807
@@ -20539,7 +20674,8 @@ components:
             * `during` - During the assignment
             * `after_assignment` - After the assignment closes
             * `after_submission` - After the student submits
-            * `after_feedback` - After feedback is released
+            * `after_feedback` - After feedback is released (whole assignment)
+            * `after_student_feedback` - After each student's feedback is ready (self-paced)
         availableFrom:
           type: string
           format: date-time
@@ -20549,7 +20685,30 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: 'Standalone quizzes: when the quiz closes / is due.'
+          description: 'Standalone quizzes: when the quiz closes / is due. Also the
+            close time when an attached quiz''s closeEvent is ''fixed_date''.'
+        closeEvent:
+          allOf:
+          - $ref: '#/components/schemas/QuizCloseEventEnum'
+          description: |-
+            When an attached quiz closes. Ignored for standalone quizzes.
+
+            * `none` - No automatic close
+            * `assignment_due` - At the assignment's deadline
+            * `submission` - After the student submits
+            * `feedback_released` - When feedback is released
+            * `fixed_date` - At a fixed date & time
+        closeOffsetMinutes:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: Minutes added to the close event (e.g. 10080 = one week after).
+            Ignored for 'none' and 'fixed_date'.
+        endAttemptsAtClose:
+          type: boolean
+          description: If true, reaching the close time ends/auto-submits in-progress
+            attempts (hard deadline); if false it only blocks new attempts.
         timeLimitMinutes:
           type: integer
           maximum: 9223372036854775807
@@ -20657,12 +20816,14 @@ components:
       - after_assignment
       - after_submission
       - after_feedback
+      - after_student_feedback
       type: string
       description: |-
         * `during` - During the assignment
         * `after_assignment` - After the assignment closes
         * `after_submission` - After the student submits
-        * `after_feedback` - After feedback is released
+        * `after_feedback` - After feedback is released (whole assignment)
+        * `after_student_feedback` - After each student's feedback is ready (self-paced)
     QuizAttemptStatusEnum:
       enum:
       - in_progress
@@ -20683,6 +20844,20 @@ components:
       required:
       - isOpen
       - reason
+    QuizCloseEventEnum:
+      enum:
+      - none
+      - assignment_due
+      - submission
+      - feedback_released
+      - fixed_date
+      type: string
+      description: |-
+        * `none` - No automatic close
+        * `assignment_due` - At the assignment's deadline
+        * `submission` - After the student submits
+        * `feedback_released` - When feedback is released
+        * `fixed_date` - At a fixed date & time
     QuizImage:
       type: object
       description: |-
@@ -21174,6 +21349,101 @@ components:
           type: number
           format: double
           nullable: true
+    StaffQuizAttempt:
+      type: object
+      description: |-
+        A quiz attempt as staff (grading) sees it: the student's identity plus every response
+        with answers and grading state. Callers set reveal/revealScore context to True.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The quiz being attempted.
+        attemptNumber:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          default: 1
+          description: 1-based attempt index for this (quiz, student).
+        status:
+          allOf:
+          - $ref: '#/components/schemas/QuizAttemptStatusEnum'
+          description: |-
+            Attempt lifecycle state.
+
+            * `in_progress` - In progress
+            * `submitted` - Submitted
+        startedAt:
+          type: string
+          format: date-time
+          description: When the student started this attempt.
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: Hard stop = startedAt + quiz.timeLimitMinutes. Null when untimed.
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the attempt was submitted.
+        score:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Auto-graded points earned (set on submit).
+        maxScore:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Total points possible in this attempt (snapshot).
+        needsManualGrading:
+          type: boolean
+          description: True if any response (essay/code) awaits manual grading.
+        passed:
+          type: boolean
+          nullable: true
+          description: Whether the attempt met quiz.passingScore. Null until fully
+            graded or if no threshold.
+        oneQuestionAtATime:
+          type: boolean
+          readOnly: true
+        allowBacktracking:
+          type: boolean
+          readOnly: true
+        serverNow:
+          type: string
+          format: date-time
+          readOnly: true
+        responses:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudentQuizResponse'
+          readOnly: true
+        student:
+          type: string
+          format: email
+          title: Email address
+          readOnly: true
+      required:
+      - allowBacktracking
+      - id
+      - oneQuestionAtATime
+      - quiz
+      - responses
+      - serverNow
+      - student
     StartQuizAttemptRequest:
       type: object
       properties:
@@ -21359,10 +21629,24 @@ components:
         attemptsUsed:
           type: integer
           readOnly: true
+        hasOpenAttempt:
+          type: boolean
+          readOnly: true
+        hasSubmittedAttempt:
+          type: boolean
+          readOnly: true
+        closeAt:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
       required:
       - attemptsUsed
       - availability
+      - closeAt
       - course
+      - hasOpenAttempt
+      - hasSubmittedAttempt
       - id
       - questionCount
       - title
@@ -21435,6 +21719,10 @@ components:
         allowBacktracking:
           type: boolean
           readOnly: true
+        serverNow:
+          type: string
+          format: date-time
+          readOnly: true
         responses:
           type: array
           items:
@@ -21446,6 +21734,7 @@ components:
       - oneQuestionAtATime
       - quiz
       - responses
+      - serverNow
     StudentQuizResponse:
       type: object
       properties:
@@ -21495,6 +21784,9 @@ components:
         needsManualGrading:
           type: boolean
           description: True for essay/code responses awaiting manual grading.
+        graderFeedback:
+          type: string
+          description: Optional feedback from the grader on a manually graded response.
       required:
       - id
       - question

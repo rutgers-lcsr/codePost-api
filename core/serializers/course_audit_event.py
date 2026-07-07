@@ -8,6 +8,7 @@ class CourseAuditEventSerializer(serializers.ModelSerializer):
     """Read-only serializer for course audit events."""
     userEmail = serializers.SerializerMethodField()
     assignmentName = serializers.SerializerMethodField()
+    quizTitle = serializers.SerializerMethodField()
     eventType = serializers.CharField(source='event_type', read_only=True)
 
     class Meta:
@@ -17,9 +18,11 @@ class CourseAuditEventSerializer(serializers.ModelSerializer):
             'course',
             'assignment',
             'submission',
+            'quiz',
             'user',
             'userEmail',
             'assignmentName',
+            'quizTitle',
             'eventType',
             'meta',
             'created',
@@ -33,3 +36,10 @@ class CourseAuditEventSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.CharField)
     def get_assignmentName(self, obj):
         return obj.assignment.name if obj.assignment else None
+
+    @extend_schema_field(serializers.CharField)
+    def get_quizTitle(self, obj):
+        # Fall back to the snapshotted title in meta for deleted quizzes.
+        if obj.quiz_id and obj.quiz:
+            return obj.quiz.title
+        return (obj.meta or {}).get('title') if isinstance(obj.meta, dict) else None

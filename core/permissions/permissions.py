@@ -16,6 +16,7 @@ from core.permissions.helpers import (
     isCourseMember,
     isCourseStaff,
     isOrganizationMember,
+    isQuizGrader,
     isStaffOfSub,
     isStudent,
     isStudentOfSub,
@@ -727,17 +728,26 @@ class QuizImagePermissions(TemplatePermission):
 # QUIZZES (Phase 2: student taking)
 # =============================================================================
 
+def canGradeQuiz(user, course):
+    """Quiz grading: course admins always; graders only with the per-course quizGraders role
+    (assignment graders do NOT grade quizzes by default)."""
+    return user.is_superuser or isCourseAdmin(user, course) or isQuizGrader(user, course)
+
+
 class QuizAttemptPermissions(TemplatePermission):
-    """Students take and view their OWN attempts; course staff may read attempts (for
-    the later grading UI). The student-entry actions (start/myAttempts/availableQuizzes)
-    validate enrollment + availability in the view body, so all this gates is auth +
-    per-attempt ownership."""
+    """Students take and view their OWN attempts; course staff may read attempts; quiz
+    graders (and admins) may grade manual responses. The student-entry actions
+    (start/myAttempts/availableQuizzes) validate enrollment + availability in the view
+    body, so all this gates is auth + per-attempt ownership."""
 
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated)
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
+        # Manual grading is the one staff write on someone else's attempt.
+        if getattr(view, 'action', None) == 'gradeResponse':
+            return canGradeQuiz(user, obj.quiz.course)
         if user == obj.student:
             return True
         # Staff may read (never mutate) a student's attempt.

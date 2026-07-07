@@ -71,7 +71,7 @@ from core.serializers.actionResponses import CapabilitiesResponseSerializer
 
 from django.utils import timezone
 
-from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField
+from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField, Prefetch
 from django.db.models.functions import Coalesce
 
 from core.utils import copy_assignment
@@ -497,7 +497,10 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     grader = self.request.query_params.get('grader', None)
     shouldReturnCompact = self.request.query_params.get('compact', None)
-    submissions = assignment.submissions.all().prefetch_related('students', 'grader')
+    # select_related the grader (FK) and assignment->course (the Submission.course property walks
+    # assignment.course, otherwise 2 FK queries per submission). The `files` prefetch is added only
+    # for the student branch below, since the compact grader serializer deliberately omits files.
+    submissions = assignment.submissions.all().select_related('grader', 'assignment__course').prefetch_related('students')
     shouldPaginate = self.request.query_params.get('page', None)
 
     #############################################################################################
@@ -527,6 +530,14 @@ class AssignmentViewSet(ListProtectedViewSet):
     isOnlyStudent = isThisStudent and not isThisGrader and not isCourseAdminCached
     if isOnlyStudent and not assignment.isReleased and not assignment.allowStudentUpload and not assignment.liveFeedbackMode:
       return returnForbidden()
+
+    # The student serializer renders files (StudentSubmissionSerializer.get_files) and each file's
+    # `edit` reverse-OneToOne (SubmissionFileWithoutCommentsSerializer.get_edit); prefetch files with
+    # `edit` select_related so the dashboard's per-assignment call doesn't N+1 over files or edits.
+    if isOnlyStudent:
+      submissions = submissions.prefetch_related(
+          Prefetch('files', queryset=SubmissionFile.objects.select_related('edit'))
+      )
 
     #############################################################################################
 

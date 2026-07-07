@@ -24,6 +24,8 @@ from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import filters
 
+from django.db.models import Prefetch
+
 from core.models import Course, Assignment
 
 class UserPagination(PageNumberPagination):
@@ -174,6 +176,21 @@ class UserViewSet(SuperUserListProtectedViewSet):
       else:
         raise serializers.ValidationError(
             "The only editable field is 'showProductTips'.")
+
+    # Re-fetch the user with role memberships and each course's sub-relations prefetched.
+    # UserSerializer renders CourseSerializer for all four role lists; without this every course
+    # fans out into a per-course N+1 (capabilities/get_assignments role checks, studentCount,
+    # sections, webhooks). With the role M2Ms cached, the `course in user.<role>_courses.all()`
+    # checks inside compute_course_capabilities become in-memory lookups.
+    prefetches = ['rubricEditor_courses', 'leader_sections']
+    for rel in ('student_courses', 'grader_courses', 'superGrader_courses', 'courseAdmin_courses'):
+      prefetches += [f'{rel}__assignments', f'{rel}__sections', f'{rel}__webhooks', f'{rel}__rubricEditors']
+      prefetches.append(Prefetch(f'{rel}__students', queryset=User.objects.only('id')))
+
+    user = User.objects.select_related('profile').prefetch_related(*prefetches).get(pk=user.pk)
+    # Point request.user at the prefetched instance so the nested CourseSerializer capability/
+    # rubric/assignment checks (which read request.user) hit the cached role M2Ms in memory.
+    request.user = user
 
     serializer = UserSerializer(user, context={"request": request})
 

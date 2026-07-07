@@ -194,7 +194,9 @@ SPECTACULAR_SETTINGS = {
         # Quiz availability / answer-reveal settings.
         'QuizAssignmentTriggerEnum': [
             ('during', 'During the assignment'), ('after_assignment', 'After the assignment closes'),
-            ('after_submission', 'After the student submits'), ('after_feedback', 'After feedback is released'),
+            ('after_submission', 'After the student submits'),
+            ('after_feedback', 'After feedback is released (whole assignment)'),
+            ('after_student_feedback', "After each student's feedback is ready (self-paced)"),
         ],
         'QuizShowAnswersEnum': [
             ('never', 'Never'), ('after_submit', 'After submitting'), ('after_close', 'After the quiz closes'),
@@ -208,6 +210,11 @@ SPECTACULAR_SETTINGS = {
         ],
         'QuizAttemptStatusEnum': [
             ('in_progress', 'In progress'), ('submitted', 'Submitted'),
+        ],
+        'QuizCloseEventEnum': [
+            ('none', 'No automatic close'), ('assignment_due', "At the assignment's deadline"),
+            ('submission', 'After the student submits'), ('feedback_released', 'When feedback is released'),
+            ('fixed_date', 'At a fixed date & time'),
         ],
     },
     'TITLE': 'codePost API',
@@ -636,6 +643,10 @@ CELERY_BEAT_SCHEDULE = {
     "delete-expired-courses": {
         "task": "core.tasks.delete_expired_courses",
         "schedule": crontab(minute=0, hour="*"), # Run every hour
+    },
+    "finalize-expired-quiz-attempts": {
+        "task": "core.tasks.finalize_expired_quiz_attempts",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
     },
     "auto-improve-prompts": {
         "task": "core.tasks.auto_improve_prompts_scheduled",

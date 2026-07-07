@@ -7,6 +7,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 @shared_task
+def finalize_expired_quiz_attempts():
+    """Auto-submit + grade timed quiz attempts whose deadline has passed but were never
+    submitted (e.g. the student closed the tab). The resume path already grades these when a
+    student returns; this sweep catches the ones who never do, so a (partial) score isn't
+    stuck in_progress forever.
+    """
+    from core.models import QuizAttempt
+    from core.services import quiz_grading
+
+    now = timezone.now()
+    stuck = QuizAttempt.objects.filter(status='in_progress', deadline__isnull=False, deadline__lt=now)
+    count = 0
+    for attempt in stuck.iterator():
+        quiz_grading.grade_attempt(attempt)
+        count += 1
+    if count:
+        logger.info(f"Finalized {count} expired quiz attempt(s)")
+    return count
+
+@shared_task
 def delete_expired_courses():
     """
     Deletes courses whose expiration_date has passed.

@@ -15,7 +15,7 @@ _DEDUP_EVENT_TYPES = {'file_view', 'feedback_view'}
 _DEDUP_WINDOW = timedelta(minutes=5)
 
 
-def record_audit_event(course, event_type, user=None, assignment=None, submission=None, meta=None):
+def record_audit_event(course, event_type, user=None, assignment=None, submission=None, quiz=None, meta=None):
     """
     Record a course audit event.
 
@@ -28,6 +28,7 @@ def record_audit_event(course, event_type, user=None, assignment=None, submissio
         user: User instance (the actor, typically a student)
         assignment: Assignment instance (optional)
         submission: Submission instance (optional)
+        quiz: Quiz instance (optional)
         meta: dict of extra context (optional)
     """
     if event_type in _DEDUP_EVENT_TYPES and user and submission:
@@ -49,6 +50,7 @@ def record_audit_event(course, event_type, user=None, assignment=None, submissio
             user=user,
             assignment=assignment,
             submission=submission,
+            quiz=quiz,
             meta=meta,
         )
     except Exception:

@@ -38,12 +38,18 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
 
   @extend_schema_field(serializers.IntegerField)
   def get_studentCount(self, obj):
+    # Use the prefetched roster when available (e.g. /users/me), otherwise fall back to a COUNT
+    # so endpoints that serialize courses without prefetching stay unchanged.
+    if 'students' in getattr(obj, '_prefetched_objects_cache', {}):
+      return len(obj.students.all())
     return obj.students.count()
 
   @extend_schema_field(serializers.BooleanField)
   def get_isRubricEditor(self, obj):
     request = self.context.get('request')
     if request and request.user.is_authenticated:
+      if 'rubricEditors' in getattr(obj, '_prefetched_objects_cache', {}):
+        return request.user in obj.rubricEditors.all()
       return obj.rubricEditors.filter(pk=request.user.pk).exists()
     return False
 
@@ -348,6 +354,8 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
       many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
   rubricEditors = serializers.SlugRelatedField(
       many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
+  quizGraders = serializers.SlugRelatedField(
+      many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
   courseAdmins = serializers.SlugRelatedField(
       many=True, slug_field='email', queryset=User.objects.all(), allow_null=True)
   inactive_students = serializers.SlugRelatedField(
@@ -360,7 +368,8 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = Course
-    fields = ('id', 'organization', 'name', 'period', 'students', 'graders', 'superGraders', 'rubricEditors', 'courseAdmins',
+    fields = ('id', 'organization', 'name', 'period', 'students', 'graders', 'superGraders', 'rubricEditors',
+              'quizGraders', 'courseAdmins',
               'inactive_students', 'inactive_graders', 'inactive_courseAdmins', 'not_activated')
     read_only_fields = ('name', 'period', 'inactive_students', 'inactive_graders',
                         'inactive_courseAdmins', 'organization', 'not_activated')
@@ -435,6 +444,14 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
       if rubricEditor in newFields['graders']:
         newRubricEditors.append(rubricEditor)
     newData['rubricEditors'] = newRubricEditors
+
+    # remove all quizGraders who are not enrolled as graders (same rule as the roles above —
+    # the quiz-grader role is a capability layered on an enrolled grader).
+    newQuizGraders = []
+    for quizGrader in newFields['quizGraders']:
+      if quizGrader in newFields['graders']:
+        newQuizGraders.append(quizGrader)
+    newData['quizGraders'] = newQuizGraders
 
     # # Check to make sure that no student is a grader or course Admin
     # for student in newFields['students']:

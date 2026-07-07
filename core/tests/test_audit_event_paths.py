@@ -32,6 +32,7 @@ from core.models import (
     Submission,
     SubmissionFile,
     Environment,
+    Quiz,
 )
 from core.services.audit import record_audit_event
 from core.tests.factories import (
@@ -56,6 +57,7 @@ class TestRecordAuditEventAllTypes(TestCase):
         self.assignment = self.course.assignments.first()
         self.submission = self.assignment.submissions.first()
         self.user = self.course.students.first()
+        self.quiz = Quiz.objects.create(course=self.course, title='Audit Quiz')
 
     def _assert_event(self, event, event_type, user=None, assignment=None, submission=None, meta=None):
         self.assertIsNotNone(event, f"record_audit_event returned None for {event_type}")
@@ -201,6 +203,38 @@ class TestRecordAuditEventAllTypes(TestCase):
         self.assertIsNotNone(event1)
         self.assertIsNone(event2)
 
+    def _assert_quiz_event(self, event_type):
+        event = record_audit_event(
+            course=self.course, event_type=event_type,
+            user=self.user, quiz=self.quiz, meta={'title': self.quiz.title},
+        )
+        self._assert_event(event, event_type, self.user)
+        self.assertEqual(event.quiz_id, self.quiz.id)
+
+    def test_quiz_created(self):
+        self._assert_quiz_event('quiz_created')
+
+    def test_quiz_updated(self):
+        self._assert_quiz_event('quiz_updated')
+
+    def test_quiz_published(self):
+        self._assert_quiz_event('quiz_published')
+
+    def test_quiz_unpublished(self):
+        self._assert_quiz_event('quiz_unpublished')
+
+    def test_quiz_deleted(self):
+        self._assert_quiz_event('quiz_deleted')
+
+    def test_quiz_attempt_started(self):
+        self._assert_quiz_event('quiz_attempt_started')
+
+    def test_quiz_attempt_submitted(self):
+        self._assert_quiz_event('quiz_attempt_submitted')
+
+    def test_quiz_attempt_autosubmitted(self):
+        self._assert_quiz_event('quiz_attempt_autosubmitted')
+
     def test_all_event_types_covered(self):
         """Ensure every EVENT_TYPE_CHOICES value has a dedicated test above."""
         defined_types = {choice[0] for choice in CourseAuditEvent.EVENT_TYPE_CHOICES}
@@ -210,6 +244,8 @@ class TestRecordAuditEventAllTypes(TestCase):
             'regrade_request', 'regrade_deleted',
             'autograder_triggered', 'autograder_completed', 'autograder_failed',
             'late_day_used', 'comment_feedback',
+            'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
+            'quiz_attempt_started', 'quiz_attempt_submitted', 'quiz_attempt_autosubmitted',
         }
         self.assertEqual(defined_types, tested_types,
                          f"Untested event types: {defined_types - tested_types}")

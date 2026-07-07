@@ -472,9 +472,10 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         newAdmins: list[User] = []
         newSuperGraders: list[User] = []
         newRubricEditors: list[User] = []
+        newQuizGraders: list[User] = []
         for keyEl, userList in zip(
-            ("students", "graders", "courseAdmins", "superGraders", "rubricEditors"),
-            (newStudents, newGraders, newAdmins, newSuperGraders, newRubricEditors),
+            ("students", "graders", "courseAdmins", "superGraders", "rubricEditors", "quizGraders"),
+            (newStudents, newGraders, newAdmins, newSuperGraders, newRubricEditors, newQuizGraders),
         ):
             parse_new_users(keyEl, request, userList)
         # Add the users to the course
@@ -486,6 +487,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         course.inactive_courseAdmins.remove(*newAdmins)
         course.superGraders.add(*newSuperGraders)
         course.rubricEditors.add(*newRubricEditors)
+        course.quizGraders.add(*newQuizGraders)
         course.save()
 
         for admin in newAdmins:
@@ -538,7 +540,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return error
 
         # Pre-filter fields for any users who do not exist yet
-        inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders, inactiveRubricEditors = (
+        inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders, inactiveRubricEditors, inactiveQuizGraders = (
+            [],
             [],
             [],
             [],
@@ -546,8 +549,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             [],
         )
         for keyEl, userList in zip(
-            ("students", "graders", "courseAdmins", "superGraders", "rubricEditors"),
-            (inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders, inactiveRubricEditors),
+            ("students", "graders", "courseAdmins", "superGraders", "rubricEditors", "quizGraders"),
+            (inactiveStudents, inactiveGraders, inactiveAdmins, inactiveSuperGraders, inactiveRubricEditors, inactiveQuizGraders),
         ):
             parse_new_users(keyEl, request, userList)
         # Add the users to the course
@@ -559,6 +562,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         course.inactive_courseAdmins.add(*inactiveAdmins)
         course.superGraders.remove(*inactiveGraders, *inactiveSuperGraders)
         course.rubricEditors.remove(*inactiveGraders, *inactiveRubricEditors)
+        course.quizGraders.remove(*inactiveGraders, *inactiveQuizGraders)
         course.save()
 
         # remove inactive graders and students from their sections
@@ -681,7 +685,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         require_capability(user, 'view_audit_log', course)
 
-        qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission')
+        qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission', 'quiz')
 
         student = request.query_params.get('student')
         assignment = request.query_params.get('assignment')
@@ -729,7 +733,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         require_capability(user, 'view_audit_log', course)
 
-        qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission')
+        qs = CourseAuditEvent.objects.filter(course=course).select_related('user', 'assignment', 'submission', 'quiz')
 
         student = request.query_params.get('student')
         assignment = request.query_params.get('assignment')
@@ -752,14 +756,16 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         response['Content-Disposition'] = f'attachment; filename="audit_log_course_{course.id}.csv"'
 
         writer = csv.writer(response)
-        writer.writerow(['Timestamp', 'Event Type', 'Student Email', 'Assignment', 'Submission ID', 'Details'])
+        writer.writerow(['Timestamp', 'Event Type', 'Student Email', 'Assignment', 'Quiz', 'Submission ID', 'Details'])
 
         for event in qs.iterator():
+            quiz_title = event.quiz.title if event.quiz else (event.meta or {}).get('title') if isinstance(event.meta, dict) else ''
             writer.writerow([
                 event.created.isoformat(),
                 event.event_type,
                 event.user.email if event.user else '',
                 event.assignment.name if event.assignment else '',
+                quiz_title or '',
                 event.submission_id or '',
                 str(event.meta) if event.meta else '',
             ])

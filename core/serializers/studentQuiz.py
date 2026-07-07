@@ -6,6 +6,7 @@ Context flags (set by the view):
   reveal       — correct answers + per-choice/question feedback + per-response correctness may show.
   revealScore  — the attempt's numeric score / pass-fail may show (i.e. it has been submitted).
 """
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -55,13 +56,14 @@ class StudentQuizResponseSerializer(serializers.ModelSerializer):
   class Meta:
     model = QuizResponse
     fields = ('id', 'question', 'sortKey', 'points', 'answerText', 'selectedChoices',
-              'pointsEarned', 'isCorrect', 'needsManualGrading')
+              'pointsEarned', 'isCorrect', 'needsManualGrading', 'graderFeedback')
 
   def to_representation(self, instance):
     data = super().to_representation(instance)
     if not self.context.get('reveal'):
       data.pop('pointsEarned', None)
       data.pop('isCorrect', None)
+      data.pop('graderFeedback', None)
     return data
 
 
@@ -70,12 +72,19 @@ class StudentQuizAttemptSerializer(serializers.ModelSerializer):
   # Navigation mode is denormalized from the quiz so the taking UI doesn't need a second fetch.
   oneQuestionAtATime = serializers.BooleanField(source='quiz.oneQuestionAtATime', read_only=True)
   allowBacktracking = serializers.BooleanField(source='quiz.allowBacktracking', read_only=True)
+  # The server's current time at response, so the client can run a skew-immune countdown
+  # (it measures elapsed time locally from this anchor rather than trusting the device clock).
+  serverNow = serializers.SerializerMethodField()
 
   class Meta:
     model = QuizAttempt
     fields = ('id', 'quiz', 'attemptNumber', 'status', 'startedAt', 'deadline',
               'submittedAt', 'score', 'maxScore', 'needsManualGrading', 'passed',
-              'oneQuestionAtATime', 'allowBacktracking', 'responses')
+              'oneQuestionAtATime', 'allowBacktracking', 'serverNow', 'responses')
+
+  @extend_schema_field(serializers.DateTimeField())
+  def get_serverNow(self, obj):
+    return timezone.now().isoformat()
 
   def to_representation(self, instance):
     data = super().to_representation(instance)
@@ -90,16 +99,24 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   questionCount = serializers.SerializerMethodField()
   availability = serializers.SerializerMethodField()
   attemptsUsed = serializers.SerializerMethodField()
+  hasOpenAttempt = serializers.SerializerMethodField()
+  hasSubmittedAttempt = serializers.SerializerMethodField()
+  closeAt = serializers.SerializerMethodField()
 
   class Meta:
     model = Quiz
     fields = ('id', 'course', 'assignment', 'title', 'description', 'timeLimitMinutes',
               'attemptsAllowed', 'scoringPolicy', 'passingScore', 'passingScoreUnit',
-              'showCorrectAnswers', 'questionCount', 'availability', 'attemptsUsed')
+              'showCorrectAnswers', 'questionCount', 'availability', 'attemptsUsed',
+              'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt')
 
   @extend_schema_field(serializers.IntegerField())
   def get_questionCount(self, obj):
-    return obj.quizQuestions.count()
+    # Fixed questions plus how many each random draw will present.
+    count = obj.quizQuestions.count()
+    for group in obj.questionGroups.select_related('bank').all():
+      count += min(group.pickCount, group.bank.questions.count())
+    return count
 
   def _student(self):
     request = self.context.get('request')
@@ -116,3 +133,26 @@ class StudentQuizSerializer(serializers.ModelSerializer):
     if student is None:
       return 0
     return obj.attempts.filter(student=student).count()
+
+  @extend_schema_field(serializers.BooleanField())
+  def get_hasOpenAttempt(self, obj):
+    student = self._student()
+    return student is not None and obj.attempts.filter(student=student, status='in_progress').exists()
+
+  @extend_schema_field(serializers.BooleanField())
+  def get_hasSubmittedAttempt(self, obj):
+    student = self._student()
+    return student is not None and obj.attempts.filter(student=student, status='submitted').exists()
+
+  @extend_schema_field(serializers.DateTimeField(allow_null=True))
+  def get_closeAt(self, obj):
+    return quiz_grading.quiz_close_time(obj, self._student())
+
+
+class StaffQuizAttemptSerializer(StudentQuizAttemptSerializer):
+  """A quiz attempt as staff (grading) sees it: the student's identity plus every response
+  with answers and grading state. Callers set reveal/revealScore context to True."""
+  student = serializers.SlugRelatedField(slug_field='email', read_only=True)
+
+  class Meta(StudentQuizAttemptSerializer.Meta):
+    fields = StudentQuizAttemptSerializer.Meta.fields + ('student',)

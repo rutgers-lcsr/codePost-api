@@ -304,6 +304,9 @@ class Course(BaseModel):
       "A list of usernames of graders for the course who have expanded permissions."))
   rubricEditors = models.ManyToManyField(User, related_name="rubricEditor_courses", help_text=(
       "A list of usernames of graders for the course who are allowed to edit the rubric."))
+  quizGraders = models.ManyToManyField(User, related_name="quizGrader_courses", blank=True, help_text=(
+      "A list of usernames of graders for the course who are allowed to grade quizzes. "
+      "Course admins can always grade quizzes."))
   courseAdmins = models.ManyToManyField(User, related_name="courseAdmin_courses", help_text=(
       "A list of usernames for admins for the course."))
 
@@ -487,6 +490,8 @@ class Assignment(BaseModel):
 
   feedbackReleased = models.BooleanField(default=False, help_text=(
       "A boolean field. 'True' if grades/feedback are released for students to view. 'False' otherwise."))
+  feedbackReleasedAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "When feedbackReleased was last set true. Anchors quiz close times relative to feedback release."))
 
   anonymousGrading = models.BooleanField(default=False, help_text=(
       "A boolean field. If 'True', graders will not have access to the students field of submission objects, unless they have elevated privileges."))
@@ -577,6 +582,11 @@ class Assignment(BaseModel):
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''
     is_new = self.pk is None
+    # Stamp the feedback-release time (before super() so it lands in update_fields).
+    if self.feedbackReleased and self.feedbackReleasedAt is None:
+      self.feedbackReleasedAt = now()
+    elif not self.feedbackReleased and self.feedbackReleasedAt is not None:
+      self.feedbackReleasedAt = None
     super(Assignment, self).save(*args, **kwargs)
     
     if is_new:
@@ -2329,6 +2339,14 @@ class CourseAuditEvent(BaseModel):
       ('autograder_failed', 'Autograder Failed'),
       ('late_day_used', 'Late Day Used'),
       ('comment_feedback', 'Comment Feedback'),
+      ('quiz_created', 'Quiz Created'),
+      ('quiz_updated', 'Quiz Updated'),
+      ('quiz_published', 'Quiz Published'),
+      ('quiz_unpublished', 'Quiz Unpublished'),
+      ('quiz_deleted', 'Quiz Deleted'),
+      ('quiz_attempt_started', 'Quiz Attempt Started'),
+      ('quiz_attempt_submitted', 'Quiz Attempt Submitted'),
+      ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
   ]
 
   course = models.ForeignKey(
@@ -2341,6 +2359,12 @@ class CourseAuditEvent(BaseModel):
       null=True, blank=True,
       related_name='audit_events',
       help_text="The assignment associated with this event",
+  )
+  quiz = models.ForeignKey(
+      'Quiz', on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='audit_events',
+      help_text="The quiz associated with this event",
   )
   submission = models.ForeignKey(
       'Submission', on_delete=models.SET_NULL,
@@ -2841,7 +2865,8 @@ class Quiz(BaseModel):
       ('during', 'During the assignment'),
       ('after_assignment', 'After the assignment closes'),
       ('after_submission', 'After the student submits'),
-      ('after_feedback', 'After feedback is released'),
+      ('after_feedback', 'After feedback is released (whole assignment)'),
+      ('after_student_feedback', "After each student's feedback is ready (self-paced)"),
   ]
   SHOW_ANSWERS_CHOICES = [
       ('never', 'Never'),
@@ -2856,6 +2881,13 @@ class Quiz(BaseModel):
       ('highest', 'Highest attempt counts'),
       ('latest', 'Latest attempt counts'),
       ('average', 'Average of attempts'),
+  ]
+  CLOSE_EVENT_CHOICES = [
+      ('none', 'No automatic close'),
+      ('assignment_due', "At the assignment's deadline"),
+      ('submission', 'After the student submits'),
+      ('feedback_released', 'When feedback is released'),
+      ('fixed_date', 'At a fixed date & time'),
   ]
 
   course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
@@ -2877,14 +2909,24 @@ class Quiz(BaseModel):
   # --- Availability ---
   # Attached quizzes open relative to the assignment lifecycle (assignmentTrigger);
   # standalone quizzes use an explicit window (availableFrom/availableUntil).
-  assignmentTrigger = models.CharField(max_length=20, choices=ASSIGNMENT_TRIGGER_CHOICES,
+  assignmentTrigger = models.CharField(max_length=32, choices=ASSIGNMENT_TRIGGER_CHOICES,
       default='during',
       help_text=("When an attached quiz becomes available, relative to the assignment lifecycle. "
                  "Ignored for standalone quizzes."))
   availableFrom = models.DateTimeField(null=True, blank=True,
       help_text=("Standalone quizzes: when the quiz opens."))
   availableUntil = models.DateTimeField(null=True, blank=True,
-      help_text=("Standalone quizzes: when the quiz closes / is due."))
+      help_text=("Standalone quizzes: when the quiz closes / is due. Also the close time when "
+                 "an attached quiz's closeEvent is 'fixed_date'."))
+  # Attached-quiz close: an event (optionally offset) after which the quiz stops being available.
+  closeEvent = models.CharField(max_length=20, choices=CLOSE_EVENT_CHOICES, default='none',
+      help_text=("When an attached quiz closes. Ignored for standalone quizzes."))
+  closeOffsetMinutes = models.PositiveIntegerField(default=0,
+      help_text=("Minutes added to the close event (e.g. 10080 = one week after). "
+                 "Ignored for 'none' and 'fixed_date'."))
+  endAttemptsAtClose = models.BooleanField(default=False,
+      help_text=("If true, reaching the close time ends/auto-submits in-progress attempts "
+                 "(hard deadline); if false it only blocks new attempts."))
 
   # --- Standard options (apply to every quiz) ---
   timeLimitMinutes = models.PositiveIntegerField(null=True, blank=True,
@@ -3044,6 +3086,10 @@ class QuizResponse(BaseModel):
       help_text=("Whether the auto-graded answer was correct. Null for manual/ungraded."))
   needsManualGrading = models.BooleanField(default=False,
       help_text=("True for essay/code responses awaiting manual grading."))
+  graderFeedback = models.TextField(blank=True,
+      help_text=("Optional feedback from the grader on a manually graded response."))
+  gradedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="+", help_text=("The staff user who manually graded this response."))
 
   course = property(lambda self: self.attempt.quiz.course)
 

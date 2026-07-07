@@ -48,6 +48,14 @@ def isRubricEditor(user, course):
   """
   return course in user.rubricEditor_courses.all()
 
+def isQuizGrader(user, course):
+  """
+  Check if the user has the quiz-grader role in the course. Assignment graders do NOT
+  grade quizzes by default — instructors grant this role explicitly. (Course admins can
+  always grade quizzes; check isCourseAdmin separately.)
+  """
+  return course in user.quizGrader_courses.all()
+
 def isCourseAdmin(user, course):
   """
   Check if the user is a course admin.

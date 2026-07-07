@@ -24,6 +24,7 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         'id', 'course', 'assignment', 'title', 'description',
         # Availability
         'assignmentTrigger', 'availableFrom', 'availableUntil',
+        'closeEvent', 'closeOffsetMinutes', 'endAttemptsAtClose',
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
         'oneQuestionAtATime', 'allowBacktracking',
@@ -49,6 +50,17 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         raise serializers.ValidationError("passingScore cannot be negative.")
       if proposed.get('passingScoreUnit') == 'percent' and passing_score > 100:
         raise serializers.ValidationError("passingScore cannot exceed 100 when expressed as a percent.")
+    # A close anchored on the same moment the quiz opens needs a positive offset, or it
+    # would close the instant it opens.
+    if proposed.get('assignment') is not None and (proposed.get('closeOffsetMinutes') or 0) == 0:
+      degenerate = (proposed.get('assignmentTrigger'), proposed.get('closeEvent')) in {
+          ('after_submission', 'submission'),
+          ('after_feedback', 'feedback_released'),
+          ('after_assignment', 'assignment_due'),
+      }
+      if degenerate:
+        raise serializers.ValidationError(
+            "Set a duration for the close — it would otherwise close the moment the quiz opens.")
     return data
 
   def create(self, validated_data):
