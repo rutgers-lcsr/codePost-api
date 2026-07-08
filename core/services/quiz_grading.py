@@ -40,24 +40,46 @@ def _question_snapshot(question):
   }
 
 
+def _generated_question_snapshot(gq):
+  """An immutable copy of a per-student GeneratedQuizQuestion — the same shape as
+  ``_question_snapshot`` (zero provenance) with ``questionId: None`` (there is no live
+  Question row) and synthetic 1-based choice ids from ``choicesData``."""
+  return {
+      'questionId': None,
+      'type': gq.questionType,
+      'text': gq.text,
+      'description': gq.description,
+      'starterCode': gq.starterCode,
+      'language': gq.language,
+      'generalFeedback': '',
+      'choices': [
+          {'id': i + 1, 'text': c.get('text', ''), 'isCorrect': bool(c.get('isCorrect')),
+           'feedback': c.get('feedback', ''), 'sortKey': i}
+          for i, c in enumerate(gq.choicesData or [])
+      ],
+  }
+
+
 def build_attempt_responses(attempt):
   """Snapshot the quiz's questions as QuizResponse rows for this attempt.
 
   Fixed questions come first (in QuizQuestion order); each random-draw group then picks
-  ``pickCount`` random questions from its bank (worth ``pointsPerQuestion``). A question
-  already used in the attempt is skipped so it never appears twice (the (attempt, question)
-  pair is unique). The whole set is shuffled when ``shuffleQuestions`` is set. Each response
-  stores a full ``questionSnapshot`` so the attempt survives later question edits/deletion.
+  ``pickCount`` random questions from its bank (worth ``pointsPerQuestion``); the student's
+  approved per-student generated questions come last (with ``question=None`` — grading runs
+  off the snapshot). A question already used in the attempt is skipped so it never appears
+  twice (the (attempt, question) pair is unique). The whole set is shuffled when
+  ``shuffleQuestions`` is set. Each response stores a full ``questionSnapshot`` so the
+  attempt survives later question edits/deletion.
   """
   quiz = attempt.quiz
-  picked = []  # list of (question, points)
+  picked = []  # list of (question_or_none, points, snapshot)
   used_ids = set()
 
   def add(question, points):
     if question.id in used_ids:
       return
     used_ids.add(question.id)
-    picked.append((question, points))
+    picked.append((question, points, _question_snapshot(question)))
 
   for m in quiz.quizQuestions.select_related('question').prefetch_related('question__choices').all():
     add(m.question, m.pointsOverride if m.pointsOverride is not None else m.question.points)
@@ -67,19 +89,27 @@ def build_attempt_responses(attempt):
     for question in random.sample(pool, min(group.pickCount, len(pool))):
       add(question, group.pointsPerQuestion)
 
+  gen_set = quiz.generatedSets.filter(student=attempt.student, status='approved').first()
+  if gen_set is not None:
+    for gq in gen_set.questions.all():
+      picked.append((None, gq.points, _generated_question_snapshot(gq)))
+
   if quiz.shuffleQuestions:
     random.shuffle(picked)
   responses = [
       QuizResponse(attempt=attempt, question=question, sortKey=position, points=points,
-                   questionSnapshot=_question_snapshot(question))
-      for position, (question, points) in enumerate(picked)
+                   questionSnapshot=snapshot)
+      for position, (question, points, snapshot) in enumerate(picked)
   ]
   QuizResponse.objects.bulk_create(responses)
 
 
 def quiz_has_content(quiz):
-  """Whether the quiz has any takeable questions — fixed, or drawable from a group's bank."""
+  """Whether the quiz has any takeable questions — fixed, drawable from a group's bank,
+  or generated per student (availability separately gates on the student's approved set)."""
   if quiz.quizQuestions.exists():
+    return True
+  if quiz.generatedSections.exists():
     return True
   return any(g.bank.questions.exists() for g in quiz.questionGroups.select_related('bank').all())
 
@@ -294,6 +324,17 @@ def _student_feedback_visible(student, assignment):
   return False
 
 
+def _generated_questions_ready(quiz, student):
+  """Whether this student may take a quiz with generated sections: True when the quiz has
+  none, or when the student's set is approved. Staff previews (student=None) never pass —
+  there is nothing student-specific to materialize."""
+  if not quiz.generatedSections.exists():
+    return True
+  if student is None:
+    return False
+  return quiz.generatedSets.filter(student=student, status='approved').exists()
+
+
 def quiz_close_time(quiz, student, now=None):
   """When the quiz stops being available, or None if it has no explicit close.
 
@@ -339,6 +380,10 @@ def quiz_availability(quiz, student, now=None):
       return (False, 'not_yet_open')
     if quiz.availableUntil and now > quiz.availableUntil:
       return (False, 'closed')
+    # Defense in depth: sections require an attached assignment, but a quiz could have
+    # been detached historically — never open without the student's approved set.
+    if not _generated_questions_ready(quiz, student):
+      return (False, 'questions_not_ready')
     return (True, 'open')
 
   assignment = quiz.assignment
@@ -362,6 +407,12 @@ def quiz_availability(quiz, student, now=None):
       return (False, 'student_feedback_not_ready')
   else:
     return (False, 'unavailable')
+
+  # Per-student generated questions must be approved before the quiz opens for that
+  # student (after the trigger checks, so more actionable reasons like
+  # 'no_submission_yet' surface first).
+  if not _generated_questions_ready(quiz, student):
+    return (False, 'questions_not_ready')
 
   # Open per the trigger — now apply the explicit close.
   close = quiz_close_time(quiz, student, now)

@@ -220,6 +220,8 @@ SPECTACULAR_SETTINGS = {
             ('submission', 'After the student submits'), ('feedback_released', 'When feedback is released'),
             ('fixed_date', 'At a fixed date & time'),
         ],
+        # Per-student generated question set lifecycle.
+        'GeneratedQuestionSetStatusEnum': 'core.models.GENERATED_SET_STATUS_CHOICES',
     },
     'TITLE': 'codePost API',
     'DESCRIPTION': """

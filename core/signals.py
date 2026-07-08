@@ -108,6 +108,35 @@ def auto_execute_submission(sender, instance, created, **kwargs):
             exc_info=True
         )
 
+
+@receiver(post_save, sender=Submission)
+def auto_generate_personalized_quiz(sender, instance, created, **kwargs):
+    """Queue per-student quiz question generation when a submission is created or its
+    files are uploaded, for attached quizzes that have generated sections.
+
+    Feature/config checks (AI configured, personalized_quiz_generation enabled,
+    regenerate-unless-approved) live in the task, matching the quiz-suggestion pattern.
+    """
+    # Same guard as auto_execute_submission: only on creation or a real file upload.
+    update = kwargs.get('update_fields', None)
+    if not (update and 'dateUploaded' in update) and not created:
+        return
+
+    try:
+        if not instance.assignment.quizzes.filter(generatedSections__isnull=False).exists():
+            return
+        # Import here to avoid circular imports.
+        from core.tasks import generate_personalized_quiz_sets
+        # Submission files are not immediately available after the row save (the existing
+        # signal sleeps 1s for the same reason) — give the upload a moment to land.
+        generate_personalized_quiz_sets.apply_async(args=[instance.id], countdown=10)
+        logger.info(f"Queued personalized quiz generation for submission {instance.id}")
+    except Exception as e:
+        logger.error(
+            f"Failed to queue personalized quiz generation for submission {instance.id}: {e}",
+            exc_info=True
+        )
+
 from core.models import AssignmentFile
 from django.db.models.signals import post_delete
 

@@ -161,6 +161,16 @@ class StudentQuizSerializer(serializers.ModelSerializer):
     count = obj.quizQuestions.count()
     for group in obj.questionGroups.select_related('bank').all():
       count += min(group.pickCount, group.bank.questions.count())
+    # Generated sections: this student's approved set's real count when it exists,
+    # else each section's configured count (never any provenance).
+    if obj.generatedSections.exists():
+      student = self._student()
+      gen_set = (obj.generatedSets.filter(student=student, status='approved').first()
+                 if student is not None else None)
+      if gen_set is not None:
+        count += gen_set.questions.count()
+      else:
+        count += sum(s.numQuestions for s in obj.generatedSections.all())
     return count
 
   def _student(self):

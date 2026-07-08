@@ -754,3 +754,49 @@ class QuizAttemptPermissions(TemplatePermission):
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return user.is_superuser or isCourseStaff(user, obj.quiz.course)
         return False
+
+
+# =============================================================================
+# QUIZZES (per-student generated questions)
+# =============================================================================
+
+def canReviewGeneratedQuestions(user, quiz):
+    """Reviewing per-student generated question sets: course admins always; other course
+    staff only when the quiz's gradersCanReviewGenerated flag is on (mirrors the
+    collaborativeRubricMode flag-branch pattern)."""
+    course = quiz.course
+    if user.is_superuser or isCourseAdmin(user, course):
+        return True
+    return quiz.gradersCanReviewGenerated and isCourseStaff(user, course)
+
+
+class QuizGeneratedSectionPermissions(TemplatePermission):
+    """Generated sections are quiz authoring config — same policy as random-draw groups."""
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return _quiz_authoring_permission(user, obj.course, request.method)
+
+
+class GeneratedQuestionSetPermissions(TemplatePermission):
+    """Per-student generated sets are reviewed by admins (always) or staff (when the
+    quiz allows it). Students never see these — they take approved questions through
+    the normal attempt flow."""
+
+    def has_permission(self, request, view):
+        # approve/unapprove/regenerate act on existing objects — checked below.
+        if request.method == 'POST' and view.action in ('approve', 'unapprove', 'regenerate'):
+            return True
+        return super().has_permission(request, view)
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return canReviewGeneratedQuestions(user, obj.quiz)
+
+
+class GeneratedQuizQuestionPermissions(TemplatePermission):
+    """Editing a generated question follows the same review gate as its set."""
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return canReviewGeneratedQuestions(user, obj.set.quiz)

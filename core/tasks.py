@@ -471,6 +471,170 @@ def generate_quiz_question_suggestions(
 
 
 @shared_task
+def generate_personalized_quiz_sets(
+    submission_id: int,
+    quiz_id: int | None = None,
+    force: bool = False,
+    requested_by_id: int | None = None,
+):
+    """Generate per-student quiz questions for the generated sections of the quizzes
+    attached to this submission's assignment.
+
+    Triggered on submission upload (signals.auto_generate_personalized_quiz) and by the
+    staff "regenerate" action (``quiz_id`` + ``force=True``). One AI call per section;
+    a group submission gets one generation copied into one set per member. A student's
+    set is skipped once approved unless ``force`` (regenerate-unless-published). Each
+    run claims its sets with a ``generationBatch`` UUID — a task whose batch has been
+    superseded by a newer run (resubmission while generating) discards its results.
+    """
+    import uuid
+    from asgiref.sync import async_to_sync
+    from django.db import transaction
+    from django.utils import timezone
+    from core.models import GeneratedQuestionSet, GeneratedQuizQuestion, Submission, User
+
+    submission = Submission.objects.filter(id=submission_id).select_related(
+        'assignment', 'assignment__course', 'assignment__course__organization').first()
+    if submission is None:
+        logger.warning(f"[PersonalQuizGen] Submission {submission_id} not found. Skipping.")
+        return
+    assignment = submission.assignment
+    course = assignment.course
+    if course.archived:
+        return
+    students = list(submission.students.all())
+    if not students:
+        return
+
+    quiz_qs = assignment.quizzes.filter(generatedSections__isnull=False).distinct()
+    if quiz_id is not None:
+        quiz_qs = quiz_qs.filter(id=quiz_id)
+    quizzes = list(quiz_qs.prefetch_related('generatedSections'))
+    if not quizzes:
+        return
+
+    from core.services.ai_service import AIService
+    service = AIService(course, assignment)
+    if not service.is_configured or service.is_globally_disabled:
+        logger.debug(f"[PersonalQuizGen] AI not configured/disabled for course {course.id}. Skipping.")
+        return
+    if not service.is_feature_enabled('personalized_quiz_generation'):
+        logger.debug(f"[PersonalQuizGen] personalized_quiz_generation disabled for course {course.id}. Skipping.")
+        return
+
+    user = User.objects.filter(id=requested_by_id).first() if requested_by_id else None
+    service.set_request_context(user=user, request_type='personalized_quiz_generation')
+
+    CHOICE_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
+    for quiz in quizzes:
+        batch = uuid.uuid4()
+
+        # Claim: one set per student in the submission, stamped with this run's batch.
+        claimed_ids = []
+        with transaction.atomic():
+            for student in students:
+                gen_set, _ = GeneratedQuestionSet.objects.get_or_create(quiz=quiz, student=student)
+                if gen_set.status == 'approved' and not force:
+                    continue
+                gen_set.status = 'generating'
+                gen_set.submission = submission
+                gen_set.generationBatch = batch
+                gen_set.errorMessage = ''
+                gen_set.approvedBy = None
+                gen_set.approvedAt = None
+                gen_set.save(update_fields=['status', 'submission', 'generationBatch',
+                                            'errorMessage', 'approvedBy', 'approvedAt', 'modified'])
+                claimed_ids.append(gen_set.id)
+        if not claimed_ids:
+            continue
+
+        # One AI call per section; any failure fails the whole set (no partial sets).
+        question_rows: list[tuple] = []  # (section, normalized question dict)
+        error = ''
+        variant_id = None
+        input_tokens = output_tokens = 0
+        for section in quiz.generatedSections.all():
+            try:
+                result = async_to_sync(service.generate_personalized_quiz_questions)(section, submission)
+            except Exception as e:
+                logger.error(f"[PersonalQuizGen] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
+                error = f"Generation failed: {e}"
+                break
+            service.record_usage(result, user=user, request_type='personalized_quiz_generation')
+            variant_id = result.variant_id or variant_id
+            input_tokens += result.input_tokens
+            output_tokens += result.output_tokens
+            if not result.success or not result.text:
+                error = result.error or 'Empty model response.'
+                break
+            try:
+                parsed = _parse_json_questions(result.text)
+            except Exception as e:
+                logger.error(f"[PersonalQuizGen] Could not parse model output as JSON: {e}", exc_info=True)
+                error = 'Could not parse the model output.'
+                break
+            section_rows = []
+            for q in parsed:
+                if not isinstance(q, dict) or not q.get('text'):
+                    continue
+                qtype = q.get('type', 'multiple_choice')
+                choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
+                if qtype in CHOICE_TYPES and not choices:
+                    logger.warning(
+                        f"[PersonalQuizGen] Skipping a '{qtype}' question with no choices "
+                        f"(quiz {quiz.id}). Raw output (truncated): {(result.text or '')[:1500]}")
+                    continue
+                section_rows.append((section, {
+                    'questionType': qtype,
+                    'text': q.get('text', ''),
+                    'choicesData': choices,
+                    'language': q.get('language'),
+                    'starterCode': q.get('starter_code'),
+                }))
+            if not section_rows:
+                error = 'The model returned no usable questions.'
+                break
+            question_rows.extend(section_rows[:section.numQuestions])
+
+        metadata = {
+            'provider': service.provider,
+            'model': service.model,
+            'input_tokens': input_tokens,
+            'output_tokens': output_tokens,
+        }
+
+        # Write results — but only to sets our batch still owns (a resubmission that
+        # started a newer run wins; our stale results are discarded).
+        auto_publish = quiz.autoPublishGenerated
+        with transaction.atomic():
+            gen_sets = list(GeneratedQuestionSet.objects.select_for_update().filter(
+                id__in=claimed_ids, generationBatch=batch))
+            for gen_set in gen_sets:
+                gen_set.questions.all().delete()
+                if error:
+                    gen_set.status = 'failed'
+                    gen_set.errorMessage = error
+                    gen_set.generationMetadata = metadata
+                    gen_set.save(update_fields=['status', 'errorMessage', 'generationMetadata', 'modified'])
+                    continue
+                GeneratedQuizQuestion.objects.bulk_create([
+                    GeneratedQuizQuestion(
+                        set=gen_set, section=section, sortKey=position,
+                        points=section.pointsPerQuestion, **fields)
+                    for position, (section, fields) in enumerate(question_rows)
+                ])
+                gen_set.status = 'approved' if auto_publish else 'ready'
+                gen_set.approvedAt = timezone.now() if auto_publish else None
+                gen_set.generationMetadata = metadata
+                gen_set.promptVariant_id = variant_id
+                gen_set.save(update_fields=['status', 'approvedAt', 'generationMetadata',
+                                            'promptVariant', 'modified'])
+        logger.info(
+            f"[PersonalQuizGen] Quiz {quiz.id}: {'failed' if error else 'generated'} "
+            f"{len(question_rows)} questions for {len(claimed_ids)} student(s) (batch {batch})")
+
+
+@shared_task
 def import_quiz_qti(job_id: int, import_quizzes: bool = False):
     """Parse an uploaded Canvas QTI export and import its questions into a bank.
 

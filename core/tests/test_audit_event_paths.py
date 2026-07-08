@@ -235,6 +235,18 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_attempt_autosubmitted(self):
         self._assert_quiz_event('quiz_attempt_autosubmitted')
 
+    def test_quiz_attempts_reset(self):
+        self._assert_quiz_event('quiz_attempts_reset')
+
+    def test_quiz_generated_set_approved(self):
+        self._assert_quiz_event('quiz_generated_set_approved')
+
+    def test_quiz_generated_set_regenerated(self):
+        self._assert_quiz_event('quiz_generated_set_regenerated')
+
+    def test_quiz_generated_sets_published(self):
+        self._assert_quiz_event('quiz_generated_sets_published')
+
     def test_all_event_types_covered(self):
         """Ensure every EVENT_TYPE_CHOICES value has a dedicated test above."""
         defined_types = {choice[0] for choice in CourseAuditEvent.EVENT_TYPE_CHOICES}
@@ -246,6 +258,9 @@ class TestRecordAuditEventAllTypes(TestCase):
             'late_day_used', 'comment_feedback',
             'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
             'quiz_attempt_started', 'quiz_attempt_submitted', 'quiz_attempt_autosubmitted',
+            'quiz_attempts_reset',
+            'quiz_generated_set_approved', 'quiz_generated_set_regenerated',
+            'quiz_generated_sets_published',
         }
         self.assertEqual(defined_types, tested_types,
                          f"Untested event types: {defined_types - tested_types}")

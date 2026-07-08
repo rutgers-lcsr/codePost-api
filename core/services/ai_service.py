@@ -1969,6 +1969,71 @@ Provide a concise markdown summary following the guidelines in your instructions
             result.variant_id = variant_id
         return result
 
+    async def generate_personalized_quiz_questions(self, section, submission) -> GenerationResult:
+        """Generate per-student quiz questions for one QuizGeneratedSection from the
+        student's submission.
+
+        The instructor's section prompt is resolved first ({variables} substituted per
+        student — see core/prompts/variables.py), then embedded in the platform-level
+        'personalized_quiz_generation' prompt, which owns the JSON output contract.
+        Returns a ``GenerationResult`` whose ``text`` is a JSON array of question objects.
+        """
+        from asgiref.sync import sync_to_async
+        from core.prompts.variables import VariableContext, substitute_variables
+
+        def _collect_context():
+            assignment = submission.assignment
+            ctx = VariableContext(course=self.course, assignment=assignment,
+                                  submission=submission, section=section)
+            instructor_text, used = substitute_variables(section.systemPrompt, ctx)
+            try:
+                language = assignment.environment.language or ''
+            except Exception:
+                language = ''
+            submission_block = ''
+            if not any(name.startswith('submission_') for name in used):
+                # The instructor's prompt never references the submission — append the
+                # standard submission context so questions can still be personalized
+                # (skipped otherwise to avoid duplicating content against the budget).
+                context = self._collect_submission_context(submission)
+                parts = [f"### {f['name']}\n```\n{f['content']}\n```" for f in context['files']]
+                if context['test_results']:
+                    parts.append(context['test_results'])
+                submission_block = "\n\n--- Student submission ---\n" + "\n\n".join(parts)
+            return instructor_text, assignment.name, language, submission_block
+
+        instructor_text, assignment_name, language, submission_block = \
+            await sync_to_async(_collect_context)()
+
+        question_types = section.questionTypes or [
+            'multiple_choice', 'true_false', 'short_answer', 'essay', 'code']
+        system_prompt, variant_id = await self._resolve_and_format_prompt(
+            'personalized_quiz_generation',
+            dict(
+                instructor_prompt=instructor_text,
+                assignment_name=assignment_name,
+                num_questions=section.numQuestions,
+                question_types=", ".join(question_types),
+                language=language or "(unspecified)",
+            ),
+        )
+
+        # The user_prompt is always sent regardless of the (DB-overridable) system prompt,
+        # so it's the reliable place to enforce the choices contract.
+        user_prompt = (
+            f"Generate exactly {section.numQuestions} quiz questions now as a JSON array, "
+            "following the format exactly. CRITICAL: every multiple_choice, multiple_answers, "
+            "true_false, short_answer, and numerical question MUST include a non-empty "
+            '"choices" array (each item: {"text": ..., "is_correct": ...}). '
+            "Only essay and code questions omit choices."
+            + submission_block
+        )
+        result = await self._generate(system_prompt, user_prompt, label='personalized quiz generation')
+        if result.success:
+            result.text = result.text.strip()
+            result.variant_id = variant_id
+        return result
+
 
 REGION_COMMENT_MARKER = 1_000_000
 

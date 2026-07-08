@@ -2,6 +2,7 @@
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.serializers.quizQuestionGroup import QuizQuestionGroupSerializer
+from core.serializers.generatedQuiz import QuizGeneratedSectionSerializer
 from core.models import Quiz, QuizQuestion
 
 
@@ -29,6 +30,7 @@ class QuizQuestionSerializer(ModelSerializerWithPOSTCheck):
 class QuizSerializer(ModelSerializerWithPOSTCheck):
   quizQuestions = QuizQuestionSerializer(many=True, read_only=True)
   questionGroups = QuizQuestionGroupSerializer(many=True, read_only=True)
+  generatedSections = QuizGeneratedSectionSerializer(many=True, read_only=True)
 
   class Meta:
     model = Quiz
@@ -42,9 +44,12 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         'oneQuestionAtATime', 'allowBacktracking',
         'showCorrectAnswers', 'passingScore', 'passingScoreUnit', 'scoringPolicy',
         'multiAttemptScoreMethod', 'isPublished',
+        # Per-student generated questions
+        'gradersCanReviewGenerated', 'autoPublishGenerated', 'generatedSections',
         'quizQuestions', 'questionGroups', 'source', 'createdBy', 'metadata',
     )
-    read_only_fields = ('source', 'createdBy', 'metadata', 'quizQuestions', 'questionGroups')
+    read_only_fields = ('source', 'createdBy', 'metadata', 'quizQuestions', 'questionGroups',
+                        'generatedSections')
     POST_permissions_fields = ('course',)
 
   def validate(self, data):
@@ -74,6 +79,14 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
       if degenerate:
         raise serializers.ValidationError(
             "Set a duration for the close — it would otherwise close the moment the quiz opens.")
+    # Generated sections are seeded by submissions to the attached assignment; detaching
+    # or re-attaching the quiz would orphan them (and any per-student sets).
+    if self.instance is not None and 'assignment' in data \
+        and data.get('assignment') != self.instance.assignment \
+        and self.instance.generatedSections.exists():
+      raise serializers.ValidationError(
+          "This quiz has personalized question sections — remove them before changing "
+          "the attached assignment.")
     return data
 
   def create(self, validated_data):

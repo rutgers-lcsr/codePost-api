@@ -5172,6 +5172,240 @@ paths:
       responses:
         '204':
           description: No response body
+  /generatedQuestionSets/{id}/:
+    get:
+      operationId: generatedQuestionSets_retrieve
+      description: |-
+        A student's generated question set — the review unit. System-created by the
+        generation task (never via POST); staff approve/unapprove/regenerate here and list
+        them per quiz via ``GET /quizzes/{id}/generatedSets/``. Staff-only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated question set.
+        required: true
+      tags:
+      - generatedQuestionSets
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuestionSet'
+          description: ''
+  /generatedQuestionSets/{id}/approve/:
+    post:
+      operationId: generatedQuestionSets_approveCreate
+      description: Approve this student's generated questions — their quiz opens once
+        approved. The approving staff member takes authorship of the questions.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated question set.
+        required: true
+      tags:
+      - generatedQuestionSets
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuestionSet'
+          description: ''
+  /generatedQuestionSets/{id}/regenerate/:
+    post:
+      operationId: generatedQuestionSets_regenerateCreate
+      description: Discard this set's questions and generate new ones from the student's
+        submission. An approved set becomes un-published until re-approved.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated question set.
+        required: true
+      tags:
+      - generatedQuestionSets
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuestionSet'
+          description: ''
+  /generatedQuestionSets/{id}/unapprove/:
+    post:
+      operationId: generatedQuestionSets_unapproveCreate
+      description: Take an approved set back to review (closing the quiz for that
+        student). Blocked once the student has any attempt on the quiz.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated question set.
+        required: true
+      tags:
+      - generatedQuestionSets
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuestionSet'
+          description: ''
+  /generatedQuizQuestions/{id}/:
+    get:
+      operationId: generatedQuizQuestions_retrieve
+      description: |-
+        One generated question in a student's set. Staff PATCH-edit content inline during
+        review (no regeneration needed) or DELETE a bad question; edits after approval are
+        fine — started attempts are snapshot-isolated.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated quiz question.
+        required: true
+      tags:
+      - generatedQuizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuizQuestion'
+          description: ''
+    put:
+      operationId: generatedQuizQuestions_update
+      description: |-
+        One generated question in a student's set. Staff PATCH-edit content inline during
+        review (no regeneration needed) or DELETE a bad question; edits after approval are
+        fine — started attempts are snapshot-isolated.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated quiz question.
+        required: true
+      tags:
+      - generatedQuizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GeneratedQuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GeneratedQuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GeneratedQuizQuestion'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuizQuestion'
+          description: ''
+    patch:
+      operationId: generatedQuizQuestions_partialUpdate
+      description: |-
+        One generated question in a student's set. Staff PATCH-edit content inline during
+        review (no regeneration needed) or DELETE a bad question; edits after approval are
+        fine — started attempts are snapshot-isolated.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated quiz question.
+        required: true
+      tags:
+      - generatedQuizQuestions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedGeneratedQuizQuestion'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedGeneratedQuizQuestion'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedGeneratedQuizQuestion'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuizQuestion'
+          description: ''
+    delete:
+      operationId: generatedQuizQuestions_destroy
+      description: |-
+        One generated question in a student's set. Staff PATCH-edit content inline during
+        review (no regeneration needed) or DELETE a bad question; edits after approval are
+        fine — started attempts are snapshot-isolated.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this generated quiz question.
+        required: true
+      tags:
+      - generatedQuizQuestions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /impersonate/:
     post:
       operationId: impersonate_create
@@ -8243,6 +8477,195 @@ paths:
                 items:
                   $ref: '#/components/schemas/StudentQuizAttempt'
           description: ''
+  /quizGeneratedSections/:
+    get:
+      operationId: quizGeneratedSections_list
+      description: |-
+        Per-student generation configs on a quiz (authoring, course staff).
+
+        A section's ``systemPrompt`` template is validated on save; the variables it may use
+        are listed by ``GET /quizzes/{id}/promptVariables/``.
+      tags:
+      - quizGeneratedSections
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizGeneratedSection'
+          description: ''
+    post:
+      operationId: quizGeneratedSections_create
+      description: |-
+        Per-student generation configs on a quiz (authoring, course staff).
+
+        A section's ``systemPrompt`` template is validated on save; the variables it may use
+        are listed by ``GET /quizzes/{id}/promptVariables/``.
+      tags:
+      - quizGeneratedSections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizGeneratedSection'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizGeneratedSection'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizGeneratedSection'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizGeneratedSection'
+          description: ''
+  /quizGeneratedSections/{id}/:
+    get:
+      operationId: quizGeneratedSections_retrieve
+      description: |-
+        Per-student generation configs on a quiz (authoring, course staff).
+
+        A section's ``systemPrompt`` template is validated on save; the variables it may use
+        are listed by ``GET /quizzes/{id}/promptVariables/``.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz generated section.
+        required: true
+      tags:
+      - quizGeneratedSections
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizGeneratedSection'
+          description: ''
+    put:
+      operationId: quizGeneratedSections_update
+      description: |-
+        Per-student generation configs on a quiz (authoring, course staff).
+
+        A section's ``systemPrompt`` template is validated on save; the variables it may use
+        are listed by ``GET /quizzes/{id}/promptVariables/``.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz generated section.
+        required: true
+      tags:
+      - quizGeneratedSections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuizGeneratedSection'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/QuizGeneratedSection'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/QuizGeneratedSection'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizGeneratedSection'
+          description: ''
+    patch:
+      operationId: quizGeneratedSections_partialUpdate
+      description: |-
+        Per-student generation configs on a quiz (authoring, course staff).
+
+        A section's ``systemPrompt`` template is validated on save; the variables it may use
+        are listed by ``GET /quizzes/{id}/promptVariables/``.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz generated section.
+        required: true
+      tags:
+      - quizGeneratedSections
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizGeneratedSection'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizGeneratedSection'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizGeneratedSection'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizGeneratedSection'
+          description: ''
+    delete:
+      operationId: quizGeneratedSections_destroy
+      description: |-
+        Per-student generation configs on a quiz (authoring, course staff).
+
+        A section's ``systemPrompt`` template is validated on save; the variables it may use
+        are listed by ``GET /quizzes/{id}/promptVariables/``.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz generated section.
+        required: true
+      tags:
+      - quizGeneratedSections
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /quizImages/:
     get:
       operationId: quizImages_list
@@ -9192,6 +9615,89 @@ paths:
                 items:
                   $ref: '#/components/schemas/StaffQuizAttempt'
           description: ''
+  /quizzes/{id}/generatedSets/:
+    get:
+      operationId: quizzes_generatedSetsList
+      description: |-
+        Per-student generated question sets on this quiz, for review. Course admins
+        always; other staff only when gradersCanReviewGenerated is on.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GeneratedQuestionSetList'
+          description: ''
+  /quizzes/{id}/promptVariables/:
+    get:
+      operationId: quizzes_promptVariablesList
+      description: The {variables} usable in this quiz's personalized-section prompts
+        (powers the prompt editor's autocomplete).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PromptVariable'
+          description: ''
+  /quizzes/{id}/publishAllGenerated/:
+    post:
+      operationId: quizzes_publishAllGeneratedCreate
+      description: Approve every generated set awaiting review on this quiz in one
+        step (course admins only). Sets with no questions are skipped.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishAllGeneratedResponse'
+          description: ''
   /quizzes/{id}/questions/:
     get:
       operationId: quizzes_questionsList
@@ -9218,6 +9724,33 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+  /quizzes/{id}/resetAttempts/:
+    post:
+      operationId: quizzes_resetAttemptsCreate
+      description: Delete ALL student attempts for this quiz (course admins only).
+        Use after a substantive edit so students retake from scratch. Irreversible;
+        responses cascade.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetQuizAttemptsResponse'
           description: ''
   /registration/checkStatusNewAdminUser/:
     get:
@@ -17313,6 +17846,247 @@ components:
       required:
       - status
       - task_id
+    GeneratedQuestionSet:
+      type: object
+      description: |-
+        A student's generated question set with its questions — the review payload.
+        Staff-only (never exposed to students).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          readOnly: true
+          description: The related quiz_id.
+        student:
+          type: integer
+          readOnly: true
+          description: The student this set was generated for.
+        studentEmail:
+          type: string
+          format: email
+          readOnly: true
+        submission:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The submission this set was generated from (seed). Null if
+            the submission was later deleted; regeneration then requires a new submission.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/GeneratedQuestionSetStatusEnum'
+          readOnly: true
+          description: |-
+            Lifecycle: pending -> generating -> ready (awaiting review) -> approved; or failed.
+
+            * `pending` - Pending
+            * `generating` - Generating
+            * `ready` - Ready for review
+            * `approved` - Approved
+            * `failed` - Failed
+        approvedBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff user who approved this set. Null when auto-published.
+        approvedByEmail:
+          type: string
+          format: email
+          readOnly: true
+          nullable: true
+        approvedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When this set was approved.
+        errorMessage:
+          type: string
+          readOnly: true
+          description: Error detail if generation failed.
+        generationMetadata:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Metadata about the generation (model, tokens, etc.). Staff-internal.
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeneratedQuizQuestion'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approvedAt
+      - approvedBy
+      - approvedByEmail
+      - created
+      - errorMessage
+      - generationMetadata
+      - id
+      - modified
+      - questions
+      - quiz
+      - status
+      - student
+      - studentEmail
+      - submission
+    GeneratedQuestionSetList:
+      type: object
+      description: Summary row for the per-quiz review table (no question payload).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          readOnly: true
+          description: The related quiz_id.
+        student:
+          type: integer
+          readOnly: true
+          description: The student this set was generated for.
+        studentEmail:
+          type: string
+          format: email
+          readOnly: true
+        submission:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The submission this set was generated from (seed). Null if
+            the submission was later deleted; regeneration then requires a new submission.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/GeneratedQuestionSetStatusEnum'
+          readOnly: true
+          description: |-
+            Lifecycle: pending -> generating -> ready (awaiting review) -> approved; or failed.
+
+            * `pending` - Pending
+            * `generating` - Generating
+            * `ready` - Ready for review
+            * `approved` - Approved
+            * `failed` - Failed
+        approvedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When this set was approved.
+        errorMessage:
+          type: string
+          readOnly: true
+          description: Error detail if generation failed.
+        questionCount:
+          type: integer
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approvedAt
+      - created
+      - errorMessage
+      - id
+      - modified
+      - questionCount
+      - quiz
+      - status
+      - student
+      - studentEmail
+      - submission
+    GeneratedQuestionSetStatusEnum:
+      enum:
+      - pending
+      - generating
+      - ready
+      - approved
+      - failed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `generating` - Generating
+        * `ready` - Ready for review
+        * `approved` - Approved
+        * `failed` - Failed
+    GeneratedQuizQuestion:
+      type: object
+      description: |-
+        One generated question in a student's set. Staff may edit its content (PATCH)
+        before or after approval; the set/section links are system-managed.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        set:
+          type: integer
+          readOnly: true
+          description: The related set_id.
+        section:
+          type: integer
+          readOnly: true
+          description: The section this question was generated for.
+        questionType:
+          allOf:
+          - $ref: '#/components/schemas/QuestionTypeEnum'
+          description: |-
+            The type of question.
+
+            * `multiple_choice` - Multiple Choice (one correct)
+            * `multiple_answers` - Multiple Answers (several correct)
+            * `true_false` - True / False
+            * `short_answer` - Short Answer
+            * `essay` - Essay
+            * `numerical` - Numerical
+            * `code` - Code
+        text:
+          type: string
+          description: The question stem/prompt.
+        description:
+          type: string
+          description: Optional Markdown description shown beneath the stem.
+        choicesData: {}
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Point value (seeded from the section's pointsPerQuestion, staff-editable).
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this question within the set.
+        language:
+          type: string
+          nullable: true
+          description: 'For code questions: the language.'
+          maxLength: 25
+        starterCode:
+          type: string
+          nullable: true
+          description: 'For code questions: optional starter code shown to students.'
+      required:
+      - id
+      - section
+      - set
+      - text
     GradeQuizResponseRequest:
       type: object
       properties:
@@ -18769,6 +19543,66 @@ components:
           type: string
           format: date-time
           readOnly: true
+    PatchedGeneratedQuizQuestion:
+      type: object
+      description: |-
+        One generated question in a student's set. Staff may edit its content (PATCH)
+        before or after approval; the set/section links are system-managed.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        set:
+          type: integer
+          readOnly: true
+          description: The related set_id.
+        section:
+          type: integer
+          readOnly: true
+          description: The section this question was generated for.
+        questionType:
+          allOf:
+          - $ref: '#/components/schemas/QuestionTypeEnum'
+          description: |-
+            The type of question.
+
+            * `multiple_choice` - Multiple Choice (one correct)
+            * `multiple_answers` - Multiple Answers (several correct)
+            * `true_false` - True / False
+            * `short_answer` - Short Answer
+            * `essay` - Essay
+            * `numerical` - Numerical
+            * `code` - Code
+        text:
+          type: string
+          description: The question stem/prompt.
+        description:
+          type: string
+          description: Optional Markdown description shown beneath the stem.
+        choicesData: {}
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Point value (seeded from the section's pointsPerQuestion, staff-editable).
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this question within the set.
+        language:
+          type: string
+          nullable: true
+          description: 'For code questions: the language.'
+          maxLength: 25
+        starterCode:
+          type: string
+          nullable: true
+          description: 'For code questions: optional starter code shown to students.'
     PatchedLearningObjective:
       type: object
       properties:
@@ -19259,10 +20093,31 @@ components:
             * `highest` - Highest attempt counts
             * `latest` - Latest attempt counts
             * `average` - Average of attempts
+        multiAttemptScoreMethod:
+          allOf:
+          - $ref: '#/components/schemas/QuizMultiAttemptScoreMethodEnum'
+          description: |-
+            How multiple attempts combine into the official score: 'by_unit' compares/averages by the passing unit (percentage, or points); 'pooled' totals points earned over total points possible across attempts.
+
+            * `by_unit` - By passing unit (percentage, or points)
+            * `pooled` - Pooled points across attempts
         isPublished:
           type: boolean
           description: If false the quiz is a draft (author-only); students only see
             published quizzes.
+        gradersCanReviewGenerated:
+          type: boolean
+          description: If true, graders may review/edit/approve per-student generated
+            question sets on this quiz; if false, only course admins may.
+        autoPublishGenerated:
+          type: boolean
+          description: If true, per-student generated question sets are approved automatically
+            on generation (no staff review gate).
+        generatedSections:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizGeneratedSection'
+          readOnly: true
         quizQuestions:
           type: array
           items:
@@ -19292,6 +20147,50 @@ components:
           type: string
           readOnly: true
           description: Staff-internal metadata (Canvas IDs, etc.).
+    PatchedQuizGeneratedSection:
+      type: object
+      description: |-
+        A per-student generation config on a quiz: an instructor-authored prompt template,
+        question count, and points per question. The prompt is strictly validated on save
+        (unknown {variables} are rejected with helpful messages).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The related quiz_id.
+        name:
+          type: string
+          description: Optional label for this section (e.g. 'About your solution
+            — 3 questions').
+          maxLength: 128
+        systemPrompt:
+          type: string
+          description: Instructor-authored prompt template. May contain {variables}
+            such as {assignment_file:name} or {submission_files}, resolved per student
+            at generation time.
+        numQuestions:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: How many questions to generate per student.
+        pointsPerQuestion:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Points each generated question is worth.
+        questionTypes: {}
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this section within the quiz.
     PatchedQuizImage:
       type: object
       description: |-
@@ -20461,6 +21360,39 @@ components:
       - modified
       - promptType
       - user
+    PromptVariable:
+      type: object
+      properties:
+        token:
+          type: string
+        name:
+          type: string
+        argument:
+          type: string
+          nullable: true
+        label:
+          type: string
+        description:
+          type: string
+        kind:
+          type: string
+      required:
+      - argument
+      - description
+      - kind
+      - label
+      - name
+      - token
+    PublishAllGeneratedResponse:
+      type: object
+      properties:
+        approved:
+          type: integer
+        skipped:
+          type: integer
+      required:
+      - approved
+      - skipped
     Question:
       type: object
       description: |-
@@ -20768,10 +21700,31 @@ components:
             * `highest` - Highest attempt counts
             * `latest` - Latest attempt counts
             * `average` - Average of attempts
+        multiAttemptScoreMethod:
+          allOf:
+          - $ref: '#/components/schemas/QuizMultiAttemptScoreMethodEnum'
+          description: |-
+            How multiple attempts combine into the official score: 'by_unit' compares/averages by the passing unit (percentage, or points); 'pooled' totals points earned over total points possible across attempts.
+
+            * `by_unit` - By passing unit (percentage, or points)
+            * `pooled` - Pooled points across attempts
         isPublished:
           type: boolean
           description: If false the quiz is a draft (author-only); students only see
             published quizzes.
+        gradersCanReviewGenerated:
+          type: boolean
+          description: If true, graders may review/edit/approve per-student generated
+            question sets on this quiz; if false, only course admins may.
+        autoPublishGenerated:
+          type: boolean
+          description: If true, per-student generated question sets are approved automatically
+            on generation (no staff review gate).
+        generatedSections:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizGeneratedSection'
+          readOnly: true
         quizQuestions:
           type: array
           items:
@@ -20804,6 +21757,7 @@ components:
       required:
       - course
       - createdBy
+      - generatedSections
       - id
       - metadata
       - questionGroups
@@ -20858,6 +21812,54 @@ components:
         * `submission` - After the student submits
         * `feedback_released` - When feedback is released
         * `fixed_date` - At a fixed date & time
+    QuizGeneratedSection:
+      type: object
+      description: |-
+        A per-student generation config on a quiz: an instructor-authored prompt template,
+        question count, and points per question. The prompt is strictly validated on save
+        (unknown {variables} are rejected with helpful messages).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        quiz:
+          type: integer
+          description: The related quiz_id.
+        name:
+          type: string
+          description: Optional label for this section (e.g. 'About your solution
+            — 3 questions').
+          maxLength: 128
+        systemPrompt:
+          type: string
+          description: Instructor-authored prompt template. May contain {variables}
+            such as {assignment_file:name} or {submission_files}, resolved per student
+            at generation time.
+        numQuestions:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+          description: How many questions to generate per student.
+        pointsPerQuestion:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Points each generated question is worth.
+        questionTypes: {}
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Order of this section within the quiz.
+      required:
+      - id
+      - quiz
+      - systemPrompt
     QuizImage:
       type: object
       description: |-
@@ -20973,6 +21975,14 @@ components:
         * `running` - Running
         * `completed` - Completed
         * `failed` - Failed
+    QuizMultiAttemptScoreMethodEnum:
+      enum:
+      - by_unit
+      - pooled
+      type: string
+      description: |-
+        * `by_unit` - By passing unit (percentage, or points)
+        * `pooled` - Pooled points across attempts
     QuizPassingScoreUnitEnum:
       enum:
       - percent
@@ -21155,6 +22165,13 @@ components:
       required:
       - isValid
       - success
+    ResetQuizAttemptsResponse:
+      type: object
+      properties:
+        deleted:
+          type: integer
+      required:
+      - deleted
     RubricCategory:
       type: object
       properties:
@@ -21475,78 +22492,57 @@ components:
         * `error` - error
     StudentQuestion:
       type: object
-      description: A question as a student sees it — no provenance; correct answers
-        gated by `reveal`.
+      description: Shape of a rendered snapshot question for a student (documents
+        the client contract).
       properties:
         id:
           type: integer
-          readOnly: true
+          nullable: true
         questionType:
-          allOf:
-          - $ref: '#/components/schemas/QuestionTypeEnum'
-          description: |-
-            The type of question.
-
-            * `multiple_choice` - Multiple Choice (one correct)
-            * `multiple_answers` - Multiple Answers (several correct)
-            * `true_false` - True / False
-            * `short_answer` - Short Answer
-            * `essay` - Essay
-            * `numerical` - Numerical
-            * `code` - Code
+          type: string
         text:
           type: string
-          description: The question stem/prompt — single font (may contain HTML from
-            Canvas).
         description:
           type: string
-          description: 'Optional Markdown description shown beneath the stem (rich
-            content: code blocks, lists, formatting).'
+          nullable: true
         starterCode:
           type: string
           nullable: true
-          description: 'For code questions: optional starter code shown to students.'
         language:
           type: string
           nullable: true
-          description: 'For code questions: the language (matches Environment.language
-            values). When null, resolve from the attached assignment''s environment.'
-          maxLength: 25
         choices:
           type: array
           items:
             $ref: '#/components/schemas/StudentQuestionChoice'
-          readOnly: true
         generalFeedback:
           type: string
-          description: Feedback shown regardless of answer.
+          nullable: true
       required:
-      - choices
+      - description
       - id
+      - language
+      - questionType
+      - starterCode
       - text
     StudentQuestionChoice:
       type: object
+      description: Shape of a rendered snapshot choice for a student (documents the
+        client contract).
       properties:
         id:
           type: integer
-          readOnly: true
         text:
           type: string
-          description: The choice text (or accepted answer value).
         sortKey:
           type: integer
-          maximum: 9223372036854775807
-          minimum: -9223372036854775808
-          format: int64
-          description: Order of this choice within the question.
         isCorrect:
           type: boolean
-          description: Whether this choice is a correct answer.
         feedback:
           type: string
-          description: Optional per-choice feedback.
       required:
       - id
+      - sortKey
       - text
     StudentQuiz:
       type: object

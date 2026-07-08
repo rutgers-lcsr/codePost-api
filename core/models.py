@@ -2352,6 +2352,9 @@ class CourseAuditEvent(BaseModel):
       ('quiz_attempt_submitted', 'Quiz Attempt Submitted'),
       ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
       ('quiz_attempts_reset', 'Quiz Attempts Reset'),
+      ('quiz_generated_set_approved', 'Generated Question Set Approved'),
+      ('quiz_generated_set_regenerated', 'Generated Question Set Regenerated'),
+      ('quiz_generated_sets_published', 'Generated Question Sets Published'),
   ]
 
   course = models.ForeignKey(
@@ -2865,6 +2868,8 @@ class Quiz(BaseModel):
     assignment: Assignment | None
     quizQuestions: RelatedManager[QuizQuestion]
     questionGroups: RelatedManager[QuizQuestionGroup]
+    generatedSections: RelatedManager[QuizGeneratedSection]
+    generatedSets: RelatedManager[GeneratedQuestionSet]
 
   ASSIGNMENT_TRIGGER_CHOICES = [
       ('during', 'During the assignment'),
@@ -2964,6 +2969,14 @@ class Quiz(BaseModel):
                  "earned over total points possible across attempts."))
   isPublished = models.BooleanField(default=False,
       help_text=("If false the quiz is a draft (author-only); students only see published quizzes."))
+
+  # --- Per-student generated questions (see QuizGeneratedSection) ---
+  gradersCanReviewGenerated = models.BooleanField(default=False,
+      help_text=("If true, graders may review/edit/approve per-student generated question sets "
+                 "on this quiz; if false, only course admins may."))
+  autoPublishGenerated = models.BooleanField(default=False,
+      help_text=("If true, per-student generated question sets are approved automatically on "
+                 "generation (no staff review gate)."))
 
   class Meta:
     ordering = ('title',)
@@ -3322,3 +3335,147 @@ class QuizImage(BaseModel):
 
   def __str__(self):
     return f"QuizImage {self.token} (course {self.course_id})"
+
+
+# --- Per-student AI-generated questions ---------------------------------------
+# A quiz may contain "generated sections" — a third component type alongside fixed
+# questions (QuizQuestion) and random draws (QuizQuestionGroup). Each section holds an
+# instructor-authored prompt template; on assignment submission, numQuestions questions
+# are generated per student from their own submission. Staff review/edit/approve each
+# student's GeneratedQuestionSet before their quiz opens. Like SuggestedQuizQuestion,
+# generated questions are NOT bank Questions and carry staff-internal provenance only.
+
+GENERATED_SET_STATUS_CHOICES = [
+    ('pending', 'Pending'),
+    ('generating', 'Generating'),
+    ('ready', 'Ready for review'),
+    ('approved', 'Approved'),
+    ('failed', 'Failed'),
+]
+
+
+class QuizGeneratedSection(BaseModel):
+  """A per-student generation config on a quiz: generate ``numQuestions`` questions per
+  student from the instructor's ``systemPrompt`` template (may contain {variables} — see
+  core/prompts/variables.py), each worth ``pointsPerQuestion``. Requires the quiz to be
+  attached to an assignment (the student's submission is the generation seed)."""
+  if TYPE_CHECKING:
+    id: int
+    quiz: Quiz
+    generatedQuestions: RelatedManager[GeneratedQuizQuestion]
+
+  quiz: Quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="generatedSections", help_text=("The related quiz_id."))
+  name = models.CharField(max_length=128, blank=True,
+      help_text=("Optional label for this section (e.g. 'About your solution — 3 questions')."))
+  systemPrompt = models.TextField(
+      help_text=("Instructor-authored prompt template. May contain {variables} such as "
+                 "{assignment_file:name} or {submission_files}, resolved per student at "
+                 "generation time."))
+  numQuestions = models.PositiveIntegerField(default=3,
+      help_text=("How many questions to generate per student."))
+  pointsPerQuestion = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
+      help_text=("Points each generated question is worth."))
+  questionTypes = JSONField(default=list, blank=True,
+      help_text=("Optional subset of question types to generate (QUESTION_TYPE_CHOICES keys). "
+                 "Empty = let the model choose."))
+  sortKey = models.IntegerField(default=0, help_text=("Order of this section within the quiz."))
+
+  course = property(lambda self: self.quiz.course)
+
+  class Meta:
+    ordering = ('sortKey', 'id')
+
+  def __str__(self):
+    return f"QuizGeneratedSection quiz={self.quiz_id} num={self.numQuestions}"
+
+
+class GeneratedQuestionSet(BaseModel):
+  """One student's generated questions for a quiz (spanning all of its generated
+  sections). The approval gate: the quiz only opens for the student once their set is
+  approved by staff (or auto-approved when Quiz.autoPublishGenerated)."""
+  if TYPE_CHECKING:
+    id: int
+    quiz: Quiz
+    student: User
+    submission: Submission | None
+    approvedBy: User | None
+    promptVariant: 'SystemPromptVariant | None'
+    questions: RelatedManager[GeneratedQuizQuestion]
+
+  quiz: Quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="generatedSets", help_text=("The related quiz_id."))
+  student: User = models.ForeignKey(User, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="generated_question_sets", help_text=("The student this set was generated for."))
+  submission: Submission | None = models.ForeignKey(Submission, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.SET_NULL, related_name="generated_question_sets",
+      help_text=("The submission this set was generated from (seed). Null if the submission "
+                 "was later deleted; regeneration then requires a new submission."))
+  status = models.CharField(max_length=12, choices=GENERATED_SET_STATUS_CHOICES, default='pending',
+      help_text=("Lifecycle: pending -> generating -> ready (awaiting review) -> approved; "
+                 "or failed."))
+  approvedBy: User | None = models.ForeignKey(User, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.SET_NULL, related_name="approved_generated_sets",
+      help_text=("The staff user who approved this set. Null when auto-published."))
+  approvedAt = models.DateTimeField(null=True, blank=True,
+      help_text=("When this set was approved."))
+  generationBatch = models.UUIDField(null=True, blank=True,
+      help_text=("UUID of the generation run that produced/claimed this set. A stale task "
+                 "whose batch no longer matches must not write results."))
+  generationMetadata = JSONField(null=True, blank=True,
+      help_text=("Metadata about the generation (model, tokens, etc.). Staff-internal."))
+  promptVariant: 'SystemPromptVariant | None' = models.ForeignKey('SystemPromptVariant',  # type: ignore[assignment]
+      null=True, blank=True, on_delete=models.SET_NULL, related_name="generated_question_sets",
+      help_text=("The platform prompt variant used to generate this set."))
+  errorMessage = models.TextField(blank=True, help_text=("Error detail if generation failed."))
+
+  course = property(lambda self: self.quiz.course)
+
+  class Meta:
+    unique_together = ('quiz', 'student')
+    ordering = ('-created',)
+    indexes = [
+        models.Index(fields=['quiz', 'status']),
+    ]
+
+  def __str__(self):
+    return f"GeneratedQuestionSet [{self.status}] quiz={self.quiz_id} student={self.student_id}"
+
+
+class GeneratedQuizQuestion(BaseModel):
+  """One generated question in a student's set. Staff-editable until (and after) approval;
+  NOT a bank Question. At attempt time it is snapshotted into QuizResponse.questionSnapshot
+  (question FK = None), so later edits never disturb an in-progress attempt."""
+  if TYPE_CHECKING:
+    id: int
+    set: GeneratedQuestionSet
+    section: QuizGeneratedSection
+
+  set: GeneratedQuestionSet = models.ForeignKey(GeneratedQuestionSet,  # type: ignore[assignment]
+      on_delete=models.CASCADE, related_name="questions", help_text=("The related set_id."))
+  section: QuizGeneratedSection = models.ForeignKey(QuizGeneratedSection,  # type: ignore[assignment]
+      on_delete=models.CASCADE, related_name="generatedQuestions",
+      help_text=("The section this question was generated for."))
+  questionType = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES,
+      default='multiple_choice', help_text=("The type of question."))
+  text = models.TextField(help_text=("The question stem/prompt."))
+  description = models.TextField(blank=True, help_text=(
+      "Optional Markdown description shown beneath the stem."))
+  choicesData = JSONField(default=list, blank=True,
+      help_text=("Choices: list of {text, isCorrect, feedback}."))
+  points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
+      help_text=("Point value (seeded from the section's pointsPerQuestion, staff-editable)."))
+  sortKey = models.IntegerField(default=0, help_text=("Order of this question within the set."))
+  # Code-question fields (used only when questionType == 'code').
+  language = models.CharField(max_length=25, blank=True, null=True,
+      help_text=("For code questions: the language."))
+  starterCode = models.TextField(blank=True, null=True,
+      help_text=("For code questions: optional starter code shown to students."))
+
+  course = property(lambda self: self.set.quiz.course)
+
+  class Meta:
+    ordering = ('sortKey', 'id')
+
+  def __str__(self):
+    return f"GeneratedQuizQuestion [{self.questionType}] set={self.set_id}"
