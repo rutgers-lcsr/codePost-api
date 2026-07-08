@@ -156,22 +156,28 @@ def recompute_attempt_totals(attempt):
 
 def _compute_passed(attempt):
   """Pass/fail against quiz.passingScore (percent or points). None when no threshold."""
-  quiz = attempt.quiz
+  return _passed_for(attempt.quiz, attempt.score or Decimal('0'), attempt.maxScore)
+
+
+def _passed_for(quiz, score, max_score):
+  """Pass/fail for a raw (score, maxScore) against quiz.passingScore. None when no threshold."""
   threshold = quiz.passingScore
   if threshold is None:
     return None
-  score = attempt.score or Decimal('0')
   if quiz.passingScoreUnit == 'points':
     return score >= threshold
   # percent
-  if not attempt.maxScore or attempt.maxScore <= 0:
+  if not max_score or max_score <= 0:
     return None
-  return (score / attempt.maxScore) * Decimal('100') >= threshold
+  return (score / max_score) * Decimal('100') >= threshold
 
 
 def official_score(quiz, student):
-  """The student's official (score, maxScore) per quiz.scoringPolicy, or None if no graded attempt."""
-  attempts = [a for a in quiz.attempts.filter(student=student, status='submitted') if a.score is not None]
+  """The student's official (score, maxScore) per quiz.scoringPolicy, or None if no fully
+  graded attempt. Attempts still awaiting manual grading are excluded — their stored score
+  is only the auto-graded portion."""
+  attempts = [a for a in quiz.attempts.filter(student=student, status='submitted')
+              if a.score is not None and not a.needsManualGrading]
   if not attempts:
     return None
   policy = quiz.scoringPolicy
@@ -185,6 +191,16 @@ def official_score(quiz, student):
   # highest (default) — by score ratio
   chosen = max(attempts, key=lambda a: (a.score / a.maxScore) if a.maxScore else Decimal('0'))
   return (chosen.score, chosen.maxScore)
+
+
+def official_passed(quiz, student, official=None):
+  """Pass/fail for the student's official score. None when no threshold or no graded attempt.
+  Pass ``official`` to reuse an already-computed official_score result."""
+  if official is None:
+    official = official_score(quiz, student)
+  if official is None:
+    return None
+  return _passed_for(quiz, official[0], official[1])
 
 
 # --------------------------------------------------------------------------- #

@@ -13,6 +13,10 @@ from rest_framework import serializers
 from core.models import Question, QuestionChoice, Quiz, QuizAttempt, QuizResponse
 from core.services import quiz_grading
 
+# Matches QuizAttempt.score/maxScore so method-field output renders like the model fields
+# (string-coerced decimals) instead of raw Decimals becoming JSON floats.
+_SCORE_FIELD = serializers.DecimalField(max_digits=8, decimal_places=2)
+
 
 class QuizAvailabilitySerializer(serializers.Serializer):
   """Shape of StudentQuiz.availability (documents the SerializerMethodField for the client)."""
@@ -102,13 +106,18 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   hasOpenAttempt = serializers.SerializerMethodField()
   hasSubmittedAttempt = serializers.SerializerMethodField()
   closeAt = serializers.SerializerMethodField()
+  myScore = serializers.SerializerMethodField()
+  myMaxScore = serializers.SerializerMethodField()
+  myPassed = serializers.SerializerMethodField()
+  myScorePending = serializers.SerializerMethodField()
 
   class Meta:
     model = Quiz
     fields = ('id', 'course', 'assignment', 'title', 'description', 'timeLimitMinutes',
               'attemptsAllowed', 'scoringPolicy', 'passingScore', 'passingScoreUnit',
               'showCorrectAnswers', 'questionCount', 'availability', 'attemptsUsed',
-              'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt')
+              'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt',
+              'myScore', 'myMaxScore', 'myPassed', 'myScorePending')
 
   @extend_schema_field(serializers.IntegerField())
   def get_questionCount(self, obj):
@@ -147,6 +156,42 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   @extend_schema_field(serializers.DateTimeField(allow_null=True))
   def get_closeAt(self, obj):
     return quiz_grading.quiz_close_time(obj, self._student())
+
+  def _official_score(self, obj):
+    # Cached per (serializer, quiz) so myScore/myMaxScore don't query twice.
+    cache = getattr(self, '_official_score_cache', None)
+    if cache is None:
+      cache = self._official_score_cache = {}
+    if obj.pk not in cache:
+      student = self._student()
+      cache[obj.pk] = quiz_grading.official_score(obj, student) if student is not None else None
+    return cache[obj.pk]
+
+  @extend_schema_field(serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True))
+  def get_myScore(self, obj):
+    """The caller's official score per scoringPolicy; null until a fully graded attempt exists."""
+    official = self._official_score(obj)
+    return _SCORE_FIELD.to_representation(official[0]) if official is not None else None
+
+  @extend_schema_field(serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True))
+  def get_myMaxScore(self, obj):
+    official = self._official_score(obj)
+    return _SCORE_FIELD.to_representation(official[1]) if official is not None else None
+
+  @extend_schema_field(serializers.BooleanField(allow_null=True))
+  def get_myPassed(self, obj):
+    """Pass/fail of the official score; null when no threshold or no graded attempt."""
+    official = self._official_score(obj)
+    if official is None:
+      return None
+    return quiz_grading.official_passed(obj, self._student(), official=official)
+
+  @extend_schema_field(serializers.BooleanField())
+  def get_myScorePending(self, obj):
+    """True while any of the caller's submitted attempts awaits manual grading."""
+    student = self._student()
+    return student is not None and obj.attempts.filter(
+        student=student, status='submitted', needsManualGrading=True).exists()
 
 
 class StaffQuizAttemptSerializer(StudentQuizAttemptSerializer):

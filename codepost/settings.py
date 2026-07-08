@@ -390,6 +390,14 @@ else:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
+            # Concurrent writes (e.g. the quiz submit flush PATCHing several answers in
+            # parallel) hit "database is locked" with SQLite's default deferred
+            # transactions. IMMEDIATE + WAL + a busy timeout makes writers queue instead.
+            "OPTIONS": {
+                "transaction_mode": "IMMEDIATE",
+                "timeout": 20,
+                "init_command": "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;",
+            },
         }
     }
 

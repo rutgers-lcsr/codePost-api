@@ -316,6 +316,68 @@ class TestRevealAndAccess:
         quiz.save()
         assert official_score(quiz, student) == (Decimal('8'), Decimal('10'))
 
+    def test_official_score_excludes_attempts_pending_manual_grading(self, taking_setup):
+        from core.models import QuizAttempt
+        from core.services.quiz_grading import official_score
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        quiz = _quiz(course, scoringPolicy='highest', attemptsAllowed=0)
+        # A pending-manual attempt only carries the auto-graded portion — never official.
+        QuizAttempt.objects.create(quiz=quiz, student=student, attemptNumber=1, status='submitted',
+                                   score=Decimal('9'), maxScore=Decimal('10'), needsManualGrading=True)
+        assert official_score(quiz, student) is None
+        QuizAttempt.objects.create(quiz=quiz, student=student, attemptNumber=2, status='submitted',
+                                   score=Decimal('6'), maxScore=Decimal('10'))
+        assert official_score(quiz, student) == (Decimal('6'), Decimal('10'))
+
+    def test_available_quizzes_exposes_official_score_and_pass(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        quiz = _quiz(course, title='Scored', scoringPolicy='highest', attemptsAllowed=0,
+                     passingScore=Decimal('70'), passingScoreUnit='percent')
+        _add(quiz, _mc(course, _bank(course)))
+        QuizAttempt.objects.create(quiz=quiz, student=student, attemptNumber=1, status='submitted',
+                                   score=Decimal('5'), maxScore=Decimal('10'))
+        QuizAttempt.objects.create(quiz=quiz, student=student, attemptNumber=2, status='submitted',
+                                   score=Decimal('8'), maxScore=Decimal('10'))
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f'/quizAttempts/availableQuizzes/?course={course.id}')
+        assert resp.status_code == status.HTTP_200_OK
+        data = next(q for q in resp.data if q['title'] == 'Scored')
+        assert Decimal(data['myScore']) == Decimal('8')
+        assert Decimal(data['myMaxScore']) == Decimal('10')
+        assert data['myPassed'] is True
+        assert data['myScorePending'] is False
+
+    def test_available_quizzes_score_pending_manual_grading(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        quiz = _quiz(course, title='Essayed', attemptsAllowed=0)
+        _add(quiz, _essay(course, _bank(course)))
+        QuizAttempt.objects.create(quiz=quiz, student=student, attemptNumber=1, status='submitted',
+                                   score=Decimal('0'), maxScore=Decimal('5'), needsManualGrading=True)
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f'/quizAttempts/availableQuizzes/?course={course.id}')
+        data = next(q for q in resp.data if q['title'] == 'Essayed')
+        assert data['myScore'] is None
+        assert data['myMaxScore'] is None
+        assert data['myPassed'] is None
+        assert data['myScorePending'] is True
+
+    def test_available_quizzes_score_fields_null_without_attempts(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course, title='Fresh')
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.get(f'/quizAttempts/availableQuizzes/?course={course.id}')
+        data = next(q for q in resp.data if q['title'] == 'Fresh')
+        assert data['myScore'] is None
+        assert data['myMaxScore'] is None
+        assert data['myPassed'] is None
+        assert data['myScorePending'] is False
+
     def test_available_quizzes_lists_only_takeable(self, api_client, taking_setup):
         from core.models import QuestionBank, QuizQuestionGroup
         course = taking_setup['course']

@@ -21640,6 +21640,31 @@ components:
           format: date-time
           nullable: true
           readOnly: true
+        myScore:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          readOnly: true
+        myMaxScore:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          readOnly: true
+        myPassed:
+          type: boolean
+          nullable: true
+          readOnly: true
+        myScorePending:
+          type: boolean
+          readOnly: true
       required:
       - attemptsUsed
       - availability
@@ -21648,6 +21673,10 @@ components:
       - hasOpenAttempt
       - hasSubmittedAttempt
       - id
+      - myMaxScore
+      - myPassed
+      - myScore
+      - myScorePending
       - questionCount
       - title
     StudentQuizAttempt:
