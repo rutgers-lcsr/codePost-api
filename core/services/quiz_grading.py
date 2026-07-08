@@ -8,6 +8,7 @@ import random
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
 from django.utils import timezone
 
 from core.models import QuizResponse
@@ -20,13 +21,33 @@ MANUAL_TYPES = {'essay', 'code'}
 # Attempt materialization
 # --------------------------------------------------------------------------- #
 
+def _question_snapshot(question):
+  """An immutable copy of a question (and its choices) stored on each QuizResponse so the
+  attempt is unaffected by later edits/deletion of the live question."""
+  return {
+      'questionId': question.id,
+      'type': question.questionType,
+      'text': question.text,
+      'description': question.description,
+      'starterCode': question.starterCode,
+      'language': question.language,
+      'generalFeedback': question.generalFeedback,
+      'choices': [
+          {'id': c.id, 'text': c.text, 'isCorrect': c.isCorrect,
+           'feedback': c.feedback, 'sortKey': c.sortKey}
+          for c in question.choices.all()
+      ],
+  }
+
+
 def build_attempt_responses(attempt):
   """Snapshot the quiz's questions as QuizResponse rows for this attempt.
 
   Fixed questions come first (in QuizQuestion order); each random-draw group then picks
   ``pickCount`` random questions from its bank (worth ``pointsPerQuestion``). A question
   already used in the attempt is skipped so it never appears twice (the (attempt, question)
-  pair is unique). The whole set is shuffled when ``shuffleQuestions`` is set.
+  pair is unique). The whole set is shuffled when ``shuffleQuestions`` is set. Each response
+  stores a full ``questionSnapshot`` so the attempt survives later question edits/deletion.
   """
   quiz = attempt.quiz
   picked = []  # list of (question, points)
@@ -38,18 +59,22 @@ def build_attempt_responses(attempt):
     used_ids.add(question.id)
     picked.append((question, points))
 
-  for m in quiz.quizQuestions.select_related('question').all():
+  for m in quiz.quizQuestions.select_related('question').prefetch_related('question__choices').all():
     add(m.question, m.pointsOverride if m.pointsOverride is not None else m.question.points)
 
-  for group in quiz.questionGroups.select_related('bank').all():
+  for group in quiz.questionGroups.select_related('bank').prefetch_related('bank__questions__choices').all():
     pool = [q for q in group.bank.questions.all() if q.id not in used_ids]
     for question in random.sample(pool, min(group.pickCount, len(pool))):
       add(question, group.pointsPerQuestion)
 
   if quiz.shuffleQuestions:
     random.shuffle(picked)
-  for position, (question, points) in enumerate(picked):
-    QuizResponse.objects.create(attempt=attempt, question=question, sortKey=position, points=points)
+  responses = [
+      QuizResponse(attempt=attempt, question=question, sortKey=position, points=points,
+                   questionSnapshot=_question_snapshot(question))
+      for position, (question, points) in enumerate(picked)
+  ]
+  QuizResponse.objects.bulk_create(responses)
 
 
 def quiz_has_content(quiz):
@@ -69,15 +94,21 @@ def _normalize_text(s):
 
 def _parse_decimal(s):
   try:
-    return Decimal(str(s).strip())
+    d = Decimal(str(s).strip())
   except (InvalidOperation, AttributeError, ValueError):
     return None
+  # Reject NaN / sNaN / Infinity: Decimal() accepts them, but comparing a signaling NaN
+  # raises InvalidOperation, and they're never valid numeric answers/points anyway.
+  if not d.is_finite():
+    return None
+  return d
 
 
 def grade_response(response):
-  """Auto-grade one response in place (caller saves). Manual types are flagged, not scored."""
-  question = response.question
-  qtype = question.questionType
+  """Auto-grade one response in place from its questionSnapshot (caller saves). Manual types
+  are flagged, not scored."""
+  snap = response.questionSnapshot or {}
+  qtype = snap.get('type')
 
   if qtype in MANUAL_TYPES:
     response.needsManualGrading = True
@@ -85,19 +116,19 @@ def grade_response(response):
     response.pointsEarned = None
     return
 
-  correct_choices = list(question.choices.filter(isCorrect=True))
+  correct_choices = [c for c in snap.get('choices', []) if c.get('isCorrect')]
   is_correct = False
 
   if qtype in ('multiple_choice', 'true_false', 'multiple_answers'):
-    selected_ids = {c.id for c in response.selectedChoices.all()}
-    correct_ids = {c.id for c in correct_choices}
+    selected_ids = set(response.selectedChoiceKeys or [])
+    correct_ids = {c['id'] for c in correct_choices}
     is_correct = bool(correct_ids) and selected_ids == correct_ids
   elif qtype == 'short_answer':
-    accepted = {_normalize_text(c.text) for c in correct_choices}
+    accepted = {_normalize_text(c['text']) for c in correct_choices}
     is_correct = bool(accepted) and _normalize_text(response.answerText) in accepted
   elif qtype == 'numerical':
     student_val = _parse_decimal(response.answerText)
-    accepted = [_parse_decimal(c.text) for c in correct_choices]
+    accepted = [_parse_decimal(c['text']) for c in correct_choices]
     is_correct = student_val is not None and any(a is not None and a == student_val for a in accepted)
 
   response.needsManualGrading = False
@@ -106,13 +137,19 @@ def grade_response(response):
 
 
 def grade_attempt(attempt):
-  """Grade all responses, set the attempt's score/maxScore/needsManualGrading/passed, submit it."""
+  """Grade all responses, set the attempt's score/maxScore/needsManualGrading/passed, submit it.
+
+  Wrapped in a single transaction so a mid-grade failure can't leave some responses graded
+  while the attempt stays in_progress; responses are written in one bulk_update.
+  """
   total_max = Decimal('0')
   total_earned = Decimal('0')
   needs_manual = False
-  for response in attempt.responses.all():
+  responses = list(attempt.responses.all())
+  graded_at = timezone.now()
+  for response in responses:
     grade_response(response)
-    response.save()
+    response.modified = graded_at  # bulk_update bypasses BaseModel.save()
     total_max += response.points or Decimal('0')
     if response.needsManualGrading:
       needs_manual = True
@@ -125,7 +162,11 @@ def grade_attempt(attempt):
   attempt.passed = None if needs_manual else _compute_passed(attempt)
   attempt.status = 'submitted'
   attempt.submittedAt = timezone.now()
-  attempt.save()
+  with transaction.atomic():
+    if responses:
+      QuizResponse.objects.bulk_update(
+          responses, ['needsManualGrading', 'isCorrect', 'pointsEarned', 'modified'])
+    attempt.save()
 
 
 def apply_manual_grade(response, points_earned, grader, feedback=''):
@@ -172,10 +213,24 @@ def _passed_for(quiz, score, max_score):
   return (score / max_score) * Decimal('100') >= threshold
 
 
+def _attempt_metric(quiz, attempt):
+  """Ranking value for the 'highest' policy: absolute points when scoring by pooled points or
+  a points threshold, otherwise the score ratio (percentage)."""
+  if quiz.multiAttemptScoreMethod == 'pooled' or quiz.passingScoreUnit == 'points':
+    return attempt.score or Decimal('0')
+  return (attempt.score / attempt.maxScore) if attempt.maxScore else Decimal('0')
+
+
 def official_score(quiz, student):
-  """The student's official (score, maxScore) per quiz.scoringPolicy, or None if no fully
-  graded attempt. Attempts still awaiting manual grading are excluded — their stored score
-  is only the auto-graded portion."""
+  """The student's official (score, maxScore) per quiz.scoringPolicy and multiAttemptScoreMethod,
+  or None if no fully graded attempt. Attempts still awaiting manual grading are excluded — their
+  stored score is only the auto-graded portion.
+
+  'highest'/'latest' return a real attempt's (score, maxScore), so the denominator always
+  matches. 'average' combines attempts per the method — 'pooled' pools points (Σearned/Σpossible),
+  'by_unit' averages by the passing unit (percentage, or points) — never pairing one attempt's
+  score with another's max.
+  """
   attempts = [a for a in quiz.attempts.filter(student=student, status='submitted')
               if a.score is not None and not a.needsManualGrading]
   if not attempts:
@@ -184,13 +239,22 @@ def official_score(quiz, student):
   if policy == 'latest':
     chosen = max(attempts, key=lambda a: a.attemptNumber)
     return (chosen.score, chosen.maxScore)
-  if policy == 'average':
-    avg = sum((a.score for a in attempts), Decimal('0')) / len(attempts)
-    latest = max(attempts, key=lambda a: a.attemptNumber)
-    return (avg, latest.maxScore)
-  # highest (default) — by score ratio
-  chosen = max(attempts, key=lambda a: (a.score / a.maxScore) if a.maxScore else Decimal('0'))
-  return (chosen.score, chosen.maxScore)
+  if policy == 'highest':
+    chosen = max(attempts, key=lambda a: _attempt_metric(quiz, a))
+    return (chosen.score, chosen.maxScore)
+  # average
+  n = len(attempts)
+  mean_score = sum((a.score for a in attempts), Decimal('0')) / n
+  mean_max = sum((a.maxScore or Decimal('0') for a in attempts), Decimal('0')) / n
+  if quiz.multiAttemptScoreMethod == 'pooled' or quiz.passingScoreUnit == 'points':
+    # Pooled points (mean_score/mean_max == Σearned/Σpossible), or the average of raw points
+    # for a points threshold. Both are represented directly by (mean_score, mean_max).
+    return (mean_score, mean_max)
+  # by_unit percentage: the mean of per-attempt ratios, rendered against the mean max so the
+  # displayed fraction and the pass check both reflect the average percentage.
+  mean_ratio = sum(((a.score / a.maxScore) if a.maxScore else Decimal('0') for a in attempts),
+                   Decimal('0')) / n
+  return (mean_ratio * mean_max, mean_max)
 
 
 def official_passed(quiz, student, official=None):
@@ -265,6 +329,8 @@ def quiz_is_closed(quiz, student=None, now=None):
 def quiz_availability(quiz, student, now=None):
   """Return (is_open: bool, reason: str) for this student. reason is a short machine code."""
   now = now or timezone.now()
+  if quiz.course.archived:
+    return (False, 'course_archived')
   if not quiz.isPublished:
     return (False, 'not_published')
 
@@ -309,9 +375,12 @@ def answers_visible(quiz, attempt, now=None):
   policy = quiz.showCorrectAnswers
   if policy == 'never':
     return False
+  # Answers only ever reveal on a SUBMITTED attempt — never while it is still in progress,
+  # or a student could read the key mid-attempt (e.g. after the quiz closes) and then answer.
+  if attempt is None or attempt.status != 'submitted':
+    return False
   if policy == 'after_submit':
-    return attempt is not None and attempt.status == 'submitted'
+    return True
   if policy == 'after_close':
-    student = attempt.student if attempt is not None else None
-    return quiz_is_closed(quiz, student, now)
+    return quiz_is_closed(quiz, attempt.student, now)
   return False

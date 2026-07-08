@@ -10,7 +10,7 @@ from django.utils import timezone
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from core.models import Question, QuestionChoice, Quiz, QuizAttempt, QuizResponse
+from core.models import Quiz, QuizAttempt, QuizResponse
 from core.services import quiz_grading
 
 # Matches QuizAttempt.score/maxScore so method-field output renders like the model fields
@@ -24,43 +24,79 @@ class QuizAvailabilitySerializer(serializers.Serializer):
   reason = serializers.CharField()
 
 
-class StudentQuestionChoiceSerializer(serializers.ModelSerializer):
-  class Meta:
-    model = QuestionChoice
-    fields = ('id', 'text', 'sortKey', 'isCorrect', 'feedback')
-
-  def to_representation(self, instance):
-    data = super().to_representation(instance)
-    if not self.context.get('reveal'):
-      data.pop('isCorrect', None)
-      data.pop('feedback', None)
-    return data
+# Types whose choices ARE selectable options (safe to show). For short_answer/numerical the
+# "choices" are the accepted answers, and for essay/code there are none — so we never send
+# choices for those types until `reveal`, or the answer key would leak mid-attempt.
+SELECTABLE_TYPES = frozenset({'multiple_choice', 'multiple_answers', 'true_false'})
 
 
-class StudentQuestionSerializer(serializers.ModelSerializer):
-  """A question as a student sees it — no provenance; correct answers gated by `reveal`."""
-  choices = StudentQuestionChoiceSerializer(many=True, read_only=True)
+class StudentQuestionChoiceSerializer(serializers.Serializer):
+  """Shape of a rendered snapshot choice for a student (documents the client contract)."""
+  id = serializers.IntegerField()
+  text = serializers.CharField()
+  sortKey = serializers.IntegerField()
+  isCorrect = serializers.BooleanField(required=False)
+  feedback = serializers.CharField(required=False)
 
-  class Meta:
-    model = Question
-    fields = ('id', 'questionType', 'text', 'description', 'starterCode', 'language',
-              'choices', 'generalFeedback')
 
-  def to_representation(self, instance):
-    data = super().to_representation(instance)
-    if not self.context.get('reveal'):
-      data.pop('generalFeedback', None)
-    return data
+class StudentQuestionSerializer(serializers.Serializer):
+  """Shape of a rendered snapshot question for a student (documents the client contract)."""
+  id = serializers.IntegerField(allow_null=True)
+  questionType = serializers.CharField()
+  text = serializers.CharField()
+  description = serializers.CharField(allow_null=True)
+  starterCode = serializers.CharField(allow_null=True)
+  language = serializers.CharField(allow_null=True)
+  choices = StudentQuestionChoiceSerializer(many=True, required=False)
+  generalFeedback = serializers.CharField(required=False, allow_null=True)
+
+
+def render_question_snapshot(snap, reveal):
+  """Render a stored questionSnapshot as a student sees it — no provenance. Correct answers /
+  per-choice feedback / general feedback show only when `reveal`; choices are omitted entirely
+  for non-selectable types pre-reveal (their choice text is the accepted answer)."""
+  snap = snap or {}
+  qtype = snap.get('type')
+  data = {
+      'id': snap.get('questionId'),
+      'questionType': qtype,
+      'text': snap.get('text'),
+      'description': snap.get('description'),
+      'starterCode': snap.get('starterCode'),
+      'language': snap.get('language'),
+  }
+  if reveal:
+    data['generalFeedback'] = snap.get('generalFeedback')
+    data['choices'] = [
+        {'id': c['id'], 'text': c['text'], 'sortKey': c.get('sortKey', 0),
+         'isCorrect': c.get('isCorrect'), 'feedback': c.get('feedback')}
+        for c in snap.get('choices', [])
+    ]
+  elif qtype in SELECTABLE_TYPES:
+    data['choices'] = [
+        {'id': c['id'], 'text': c['text'], 'sortKey': c.get('sortKey', 0)}
+        for c in snap.get('choices', [])
+    ]
+  return data
 
 
 class StudentQuizResponseSerializer(serializers.ModelSerializer):
-  question = StudentQuestionSerializer(read_only=True)
-  selectedChoices = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+  question = serializers.SerializerMethodField()
+  selectedChoices = serializers.SerializerMethodField()
 
   class Meta:
     model = QuizResponse
     fields = ('id', 'question', 'sortKey', 'points', 'answerText', 'selectedChoices',
               'pointsEarned', 'isCorrect', 'needsManualGrading', 'graderFeedback')
+
+  @extend_schema_field(StudentQuestionSerializer)
+  def get_question(self, obj):
+    return render_question_snapshot(obj.questionSnapshot, bool(self.context.get('reveal')))
+
+  @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
+  def get_selectedChoices(self, obj):
+    # Ids into questionSnapshot.choices (kept named `selectedChoices` for client compatibility).
+    return obj.selectedChoiceKeys or []
 
   def to_representation(self, instance):
     data = super().to_representation(instance)

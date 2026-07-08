@@ -208,6 +208,10 @@ SPECTACULAR_SETTINGS = {
             ('highest', 'Highest attempt counts'), ('latest', 'Latest attempt counts'),
             ('average', 'Average of attempts'),
         ],
+        'QuizMultiAttemptScoreMethodEnum': [
+            ('by_unit', 'By passing unit (percentage, or points)'),
+            ('pooled', 'Pooled points across attempts'),
+        ],
         'QuizAttemptStatusEnum': [
             ('in_progress', 'In progress'), ('submitted', 'Submitted'),
         ],

@@ -33,8 +33,12 @@ class QuestionSerializer(ModelSerializerWithPOSTCheck):
 
   def validate(self, data):
     data = super().validate(data)
-    bank = data.get('bank')
-    course = data.get('course')
+    # Merge with the existing instance so a PATCH that sends ONLY `bank` (course omitted)
+    # still runs the check — otherwise a question can be silently moved into another
+    # course's bank, bypassing the object-permission check that ran against the old course.
+    proposed = self.genProposedFields(data)
+    bank = proposed.get('bank')
+    course = proposed.get('course')
     if bank is not None and course is not None and bank.course_id != course.id:
       raise serializers.ValidationError({'bank': 'Bank does not belong to this course.'})
     return data

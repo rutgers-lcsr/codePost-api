@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from django.db.models import Q
+from django.db.models import ProtectedError, Q
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status
 from rest_framework.decorators import action
@@ -54,7 +54,15 @@ class QuestionBankViewSet(ListProtectedViewSet):
           status=status.HTTP_409_CONFLICT,
       )
 
-    bank.delete()
+    try:
+      bank.delete()
+    except ProtectedError:
+      # Defensive: a protected dependent (e.g. a future relation) blocks the cascade. Return a
+      # clean 409 rather than a 500. QuizResponses no longer protect (they snapshot + SET_NULL).
+      return Response(
+          {'error': 'in_use', 'message': 'This bank has protected dependents and cannot be deleted.'},
+          status=status.HTTP_409_CONFLICT,
+      )
     return Response(
         {'deleted': True, 'impactedQuizzes': impacted, 'questionCount': question_count},
         status=status.HTTP_200_OK,

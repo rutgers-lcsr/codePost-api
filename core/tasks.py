@@ -18,10 +18,18 @@ def finalize_expired_quiz_attempts():
 
     now = timezone.now()
     stuck = QuizAttempt.objects.filter(status='in_progress', deadline__isnull=False, deadline__lt=now)
+    # Snapshot the ids first so grading (which mutates status out of the filter) can't disturb
+    # the iteration, and isolate each attempt so one bad attempt can't strand all the others.
     count = 0
-    for attempt in stuck.iterator():
-        quiz_grading.grade_attempt(attempt)
-        count += 1
+    for attempt_id in list(stuck.values_list('id', flat=True)):
+        try:
+            attempt = QuizAttempt.objects.get(pk=attempt_id, status='in_progress')
+            quiz_grading.grade_attempt(attempt)
+            count += 1
+        except QuizAttempt.DoesNotExist:
+            continue
+        except Exception:
+            logger.exception(f"Failed to finalize expired quiz attempt {attempt_id}")
     if count:
         logger.info(f"Finalized {count} expired quiz attempt(s)")
     return count
@@ -381,13 +389,6 @@ def generate_quiz_question_suggestions(
         logger.debug(f"[QuizGen] quiz_generation disabled for course {course.id}. Skipping.")
         return
 
-    # Replace any prior pending suggestions for this seed (assignment for fresh
-    # generation, or the source question for a refresh) so there's a single batch.
-    if source_question is not None:
-        SuggestedQuizQuestion.objects.filter(sourceQuestion=source_question, status='pending').delete()
-    elif assignment is not None:
-        SuggestedQuizQuestion.objects.filter(assignment=assignment, status='pending').delete()
-
     service.set_request_context(
         user=user, request_type='quiz_generation', instructions=instructions,
     )
@@ -426,28 +427,37 @@ def generate_quiz_question_suggestions(
     CHOICE_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
     created = 0
     missing_choices = 0
-    for q in questions:
-        if not isinstance(q, dict) or not q.get('text'):
-            continue
-        qtype = q.get('type', 'multiple_choice')
-        choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
-        if qtype in CHOICE_TYPES and not choices:
-            missing_choices += 1
-        SuggestedQuizQuestion.objects.create(
-            assignment=assignment,
-            sourceQuestion=source_question,
-            questionType=qtype,
-            text=q.get('text', ''),
-            choicesData=choices,
-            points=q.get('points', 1) or 1,
-            language=q.get('language') or (source_question.language if source_question else None),
-            starterCode=q.get('starter_code'),
-            referenceSolution=q.get('reference_solution'),
-            generationMetadata=metadata,
-            promptVariant_id=prompt_variant_id,
-            generationBatch=batch,
-        )
-        created += 1
+    from django.db import transaction
+    with transaction.atomic():
+        # Replace any prior pending suggestions for this seed (assignment for fresh generation,
+        # or the source question for a refresh) so there's a single batch — but only now that
+        # generation succeeded, so a failed/unparseable run leaves the existing queue intact.
+        if source_question is not None:
+            SuggestedQuizQuestion.objects.filter(sourceQuestion=source_question, status='pending').delete()
+        elif assignment is not None:
+            SuggestedQuizQuestion.objects.filter(assignment=assignment, status='pending').delete()
+        for q in questions:
+            if not isinstance(q, dict) or not q.get('text'):
+                continue
+            qtype = q.get('type', 'multiple_choice')
+            choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
+            if qtype in CHOICE_TYPES and not choices:
+                missing_choices += 1
+            SuggestedQuizQuestion.objects.create(
+                assignment=assignment,
+                sourceQuestion=source_question,
+                questionType=qtype,
+                text=q.get('text', ''),
+                choicesData=choices,
+                points=q.get('points', 1) or 1,
+                language=q.get('language') or (source_question.language if source_question else None),
+                starterCode=q.get('starter_code'),
+                referenceSolution=q.get('reference_solution'),
+                generationMetadata=metadata,
+                promptVariant_id=prompt_variant_id,
+                generationBatch=batch,
+            )
+            created += 1
 
     logger.info(f"[QuizGen] Created {created} suggested quiz questions for course {course.id} (batch {batch})")
     if missing_choices:

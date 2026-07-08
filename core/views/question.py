@@ -1,5 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from django.db import transaction
+from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status
@@ -7,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.models import Question, QuestionBank
+from core.models import Assignment, Question, QuestionBank
 from core.serializers.question import QuestionSerializer
 from core.serializers.suggestedQuizQuestion import SuggestedQuizQuestionSerializer
 from core.views.template import ListProtectedViewSet
@@ -20,6 +21,17 @@ class QuestionViewSet(ListProtectedViewSet):
   queryset = Question.objects.select_related('course', 'createdBy', 'bank').prefetch_related('choices').all()
   serializer_class = QuestionSerializer
   permission_classes = (IsAuthenticated, QuestionPermissions)
+
+  def destroy(self, request, *args, **kwargs):
+    # QuizResponses snapshot the question and SET_NULL, so deleting a used question no longer
+    # raises ProtectedError; this stays as a clean-409 safety net for any future protected relation.
+    try:
+      return super().destroy(request, *args, **kwargs)
+    except ProtectedError:
+      return Response(
+          {'error': 'in_use', 'message': 'This question has protected dependents and cannot be deleted.'},
+          status=status.HTTP_409_CONFLICT,
+      )
 
   def _resolve_target_bank(self, request):
     """Resolve the target bank from the request and check course-staff access."""
@@ -98,10 +110,19 @@ class QuestionViewSet(ListProtectedViewSet):
     question = self.get_object()  # triggers object-level permission check
     from core.tasks import generate_quiz_question_suggestions
 
+    # A cross-course assignment_id would resolve the task's course to that other course and
+    # inject the refresh suggestion there; require it to match the question's course.
+    assignment_id = request.data.get('assignment_id')
+    if assignment_id is not None:
+      assignment = get_object_or_404(Assignment, id=assignment_id)
+      if assignment.course_id != question.course_id:
+        return Response({'error': 'Assignment must belong to the same course as the question.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
     task = generate_quiz_question_suggestions.delay(
         requested_by_id=request.user.id,
         source_question_id=question.id,
-        assignment_id=request.data.get('assignment_id'),
+        assignment_id=assignment_id,
         num_questions=request.data.get('num_questions', 1),
         question_types=request.data.get('question_types') or [question.questionType],
         instructions=request.data.get('instructions', '') or '',

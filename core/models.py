@@ -1680,8 +1680,12 @@ class Environment(BaseModel):
 
 @receiver(models.signals.pre_delete, sender=Assignment)
 def delete_assignment(sender, instance: Assignment, **kwargs):
-  # Delete any data releate to the assignment within the system. 
+  # Delete any data releate to the assignment within the system.
   # The database will handle deleting on cascade, but the docker images and datasets will need to be deleted manually.
+
+  # Attached quizzes are SET_NULL on assignment delete, which would turn a gated quiz into an
+  # open standalone one. Unpublish them first so a deleted assignment never silently opens a quiz.
+  instance.quizzes.filter(isPublished=True).update(isPublished=False)
 
   if instance.dataSets.all() and instance.dataSets.all().count() > 0:
     # just delete the directory assignment/dataset
@@ -2347,6 +2351,7 @@ class CourseAuditEvent(BaseModel):
       ('quiz_attempt_started', 'Quiz Attempt Started'),
       ('quiz_attempt_submitted', 'Quiz Attempt Submitted'),
       ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
+      ('quiz_attempts_reset', 'Quiz Attempts Reset'),
   ]
 
   course = models.ForeignKey(
@@ -2882,6 +2887,10 @@ class Quiz(BaseModel):
       ('latest', 'Latest attempt counts'),
       ('average', 'Average of attempts'),
   ]
+  MULTI_ATTEMPT_SCORE_METHOD_CHOICES = [
+      ('by_unit', 'By passing unit (percentage, or points)'),
+      ('pooled', 'Pooled points across attempts'),
+  ]
   CLOSE_EVENT_CHOICES = [
       ('none', 'No automatic close'),
       ('assignment_due', "At the assignment's deadline"),
@@ -2948,6 +2957,11 @@ class Quiz(BaseModel):
       default='percent', help_text=("Whether passingScore is a percentage or an absolute point value."))
   scoringPolicy = models.CharField(max_length=8, choices=SCORING_POLICY_CHOICES, default='highest',
       help_text=("Which attempt counts as the official score when multiple attempts are allowed."))
+  multiAttemptScoreMethod = models.CharField(max_length=8, choices=MULTI_ATTEMPT_SCORE_METHOD_CHOICES,
+      default='by_unit',
+      help_text=("How multiple attempts combine into the official score: 'by_unit' compares/"
+                 "averages by the passing unit (percentage, or points); 'pooled' totals points "
+                 "earned over total points possible across attempts."))
   isPublished = models.BooleanField(default=False,
       help_text=("If false the quiz is a draft (author-only); students only see published quizzes."))
 
@@ -3049,6 +3063,9 @@ class QuizAttempt(BaseModel):
       help_text=("True if any response (essay/code) awaits manual grading."))
   passed = models.BooleanField(null=True, blank=True,
       help_text=("Whether the attempt met quiz.passingScore. Null until fully graded or if no threshold."))
+  furthestIndex = models.PositiveIntegerField(default=0,
+      help_text=("Highest response sortKey the student has reached; enforces sequential "
+                 "navigation (oneQuestionAtATime / no-backtracking) server-side."))
 
   course = property(lambda self: self.quiz.course)
 
@@ -3061,23 +3078,33 @@ class QuizAttempt(BaseModel):
 
 
 class QuizResponse(BaseModel):
-  """A student's answer to one question within a QuizAttempt. Snapshots the presented
-  question and its point value so the attempt is stable across reloads and later edits."""
+  """A student's answer to one question within a QuizAttempt.
+
+  The presented question — stem, choices (with their correct flags), points — is fully
+  snapshotted into ``questionSnapshot`` at attempt-build time, so editing or deleting the
+  live Question afterward never alters or destroys an in-flight or graded attempt. Grading
+  and student rendering read the snapshot, not the live question."""
   if TYPE_CHECKING:
     id: int
     attempt: QuizAttempt
-    question: Question
+    question: Question | None
 
   attempt: QuizAttempt = models.ForeignKey(QuizAttempt, on_delete=models.CASCADE,  # type: ignore[assignment]
       related_name="responses", help_text=("The attempt this response belongs to."))
-  question: Question = models.ForeignKey(Question, on_delete=models.PROTECT,  # type: ignore[assignment]
-      related_name="+", help_text=("The question presented (snapshot)."))
+  question: Question | None = models.ForeignKey(Question, on_delete=models.SET_NULL,  # type: ignore[assignment]
+      null=True, blank=True, related_name="+",
+      help_text=("The live question this was drawn from (analytics only; may be deleted). "
+                 "Grading/rendering use questionSnapshot, so this is nullable and SET_NULL."))
+  questionSnapshot = models.JSONField(default=dict,
+      help_text=("Immutable copy of the presented question at attempt time: "
+                 "{questionId, type, text, description, starterCode, language, generalFeedback, "
+                 "choices:[{id, text, isCorrect, feedback, sortKey}]}."))
   sortKey = models.IntegerField(default=0,
       help_text=("Presentation order within the attempt (randomized when shuffleQuestions)."))
   points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
       help_text=("Points this question is worth in this attempt (snapshot of override/base)."))
-  selectedChoices = models.ManyToManyField(QuestionChoice, blank=True, related_name="+",
-      help_text=("Selected option(s) for choice-based questions."))
+  selectedChoiceKeys = models.JSONField(default=list,
+      help_text=("Selected option id(s) into questionSnapshot.choices, for choice-based questions."))
   answerText = models.TextField(blank=True,
       help_text=("Typed answer for short-answer/numerical/essay/code questions."))
   pointsEarned = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True,

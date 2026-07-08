@@ -80,6 +80,12 @@ class SuggestedQuizQuestionViewSet(ListProtectedViewSet):
         return Response({'error': 'bankId is required to accept a new question into a bank.'},
                         status=status.HTTP_400_BAD_REQUEST)
       bank = get_object_or_404(QuestionBank, id=bank_id)
+      # The permission class validated the caller as staff of the suggestion's course; require
+      # the target bank to be in that same course so a suggestion can't be accepted into (and
+      # inject a Question into) a course the caller has no role in.
+      if bank.course_id != suggestion.course.id:
+        return Response({'error': 'Bank must belong to the same course as the suggestion.'},
+                        status=status.HTTP_403_FORBIDDEN)
       question = Question.objects.create(
           course=bank.course,
           bank=bank,

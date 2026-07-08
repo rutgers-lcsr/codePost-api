@@ -6,6 +6,7 @@ Kept separate from the staff-only QuizViewSet. Only the mixins students need are
 """
 from datetime import timedelta
 
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
@@ -25,6 +26,18 @@ from core.serializers.studentQuiz import (
 )
 from core.services import quiz_grading
 from core.services.audit import record_audit_event
+
+
+def _require_int(value):
+  """Coerce a client-supplied id to int, or None if it isn't a valid integer.
+
+  Guards against get_object_or_404(pk='abc') raising ValueError → 500 (it only catches
+  DoesNotExist). Callers return 400 on None.
+  """
+  try:
+    return int(value)
+  except (TypeError, ValueError):
+    return None
 
 
 def _record_attempt_event(attempt, event_type):
@@ -66,9 +79,9 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   )
   def create(self, request, *args, **kwargs):
     """Start a new attempt, or resume the student's in-progress one, for ``quiz``."""
-    quiz_id = request.data.get('quiz')
-    if not quiz_id:
-      return Response({'detail': 'A quiz id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    quiz_id = _require_int(request.data.get('quiz'))
+    if quiz_id is None:
+      return Response({'detail': 'A valid quiz id is required.'}, status=status.HTTP_400_BAD_REQUEST)
     quiz = get_object_or_404(Quiz, pk=quiz_id)
     user = request.user
 
@@ -100,11 +113,20 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       close = quiz_grading.quiz_close_time(quiz, user, started)
       if close is not None:
         deadline = close if deadline is None else min(deadline, close)
-    attempt = QuizAttempt.objects.create(
-        quiz=quiz, student=user, attemptNumber=used + 1,
-        startedAt=started, deadline=deadline, status='in_progress',
-    )
-    quiz_grading.build_attempt_responses(attempt)
+    try:
+      with transaction.atomic():
+        attempt = QuizAttempt.objects.create(
+            quiz=quiz, student=user, attemptNumber=used + 1,
+            startedAt=started, deadline=deadline, status='in_progress',
+        )
+        quiz_grading.build_attempt_responses(attempt)
+    except IntegrityError:
+      # A concurrent start (double-click) won the (quiz, student, attemptNumber) unique race.
+      # Return the in-progress attempt it created rather than a 500.
+      existing = quiz.attempts.filter(student=user, status='in_progress').order_by('-attemptNumber').first()
+      if existing is not None:
+        return Response(StudentQuizAttemptSerializer(existing, context=self._attempt_context(existing)).data)
+      raise
     _record_attempt_event(attempt, 'quiz_attempt_started')
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data,
                     status=status.HTTP_201_CREATED)
@@ -121,18 +143,33 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   def saveAnswer(self, request, pk=None):
     """Autosave a single response within an in-progress, not-yet-expired attempt."""
     attempt = self.get_object()  # ownership enforced by has_object_permission (PATCH ⇒ owner)
+    if attempt.quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
     if attempt.status != 'in_progress':
       return Response({'detail': 'This attempt is no longer open.'}, status=status.HTTP_400_BAD_REQUEST)
     if attempt.deadline and timezone.now() > attempt.deadline + SAVE_DEADLINE_GRACE:
       return Response({'detail': 'Time is up for this attempt.'}, status=status.HTTP_400_BAD_REQUEST)
 
     response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
+
+    # Enforce no-backtracking server-side (otherwise the setting is only advisory in the UI):
+    # once the student has moved past a question, its answer can't be changed via a direct call.
+    if not attempt.quiz.allowBacktracking and response.sortKey < attempt.furthestIndex:
+      return Response({'detail': 'Returning to earlier questions is not allowed.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+
     if 'answerText' in request.data:
       response.answerText = request.data.get('answerText') or ''
       response.save()
     if 'selectedChoices' in request.data:
-      valid = response.question.choices.filter(id__in=request.data.get('selectedChoices') or [])
-      response.selectedChoices.set(valid)
+      valid_ids = {c['id'] for c in (response.questionSnapshot or {}).get('choices', [])}
+      requested = request.data.get('selectedChoices') or []
+      response.selectedChoiceKeys = [i for i in requested if i in valid_ids]
+      response.save()
+
+    if response.sortKey > attempt.furthestIndex:
+      attempt.furthestIndex = response.sortKey
+      attempt.save()
     return Response(StudentQuizResponseSerializer(
         response, context={'request': request, 'reveal': False}).data)
 
@@ -141,6 +178,8 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   def submit(self, request, pk=None):
     """Finalize and auto-grade the attempt."""
     attempt = self.get_object()
+    if attempt.quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
     if attempt.status != 'submitted':
       quiz_grading.grade_attempt(attempt)
       attempt.refresh_from_db()
@@ -164,7 +203,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       return Response({'detail': 'Only submitted attempts can be graded.'},
                       status=status.HTTP_400_BAD_REQUEST)
     response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
-    if response.question.questionType not in quiz_grading.MANUAL_TYPES:
+    if (response.questionSnapshot or {}).get('type') not in quiz_grading.MANUAL_TYPES:
       return Response({'detail': 'Only essay/code responses are graded manually.'},
                       status=status.HTTP_400_BAD_REQUEST)
     points = quiz_grading._parse_decimal(request.data.get('pointsEarned'))
@@ -184,7 +223,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   @action(detail=False, methods=['GET'])
   def myAttempts(self, request):
     """The calling student's attempts for ``quiz``."""
-    quiz = get_object_or_404(Quiz, pk=request.query_params.get('quiz'))
+    quiz_id = _require_int(request.query_params.get('quiz'))
+    if quiz_id is None:
+      return Response({'detail': 'A valid quiz id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    quiz = get_object_or_404(Quiz, pk=quiz_id)
     attempts = quiz.attempts.filter(student=request.user).order_by('attemptNumber')
     data = [StudentQuizAttemptSerializer(a, context=self._attempt_context(a)).data for a in attempts]
     return Response(data)
@@ -201,7 +243,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     itself is still locked — so the assignment card can show them with a reason.
     Standalone quizzes surface only when open now or already attempted.
     """
-    course = get_object_or_404(Course, pk=request.query_params.get('course'))
+    course_id = _require_int(request.query_params.get('course'))
+    if course_id is None:
+      return Response({'detail': 'A valid course id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    course = get_object_or_404(Course, pk=course_id)
     if not isCourseMember(request.user, course):
       return Response({'detail': 'Not a member of this course.'}, status=status.HTTP_403_FORBIDDEN)
     result = []

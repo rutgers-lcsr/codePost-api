@@ -57,6 +57,9 @@ QTI_TYPE_MAP = {
     'numerical_question': 'numerical',
 }
 
+# Auto-graded types that require a parseable correct answer (essay/code are manually graded).
+_KEYED_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
+
 
 def _lname(tag: str) -> str:
     """Local name of a possibly namespaced XML tag."""
@@ -160,7 +163,12 @@ def _parse_choices(item, qtype: str):
     for rc in _iter(item, 'respcondition'):
         if not _awards_credit(rc):
             continue
+        # A <varequal> nested under <not> asserts the answer is WRONG (Canvas multiple_answers
+        # lists excluded options this way). Exclude those, or wrong options get marked correct.
+        negated = {id(ve) for neg in _iter(rc, 'not') for ve in _iter(neg, 'varequal')}
         for ve in _iter(rc, 'varequal'):
+            if id(ve) in negated:
+                continue
             val = (ve.text or '').strip()
             if val in label_idents:
                 correct_idents.add(val)
@@ -201,6 +209,11 @@ def _parse_item(item):
         points = 1.0
 
     choices, _ok = _parse_choices(item, qtype)
+    # Auto-graded types need a parseable answer key. If none was extracted — e.g. a numerical
+    # question scored by a <vargte>/<varlte> range we don't support — skip it with a reason
+    # rather than importing a question that marks every student wrong.
+    if qtype in _KEYED_TYPES and not any(c.get('isCorrect') for c in choices):
+        return None, f'no correct answer parsed for {qtype} (e.g. numerical range or unsupported scoring)'
     question = {
         'ident': ident,
         'type': qtype,
@@ -295,7 +308,9 @@ def parse_canvas_export(data) -> dict:
 
     try:
         with zipfile.ZipFile(buffer) as zf:
-            xml_names = [n for n in zf.namelist() if n.lower().endswith('.xml')]
+            # Sort so dedup keeps a deterministic canonical occurrence regardless of the
+            # archive's internal member order (which varies by zip tooling / filesystem).
+            xml_names = sorted(n for n in zf.namelist() if n.lower().endswith('.xml'))
             # Skip the manifest and Canvas meta files — they hold no QTI items.
             for name in xml_names:
                 base = name.rsplit('/', 1)[-1].lower()

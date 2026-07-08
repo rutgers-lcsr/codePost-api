@@ -938,3 +938,122 @@ class TestQuizAuditLog:
 
         api_client.delete(f'/quizzes/{quiz_id}/')
         assert self._events(course, event_type='quiz_deleted').exists()
+
+
+# --------------------------------------------------------------------------- #
+# Regression tests for the pre-push code-review fixes
+# --------------------------------------------------------------------------- #
+
+class TestReviewFixRegressions:
+    def _take(self, api_client, student, quiz):
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        return start.data
+
+    def test_short_answer_key_hidden_while_taking_then_revealed(self, api_client, taking_setup):
+        # The accepted answer for short-answer/numerical is stored as a choice; it must not
+        # ship to a student mid-attempt, but is fine to reveal after submitting.
+        course = taking_setup['course']
+        quiz = _quiz(course, showCorrectAnswers='after_submit')
+        _add(quiz, _short(course, _bank(course)))
+        attempt = self._take(api_client, taking_setup['students'][0], quiz)
+        resp = attempt['responses'][0]
+        assert 'choices' not in resp['question']  # answer key not exposed while taking
+        api_client.patch(f"/quizAttempts/{attempt['id']}/saveAnswer/",
+                         {'response': resp['id'], 'answerText': 'Paris'}, format='json')
+        done = api_client.post(f"/quizAttempts/{attempt['id']}/submit/", {}, format='json')
+        revealed = done.data['responses'][0]['question']['choices']
+        assert any(c['text'] == 'Paris' for c in revealed)  # revealed only after submit
+
+    def test_numerical_snan_answer_does_not_crash(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _numerical(course, _bank(course)))
+        attempt = self._take(api_client, taking_setup['students'][0], quiz)
+        api_client.patch(f"/quizAttempts/{attempt['id']}/saveAnswer/",
+                         {'response': attempt['responses'][0]['id'], 'answerText': 'snan'}, format='json')
+        done = api_client.post(f"/quizAttempts/{attempt['id']}/submit/", {}, format='json')
+        assert done.status_code == status.HTTP_200_OK
+        assert _dec(done.data['score']) == _dec('0.00')  # graded wrong, not a 500
+
+    def test_attempt_survives_question_deletion(self, api_client, taking_setup):
+        # Editing/deleting a question must not alter or destroy an in-flight attempt (snapshot).
+        from core.models import Question
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course)
+        _add(quiz, q)
+        attempt = self._take(api_client, taking_setup['students'][0], quiz)
+        correct_id = q.choices.get(isCorrect=True).id
+        api_client.patch(f"/quizAttempts/{attempt['id']}/saveAnswer/",
+                         {'response': attempt['responses'][0]['id'], 'selectedChoices': [correct_id]},
+                         format='json')
+        Question.objects.filter(pk=q.id).delete()  # delete the live question mid-attempt
+        done = api_client.post(f"/quizAttempts/{attempt['id']}/submit/", {}, format='json')
+        assert done.status_code == status.HTTP_200_OK
+        assert _dec(done.data['score']) == _dec('2.00')  # graded from the snapshot
+
+    def test_deleting_a_used_question_returns_409_not_500(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course)
+        _add(quiz, q)
+        self._take(api_client, taking_setup['students'][0], quiz)  # creates a QuizResponse
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.delete(f'/questions/{q.id}/')
+        assert resp.status_code in (status.HTTP_200_OK, status.HTTP_204_NO_CONTENT)  # SET_NULL, no crash
+
+    def test_cross_course_question_cannot_be_attached_to_quiz(self, api_client, taking_setup):
+        from core.models import Quiz
+        from core.tests.factories import CourseFactory
+        course_a = taking_setup['course']
+        with factory.django.mute_signals(post_save):
+            course_b = CourseFactory(name="other333", period="s2026", organization=course_a.organization)
+        foreign_q = _mc(course_b, _bank(course_b))
+        quiz_a = _quiz(course_a)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post('/quizQuestions/',
+                               {'quiz': quiz_a.id, 'question': foreign_q.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_reset_attempts_deletes_all(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        self._take(api_client, taking_setup['students'][0], quiz)
+        assert quiz.attempts.count() == 1
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizzes/{quiz.id}/resetAttempts/', {}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert QuizAttempt.objects.filter(quiz=quiz).count() == 0
+
+    def test_deleting_assignment_unpublishes_attached_quiz(self, taking_setup):
+        from core.models import Assignment, Quiz
+        course = taking_setup['course']
+        assignment = taking_setup['assignment']
+        quiz = _quiz(course, title='Attached', assignment=assignment, isPublished=True)
+        Assignment.objects.get(pk=assignment.id).delete()
+        quiz.refresh_from_db()
+        assert quiz.assignment_id is None
+        assert quiz.isPublished is False  # never silently becomes an open standalone quiz
+
+    def test_after_close_does_not_reveal_to_in_progress_attempt(self, api_client, taking_setup):
+        # A quiz with 'after_close' reveal must not leak correct answers to an attempt that is
+        # still in progress once the close time passes.
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        quiz = _quiz(course, showCorrectAnswers='after_close',
+                     availableUntil=timezone.now() - timedelta(minutes=1))
+        _add(quiz, _mc(course, _bank(course)))
+        # availableUntil is in the past → a fresh start is closed; craft an in-progress attempt.
+        student = taking_setup['students'][0]
+        attempt = QuizAttempt.objects.create(quiz=quiz, student=student, attemptNumber=1,
+                                             status='in_progress')
+        from core.services import quiz_grading
+        quiz_grading.build_attempt_responses(attempt)
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f"/quizAttempts/{attempt.id}/")
+        for r in resp.data['responses']:
+            assert all('isCorrect' not in c for c in r['question'].get('choices', []))

@@ -13,6 +13,18 @@ class QuizQuestionSerializer(ModelSerializerWithPOSTCheck):
     fields = ('id', 'quiz', 'question', 'sortKey', 'pointsOverride')
     POST_permissions_fields = ('quiz',)
 
+  def validate(self, data):
+    data = super().validate(data)
+    proposed = self.genProposedFields(data)
+    quiz = proposed.get('quiz')
+    question = proposed.get('question')
+    # The attached question must belong to the same course as the quiz (mirrors the bank
+    # check in QuizQuestionGroupSerializer) — otherwise another course's question, and its
+    # content, could be surfaced to this quiz's students.
+    if quiz is not None and question is not None and question.course_id != quiz.course_id:
+      raise serializers.ValidationError("The question must belong to the same course as the quiz.")
+    return data
+
 
 class QuizSerializer(ModelSerializerWithPOSTCheck):
   quizQuestions = QuizQuestionSerializer(many=True, read_only=True)
@@ -28,7 +40,8 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
         'oneQuestionAtATime', 'allowBacktracking',
-        'showCorrectAnswers', 'passingScore', 'passingScoreUnit', 'scoringPolicy', 'isPublished',
+        'showCorrectAnswers', 'passingScore', 'passingScoreUnit', 'scoringPolicy',
+        'multiAttemptScoreMethod', 'isPublished',
         'quizQuestions', 'questionGroups', 'source', 'createdBy', 'metadata',
     )
     read_only_fields = ('source', 'createdBy', 'metadata', 'quizQuestions', 'questionGroups')

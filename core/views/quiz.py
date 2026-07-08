@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
-from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import status
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import serializers, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -10,6 +10,7 @@ from core.serializers.quiz import QuizSerializer, QuizQuestionSerializer
 from core.serializers.studentQuiz import StaffQuizAttemptSerializer
 from core.services.audit import record_audit_event
 from core.views.template import ListProtectedViewSet
+from core.permissions.helpers import isCourseAdmin
 from core.permissions.permissions import QuizPermissions, canGradeQuiz
 
 
@@ -66,9 +67,26 @@ class QuizViewSet(ListProtectedViewSet):
     if not canGradeQuiz(request.user, quiz.course):
       return Response({'detail': 'Only quiz graders and course admins can view attempts for grading.'},
                       status=status.HTTP_403_FORBIDDEN)
-    attempts = quiz.attempts.filter(status='submitted').select_related('student').order_by(
-        'student__email', 'attemptNumber')
+    attempts = quiz.attempts.filter(status='submitted').select_related(
+        'student', 'quiz').prefetch_related('responses').order_by('student__email', 'attemptNumber')
     if request.query_params.get('needsGrading') in ('true', 'True', '1'):
       attempts = attempts.filter(needsManualGrading=True)
     return Response(StaffQuizAttemptSerializer(
         attempts, many=True, context={'request': request, 'reveal': True, 'revealScore': True}).data)
+
+  @extend_schema(
+      request=None,
+      responses=inline_serializer('ResetQuizAttemptsResponse', {'deleted': serializers.IntegerField()}),
+      description="Delete ALL student attempts for this quiz (course admins only). Use after a "
+                  "substantive edit so students retake from scratch. Irreversible; responses cascade.",
+  )
+  @action(detail=True, methods=['POST'])
+  def resetAttempts(self, request, pk=None):
+    quiz = self.get_object()
+    if not (request.user.is_superuser or isCourseAdmin(request.user, quiz.course)):
+      return Response({'detail': 'Only course admins can reset attempts.'},
+                      status=status.HTTP_403_FORBIDDEN)
+    deleted, _ = quiz.attempts.all().delete()
+    record_audit_event(course=quiz.course, event_type='quiz_attempts_reset', user=request.user,
+                       quiz=quiz, assignment=quiz.assignment, meta={'title': quiz.title})
+    return Response({'deleted': deleted}, status=status.HTTP_200_OK)
