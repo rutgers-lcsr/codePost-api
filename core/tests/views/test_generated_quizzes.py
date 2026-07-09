@@ -101,8 +101,16 @@ def _make_set(quiz, student, submission=None, status='ready', questions=True):
 # Section authoring
 # --------------------------------------------------------------------------- #
 
+def _feature_on(monkeypatch):
+    """Creating a section requires the personalized_quiz_generation feature; tests run
+    without an AI provider, so enable it explicitly where creation should succeed."""
+    monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                        lambda self, key: True)
+
+
 class TestSectionAuthoring:
-    def test_staff_can_create_section(self, api_client, gen_setup):
+    def test_staff_can_create_section(self, api_client, gen_setup, monkeypatch):
+        _feature_on(monkeypatch)
         api_client.force_authenticate(user=gen_setup['grader'])
         resp = api_client.post('/quizGeneratedSections/', {
             'quiz': gen_setup['quiz'].id, 'systemPrompt': 'Ask about {assignment_name}.',
@@ -110,14 +118,36 @@ class TestSectionAuthoring:
         }, format='json')
         assert resp.status_code == status.HTTP_201_CREATED
 
-    def test_student_cannot_create_section(self, api_client, gen_setup):
+    def test_student_cannot_create_section(self, api_client, gen_setup, monkeypatch):
+        _feature_on(monkeypatch)
         api_client.force_authenticate(user=gen_setup['students'][0])
         resp = api_client.post('/quizGeneratedSections/', {
             'quiz': gen_setup['quiz'].id, 'systemPrompt': 'x',
         }, format='json')
         assert resp.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_unknown_variable_rejected(self, api_client, gen_setup):
+    def test_create_blocked_when_feature_disabled(self, api_client, gen_setup):
+        # No AI provider is configured in tests, so the feature resolves to disabled.
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post('/quizGeneratedSections/', {
+            'quiz': gen_setup['quiz'].id, 'systemPrompt': 'x',
+        }, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'not enabled' in str(resp.data)
+
+    def test_editing_section_allowed_when_feature_disabled(self, api_client, gen_setup):
+        # Editing/deleting existing sections stays possible for cleanup after a
+        # course turns the feature off.
+        api_client.force_authenticate(user=gen_setup['admin'])
+        section = gen_setup['section']
+        resp = api_client.patch(f'/quizGeneratedSections/{section.id}/',
+                                {'numQuestions': 5}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        delete = api_client.delete(f'/quizGeneratedSections/{section.id}/')
+        assert delete.status_code == status.HTTP_204_NO_CONTENT
+
+    def test_unknown_variable_rejected(self, api_client, gen_setup, monkeypatch):
+        _feature_on(monkeypatch)
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.post('/quizGeneratedSections/', {
             'quiz': gen_setup['quiz'].id, 'systemPrompt': 'Use {not_a_variable}.',
@@ -125,8 +155,9 @@ class TestSectionAuthoring:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
         assert 'Unknown variable' in str(resp.data)
 
-    def test_unattached_quiz_rejected(self, api_client, gen_setup):
+    def test_unattached_quiz_rejected(self, api_client, gen_setup, monkeypatch):
         from core.models import Quiz
+        _feature_on(monkeypatch)
         standalone = Quiz.objects.create(course=gen_setup['course'], title='Standalone')
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.post('/quizGeneratedSections/', {

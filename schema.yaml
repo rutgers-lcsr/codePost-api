@@ -9647,7 +9647,7 @@ paths:
   /quizzes/{id}/promptVariables/:
     get:
       operationId: quizzes_promptVariablesList
-      description: The {variables} usable in this quiz's personalized-section prompts
+      description: The {variables} usable in this quiz's AI-generated section prompts
         (powers the prompt editor's autocomplete).
       parameters:
       - in: path

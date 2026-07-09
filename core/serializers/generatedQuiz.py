@@ -26,7 +26,16 @@ class QuizGeneratedSectionSerializer(ModelSerializerWithPOSTCheck):
     # Generation is seeded by the student's submission, so the quiz must be attached.
     if quiz is not None and quiz.assignment_id is None:
       raise serializers.ValidationError(
-          "Personalized sections require the quiz to be attached to an assignment.")
+          "AI-generated sections require the quiz to be attached to an assignment.")
+    # Block creating a section when the AI feature is off/unconfigured — otherwise
+    # generation never runs and students sit at 'questions_not_ready' forever.
+    # (Editing/deleting existing sections stays allowed for cleanup.)
+    if self.instance is None and quiz is not None:
+      from core.services.ai_service import AIService
+      if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
+        raise serializers.ValidationError(
+            "AI quiz question generation is not enabled for this course. Enable the "
+            "'AI-Generated Quiz Questions' AI feature in the course's AI settings first.")
     if proposed.get('numQuestions') is not None and proposed['numQuestions'] < 1:
       raise serializers.ValidationError("numQuestions must be at least 1.")
     question_types = proposed.get('questionTypes') or []

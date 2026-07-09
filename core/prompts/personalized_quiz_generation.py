@@ -4,7 +4,7 @@ from core.prompts.registry import register_prompt
 
 @register_prompt(
     'personalized_quiz_generation',
-    label='Personalized Quiz Questions',
+    label='AI-Generated Quiz Questions',
     description="Generate per-student quiz questions from an assignment and the student's own submission",
     allowed_placeholders=frozenset({
         'instructor_prompt', 'assignment_name', 'num_questions', 'question_types', 'language',

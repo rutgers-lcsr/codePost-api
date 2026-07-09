@@ -145,7 +145,7 @@ class QuizViewSet(ListProtectedViewSet):
           'argument': serializers.CharField(allow_null=True), 'label': serializers.CharField(),
           'description': serializers.CharField(), 'kind': serializers.CharField()},
           many=True),
-      description="The {variables} usable in this quiz's personalized-section prompts "
+      description="The {variables} usable in this quiz's AI-generated section prompts "
                   "(powers the prompt editor's autocomplete).",
   )
   @action(detail=True, methods=['GET'])
