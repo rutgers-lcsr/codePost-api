@@ -2025,7 +2025,10 @@ Provide a concise markdown summary following the guidelines in your instructions
             "following the format exactly. CRITICAL: every multiple_choice, multiple_answers, "
             "true_false, short_answer, and numerical question MUST include a non-empty "
             '"choices" array (each item: {"text": ..., "is_correct": ...}). '
-            "Only essay and code questions omit choices."
+            "Only essay and code questions omit choices. "
+            "When a question refers to specific code or test output, put that short excerpt "
+            'in the question\'s "description" (Markdown, fenced code blocks) so the student '
+            "sees what is being referenced."
             + submission_block
         )
         result = await self._generate(system_prompt, user_prompt, label='personalized quiz generation')

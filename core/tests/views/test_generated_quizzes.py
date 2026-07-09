@@ -16,6 +16,7 @@ from rest_framework import status
 
 QUESTIONS_JSON = json.dumps([
     {'type': 'multiple_choice', 'text': 'What does your helper return?', 'points': 2,
+     'description': '```python\ndef helper():\n    return []\n```',
      'choices': [{'text': 'A list', 'is_correct': True}, {'text': 'None', 'is_correct': False}]},
     {'type': 'essay', 'text': 'Explain your loop.', 'points': 5, 'choices': []},
 ])
@@ -238,6 +239,9 @@ class TestGenerationTask:
         assert all(q.points == Decimal('3') for q in questions)
         assert questions[0].questionType == 'multiple_choice'
         assert questions[0].choicesData[0]['isCorrect'] is True
+        # The model's Markdown description (e.g. the referenced code excerpt) is kept.
+        assert questions[0].description.startswith('```python')
+        assert questions[1].description == ''
 
     def test_feature_disabled_skips(self, gen_setup, monkeypatch):
         _mock_ai(monkeypatch)

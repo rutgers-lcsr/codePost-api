@@ -601,6 +601,7 @@ def generate_personalized_quiz_sets(
                 section_rows.append((section, {
                     'questionType': qtype,
                     'text': q.get('text', ''),
+                    'description': q.get('description', '') or '',
                     'choicesData': choices,
                     'language': language,
                     'starterCode': q.get('starter_code'),
