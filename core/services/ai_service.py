@@ -2026,9 +2026,9 @@ Provide a concise markdown summary following the guidelines in your instructions
             "true_false, short_answer, and numerical question MUST include a non-empty "
             '"choices" array (each item: {"text": ..., "is_correct": ...}). '
             "Only essay and code questions omit choices. "
-            "When a question refers to specific code or test output, put that short excerpt "
-            'in the question\'s "description" (Markdown, fenced code blocks) so the student '
-            "sees what is being referenced."
+            'Use the optional "description" (Markdown, fenced code blocks) for any context '
+            "that helps the student answer — their code, test output, examples — at your "
+            "discretion; if the stem refers to something specific, show it there."
             + submission_block
         )
         result = await self._generate(system_prompt, user_prompt, label='personalized quiz generation')
