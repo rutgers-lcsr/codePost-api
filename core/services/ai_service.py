@@ -1976,6 +1976,9 @@ Provide a concise markdown summary following the guidelines in your instructions
         The instructor's section prompt is resolved first ({variables} substituted per
         student — see core/prompts/variables.py), then embedded in the platform-level
         'personalized_quiz_generation' prompt, which owns the JSON output contract.
+        The model sees ONLY what the prompt's variables reference — nothing is attached
+        implicitly (instructors opt in via {submission_files}, {submission_test_results},
+        etc.; the section editor's default template references them).
         Returns a ``GenerationResult`` whose ``text`` is a JSON array of question objects.
         """
         from asgiref.sync import sync_to_async
@@ -1985,25 +1988,14 @@ Provide a concise markdown summary following the guidelines in your instructions
             assignment = submission.assignment
             ctx = VariableContext(course=self.course, assignment=assignment,
                                   submission=submission, section=section)
-            instructor_text, used = substitute_variables(section.systemPrompt, ctx)
+            instructor_text, _ = substitute_variables(section.systemPrompt, ctx)
             try:
                 language = assignment.environment.language or ''
             except Exception:
                 language = ''
-            submission_block = ''
-            if not any(name.startswith('submission_') for name in used):
-                # The instructor's prompt never references the submission — append the
-                # standard submission context so questions can still be personalized
-                # (skipped otherwise to avoid duplicating content against the budget).
-                context = self._collect_submission_context(submission)
-                parts = [f"### {f['name']}\n```\n{f['content']}\n```" for f in context['files']]
-                if context['test_results']:
-                    parts.append(context['test_results'])
-                submission_block = "\n\n--- Student submission ---\n" + "\n\n".join(parts)
-            return instructor_text, assignment.name, language, submission_block
+            return instructor_text, assignment.name, language
 
-        instructor_text, assignment_name, language, submission_block = \
-            await sync_to_async(_collect_context)()
+        instructor_text, assignment_name, language = await sync_to_async(_collect_context)()
 
         question_types = section.questionTypes or [
             'multiple_choice', 'true_false', 'short_answer', 'essay', 'code']
@@ -2029,7 +2021,6 @@ Provide a concise markdown summary following the guidelines in your instructions
             'Use the optional "description" (Markdown, fenced code blocks) for any context '
             "that helps the student answer — their code, test output, examples — at your "
             "discretion; if the stem refers to something specific, show it there."
-            + submission_block
         )
         result = await self._generate(system_prompt, user_prompt, label='personalized quiz generation')
         if result.success:

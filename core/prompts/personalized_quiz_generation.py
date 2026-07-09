@@ -17,8 +17,10 @@ the student sees them.
 
 Guidelines:
 - Generate exactly {num_questions} questions.
-- Base the questions on the student's OWN code and work: reference their actual identifiers,
-  structure, and decisions so the questions verify the student understands what they submitted.
+- Work ONLY from the material the instructor's instructions include below. When they include
+  the student's own code or test results, base the questions on that student's actual
+  identifiers, structure, and decisions so the questions verify they understand what they
+  submitted; otherwise stick to the assignment material provided.
 - Write clear, unambiguous questions. Prefer understanding and application over trivia.
 - Never mention how the questions were produced, and never address the student directly about
   their grade or feedback.
