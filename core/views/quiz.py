@@ -9,11 +9,13 @@ from django.utils import timezone
 
 from core.models import Quiz
 from core.serializers.quiz import QuizSerializer, QuizQuestionSerializer
-from core.serializers.generatedQuiz import GeneratedQuestionSetListSerializer
+from core.serializers.generatedQuiz import (
+    GeneratedQuestionSetListSerializer, GeneratedQuestionSetSerializer,
+)
 from core.serializers.studentQuiz import StaffQuizAttemptSerializer
 from core.services.audit import record_audit_event
 from core.views.template import ListProtectedViewSet
-from core.permissions.helpers import isCourseAdmin, isCourseStaff
+from core.permissions.helpers import isCourseAdmin, isCourseStaff, isStudent
 from core.permissions.permissions import (
     QuizPermissions, canGradeQuiz, canReviewGeneratedQuestions,
 )
@@ -138,6 +140,73 @@ class QuizViewSet(ListProtectedViewSet):
                        user=request.user, quiz=quiz, assignment=quiz.assignment,
                        meta={'title': quiz.title, 'approved': approved, 'skipped': skipped})
     return Response({'approved': approved, 'skipped': skipped}, status=status.HTTP_200_OK)
+
+  @extend_schema(
+      request=inline_serializer('GenerateForStudentRequest', {
+          'student': serializers.EmailField(),
+          'force': serializers.BooleanField(required=False, default=False),
+      }),
+      responses=GeneratedQuestionSetSerializer,
+      description="Generate (or regenerate) this quiz's AI questions for one student from "
+                  "their latest submission — useful for testing a prompt or backfilling after "
+                  "enabling the feature. An approved set is only regenerated with force=true "
+                  "(it becomes un-published until re-approved).",
+  )
+  @action(detail=True, methods=['POST'])
+  def generateForStudent(self, request, pk=None):
+    from core.models import GeneratedQuestionSet, User
+    from core.services.ai_service import AIService
+
+    quiz = self.get_object()
+    if not canReviewGeneratedQuestions(request.user, quiz):
+      return Response({'detail': 'You do not have permission to review generated questions '
+                                 'on this quiz.'}, status=status.HTTP_403_FORBIDDEN)
+    if not quiz.generatedSections.exists():
+      return Response({'error': 'This quiz has no AI-generated sections.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if quiz.assignment_id is None:
+      return Response({'error': 'This quiz is not attached to an assignment.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
+      return Response({'error': "AI quiz question generation is not enabled for this course. "
+                                "Enable the 'AI-Generated Quiz Questions' AI feature in the "
+                                "course's AI settings first."},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    student = User.objects.filter(email=request.data.get('student')).first()
+    if student is None or not isStudent(student, quiz.course):
+      return Response({'error': 'No student with that email is enrolled in this course.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    submissions = student.student_submissions.filter(assignment=quiz.assignment)
+    submission = (submissions.exclude(dateUploaded=None).order_by('-dateUploaded').first()
+                  or submissions.order_by('-id').first())
+    if submission is None:
+      return Response({'error': 'The student has no submission for this assignment to '
+                                'generate from.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    force = bool(request.data.get('force'))
+    gen_set, _ = GeneratedQuestionSet.objects.get_or_create(quiz=quiz, student=student)
+    if gen_set.status == 'generating':
+      return Response({'error': "The student's set is already generating."},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if gen_set.status == 'approved' and not force:
+      return Response({'error': "The student's set is already approved. Pass force=true to "
+                                'regenerate it (this un-publishes the quiz for them until '
+                                're-approval).'}, status=status.HTTP_400_BAD_REQUEST)
+    gen_set.status = 'pending'
+    gen_set.approvedBy = None
+    gen_set.approvedAt = None
+    gen_set.save(update_fields=['status', 'approvedBy', 'approvedAt', 'modified'])
+    from core.tasks import generate_personalized_quiz_sets
+    generate_personalized_quiz_sets.delay(
+        submission.id, quiz_id=quiz.id, force=True,
+        requested_by_id=request.user.id, student_id=student.id)
+    record_audit_event(course=quiz.course, event_type='quiz_generated_set_regenerated',
+                       user=request.user, quiz=quiz, assignment=quiz.assignment,
+                       meta={'studentEmail': student.email, 'setId': gen_set.id,
+                             'trigger': 'generateForStudent'})
+    return Response(GeneratedQuestionSetSerializer(gen_set, context={'request': request}).data,
+                    status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(
       responses=inline_serializer('PromptVariable', {

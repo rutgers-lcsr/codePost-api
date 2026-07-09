@@ -476,15 +476,18 @@ def generate_personalized_quiz_sets(
     quiz_id: int | None = None,
     force: bool = False,
     requested_by_id: int | None = None,
+    student_id: int | None = None,
 ):
     """Generate per-student quiz questions for the generated sections of the quizzes
     attached to this submission's assignment.
 
     Triggered on submission upload (signals.auto_generate_personalized_quiz) and by the
-    staff "regenerate" action (``quiz_id`` + ``force=True``). One AI call per section;
-    a group submission gets one generation copied into one set per member. A student's
-    set is skipped once approved unless ``force`` (regenerate-unless-published). Each
-    run claims its sets with a ``generationBatch`` UUID — a task whose batch has been
+    staff "regenerate" / "generate for student" actions (``quiz_id`` + ``force=True``).
+    One AI call per section; a group submission gets one generation copied into one set
+    per member — unless ``student_id`` scopes the run to a single member (the staff
+    actions target one student and must not touch a group-mate's set). A student's set
+    is skipped once approved unless ``force`` (regenerate-unless-published). Each run
+    claims its sets with a ``generationBatch`` UUID — a task whose batch has been
     superseded by a newer run (resubmission while generating) discards its results.
     """
     import uuid
@@ -503,6 +506,8 @@ def generate_personalized_quiz_sets(
     if course.archived:
         return
     students = list(submission.students.all())
+    if student_id is not None:
+        students = [s for s in students if s.id == student_id]
     if not students:
         return
 

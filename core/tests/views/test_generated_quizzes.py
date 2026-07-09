@@ -316,6 +316,89 @@ class TestGenerationTask:
         assert all(s.questions.count() == 2 for s in sets)
 
 
+class TestGenerateForStudent:
+    """POST /quizzes/{id}/generateForStudent/ — staff-triggered generation for one
+    student (testing a prompt / backfilling), scoped so group-mates are untouched."""
+
+    def _eager_task(self, monkeypatch):
+        from core.tasks import generate_personalized_quiz_sets
+        monkeypatch.setattr('core.tasks.generate_personalized_quiz_sets.delay',
+                            lambda *a, **kw: generate_personalized_quiz_sets(*a, **kw))
+
+    def _post(self, api_client, gen_setup, email, force=False):
+        return api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateForStudent/",
+                               {'student': email, 'force': force}, format='json')
+
+    def test_generates_for_one_student(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        self._eager_task(monkeypatch)
+        # Group submission: generating for students[0] must not touch students[1].
+        gen_setup['submission'].students.add(gen_setup['students'][1])
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'ready'
+        assert gen_set.questions.count() == 2
+        assert not gen_setup['quiz'].generatedSets.filter(
+            student=gen_setup['students'][1]).exists()
+
+    def test_approved_needs_force(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        self._eager_task(monkeypatch)
+        _make_set(gen_setup['quiz'], gen_setup['students'][0],
+                  submission=gen_setup['submission'], status='approved')
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'force' in str(resp.data)
+        resp = self._post(api_client, gen_setup, gen_setup['students'][0].email, force=True)
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'ready'
+        assert gen_set.approvedAt is None
+
+    def test_requires_submission(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        # students[1] never submitted.
+        resp = self._post(api_client, gen_setup, gen_setup['students'][1].email)
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'no submission' in str(resp.data)
+
+    def test_unknown_or_unenrolled_email_rejected(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup, 'nobody@example.com')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        resp = self._post(api_client, gen_setup, gen_setup['grader'].email)
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_feature_disabled_rejected(self, api_client, gen_setup):
+        # No AI provider configured in tests → feature resolves to disabled.
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'not enabled' in str(resp.data)
+
+    def test_grader_gate_follows_quiz_flag(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        self._eager_task(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['grader'])
+        resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        gen_setup['quiz'].gradersCanReviewGenerated = True
+        gen_setup['quiz'].save()
+        resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+
+    def test_student_forbidden(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['students'][0])
+        resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
 # --------------------------------------------------------------------------- #
 # Review / approve / publish API + permission gate
 # --------------------------------------------------------------------------- #

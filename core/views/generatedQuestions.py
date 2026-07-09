@@ -111,7 +111,7 @@ class GeneratedQuestionSetViewSet(mixins.RetrieveModelMixin, viewsets.GenericVie
     from core.tasks import generate_personalized_quiz_sets
     generate_personalized_quiz_sets.delay(
         gen_set.submission_id, quiz_id=gen_set.quiz_id, force=True,
-        requested_by_id=request.user.id)
+        requested_by_id=request.user.id, student_id=gen_set.student_id)
     record_audit_event(course=gen_set.quiz.course, event_type='quiz_generated_set_regenerated',
                        user=request.user, quiz=gen_set.quiz, assignment=gen_set.quiz.assignment,
                        meta={'studentEmail': gen_set.student.email, 'setId': gen_set.id})

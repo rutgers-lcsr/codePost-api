@@ -9615,6 +9615,46 @@ paths:
                 items:
                   $ref: '#/components/schemas/StaffQuizAttempt'
           description: ''
+  /quizzes/{id}/generateForStudent/:
+    post:
+      operationId: quizzes_generateForStudentCreate
+      description: Generate (or regenerate) this quiz's AI questions for one student
+        from their latest submission — useful for testing a prompt or backfilling
+        after enabling the feature. An approved set is only regenerated with force=true
+        (it becomes un-published until re-approved).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateForStudentRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GenerateForStudentRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GenerateForStudentRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedQuestionSet'
+          description: ''
   /quizzes/{id}/generatedSets/:
     get:
       operationId: quizzes_generatedSetsList
@@ -17807,6 +17847,17 @@ components:
           description: ID of the submission file to generate suggestions for.
       required:
       - fileId
+    GenerateForStudentRequest:
+      type: object
+      properties:
+        student:
+          type: string
+          format: email
+        force:
+          type: boolean
+          default: false
+      required:
+      - student
     GenerateOTTRequest:
       type: object
       properties:
