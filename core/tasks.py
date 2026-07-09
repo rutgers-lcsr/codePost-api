@@ -510,6 +510,12 @@ def generate_personalized_quiz_sets(
         students = [s for s in students if s.id == student_id]
     if not students:
         return
+    # Code questions need a language for syntax highlighting; the model's output has no
+    # language field, so default from the assignment's environment.
+    try:
+        env_language = assignment.environment.language or ''
+    except Exception:
+        env_language = ''
 
     quiz_qs = assignment.quizzes.filter(generatedSections__isnull=False).distinct()
     if quiz_id is not None:
@@ -589,11 +595,14 @@ def generate_personalized_quiz_sets(
                         f"[PersonalQuizGen] Skipping a '{qtype}' question with no choices "
                         f"(quiz {quiz.id}). Raw output (truncated): {(result.text or '')[:1500]}")
                     continue
+                language = q.get('language')
+                if qtype == 'code' and not language:
+                    language = env_language or None
                 section_rows.append((section, {
                     'questionType': qtype,
                     'text': q.get('text', ''),
                     'choicesData': choices,
-                    'language': q.get('language'),
+                    'language': language,
                     'starterCode': q.get('starter_code'),
                 }))
             if not section_rows:

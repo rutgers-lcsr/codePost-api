@@ -306,6 +306,20 @@ class TestGenerationTask:
         assert gen_set.status == 'generating'
         assert gen_set.questions.count() == 0
 
+    def test_code_question_defaults_environment_language(self, gen_setup, monkeypatch):
+        from core.models import Environment
+        Environment.objects.create(assignment=gen_setup['assignment'], language='python-3')
+        _mock_ai(monkeypatch, json_text=json.dumps([
+            {'type': 'code', 'text': 'Refactor your helper.', 'points': 3,
+             'starter_code': 'def helper():\n    pass', 'choices': []},
+        ]))
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        question = gen_set.questions.get()
+        assert question.questionType == 'code'
+        assert question.language == 'python-3'
+        assert question.starterCode == 'def helper():\n    pass'
+
     def test_group_submission_gets_one_set_per_member(self, gen_setup, monkeypatch):
         gen_setup['submission'].students.add(gen_setup['students'][1])
         _mock_ai(monkeypatch)
