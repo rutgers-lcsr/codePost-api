@@ -649,6 +649,71 @@ def generate_personalized_quiz_sets(
             f"{len(question_rows)} questions for {len(claimed_ids)} student(s) (batch {batch})")
 
 
+def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
+                                  missing_only: bool = False) -> int:
+    """Enqueue per-student question generation for everyone who already submitted to the
+    quiz's attached assignment. Returns the number of students queued.
+
+    Covers sections created AFTER students started submitting — without this, early
+    submitters have no GeneratedQuestionSet and sit on "being prepared" forever. With
+    ``missing_only`` the run is restricted to students without a set (the review drawer's
+    "Generate missing"); otherwise non-approved sets regenerate too, since a new section
+    changes what every set should contain. Approved sets are never touched either way
+    (the task's regenerate-unless-approved rule).
+
+    Cheap to call inline (DB reads + .delay()s); the actual generation runs in the
+    per-submission tasks. Group submissions are enqueued once (one shared AI call per
+    section) unless only some members need generating.
+    """
+    from django.db.models import F
+    from core.models import GeneratedQuestionSet
+
+    assignment = quiz.assignment
+    if assignment is None or not quiz.generatedSections.exists():
+        return 0
+    skip_ids = (set(GeneratedQuestionSet.objects.filter(quiz=quiz)
+                    .values_list('student_id', flat=True))
+                if missing_only else set())
+
+    # Newest submission wins per student (mirrors generateForStudent's selection).
+    covered = set(skip_ids)
+    queued = 0
+    submissions = assignment.submissions.prefetch_related('students').order_by(
+        F('dateUploaded').desc(nulls_last=True), '-id')
+    for submission in submissions:
+        members = list(submission.students.all())
+        targets = [s for s in members if s.id not in covered]
+        if not targets:
+            continue
+        covered.update(s.id for s in targets)
+        if len(targets) == len(members):
+            generate_personalized_quiz_sets.delay(
+                submission.id, quiz_id=quiz.id, requested_by_id=requested_by_id)
+        else:
+            # Partial group (e.g. a partner already has a set): scope per student so the
+            # covered member's set isn't touched.
+            for s in targets:
+                generate_personalized_quiz_sets.delay(
+                    submission.id, quiz_id=quiz.id, requested_by_id=requested_by_id,
+                    student_id=s.id)
+        queued += len(targets)
+    return queued
+
+
+@shared_task
+def backfill_personalized_quiz_sets(quiz_id: int, requested_by_id: int | None = None):
+    """Async wrapper around enqueue_personalized_backfill for signal-triggered backfills
+    (a QuizGeneratedSection created after students already submitted)."""
+    from core.models import Quiz
+
+    quiz = Quiz.objects.filter(id=quiz_id).select_related('assignment').first()
+    if quiz is None:
+        return
+    queued = enqueue_personalized_backfill(quiz, requested_by_id=requested_by_id)
+    if queued:
+        logger.info(f"[PersonalQuizGen] Backfill for quiz {quiz_id}: queued {queued} student(s).")
+
+
 @shared_task
 def import_quiz_qti(job_id: int, import_quizzes: bool = False):
     """Parse an uploaded Canvas QTI export and import its questions into a bank.

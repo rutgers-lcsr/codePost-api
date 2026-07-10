@@ -643,3 +643,86 @@ class TestStudentTaking:
         again = api_client.get(f"/quizAttempts/{resp.data['id']}/")
         texts = {r['question']['text'] for r in again.data['responses']}
         assert 'Changed after start' not in texts
+
+
+# --------------------------------------------------------------------------- #
+# Backfill: sections created after students already submitted
+# --------------------------------------------------------------------------- #
+
+class TestBackfill:
+    def _eager_tasks(self, monkeypatch):
+        """No broker in tests — run the queued tasks inline (same pattern as
+        TestGenerateForStudent)."""
+        from core.tasks import backfill_personalized_quiz_sets, generate_personalized_quiz_sets
+        monkeypatch.setattr('core.tasks.generate_personalized_quiz_sets.delay',
+                            lambda *a, **kw: generate_personalized_quiz_sets(*a, **kw))
+        monkeypatch.setattr('core.tasks.backfill_personalized_quiz_sets.delay',
+                            lambda *a, **kw: backfill_personalized_quiz_sets(*a, **kw))
+
+    def test_section_created_after_submissions_backfills(self, api_client, gen_setup, monkeypatch):
+        """A section added late (students already submitted) generates sets for those
+        students immediately — they must not sit on 'being prepared' forever."""
+        from core.models import GeneratedQuestionSet, Quiz
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        late_quiz = Quiz.objects.create(course=gen_setup['course'], title='Late quiz',
+                                        assignment=gen_setup['assignment'])
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post('/quizGeneratedSections/', {
+            'quiz': late_quiz.id, 'systemPrompt': 'Ask about {submission_files}.',
+            'numQuestions': 2, 'pointsPerQuestion': '3.00',
+        }, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
+        # Celery runs eagerly in tests: the backfill already generated for the fixture's submitter.
+        gen_set = GeneratedQuestionSet.objects.get(quiz=late_quiz, student=gen_setup['students'][0])
+        assert gen_set.status == 'ready'
+        assert gen_set.questions.count() > 0
+        # Students without a submission get nothing.
+        assert not GeneratedQuestionSet.objects.filter(
+            quiz=late_quiz, student=gen_setup['students'][1]).exists()
+
+    def test_generate_missing_targets_only_students_without_sets(self, api_client, gen_setup, monkeypatch):
+        from core.models import GeneratedQuestionSet
+        from core.tests.factories import SubmissionFactory
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        # A second submitter, added with signals muted (i.e. generation never ran for them).
+        with factory.django.mute_signals(post_save):
+            sub2 = SubmissionFactory(assignment=gen_setup['assignment'])
+            sub2.students.add(gen_setup['students'][1])
+            sub2.dateUploaded = timezone.now()
+            sub2.save()
+        # The first submitter already has an APPROVED set — it must stay untouched.
+        existing = _make_set(gen_setup['quiz'], gen_setup['students'][0],
+                             submission=gen_setup['submission'], status='approved')
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {}, format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert resp.data['queued'] == 1
+
+        missing = GeneratedQuestionSet.objects.get(quiz=gen_setup['quiz'],
+                                                   student=gen_setup['students'][1])
+        assert missing.status == 'ready'
+        existing.refresh_from_db()
+        assert existing.status == 'approved'  # not regenerated
+
+        # Everyone covered now: a second run queues nothing.
+        again = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {}, format='json')
+        assert again.status_code == status.HTTP_202_ACCEPTED
+        assert again.data['queued'] == 0
+
+    def test_generate_missing_permissions_and_feature_gate(self, api_client, gen_setup, monkeypatch):
+        # Plain graders (without the review flag) and students are blocked.
+        api_client.force_authenticate(user=gen_setup['grader'])
+        assert api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {},
+                               format='json').status_code == status.HTTP_403_FORBIDDEN
+        api_client.force_authenticate(user=gen_setup['students'][0])
+        assert api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {},
+                               format='json').status_code == status.HTTP_403_FORBIDDEN
+        # Admins get a clear 400 while the AI feature is off (no provider in tests).
+        api_client.force_authenticate(user=gen_setup['admin'])
+        off = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {}, format='json')
+        assert off.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'not enabled' in str(off.data)

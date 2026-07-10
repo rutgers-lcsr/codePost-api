@@ -248,6 +248,42 @@ class QuizViewSet(ListProtectedViewSet):
                     status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(
+      request=None,
+      responses=inline_serializer('GenerateMissingResponse', {'queued': serializers.IntegerField()}),
+  )
+  @action(detail=True, methods=['POST'])
+  def generateMissing(self, request, pk=None):
+    """Queue question generation for every student who has a submission on the attached
+    assignment but no question set yet — e.g. they submitted before the AI section
+    existed, or the feature was off / generation failed at the time."""
+    from core.services.ai_service import AIService
+
+    quiz = self.get_object()
+    if not canReviewGeneratedQuestions(request.user, quiz):
+      return Response({'detail': 'You do not have permission to review generated questions '
+                                 'on this quiz.'}, status=status.HTTP_403_FORBIDDEN)
+    if not quiz.generatedSections.exists():
+      return Response({'error': 'This quiz has no AI-generated sections.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if quiz.assignment_id is None:
+      return Response({'error': 'This quiz is not attached to an assignment.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
+      return Response({'error': "AI quiz question generation is not enabled for this course. "
+                                "Enable the 'AI-Generated Quiz Questions' AI feature in the "
+                                "course's AI settings first."},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    from core.tasks import enqueue_personalized_backfill
+    queued = enqueue_personalized_backfill(quiz, requested_by_id=request.user.id,
+                                           missing_only=True)
+    if queued:
+      record_audit_event(course=quiz.course, event_type='quiz_generated_set_regenerated',
+                         user=request.user, quiz=quiz, assignment=quiz.assignment,
+                         meta={'trigger': 'generateMissing', 'queued': queued})
+    return Response({'queued': queued}, status=status.HTTP_202_ACCEPTED)
+
+  @extend_schema(
       responses=inline_serializer('PromptVariable', {
           'token': serializers.CharField(), 'name': serializers.CharField(),
           'argument': serializers.CharField(allow_null=True), 'label': serializers.CharField(),

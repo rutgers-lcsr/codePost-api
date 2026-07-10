@@ -9760,6 +9760,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/GeneratedQuestionSet'
           description: ''
+  /quizzes/{id}/generateMissing/:
+    post:
+      operationId: quizzes_generateMissingCreate
+      description: |-
+        Queue question generation for every student who has a submission on the attached
+        assignment but no question set yet — e.g. they submitted before the AI section
+        existed, or the feature was off / generation failed at the time.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateMissingResponse'
+          description: ''
   /quizzes/{id}/generatedSets/:
     get:
       operationId: quizzes_generatedSetsList
@@ -18005,6 +18033,13 @@ components:
           default: false
       required:
       - student
+    GenerateMissingResponse:
+      type: object
+      properties:
+        queued:
+          type: integer
+      required:
+      - queued
     GenerateOTTRequest:
       type: object
       properties:

@@ -9,7 +9,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
 
-from core.models import Submission
+from core.models import QuizGeneratedSection, Submission
 import time
 
 logger = logging.getLogger(__name__)
@@ -136,6 +136,29 @@ def auto_generate_personalized_quiz(sender, instance, created, **kwargs):
             f"Failed to queue personalized quiz generation for submission {instance.id}: {e}",
             exc_info=True
         )
+
+
+@receiver(post_save, sender=QuizGeneratedSection)
+def backfill_generated_sets_on_section_created(sender, instance, created, **kwargs):
+    """Backfill question generation when an AI section is created AFTER students already
+    submitted — the submission signal above only covers submissions made while a section
+    exists, so without this, earlier submitters would sit on "being prepared" forever.
+    Also refreshes existing non-approved sets, which the new section makes incomplete."""
+    if not created:
+        return
+    if instance.quiz.assignment_id is None:
+        return
+    try:
+        from core.tasks import backfill_personalized_quiz_sets
+        backfill_personalized_quiz_sets.delay(instance.quiz_id)
+        logger.info(f"Queued personalized quiz backfill for quiz {instance.quiz_id} "
+                    f"(section {instance.id} created)")
+    except Exception as e:
+        logger.error(
+            f"Failed to queue personalized quiz backfill for quiz {instance.quiz_id}: {e}",
+            exc_info=True
+        )
+
 
 from core.models import AssignmentFile
 from django.db.models.signals import post_delete
