@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
 from core.forms.forms import IDForm
-from core.models import Course, RubricCategory
+from core.models import Course, QuizAccommodation, RubricCategory
 from core.models import User
 from core.serializers.course import (
     CourseSerializer,
@@ -56,6 +56,12 @@ from core.utils import get_or_create_user
 # Can override get_serializer method to use different serializer for
 # different user types
 from core.emails import UserAddedToCourseEmail
+
+class QuizAccommodationRowSerializer(serializers.Serializer):
+    """One per-student quiz extra-time accommodation (course-level multiplier)."""
+    student = serializers.EmailField()
+    timeMultiplier = serializers.DecimalField(max_digits=4, decimal_places=2)
+
 
 def generate_invite_code():
     import secrets
@@ -878,6 +884,50 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnForbidden()
         quizzes = course.quizzes.all()
         return Response(QuizSerializer(quizzes, many=True, context={"request": request}).data)
+
+    @extend_schema(responses=QuizAccommodationRowSerializer(many=True))
+    @action(detail=True, methods=["GET"])
+    def quizAccommodations(self, request, pk=None):
+        """List per-student quiz extra-time accommodations (course admins only)."""
+        course = self.get_object()
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+        rows = course.quizAccommodations.select_related('student').order_by('student__email')
+        return Response(QuizAccommodationRowSerializer(
+            [{'student': a.student.email, 'timeMultiplier': a.timeMultiplier} for a in rows],
+            many=True).data)
+
+    @extend_schema(
+        request=QuizAccommodationRowSerializer,
+        responses=QuizAccommodationRowSerializer,
+    )
+    @action(detail=True, methods=["PATCH"])
+    def setQuizAccommodation(self, request, pk=None):
+        """Set a student's quiz time multiplier (course admins only). A multiplier of 1
+        removes the accommodation."""
+        course = self.get_object()
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+        if course.archived:
+            return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+        ser = QuizAccommodationRowSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+        multiplier = ser.validated_data['timeMultiplier']
+        if multiplier < 1:
+            return Response({'detail': 'timeMultiplier must be at least 1.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        student = course.students.filter(email=ser.validated_data['student']).first()
+        if student is None:
+            return Response({'detail': 'No such student in this course.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if multiplier == 1:
+            QuizAccommodation.objects.filter(course=course, student=student).delete()
+        else:
+            QuizAccommodation.objects.update_or_create(
+                course=course, student=student, defaults={'timeMultiplier': multiplier})
+        return Response(QuizAccommodationRowSerializer(
+            {'student': student.email, 'timeMultiplier': multiplier}).data)
 
     @extend_schema(responses=QuestionSerializer(many=True))
     @action(detail=True, methods=["GET"])

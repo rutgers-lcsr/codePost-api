@@ -34,6 +34,8 @@ def _question_snapshot(question):
       'starterCode': question.starterCode,
       'language': question.language,
       'generalFeedback': question.generalFeedback,
+      'partialCredit': question.partialCredit,
+      'numericTolerance': str(question.numericTolerance) if question.numericTolerance is not None else None,
       'choices': [
           {'id': c.id, 'text': c.text, 'isCorrect': c.isCorrect,
            'feedback': c.feedback, 'sortKey': c.sortKey}
@@ -54,6 +56,9 @@ def _generated_question_snapshot(gq):
       'starterCode': gq.starterCode,
       'language': gq.language,
       'generalFeedback': '',
+      # The generation contract doesn't produce grading settings — defaults apply.
+      'partialCredit': False,
+      'numericTolerance': None,
       'choices': [
           {'id': i + 1, 'text': c.get('text', ''), 'isCorrect': bool(c.get('isCorrect')),
            'feedback': c.get('feedback', ''), 'sortKey': i}
@@ -151,6 +156,24 @@ def grade_response(response):
   correct_choices = [c for c in snap.get('choices', []) if c.get('isCorrect')]
   is_correct = False
 
+  if qtype == 'multiple_answers' and snap.get('partialCredit'):
+    # Right-minus-wrong partial credit: (correct − incorrect selections) / total correct,
+    # floored at 0. isCorrect is True on full credit, False on none, None in between.
+    selected_ids = set(response.selectedChoiceKeys or [])
+    correct_ids = {c['id'] for c in correct_choices}
+    if correct_ids:
+      n_right = len(selected_ids & correct_ids)
+      n_wrong = len(selected_ids - correct_ids)
+      fraction = max(Decimal('0'), (Decimal(n_right) - Decimal(n_wrong)) / Decimal(len(correct_ids)))
+      earned = (fraction * (response.points or Decimal('0'))).quantize(Decimal('0.01'))
+    else:
+      earned = Decimal('0')
+    response.needsManualGrading = False
+    response.pointsEarned = earned
+    full = response.points or Decimal('0')
+    response.isCorrect = True if earned == full and full > 0 else (False if earned == 0 else None)
+    return
+
   if qtype in ('multiple_choice', 'true_false', 'multiple_answers'):
     selected_ids = set(response.selectedChoiceKeys or [])
     correct_ids = {c['id'] for c in correct_choices}
@@ -161,7 +184,9 @@ def grade_response(response):
   elif qtype == 'numerical':
     student_val = _parse_decimal(response.answerText)
     accepted = [_parse_decimal(c['text']) for c in correct_choices]
-    is_correct = student_val is not None and any(a is not None and a == student_val for a in accepted)
+    tolerance = _parse_decimal(snap.get('numericTolerance')) or Decimal('0')
+    is_correct = student_val is not None and any(
+        a is not None and abs(a - student_val) <= tolerance for a in accepted)
 
   response.needsManualGrading = False
   response.isCorrect = is_correct

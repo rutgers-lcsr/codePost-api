@@ -15,7 +15,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.models import Course, Quiz, QuizAttempt
+from core.models import Course, Quiz, QuizAccommodation, QuizAttempt
 from core.permissions.helpers import isCourseMember, isCourseStaff, isStudent
 from core.permissions.permissions import QuizAttemptPermissions
 from core.serializers.studentQuiz import (
@@ -131,7 +131,14 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       return Response({'detail': 'This quiz has no questions yet.'}, status=status.HTTP_400_BAD_REQUEST)
 
     started = timezone.now()
-    deadline = started + timedelta(minutes=quiz.timeLimitMinutes) if quiz.timeLimitMinutes else None
+    deadline = None
+    if quiz.timeLimitMinutes:
+      minutes = float(quiz.timeLimitMinutes)
+      # Course-level per-student extra-time accommodation scales every timed quiz.
+      accommodation = QuizAccommodation.objects.filter(course=quiz.course, student=user).first()
+      if accommodation is not None:
+        minutes *= float(accommodation.timeMultiplier)
+      deadline = started + timedelta(minutes=minutes)
     if quiz.endAttemptsAtClose:
       close = quiz_grading.quiz_close_time(quiz, user, started)
       if close is not None:
@@ -222,6 +229,8 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     """Manually grade one essay/code response (quiz graders and course admins only —
     gated by QuizAttemptPermissions). Recomputes the attempt's score and pass state."""
     attempt = self.get_object()
+    if attempt.quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
     if attempt.status != 'submitted':
       return Response({'detail': 'Only submitted attempts can be graded.'},
                       status=status.HTTP_400_BAD_REQUEST)
@@ -252,6 +261,8 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     """Send a manually graded essay/code response back to the grading queue (undo the
     grade). The feedback text is kept as a draft; the attempt's totals are refreshed."""
     attempt = self.get_object()
+    if attempt.quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
     if attempt.status != 'submitted':
       return Response({'detail': 'Only submitted attempts can be graded.'},
                       status=status.HTTP_400_BAD_REQUEST)

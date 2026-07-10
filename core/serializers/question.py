@@ -25,6 +25,7 @@ class QuestionSerializer(ModelSerializerWithPOSTCheck):
     model = Question
     fields = (
         'id', 'course', 'bank', 'questionType', 'text', 'description', 'points', 'generalFeedback',
+        'partialCredit', 'numericTolerance',
         'language', 'starterCode', 'referenceSolution', 'source', 'createdBy',
         'choices', 'metadata',
     )

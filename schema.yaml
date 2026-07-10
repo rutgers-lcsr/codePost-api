@@ -4364,6 +4364,34 @@ paths:
                 items:
                   $ref: '#/components/schemas/Question'
           description: ''
+  /courses/{id}/quizAccommodations/:
+    get:
+      operationId: courses_quizAccommodationsList
+      description: List per-student quiz extra-time accommodations (course admins
+        only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizAccommodationRow'
+          description: ''
   /courses/{id}/quizzes/:
     get:
       operationId: courses_quizzesList
@@ -4636,6 +4664,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedSectionList'
+          description: ''
+  /courses/{id}/setQuizAccommodation/:
+    patch:
+      operationId: courses_setQuizAccommodationPartialUpdate
+      description: |-
+        Set a student's quiz time multiplier (course admins only). A multiplier of 1
+        removes the accommodation.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizAccommodationRow'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizAccommodationRow'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedQuizAccommodationRow'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizAccommodationRow'
           description: ''
   /courses/{id}/studentCaptions/:
     get:
@@ -20036,6 +20102,21 @@ components:
         generalFeedback:
           type: string
           description: Feedback shown regardless of answer.
+        partialCredit:
+          type: boolean
+          description: 'For multiple_answers questions: score right-minus-wrong partial
+            credit ((correct − incorrect selections) / total correct × points, floored
+            at 0) instead of all-or-nothing.'
+        numericTolerance:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: 'For numerical questions: accept answers within ± this of an
+            accepted value. Null/0 requires an exact match.'
         language:
           type: string
           nullable: true
@@ -20293,6 +20374,20 @@ components:
           type: string
           readOnly: true
           description: Staff-internal metadata (Canvas IDs, etc.).
+    PatchedQuizAccommodationRow:
+      type: object
+      description: One per-student quiz extra-time accommodation (course-level multiplier).
+      properties:
+        student:
+          type: string
+          format: email
+        timeMultiplier:
+          type: number
+          format: double
+          maximum: 100
+          minimum: -100
+          exclusiveMaximum: true
+          exclusiveMinimum: true
     PatchedQuizGeneratedSection:
       type: object
       description: |-
@@ -21588,6 +21683,21 @@ components:
         generalFeedback:
           type: string
           description: Feedback shown regardless of answer.
+        partialCredit:
+          type: boolean
+          description: 'For multiple_answers questions: score right-minus-wrong partial
+            credit ((correct − incorrect selections) / total correct × points, floored
+            at 0) instead of all-or-nothing.'
+        numericTolerance:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: 'For numerical questions: accept answers within ± this of an
+            accepted value. Null/0 requires an exact match.'
         language:
           type: string
           nullable: true
@@ -21910,6 +22020,23 @@ components:
       - quizQuestions
       - source
       - title
+    QuizAccommodationRow:
+      type: object
+      description: One per-student quiz extra-time accommodation (course-level multiplier).
+      properties:
+        student:
+          type: string
+          format: email
+        timeMultiplier:
+          type: number
+          format: double
+          maximum: 100
+          minimum: -100
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+      required:
+      - student
+      - timeMultiplier
     QuizAssignmentTriggerEnum:
       enum:
       - during

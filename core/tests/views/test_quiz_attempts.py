@@ -274,6 +274,29 @@ class TestRevealAndAccess:
         assert 'isCorrect' not in resp
         assert all('isCorrect' not in c for c in resp['question']['choices'])
 
+    def test_feedback_and_points_show_after_submit_even_when_answers_never(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course, showCorrectAnswers='never')
+        _add(quiz, _essay(course, _bank(course)))
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.post(f"/quizAttempts/{start.data['id']}/gradeResponse/",
+                        {'response': start.data['responses'][0]['id'], 'pointsEarned': '3',
+                         'graderFeedback': 'Add detail.'}, format='json')
+
+        api_client.force_authenticate(user=student)
+        mine = api_client.get(f"/quizAttempts/{start.data['id']}/")
+        resp = mine.data['responses'][0]
+        # Grader feedback and the student's own earned points aren't answer keys —
+        # they show once the attempt is submitted...
+        assert resp['graderFeedback'] == 'Add detail.'
+        assert _dec(resp['pointsEarned']) == _dec('3.00')
+        # ...while correctness stays hidden under the 'never' policy.
+        assert 'isCorrect' not in resp
+
     def test_student_cannot_read_another_students_attempt(self, api_client, taking_setup):
         course = taking_setup['course']
         quiz = _quiz(course)
@@ -991,6 +1014,24 @@ class TestManualGrading:
         assert row['needsGrading'] is False
         assert row['lastSubmittedAt'] is not None
 
+    def test_grading_blocked_on_archived_course(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._essay_quiz(taking_setup)
+        attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        graded = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                                 {'response': essay_id, 'pointsEarned': '3'}, format='json')
+        assert graded.status_code == status.HTTP_200_OK
+
+        course.archived = True
+        course.save()
+        regrade = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                                  {'response': essay_id, 'pointsEarned': '4'}, format='json')
+        assert regrade.status_code == status.HTTP_403_FORBIDDEN
+        reopen = api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
+                                 {'response': essay_id}, format='json')
+        assert reopen.status_code == status.HTTP_403_FORBIDDEN
+
     def test_grade_quiz_capability_follows_role(self, api_client, taking_setup):
         course = taking_setup['course']
         grader = course.graders.first()
@@ -1190,3 +1231,165 @@ class TestReviewFixRegressions:
         resp = api_client.get(f"/quizAttempts/{attempt.id}/")
         for r in resp.data['responses']:
             assert all('isCorrect' not in c for c in r['question'].get('choices', []))
+
+
+# --------------------------------------------------------------------------- #
+# Per-question grading settings: partial credit + numerical tolerance
+# --------------------------------------------------------------------------- #
+
+class TestGradingSettings:
+    def _submit_with_choices(self, api_client, taking_setup, quiz, pick_texts):
+        """Start an attempt, select the choices whose text is in pick_texts, submit."""
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        resp = start.data['responses'][0]
+        choice_ids = [c['id'] for c in resp['question']['choices'] if c['text'] in pick_texts]
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': resp['id'], 'selectedChoices': choice_ids}, format='json')
+        done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        assert done.status_code == status.HTTP_200_OK
+        return done.data
+
+    def _submit_with_text(self, api_client, taking_setup, quiz, text):
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': start.data['responses'][0]['id'], 'answerText': text}, format='json')
+        done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        return done.data
+
+    def test_partial_credit_right_minus_wrong(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _multi(course, _bank(course), points='4')  # correct: 2 and 4 (of 2/3/4)
+        q.partialCredit = True
+        q.save()
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, q)
+
+        # Full credit: both correct, nothing wrong.
+        done = self._submit_with_choices(api_client, taking_setup, quiz, {'2', '4'})
+        assert _dec(done['score']) == _dec('4.00')
+        assert done['responses'][0]['isCorrect'] is True
+
+        # Half right: (1 - 0) / 2 × 4 = 2; partially correct ⇒ isCorrect is None.
+        done = self._submit_with_choices(api_client, taking_setup, quiz, {'2'})
+        assert _dec(done['score']) == _dec('2.00')
+        assert done['responses'][0]['isCorrect'] is None
+
+        # One right one wrong cancels out: (1 - 1) / 2 × 4 = 0.
+        done = self._submit_with_choices(api_client, taking_setup, quiz, {'2', '3'})
+        assert _dec(done['score']) == _dec('0.00')
+        assert done['responses'][0]['isCorrect'] is False
+
+        # Selecting everything: (2 - 1) / 2 × 4 = 2 — floored formula, not full marks.
+        done = self._submit_with_choices(api_client, taking_setup, quiz, {'2', '3', '4'})
+        assert _dec(done['score']) == _dec('2.00')
+
+    def test_partial_credit_off_by_default(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _multi(course, _bank(course), points='4')
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, q)
+        # All-or-nothing without the toggle: one correct selection scores 0.
+        done = self._submit_with_choices(api_client, taking_setup, quiz, {'2'})
+        assert _dec(done['score']) == _dec('0.00')
+        assert done['responses'][0]['isCorrect'] is False
+
+    def test_numerical_tolerance(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _numerical(course, _bank(course))  # accepted answer '4', 2 pts
+        q.numericTolerance = Decimal('0.5')
+        q.save()
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, q)
+
+        done = self._submit_with_text(api_client, taking_setup, quiz, '4.4')
+        assert _dec(done['score']) == _dec('2.00')  # within ±0.5
+        done = self._submit_with_text(api_client, taking_setup, quiz, '3.6')
+        assert _dec(done['score']) == _dec('2.00')  # within, below
+        done = self._submit_with_text(api_client, taking_setup, quiz, '4.6')
+        assert _dec(done['score']) == _dec('0.00')  # outside
+
+    def test_numerical_exact_without_tolerance(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, _numerical(course, _bank(course)))
+        done = self._submit_with_text(api_client, taking_setup, quiz, '4.01')
+        assert _dec(done['score']) == _dec('0.00')
+        done = self._submit_with_text(api_client, taking_setup, quiz, '4.0')
+        assert _dec(done['score']) == _dec('2.00')  # numerically equal is still exact
+
+    def test_settings_survive_question_copy(self, api_client, taking_setup):
+        from core.models import Question, QuestionBank
+        course = taking_setup['course']
+        q = _multi(course, _bank(course))
+        q.partialCredit = True
+        q.numericTolerance = Decimal('0.25')
+        q.save()
+        target = QuestionBank.objects.create(course=course, name='CopyTarget')
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post('/questions/copyToBank/',
+                               {'bankId': target.id, 'questionIds': [q.id]}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        copy = Question.objects.get(pk=resp.data[0]['id'])
+        assert copy.partialCredit is True and copy.numericTolerance == Decimal('0.2500')
+
+
+# --------------------------------------------------------------------------- #
+# Extra-time accommodations (course-level per-student multiplier)
+# --------------------------------------------------------------------------- #
+
+class TestAccommodations:
+    def test_multiplier_extends_timed_deadline(self, api_client, taking_setup):
+        from core.models import QuizAccommodation, QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        quiz = _quiz(course, timeLimitMinutes=40)
+        _add(quiz, _mc(course, _bank(course)))
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('1.5'))
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        minutes = (attempt.deadline - attempt.startedAt).total_seconds() / 60
+        assert 59.9 < minutes < 60.1  # 40 × 1.5
+
+        # Another student without an accommodation keeps the plain limit.
+        other = taking_setup['students'][1]
+        api_client.force_authenticate(user=other)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        minutes = (attempt.deadline - attempt.startedAt).total_seconds() / 60
+        assert 39.9 < minutes < 40.1
+
+    def test_admin_manages_accommodations(self, api_client, taking_setup):
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+
+        # Non-admin staff can neither view nor set.
+        api_client.force_authenticate(user=course.graders.first())
+        assert api_client.get(f'/courses/{course.id}/quizAccommodations/').status_code \
+            == status.HTTP_403_FORBIDDEN
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        set1 = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1.5'}, format='json')
+        assert set1.status_code == status.HTTP_200_OK
+        listing = api_client.get(f'/courses/{course.id}/quizAccommodations/')
+        assert len(listing.data) == 1
+        assert listing.data[0]['student'] == student.email
+        assert _dec(listing.data[0]['timeMultiplier']) == _dec('1.5')
+
+        # Multipliers below 1 are rejected; unknown students are rejected.
+        bad = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                               {'student': student.email, 'timeMultiplier': '0.5'}, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        unknown = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                   {'student': 'ghost@nowhere.edu', 'timeMultiplier': '1.5'}, format='json')
+        assert unknown.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Multiplier 1 clears the accommodation.
+        api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                         {'student': student.email, 'timeMultiplier': '1'}, format='json')
+        assert api_client.get(f'/courses/{course.id}/quizAccommodations/').data == []

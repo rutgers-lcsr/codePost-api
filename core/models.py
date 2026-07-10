@@ -2825,6 +2825,13 @@ class Question(BaseModel):
   points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
       help_text=("Point value of the question."))
   generalFeedback = models.TextField(blank=True, help_text=("Feedback shown regardless of answer."))
+  partialCredit = models.BooleanField(default=False, help_text=(
+      "For multiple_answers questions: score right-minus-wrong partial credit "
+      "((correct − incorrect selections) / total correct × points, floored at 0) "
+      "instead of all-or-nothing."))
+  numericTolerance = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True,
+      help_text=("For numerical questions: accept answers within ± this of an accepted value. "
+                 "Null/0 requires an exact match."))
   # Code-question fields (used only when questionType == 'code').
   language = models.CharField(max_length=25, blank=True, null=True,
       help_text=("For code questions: the language (matches Environment.language values). "
@@ -3098,6 +3105,31 @@ class QuizAttempt(BaseModel):
 
   def __str__(self):
     return f"QuizAttempt quiz={self.quiz_id} student={self.student_id} #{self.attemptNumber}"
+
+
+class QuizAccommodation(BaseModel):
+  """A per-student extra-time accommodation for a course's timed quizzes.
+
+  The multiplier scales every quiz's timeLimitMinutes when the student starts an attempt
+  (e.g. 1.5 turns a 40-minute quiz into 60). It does NOT move a quiz's close time —
+  ``endAttemptsAtClose`` still caps the attempt deadline at the close."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    student: User
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quizAccommodations", help_text=("The course this accommodation applies to."))
+  student: User = models.ForeignKey(User, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quizAccommodations", help_text=("The accommodated student."))
+  timeMultiplier = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal('1'),
+      help_text=("Multiplier applied to every timed quiz's time limit for this student."))
+
+  class Meta:
+    unique_together = ('course', 'student')
+
+  def __str__(self):
+    return f"QuizAccommodation course={self.course_id} student={self.student_id} ×{self.timeMultiplier}"
 
 
 class QuizResponse(BaseModel):

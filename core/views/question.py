@@ -81,6 +81,7 @@ class QuestionViewSet(ListProtectedViewSet):
         copy = Question.objects.create(
             course=bank.course, bank=bank, questionType=q.questionType, text=q.text,
             description=q.description, points=q.points, generalFeedback=q.generalFeedback,
+            partialCredit=q.partialCredit, numericTolerance=q.numericTolerance,
             language=q.language, starterCode=q.starterCode, referenceSolution=q.referenceSolution,
             source=q.source, createdBy=request.user, metadata=q.metadata,
         )
