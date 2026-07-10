@@ -66,6 +66,8 @@ class TestPermissions_Course_aiSettings(APITestCase):
       'aiUseOwnSettings',
       'aiTokenRates',
       'aiFeatureConfig',
+      'aiFeatureModels',
+      'aiFeatureModelsResolved',
       'aiFeatures',
       'orgAiAvailable',
       'hasApiKey',
@@ -107,3 +109,42 @@ class TestPermissions_Course_aiSettings(APITestCase):
     self.assertEqual(disable_response.status_code, status.HTTP_200_OK)
     self.assertFalse(disable_response.data['aiEnabled'])
     self.assertFalse(disable_response.data['aiCommentsEnabled'])
+
+  def test_patch_ai_feature_models_round_trip(self):
+    admin = Persona.ADMIN_OF_COURSE(self)
+
+    response = request_as('update', admin, self.endpoint, {
+      'aiProvider': 'openai',
+      'aiApiKey': 'secret-test-key',
+      'aiUseOwnSettings': True,
+      'aiFeatureModels': {'quiz_generation': 'gpt-4o', 'comment_generation': 'gpt-4o-mini'},
+    })
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    self.assertEqual(
+      response.data['aiFeatureModels'],
+      {'quiz_generation': 'gpt-4o', 'comment_generation': 'gpt-4o-mini'},
+    )
+    # Resolved view reflects the overrides; untouched features use the default
+    self.assertEqual(response.data['aiFeatureModelsResolved']['quiz_generation'], 'gpt-4o')
+    self.assertEqual(response.data['aiFeatureModelsResolved']['comment_generation'], 'gpt-4o-mini')
+    self.assertEqual(response.data['aiFeatureModelsResolved']['submission_summary'], 'gpt-4o-mini')
+
+    course = Course.objects.get(id=self.DB['Course'].id)
+    self.assertEqual(
+      course.ai_feature_models,
+      {'quiz_generation': 'gpt-4o', 'comment_generation': 'gpt-4o-mini'},
+    )
+
+  def test_patch_ai_feature_models_rejects_unknown_key(self):
+    admin = Persona.ADMIN_OF_COURSE(self)
+    response = request_as('update', admin, self.endpoint, {
+      'aiFeatureModels': {'bogus_feature': 'gpt-4o'},
+    })
+    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+  def test_patch_ai_feature_models_rejects_non_dict(self):
+    admin = Persona.ADMIN_OF_COURSE(self)
+    response = request_as('update', admin, self.endpoint, {
+      'aiFeatureModels': ['quiz_generation'],
+    })
+    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

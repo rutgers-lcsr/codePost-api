@@ -219,6 +219,7 @@ class AIService:
         self.assignment = assignment
 
         # Resolve effective AI config: course-own settings or org-level
+        self._config_from_org = False
         if course.ai_use_own_settings and course.ai_provider:
             # Course explicitly uses its own key
             self.provider = course.ai_provider
@@ -238,6 +239,7 @@ class AIService:
                 self.api_key = org.ai_api_key
                 self.base_url = org.ai_base_url
                 self.model = org.ai_model or self._get_default_model_for(org.ai_provider)
+                self._config_from_org = True
             else:
                 # Org not available, fall back to course fields (may be empty)
                 self.provider = course.ai_provider
@@ -251,6 +253,10 @@ class AIService:
             self.api_key = course.ai_api_key
             self.base_url = course.ai_base_url
             self.model = course.ai_model or self._get_default_model()
+
+        # Base model before any per-feature override; set_request_context()
+        # swaps self.model to the feature-specific model when one is set.
+        self.base_model = self.model
 
         # Optional request context, attached to outbound provider requests as
         # observability metadata (currently consumed by Portkey). Populated by
@@ -271,13 +277,52 @@ class AIService:
         ``user`` and ``request_type`` mirror the values passed to
         ``record_usage``; ``instructions`` is the user's free-text request.
         Generates a fresh trace id per call. Returns ``self`` for chaining.
+
+        Also switches ``self.model`` to the per-feature model override for
+        ``request_type``, if the course or org configured one.
         """
         import uuid
         self.request_user = user
         self.request_type = request_type
         self.request_instructions = instructions or ''
         self._trace_id = str(uuid.uuid4())
+        self.model = self.model_for_feature(request_type) if request_type else self.base_model
         return self
+
+    # Request types that don't match their governing feature key 1:1.
+    REQUEST_TYPE_TO_FEATURE = {
+        'file_suggestions': 'suggested_comments',
+    }
+
+    def model_for_feature(self, feature_key: Optional[str]) -> str:
+        """Resolve the model to use for *feature_key*.
+
+        Precedence (mirrors ``_resolve_feature_toggle``):
+        1. Course ``ai_feature_models[key]`` if set
+        2. Org ``ai_feature_models[key]`` if the effective config is the org's
+        3. The base model (course/org ``ai_model`` or provider default)
+        """
+        if not feature_key:
+            return self.base_model
+        feature_key = self.REQUEST_TYPE_TO_FEATURE.get(feature_key, feature_key)
+        course_models = getattr(self.course, 'ai_feature_models', None) or {}
+        override = course_models.get(feature_key)
+        if override:
+            return override
+        if self._config_from_org and self.course.organization:
+            org_models = getattr(self.course.organization, 'ai_feature_models', None) or {}
+            override = org_models.get(feature_key)
+            if override:
+                return override
+        return self.base_model
+
+    def get_feature_models(self) -> dict[str, str]:
+        """Return the resolved model for every registered feature."""
+        from core.ai_features.registry import ai_feature_registry
+        return {
+            entry.key: self.model_for_feature(entry.key)
+            for entry in ai_feature_registry.all()
+        }
 
     def _build_portkey_metadata(self) -> dict[str, str]:
         """Build the Portkey metadata dict from the current request context.

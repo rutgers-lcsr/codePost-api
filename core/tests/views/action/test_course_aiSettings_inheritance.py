@@ -161,3 +161,31 @@ class TestCourseAISettingsInheritance(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['orgAiAvailable'])
         self.assertTrue(response.data['aiEnabled'])
+
+    # ------------------------------------------------------------------
+    # Per-feature model inheritance (aiFeatureModelsResolved)
+    # ------------------------------------------------------------------
+
+    def test_course_inherits_org_feature_models(self):
+        """Org per-feature overrides show up in the course's resolved models."""
+        self._configure_org(policy='all', ai_feature_models={'quiz_generation': 'gemini-2.5-pro'})
+        admin = Persona.ADMIN_OF_COURSE(self)
+        response = request_as('read', admin, self.course_endpoint, {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        resolved = response.data['aiFeatureModelsResolved']
+        self.assertEqual(resolved['quiz_generation'], 'gemini-2.5-pro')
+        self.assertEqual(resolved['comment_generation'], 'gemini-2.5-flash')
+        # The course itself has no overrides stored
+        self.assertEqual(response.data['aiFeatureModels'], {})
+
+    def test_course_feature_model_overrides_org(self):
+        """A course override beats the org's per-feature model."""
+        self._configure_org(policy='all', ai_feature_models={'quiz_generation': 'gemini-2.5-pro'})
+        admin = Persona.ADMIN_OF_COURSE(self)
+        response = request_as('update', admin, self.course_endpoint, {
+            'aiFeatureModels': {'quiz_generation': 'gemini-3-pro-preview'},
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        resolved = response.data['aiFeatureModelsResolved']
+        self.assertEqual(resolved['quiz_generation'], 'gemini-3-pro-preview')
+        self.assertEqual(resolved['comment_generation'], 'gemini-2.5-flash')

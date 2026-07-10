@@ -218,9 +218,14 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
     source='ai_feature_config', required=False, default=dict,
     help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}',
   )
+  aiFeatureModels = serializers.JSONField(
+    source='ai_feature_models', required=False, default=dict,
+    help_text='Per-feature AI model overrides. JSON: {"quiz_generation": "gemini-2.5-pro", ...}. Missing keys use the effective default model.',
+  )
+  aiFeatureModelsResolved = serializers.SerializerMethodField()
   aiFeatures = serializers.SerializerMethodField()
   defaultTokenRates = serializers.SerializerMethodField()
-  
+
   class Meta:
     model = Course
     fields = (
@@ -234,6 +239,8 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'aiUseOwnSettings',
       'aiTokenRates',
       'aiFeatureConfig',
+      'aiFeatureModels',
+      'aiFeatureModelsResolved',
       'aiFeatures',
       'aiEnabled',
       'aiCommentsEnabled',
@@ -326,6 +333,16 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
     from core.services.ai_service import AIService
     service = AIService(obj)
     return service.get_feature_status()
+
+  @extend_schema_field(serializers.DictField(child=serializers.CharField()))
+  def get_aiFeatureModelsResolved(self, obj):
+    """Returns the effective model for each AI feature (course override, org override, or default)."""
+    from core.services.ai_service import AIService
+    return AIService(obj).get_feature_models()
+
+  def validate_aiFeatureModels(self, value):
+    from core.serializers.ai_usage import validate_ai_feature_models_dict
+    return validate_ai_feature_models_dict(value)
 
   @extend_schema_field(serializers.DictField(child=serializers.DictField()))
   def get_defaultTokenRates(self, obj):

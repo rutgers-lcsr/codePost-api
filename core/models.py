@@ -178,6 +178,10 @@ class Organization(BaseModel):
       default=dict, blank=True,
       help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}. Missing keys use defaults (enabled).'
   )
+  ai_feature_models = JSONField(
+      default=dict, blank=True,
+      help_text='Per-feature AI model overrides. JSON: {"quiz_generation": "gemini-2.5-pro", ...}. Missing keys use ai_model.'
+  )
 
   class Meta:
     ordering = ('name',)
@@ -411,6 +415,10 @@ class Course(BaseModel):
   ai_feature_config = JSONField(
       default=dict, blank=True,
       help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}. Missing keys use defaults (enabled).'
+  )
+  ai_feature_models = JSONField(
+      default=dict, blank=True,
+      help_text='Per-feature AI model overrides. JSON: {"quiz_generation": "gemini-2.5-pro", ...}. Missing keys use the effective default model.'
   )
 
   class Meta:

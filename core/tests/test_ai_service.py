@@ -245,6 +245,91 @@ class TestAIServiceConfigResolution(TestCase):
 
 
 # ===========================================================================
+# Per-feature model resolution
+# ===========================================================================
+
+class TestPerFeatureModelResolution(TestCase):
+    """Test AIService.model_for_feature and the set_request_context hook."""
+
+    def _org_inherited_service(self, course_models=None, org_models=None):
+        """Course inheriting AI config from its org (policy 'all')."""
+        org = _make_org(
+            ai_provider='gemini',
+            ai_api_key='org-key',
+            ai_model='gemini-2.5-flash',
+            ai_course_policy='all',
+            ai_feature_models=org_models or {},
+        )
+        course = _make_course(
+            ai_use_own_settings=False,
+            organization=org,
+            ai_feature_models=course_models or {},
+        )
+        return AIService(cast(Course, course))
+
+    def test_no_override_uses_base_model(self):
+        svc = self._org_inherited_service()
+        self.assertEqual(svc.model_for_feature('quiz_generation'), 'gemini-2.5-flash')
+
+    def test_org_override_applies_when_inheriting(self):
+        svc = self._org_inherited_service(org_models={'quiz_generation': 'gemini-2.5-pro'})
+        self.assertEqual(svc.model_for_feature('quiz_generation'), 'gemini-2.5-pro')
+        # Other features keep the base model
+        self.assertEqual(svc.model_for_feature('comment_generation'), 'gemini-2.5-flash')
+
+    def test_course_override_wins_over_org(self):
+        svc = self._org_inherited_service(
+            course_models={'quiz_generation': 'gemini-3-pro-preview'},
+            org_models={'quiz_generation': 'gemini-2.5-pro'},
+        )
+        self.assertEqual(svc.model_for_feature('quiz_generation'), 'gemini-3-pro-preview')
+
+    def test_org_override_ignored_when_course_uses_own_settings(self):
+        """A course on its own provider must not pick up org feature models."""
+        org = _make_org(
+            ai_provider='gemini',
+            ai_api_key='org-key',
+            ai_model='gemini-2.5-flash',
+            ai_course_policy='all',
+            ai_feature_models={'quiz_generation': 'gemini-2.5-pro'},
+        )
+        course = _make_course(
+            ai_use_own_settings=True,
+            ai_provider='openai',
+            ai_api_key='course-key',
+            ai_model='gpt-4o',
+            organization=org,
+        )
+        svc = AIService(cast(Course, course))
+        self.assertEqual(svc.model_for_feature('quiz_generation'), 'gpt-4o')
+
+    def test_file_suggestions_maps_to_suggested_comments(self):
+        svc = self._org_inherited_service(course_models={'suggested_comments': 'gemini-2.5-pro'})
+        self.assertEqual(svc.model_for_feature('file_suggestions'), 'gemini-2.5-pro')
+
+    def test_set_request_context_switches_and_resets_model(self):
+        svc = self._org_inherited_service(course_models={'quiz_generation': 'gemini-2.5-pro'})
+        svc.set_request_context(request_type='quiz_generation')
+        self.assertEqual(svc.model, 'gemini-2.5-pro')
+        # A subsequent request for a feature without an override resolves
+        # from the base model, not the previous override.
+        svc.set_request_context(request_type='comment_generation')
+        self.assertEqual(svc.model, 'gemini-2.5-flash')
+
+    def test_unknown_feature_key_falls_back_to_base(self):
+        svc = self._org_inherited_service(course_models={'quiz_generation': 'gemini-2.5-pro'})
+        self.assertEqual(svc.model_for_feature('nonexistent_feature'), 'gemini-2.5-flash')
+
+    def test_get_feature_models_covers_registry(self):
+        from core.ai_features.registry import ai_feature_registry
+        svc = self._org_inherited_service(org_models={'submission_summary': 'gemini-2.5-pro'})
+        resolved = svc.get_feature_models()
+        self.assertEqual(set(resolved.keys()), set(ai_feature_registry.keys()))
+        self.assertEqual(resolved['submission_summary'], 'gemini-2.5-pro')
+        self.assertEqual(resolved['comment_generation'], 'gemini-2.5-flash')
+
+
+# ===========================================================================
 # Cost estimation
 # ===========================================================================
 

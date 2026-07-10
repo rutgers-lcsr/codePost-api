@@ -16983,6 +16983,14 @@ components:
         aiFeatureConfig:
           description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
             "suggested_comments": false, ...}'
+        aiFeatureModels:
+          description: 'Per-feature AI model overrides. JSON: {"quiz_generation":
+            "gemini-2.5-pro", ...}. Missing keys use the effective default model.'
+        aiFeatureModelsResolved:
+          type: object
+          additionalProperties:
+            type: string
+          readOnly: true
         aiFeatures:
           type: object
           additionalProperties:
@@ -17013,6 +17021,7 @@ components:
       required:
       - aiCommentsEnabled
       - aiEnabled
+      - aiFeatureModelsResolved
       - aiFeatures
       - apiKeyHint
       - defaultTokenRates
@@ -18568,6 +18577,9 @@ components:
         aiFeatureConfig:
           description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
             "suggested_comments": false, ...}'
+        aiFeatureModels:
+          description: 'Per-feature AI model overrides. JSON: {"quiz_generation":
+            "gemini-2.5-pro", ...}. Missing keys use aiModel.'
         aiFeatures:
           type: object
           additionalProperties:
@@ -19369,6 +19381,14 @@ components:
         aiFeatureConfig:
           description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
             "suggested_comments": false, ...}'
+        aiFeatureModels:
+          description: 'Per-feature AI model overrides. JSON: {"quiz_generation":
+            "gemini-2.5-pro", ...}. Missing keys use the effective default model.'
+        aiFeatureModelsResolved:
+          type: object
+          additionalProperties:
+            type: string
+          readOnly: true
         aiFeatures:
           type: object
           additionalProperties:
@@ -19789,6 +19809,9 @@ components:
         aiFeatureConfig:
           description: 'Per-feature AI toggles. JSON: {"comment_generation": true,
             "suggested_comments": false, ...}'
+        aiFeatureModels:
+          description: 'Per-feature AI model overrides. JSON: {"quiz_generation":
+            "gemini-2.5-pro", ...}. Missing keys use aiModel.'
     PatchedPromptExperiment:
       type: object
       properties:

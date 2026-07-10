@@ -71,6 +71,7 @@ class TestOrganizationAISettings(APITestCase):
             'aiEnabledCourseIds',
             'aiTokenRates',
             'aiFeatureConfig',
+            'aiFeatureModels',
             'aiFeatures',
             'aiEnabled',
             'aiCommentsEnabled',
@@ -218,3 +219,52 @@ class TestOrganizationAISettings(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.org.refresh_from_db()
         self.assertEqual(self.org.ai_course_policy, 'none')
+
+    # ------------------------------------------------------------------
+    # Per-feature model overrides (aiFeatureModels)
+    # ------------------------------------------------------------------
+
+    def test_patch_ai_feature_models_persists(self):
+        from django.contrib.auth.models import User
+        su = User.objects.create_superuser('su10@test.edu', 'su10@test.edu', 'pass')
+
+        response = request_as('update', su, self.endpoint, {
+            'aiFeatureModels': {'quiz_generation': 'gemini-2.5-pro'},
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['aiFeatureModels'], {'quiz_generation': 'gemini-2.5-pro'})
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.ai_feature_models, {'quiz_generation': 'gemini-2.5-pro'})
+
+    def test_patch_ai_feature_models_rejects_unknown_key(self):
+        from django.contrib.auth.models import User
+        su = User.objects.create_superuser('su11@test.edu', 'su11@test.edu', 'pass')
+
+        response = request_as('update', su, self.endpoint, {
+            'aiFeatureModels': {'not_a_feature': 'gpt-4o'},
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_ai_feature_models_rejects_non_string_value(self):
+        from django.contrib.auth.models import User
+        su = User.objects.create_superuser('su12@test.edu', 'su12@test.edu', 'pass')
+
+        response = request_as('update', su, self.endpoint, {
+            'aiFeatureModels': {'quiz_generation': 42},
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_ai_feature_models_drops_empty_values(self):
+        """Empty-string values mean 'clear the override' and are not stored."""
+        from django.contrib.auth.models import User
+        su = User.objects.create_superuser('su13@test.edu', 'su13@test.edu', 'pass')
+
+        request_as('update', su, self.endpoint, {
+            'aiFeatureModels': {'quiz_generation': 'gemini-2.5-pro'},
+        })
+        response = request_as('update', su, self.endpoint, {
+            'aiFeatureModels': {'quiz_generation': ''},
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.ai_feature_models, {})

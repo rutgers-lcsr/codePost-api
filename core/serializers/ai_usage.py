@@ -74,6 +74,29 @@ class AIUsageSummarySerializer(serializers.Serializer):
   endDate = serializers.DateTimeField()
 
 
+def validate_ai_feature_models_dict(value):
+  """Shared validation for ``aiFeatureModels`` JSON fields.
+
+  Ensures a flat dict of registered feature key → model name (string).
+  Empty/null values mean "no override" and are dropped from the stored dict.
+  """
+  from core.ai_features.registry import ai_feature_registry
+  if not isinstance(value, dict):
+    raise serializers.ValidationError('Must be a JSON object mapping feature keys to model names.')
+  unknown = [k for k in value if k not in ai_feature_registry]
+  if unknown:
+    raise serializers.ValidationError(
+      f"Unknown AI feature keys: {', '.join(sorted(unknown))}. "
+      f"Valid keys: {', '.join(sorted(ai_feature_registry.keys()))}."
+    )
+  non_string = [k for k, v in value.items() if v is not None and not isinstance(v, str)]
+  if non_string:
+    raise serializers.ValidationError(
+      f"Model values must be strings: {', '.join(sorted(non_string))}."
+    )
+  return {k: v for k, v in value.items() if v}
+
+
 class OrganizationAISettingsSerializer(serializers.ModelSerializer):
   """Serializer for organization-level AI configuration."""
   aiProvider = serializers.ChoiceField(
@@ -107,6 +130,10 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
     source='ai_feature_config', required=False, default=dict,
     help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}',
   )
+  aiFeatureModels = serializers.JSONField(
+    source='ai_feature_models', required=False, default=dict,
+    help_text='Per-feature AI model overrides. JSON: {"quiz_generation": "gemini-2.5-pro", ...}. Missing keys use aiModel.',
+  )
   aiFeatures = serializers.SerializerMethodField()
   aiEnabled = serializers.SerializerMethodField()
   aiCommentsEnabled = serializers.SerializerMethodField()
@@ -128,6 +155,7 @@ class OrganizationAISettingsSerializer(serializers.ModelSerializer):
       'aiEnabledCourseIds',
       'aiTokenRates',
       'aiFeatureConfig',
+      'aiFeatureModels',
       'aiFeatures',
       'aiEnabled',
       'aiCommentsEnabled',
@@ -227,6 +255,10 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
     source='ai_feature_config', required=False, default=dict,
     help_text='Per-feature AI toggles. JSON: {"comment_generation": true, "suggested_comments": false, ...}',
   )
+  aiFeatureModels = serializers.JSONField(
+    source='ai_feature_models', required=False, default=dict,
+    help_text='Per-feature AI model overrides. JSON: {"quiz_generation": "gemini-2.5-pro", ...}. Missing keys use aiModel.',
+  )
 
   class Meta:
     model = Organization
@@ -241,7 +273,11 @@ class OrganizationAISettingsUpdateSerializer(serializers.ModelSerializer):
       'aiEnabledCourseIds',
       'aiTokenRates',
       'aiFeatureConfig',
+      'aiFeatureModels',
     )
+
+  def validate_aiFeatureModels(self, value):
+    return validate_ai_feature_models_dict(value)
 
   def update(self, instance, validated_data):
     course_ids = validated_data.pop('aiEnabledCourseIds', None)
