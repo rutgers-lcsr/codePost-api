@@ -745,8 +745,8 @@ class QuizAttemptPermissions(TemplatePermission):
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
-        # Manual grading is the one staff write on someone else's attempt.
-        if getattr(view, 'action', None) == 'gradeResponse':
+        # Manual grading (and undoing it) are the staff writes on someone else's attempt.
+        if getattr(view, 'action', None) in ('gradeResponse', 'reopenResponse'):
             return canGradeQuiz(user, obj.quiz.course)
         if user == obj.student:
             return True

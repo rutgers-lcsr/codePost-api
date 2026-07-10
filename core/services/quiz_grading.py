@@ -1,8 +1,10 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
-"""Quiz taking: attempt materialization, auto-grading, availability, and answer-reveal logic.
+"""Quiz taking: attempt materialization, grading, availability, and answer-reveal logic.
 
-Phase 2 slice 1 — auto-gradable question types only. Essay/code responses are flagged
-for manual grading (a later slice) and excluded from the auto-graded score.
+MC/multi-answer/true-false/short-answer/numerical responses auto-grade on submit.
+Essay/code responses are flagged for manual grading (apply_manual_grade /
+reopen_manual_grade, driven by the quizAttempts gradeResponse/reopenResponse actions)
+and excluded from the score until graded.
 """
 import random
 from datetime import timedelta
@@ -211,6 +213,19 @@ def apply_manual_grade(response, points_earned, grader, feedback=''):
   response.needsManualGrading = False
   response.graderFeedback = feedback or ''
   response.gradedBy = grader
+  response.save()
+  recompute_attempt_totals(response.attempt)
+
+
+def reopen_manual_grade(response):
+  """Send a manually graded (essay/code) response back to the grading queue.
+
+  Keeps graderFeedback as a draft for the next grader; refreshes the attempt's totals
+  (score drops the reopened points and needsManualGrading/passed reset accordingly)."""
+  response.pointsEarned = None
+  response.isCorrect = None
+  response.needsManualGrading = True
+  response.gradedBy = None
   response.save()
   recompute_attempt_totals(response.attempt)
 

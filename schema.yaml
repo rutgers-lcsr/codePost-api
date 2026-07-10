@@ -8317,7 +8317,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudentQuizAttempt'
+                $ref: '#/components/schemas/StaffQuizAttempt'
           description: ''
   /quizAttempts/{id}/gradeResponse/:
     post:
@@ -8345,6 +8345,45 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/GradeQuizResponseRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffQuizAttempt'
+          description: ''
+  /quizAttempts/{id}/reopenResponse/:
+    post:
+      operationId: quizAttempts_reopenResponseCreate
+      description: |-
+        Send a manually graded essay/code response back to the grading queue (undo the
+        grade). The feedback text is kept as a draft; the attempt's totals are refreshed.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReopenQuizResponseRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ReopenQuizResponseRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ReopenQuizResponseRequest'
         required: true
       security:
       - courseKeyAuth: []
@@ -9791,6 +9830,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ResetQuizAttemptsResponse'
+          description: ''
+  /quizzes/{id}/results/:
+    get:
+      operationId: quizzes_resultsList
+      description: |-
+        Per-student official results (per this quiz's scoringPolicy) — quiz graders and
+        course admins only. Score is null until the student has a fully graded attempt.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizResultRow'
           description: ''
   /registration/checkStatusNewAdminUser/:
     get:
@@ -16251,6 +16319,8 @@ components:
                 type: boolean
               manage_course_api_keys:
                 type: boolean
+              grade_quiz:
+                type: boolean
               edit_assignment:
                 type: boolean
               copy_assignment:
@@ -16452,6 +16522,8 @@ components:
             change_invite_code:
               type: boolean
             manage_course_api_keys:
+              type: boolean
+            grade_quiz:
               type: boolean
             edit_assignment:
               type: boolean
@@ -22140,6 +22212,47 @@ components:
       - bank
       - id
       - quiz
+    QuizResultRow:
+      type: object
+      properties:
+        student:
+          type: string
+          format: email
+        attemptsUsed:
+          type: integer
+        score:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+        maxScore:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+        passed:
+          type: boolean
+          nullable: true
+        needsGrading:
+          type: boolean
+        lastSubmittedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - attemptsUsed
+      - lastSubmittedAt
+      - maxScore
+      - needsGrading
+      - passed
+      - score
+      - student
     QuizScoringPolicyEnum:
       enum:
       - highest
@@ -22216,6 +22329,13 @@ components:
           type: boolean
       required:
       - isValid
+    ReopenQuizResponseRequest:
+      type: object
+      properties:
+        response:
+          type: integer
+      required:
+      - response
     ResetPasswordRequest:
       type: object
       properties:
@@ -23155,6 +23275,8 @@ components:
             change_invite_code:
               type: boolean
             manage_course_api_keys:
+              type: boolean
+            grade_quiz:
               type: boolean
             edit_assignment:
               type: boolean

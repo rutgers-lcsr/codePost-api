@@ -100,9 +100,13 @@ class StudentQuizResponseSerializer(serializers.ModelSerializer):
 
   def to_representation(self, instance):
     data = super().to_representation(instance)
+    # Correctness follows the quiz's answer-reveal policy; the student's own earned points
+    # and grader feedback are not answer keys, so they show as soon as scores do (i.e.
+    # once the attempt is submitted) — even on showCorrectAnswers='never' quizzes.
     if not self.context.get('reveal'):
-      data.pop('pointsEarned', None)
       data.pop('isCorrect', None)
+    if not self.context.get('revealScore'):
+      data.pop('pointsEarned', None)
       data.pop('graderFeedback', None)
     return data
 

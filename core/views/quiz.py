@@ -13,6 +13,7 @@ from core.serializers.generatedQuiz import (
     GeneratedQuestionSetListSerializer, GeneratedQuestionSetSerializer,
 )
 from core.serializers.studentQuiz import StaffQuizAttemptSerializer
+from core.services import quiz_grading
 from core.services.audit import record_audit_event
 from core.views.template import ListProtectedViewSet
 from core.permissions.helpers import isCourseAdmin, isCourseStaff, isStudent
@@ -80,6 +81,44 @@ class QuizViewSet(ListProtectedViewSet):
       attempts = attempts.filter(needsManualGrading=True)
     return Response(StaffQuizAttemptSerializer(
         attempts, many=True, context={'request': request, 'reveal': True, 'revealScore': True}).data)
+
+  @extend_schema(
+      responses=inline_serializer('QuizResultRow', {
+          'student': serializers.EmailField(),
+          'attemptsUsed': serializers.IntegerField(),
+          'score': serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True),
+          'maxScore': serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True),
+          'passed': serializers.BooleanField(allow_null=True),
+          'needsGrading': serializers.BooleanField(),
+          'lastSubmittedAt': serializers.DateTimeField(allow_null=True),
+      }, many=True),
+  )
+  @action(detail=True, methods=['GET'])
+  def results(self, request, pk=None):
+    """Per-student official results (per this quiz's scoringPolicy) — quiz graders and
+    course admins only. Score is null until the student has a fully graded attempt."""
+    quiz = self.get_object()
+    if not canGradeQuiz(request.user, quiz.course):
+      return Response({'detail': 'Only quiz graders and course admins can view quiz results.'},
+                      status=status.HTTP_403_FORBIDDEN)
+    score_field = serializers.DecimalField(max_digits=8, decimal_places=2)
+    by_student = {}
+    for attempt in quiz.attempts.filter(status='submitted').select_related('student').order_by(
+        'student__email', 'attemptNumber'):
+      by_student.setdefault(attempt.student, []).append(attempt)
+    rows = []
+    for student, attempts in by_student.items():
+      official = quiz_grading.official_score(quiz, student)
+      rows.append({
+          'student': student.email,
+          'attemptsUsed': len(attempts),
+          'score': score_field.to_representation(official[0]) if official else None,
+          'maxScore': score_field.to_representation(official[1]) if official else None,
+          'passed': quiz_grading.official_passed(quiz, student, official=official) if official else None,
+          'needsGrading': any(a.needsManualGrading for a in attempts),
+          'lastSubmittedAt': max((a.submittedAt for a in attempts if a.submittedAt), default=None),
+      })
+    return Response(rows)
 
   @extend_schema(
       request=None,

@@ -16,7 +16,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from core.models import Course, Quiz, QuizAttempt
-from core.permissions.helpers import isCourseMember, isStudent
+from core.permissions.helpers import isCourseMember, isCourseStaff, isStudent
 from core.permissions.permissions import QuizAttemptPermissions
 from core.serializers.studentQuiz import (
     StaffQuizAttemptSerializer,
@@ -38,6 +38,22 @@ def _require_int(value):
     return int(value)
   except (TypeError, ValueError):
     return None
+
+
+def _record_grading_event(attempt, response, event_type, grader):
+  """Log a manual-grading event (graded/reopened) to the course activity log.
+
+  Attributed to the grader; the affected student rides along in meta."""
+  quiz = attempt.quiz
+  meta = {
+      'quizTitle': quiz.title,
+      'student': attempt.student.email,
+      'attemptNumber': attempt.attemptNumber,
+      'questionType': (response.questionSnapshot or {}).get('type'),
+      'pointsEarned': str(response.pointsEarned) if response.pointsEarned is not None else None,
+  }
+  record_audit_event(course=quiz.course, event_type=event_type, user=grader,
+                     quiz=quiz, assignment=quiz.assignment, meta=meta)
 
 
 def _record_attempt_event(attempt, event_type):
@@ -69,8 +85,15 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
         'revealScore': attempt.status == 'submitted',
     }
 
+  @extend_schema(responses=StaffQuizAttemptSerializer)
   def retrieve(self, request, *args, **kwargs):
     attempt = self.get_object()
+    # Staff reading someone else's attempt get the grading projection (student identity,
+    # answers and scores revealed); the owner keeps the policy-gated student view.
+    if request.user != attempt.student and (
+        request.user.is_superuser or isCourseStaff(request.user, attempt.quiz.course)):
+      return Response(StaffQuizAttemptSerializer(
+          attempt, context={'request': request, 'reveal': True, 'revealScore': True}).data)
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data)
 
   @extend_schema(
@@ -213,6 +236,37 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     quiz_grading.apply_manual_grade(response, points, request.user,
                                     feedback=request.data.get('graderFeedback') or '')
     attempt.refresh_from_db()
+    response.refresh_from_db()
+    _record_grading_event(attempt, response, 'quiz_response_graded', request.user)
+    return Response(StaffQuizAttemptSerializer(
+        attempt, context={'request': request, 'reveal': True, 'revealScore': True}).data)
+
+  @extend_schema(
+      request=inline_serializer('ReopenQuizResponseRequest', {
+          'response': serializers.IntegerField(),
+      }),
+      responses=StaffQuizAttemptSerializer,
+  )
+  @action(detail=True, methods=['POST'])
+  def reopenResponse(self, request, pk=None):
+    """Send a manually graded essay/code response back to the grading queue (undo the
+    grade). The feedback text is kept as a draft; the attempt's totals are refreshed."""
+    attempt = self.get_object()
+    if attempt.status != 'submitted':
+      return Response({'detail': 'Only submitted attempts can be graded.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
+    if (response.questionSnapshot or {}).get('type') not in quiz_grading.MANUAL_TYPES:
+      return Response({'detail': 'Only essay/code responses are graded manually.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if response.needsManualGrading:
+      return Response({'detail': 'This response has not been graded yet.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    quiz_grading.reopen_manual_grade(response)
+    attempt.refresh_from_db()
+    response.refresh_from_db()
+    _record_grading_event(attempt, response, 'quiz_response_grade_reopened', request.user)
     return Response(StaffQuizAttemptSerializer(
         attempt, context={'request': request, 'reveal': True, 'revealScore': True}).data)
 

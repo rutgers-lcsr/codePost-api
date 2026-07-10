@@ -2360,6 +2360,8 @@ class CourseAuditEvent(BaseModel):
       ('quiz_attempt_submitted', 'Quiz Attempt Submitted'),
       ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
       ('quiz_attempts_reset', 'Quiz Attempts Reset'),
+      ('quiz_response_graded', 'Quiz Response Graded'),
+      ('quiz_response_grade_reopened', 'Quiz Response Grade Reopened'),
       ('quiz_generated_set_approved', 'Generated Question Set Approved'),
       ('quiz_generated_set_regenerated', 'Generated Question Set Regenerated'),
       ('quiz_generated_sets_published', 'Generated Question Sets Published'),
@@ -3051,7 +3053,7 @@ class QuizQuestionGroup(BaseModel):
 
 class QuizAttempt(BaseModel):
   """One student's attempt at a Quiz. Auto-gradable responses are scored on submit;
-  essay/code responses are flagged for manual grading (a later slice)."""
+  essay/code responses are flagged for manual grading by quiz graders / course admins."""
   if TYPE_CHECKING:
     id: int
     quiz: Quiz

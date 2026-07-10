@@ -896,6 +896,114 @@ class TestManualGrading:
         # Removing the role does NOT unenroll the grader.
         assert course.graders.filter(pk=grader.pk).exists()
 
+    def test_reopen_returns_response_to_grading_queue(self, api_client, taking_setup):
+        from core.models import QuizResponse
+        quiz = self._essay_quiz(taking_setup, passingScore=Decimal('6'), passingScoreUnit='points')
+        attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                        {'response': essay_id, 'pointsEarned': '4.5', 'graderFeedback': 'Nice.'},
+                        format='json')
+
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
+                               {'response': essay_id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['needsManualGrading'] is True
+        assert _dec(resp.data['score']) == _dec('2.00')  # back to the auto-graded MC only
+        assert resp.data['passed'] is None
+        reopened = QuizResponse.objects.get(pk=essay_id)
+        assert reopened.pointsEarned is None and reopened.gradedBy is None
+        assert reopened.graderFeedback == 'Nice.'  # kept as a draft for the next grader
+
+    def test_reopen_requires_grading_role_and_graded_state(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._essay_quiz(taking_setup)
+        attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
+
+        # Not graded yet → 400 even for an admin.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        early = api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
+                                {'response': essay_id}, format='json')
+        assert early.status_code == status.HTTP_400_BAD_REQUEST
+
+        api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                        {'response': essay_id, 'pointsEarned': '3'}, format='json')
+
+        # Plain graders and students can't reopen.
+        api_client.force_authenticate(user=course.graders.first())
+        assert api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
+                               {'response': essay_id},
+                               format='json').status_code == status.HTTP_403_FORBIDDEN
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        assert api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
+                               {'response': essay_id},
+                               format='json').status_code == status.HTTP_403_FORBIDDEN
+
+    def test_staff_retrieve_returns_grading_projection(self, api_client, taking_setup):
+        quiz = self._essay_quiz(taking_setup, showCorrectAnswers='never')
+        attempt_id, _ = self._submitted_attempt(api_client, taking_setup, quiz)
+        student = taking_setup['students'][0]
+
+        # Staff reading someone else's attempt see the grading projection: the student's
+        # identity plus revealed correctness/scores regardless of the quiz's reveal policy.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        staff_view = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert staff_view.status_code == status.HTTP_200_OK
+        assert staff_view.data['student'] == student.email
+        assert 'score' in staff_view.data
+        mc = next(r for r in staff_view.data['responses']
+                  if r['question']['questionType'] == 'multiple_choice')
+        assert 'isCorrect' in mc
+
+        # The owner keeps the policy-gated student view ('never' → no correctness, no email).
+        api_client.force_authenticate(user=student)
+        own = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert 'student' not in own.data
+        mc_own = next(r for r in own.data['responses']
+                      if r['question']['questionType'] == 'multiple_choice')
+        assert 'isCorrect' not in mc_own
+
+    def test_results_reports_official_scores_per_student(self, api_client, taking_setup):
+        quiz = self._essay_quiz(taking_setup, passingScore=Decimal('6'), passingScoreUnit='points')
+        attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
+        student = taking_setup['students'][0]
+
+        # Plain graders can't view results.
+        api_client.force_authenticate(user=taking_setup['course'].graders.first())
+        assert api_client.get(f'/quizzes/{quiz.id}/results/').status_code == status.HTTP_403_FORBIDDEN
+
+        # While the essay is ungraded: the row exists but carries no official score yet.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        pending = api_client.get(f'/quizzes/{quiz.id}/results/')
+        assert pending.status_code == status.HTTP_200_OK
+        row = next(r for r in pending.data if r['student'] == student.email)
+        assert row['score'] is None and row['passed'] is None
+        assert row['needsGrading'] is True
+        assert row['attemptsUsed'] == 1
+
+        api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                        {'response': essay_id, 'pointsEarned': '4.5'}, format='json')
+        graded = api_client.get(f'/quizzes/{quiz.id}/results/')
+        row = next(r for r in graded.data if r['student'] == student.email)
+        assert _dec(row['score']) == _dec('6.50')
+        assert _dec(row['maxScore']) == _dec('7.00')
+        assert row['passed'] is True
+        assert row['needsGrading'] is False
+        assert row['lastSubmittedAt'] is not None
+
+    def test_grade_quiz_capability_follows_role(self, api_client, taking_setup):
+        course = taking_setup['course']
+        grader = course.graders.first()
+        api_client.force_authenticate(user=grader)
+        before = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert before.data['capabilitiesMap']['grade_quiz'] is False
+        course.quizGraders.add(grader)
+        after = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert after.data['capabilitiesMap']['grade_quiz'] is True
+        api_client.force_authenticate(user=taking_setup['admin'])
+        admin_caps = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert admin_caps.data['capabilitiesMap']['grade_quiz'] is True
+
 
 class TestQuizAuditLog:
     """Quiz activity feeds the course audit log (CourseAuditEvent)."""
@@ -938,6 +1046,31 @@ class TestQuizAuditLog:
 
         api_client.delete(f'/quizzes/{quiz_id}/')
         assert self._events(course, event_type='quiz_deleted').exists()
+
+    def test_manual_grading_and_reopen_are_logged(self, api_client, taking_setup):
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        admin = taking_setup['admin']
+        quiz = _quiz(course)
+        _add(quiz, _essay(course, _bank(course)))
+
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        essay_id = start.data['responses'][0]['id']
+
+        api_client.force_authenticate(user=admin)
+        api_client.post(f"/quizAttempts/{start.data['id']}/gradeResponse/",
+                        {'response': essay_id, 'pointsEarned': '3'}, format='json')
+        graded = self._events(course, quiz=quiz, user=admin, event_type='quiz_response_graded')
+        assert graded.exists()
+        assert graded.first().meta['student'] == student.email
+        assert graded.first().meta['pointsEarned'] == '3.00'
+
+        api_client.post(f"/quizAttempts/{start.data['id']}/reopenResponse/",
+                        {'response': essay_id}, format='json')
+        assert self._events(course, quiz=quiz, user=admin,
+                            event_type='quiz_response_grade_reopened').exists()
 
 
 # --------------------------------------------------------------------------- #

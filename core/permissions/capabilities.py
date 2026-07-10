@@ -28,6 +28,7 @@ class Capability(str, Enum):
     VIEW_AUDIT_LOG = "view_audit_log"
     CHANGE_INVITE_CODE = "change_invite_code"
     MANAGE_COURSE_API_KEYS = "manage_course_api_keys"
+    GRADE_QUIZ = "grade_quiz"
 
     # -- Assignment-level --
     EDIT_ASSIGNMENT = "edit_assignment"
@@ -89,6 +90,7 @@ CAPABILITY_DESCRIPTIONS: dict[Capability, str] = {
     Capability.VIEW_AUDIT_LOG: "View and export the course-level audit log of student and grader activity.",
     Capability.CHANGE_INVITE_CODE: "Regenerate the course join invite code.",
     Capability.MANAGE_COURSE_API_KEYS: "Create, revoke, and manage course-scoped API keys.",
+    Capability.GRADE_QUIZ: "View quiz attempts and manually grade essay/code responses (course admins and quiz graders).",
     # Assignment
     Capability.EDIT_ASSIGNMENT: "Modify assignment settings including name, deadlines, point values, and visibility.",
     Capability.COPY_ASSIGNMENT: "Duplicate an assignment's configuration, rubric, and test cases to another course.",
@@ -168,6 +170,7 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
     member = rc.is_course_member(course)
     grader = rc.is_grader(course)
     rubric_editor = rc.is_rubric_editor(course)
+    quiz_grader = rc.is_quiz_grader(course)
     super_grader = rc.is_super_grader(course)
     archived = course.archived
     org_staff = hasattr(user, 'profile') and user.profile.isOrgStaff
@@ -184,6 +187,7 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
         Capability.CREATE_ASSIGNMENT: admin and not archived,
         Capability.CLAIM_SUBMISSIONS: (grader or admin) and course.activateQueue and not archived,
         Capability.EDIT_RUBRIC: (admin or rubric_editor or (grader and course.allowGradersToEditRubric)) and not archived,
+        Capability.GRADE_QUIZ: admin or quiz_grader,
         Capability.MANAGE_REGRADES: admin or super_grader,
         Capability.VIEW_AUDIT_LOG: admin,
         Capability.CHANGE_INVITE_CODE: admin,

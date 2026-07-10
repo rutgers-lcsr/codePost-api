@@ -65,6 +65,10 @@ class RoleCache:
         from core.permissions.helpers import isRubricEditor
         return self._get_or_compute("isRubricEditor", isRubricEditor, course)
 
+    def is_quiz_grader(self, course: "Course") -> bool:
+        from core.permissions.helpers import isQuizGrader
+        return self._get_or_compute("isQuizGrader", isQuizGrader, course)
+
     def is_course_admin(self, course: "Course") -> bool:
         from core.permissions.helpers import isCourseAdmin
         return self._get_or_compute("isCourseAdmin", isCourseAdmin, course)

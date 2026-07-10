@@ -151,6 +151,11 @@ class Command(BaseCommand):
         make_quiz('Answers never shown', AUTO,
                   description='You get a score after submitting, but correct answers are **never** revealed.',
                   showCorrectAnswers='never')
+        make_quiz('Essay · manual grading', [es],
+                  description='A single **essay**, for staff manual-grading flows. Unlimited attempts; '
+                              'pass at 3 points once graded.',
+                  attemptsAllowed=0, passingScore=Decimal('3'), passingScoreUnit='points',
+                  showCorrectAnswers='after_submit')
         make_quiz('DRAFT — students should NOT see this', AUTO,
                   description='Unpublished draft. Only the instructor should see it.', published=False)
 
