@@ -12,7 +12,9 @@ from core.serializers.quiz import QuizSerializer, QuizQuestionSerializer
 from core.serializers.generatedQuiz import (
     GeneratedQuestionSetListSerializer, GeneratedQuestionSetSerializer,
 )
-from core.serializers.studentQuiz import StaffQuizAttemptSerializer
+from core.serializers.studentQuiz import (
+    StaffQuizAttemptSerializer, serialize_score, staff_reveal_context,
+)
 from core.services import quiz_grading
 from core.services.audit import record_audit_event
 from core.views.template import ListProtectedViewSet
@@ -20,6 +22,48 @@ from core.permissions.helpers import isCourseAdmin, isCourseStaff, isStudent
 from core.permissions.permissions import (
     QuizPermissions, canGradeQuiz, canReviewGeneratedQuestions,
 )
+
+
+# ---- Action guards: each returns an error Response, or None when allowed. ---- #
+
+def _forbidden(detail):
+  return Response({'detail': detail}, status=status.HTTP_403_FORBIDDEN)
+
+
+def _review_guard(user, quiz):
+  """Generated-question review actions: admins always, staff per the quiz flag."""
+  if canReviewGeneratedQuestions(user, quiz):
+    return None
+  return _forbidden('You do not have permission to review generated questions on this quiz.')
+
+
+def _grading_guard(user, quiz, detail):
+  if canGradeQuiz(user, quiz.course):
+    return None
+  return _forbidden(detail)
+
+
+def _admin_guard(user, quiz, detail):
+  if user.is_superuser or isCourseAdmin(user, quiz.course):
+    return None
+  return _forbidden(detail)
+
+
+def _generation_ready_guard(quiz):
+  """AI-generation actions need sections, an attached assignment, and the feature on."""
+  from core.services.ai_service import AIService
+  if not quiz.generatedSections.exists():
+    return Response({'error': 'This quiz has no AI-generated sections.'},
+                    status=status.HTTP_400_BAD_REQUEST)
+  if quiz.assignment_id is None:
+    return Response({'error': 'This quiz is not attached to an assignment.'},
+                    status=status.HTTP_400_BAD_REQUEST)
+  if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
+    return Response({'error': "AI quiz question generation is not enabled for this course. "
+                              "Enable the 'AI-Generated Quiz Questions' AI feature in the "
+                              "course's AI settings first."},
+                    status=status.HTTP_400_BAD_REQUEST)
+  return None
 
 
 class QuizViewSet(ListProtectedViewSet):
@@ -72,15 +116,16 @@ class QuizViewSet(ListProtectedViewSet):
   def attempts(self, request, pk=None):
     """Submitted attempts on this quiz, for grading — quiz graders and course admins only."""
     quiz = self.get_object()
-    if not canGradeQuiz(request.user, quiz.course):
-      return Response({'detail': 'Only quiz graders and course admins can view attempts for grading.'},
-                      status=status.HTTP_403_FORBIDDEN)
+    denied = _grading_guard(request.user, quiz,
+                            'Only quiz graders and course admins can view attempts for grading.')
+    if denied:
+      return denied
     attempts = quiz.attempts.filter(status='submitted').select_related(
         'student', 'quiz').prefetch_related('responses').order_by('student__email', 'attemptNumber')
     if request.query_params.get('needsGrading') in ('true', 'True', '1'):
       attempts = attempts.filter(needsManualGrading=True)
     return Response(StaffQuizAttemptSerializer(
-        attempts, many=True, context={'request': request, 'reveal': True, 'revealScore': True}).data)
+        attempts, many=True, context=staff_reveal_context(request)).data)
 
   @extend_schema(
       responses=inline_serializer('QuizResultRow', {
@@ -98,22 +143,23 @@ class QuizViewSet(ListProtectedViewSet):
     """Per-student official results (per this quiz's scoringPolicy) — quiz graders and
     course admins only. Score is null until the student has a fully graded attempt."""
     quiz = self.get_object()
-    if not canGradeQuiz(request.user, quiz.course):
-      return Response({'detail': 'Only quiz graders and course admins can view quiz results.'},
-                      status=status.HTTP_403_FORBIDDEN)
-    score_field = serializers.DecimalField(max_digits=8, decimal_places=2)
+    denied = _grading_guard(request.user, quiz,
+                            'Only quiz graders and course admins can view quiz results.')
+    if denied:
+      return denied
     by_student = {}
     for attempt in quiz.attempts.filter(status='submitted').select_related('student').order_by(
         'student__email', 'attemptNumber'):
       by_student.setdefault(attempt.student, []).append(attempt)
     rows = []
     for student, attempts in by_student.items():
-      official = quiz_grading.official_score(quiz, student)
+      # The attempts are already in hand — no per-student re-query.
+      official = quiz_grading.official_score(quiz, student, attempts=attempts)
       rows.append({
           'student': student.email,
           'attemptsUsed': len(attempts),
-          'score': score_field.to_representation(official[0]) if official else None,
-          'maxScore': score_field.to_representation(official[1]) if official else None,
+          'score': serialize_score(official[0]) if official else None,
+          'maxScore': serialize_score(official[1]) if official else None,
           'passed': quiz_grading.official_passed(quiz, student, official=official) if official else None,
           'needsGrading': any(a.needsManualGrading for a in attempts),
           'lastSubmittedAt': max((a.submittedAt for a in attempts if a.submittedAt), default=None),
@@ -129,9 +175,9 @@ class QuizViewSet(ListProtectedViewSet):
   @action(detail=True, methods=['POST'])
   def resetAttempts(self, request, pk=None):
     quiz = self.get_object()
-    if not (request.user.is_superuser or isCourseAdmin(request.user, quiz.course)):
-      return Response({'detail': 'Only course admins can reset attempts.'},
-                      status=status.HTTP_403_FORBIDDEN)
+    denied = _admin_guard(request.user, quiz, 'Only course admins can reset attempts.')
+    if denied:
+      return denied
     deleted, _ = quiz.attempts.all().delete()
     record_audit_event(course=quiz.course, event_type='quiz_attempts_reset', user=request.user,
                        quiz=quiz, assignment=quiz.assignment, meta={'title': quiz.title})
@@ -143,9 +189,9 @@ class QuizViewSet(ListProtectedViewSet):
     """Per-student generated question sets on this quiz, for review. Course admins
     always; other staff only when gradersCanReviewGenerated is on."""
     quiz = self.get_object()
-    if not canReviewGeneratedQuestions(request.user, quiz):
-      return Response({'detail': 'You do not have permission to review generated questions '
-                                 'on this quiz.'}, status=status.HTTP_403_FORBIDDEN)
+    denied = _review_guard(request.user, quiz)
+    if denied:
+      return denied
     sets = quiz.generatedSets.select_related('student', 'submission').prefetch_related(
         'questions').order_by('student__email')
     return Response(GeneratedQuestionSetListSerializer(
@@ -161,9 +207,9 @@ class QuizViewSet(ListProtectedViewSet):
   @action(detail=True, methods=['POST'])
   def publishAllGenerated(self, request, pk=None):
     quiz = self.get_object()
-    if not (request.user.is_superuser or isCourseAdmin(request.user, quiz.course)):
-      return Response({'detail': 'Only course admins can publish all generated sets.'},
-                      status=status.HTTP_403_FORBIDDEN)
+    denied = _admin_guard(request.user, quiz, 'Only course admins can publish all generated sets.')
+    if denied:
+      return denied
     approved = skipped = 0
     now = timezone.now()
     for gen_set in quiz.generatedSets.filter(status='ready').prefetch_related('questions'):
@@ -194,31 +240,17 @@ class QuizViewSet(ListProtectedViewSet):
   @action(detail=True, methods=['POST'])
   def generateForStudent(self, request, pk=None):
     from core.models import GeneratedQuestionSet, User
-    from core.services.ai_service import AIService
 
     quiz = self.get_object()
-    if not canReviewGeneratedQuestions(request.user, quiz):
-      return Response({'detail': 'You do not have permission to review generated questions '
-                                 'on this quiz.'}, status=status.HTTP_403_FORBIDDEN)
-    if not quiz.generatedSections.exists():
-      return Response({'error': 'This quiz has no AI-generated sections.'},
-                      status=status.HTTP_400_BAD_REQUEST)
-    if quiz.assignment_id is None:
-      return Response({'error': 'This quiz is not attached to an assignment.'},
-                      status=status.HTTP_400_BAD_REQUEST)
-    if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
-      return Response({'error': "AI quiz question generation is not enabled for this course. "
-                                "Enable the 'AI-Generated Quiz Questions' AI feature in the "
-                                "course's AI settings first."},
-                      status=status.HTTP_400_BAD_REQUEST)
+    denied = (_review_guard(request.user, quiz) or _generation_ready_guard(quiz))
+    if denied:
+      return denied
 
     student = User.objects.filter(email=request.data.get('student')).first()
     if student is None or not isStudent(student, quiz.course):
       return Response({'error': 'No student with that email is enrolled in this course.'},
                       status=status.HTTP_400_BAD_REQUEST)
-    submissions = student.student_submissions.filter(assignment=quiz.assignment)
-    submission = (submissions.exclude(dateUploaded=None).order_by('-dateUploaded').first()
-                  or submissions.order_by('-id').first())
+    submission = quiz_grading.latest_submission_for(student, quiz.assignment)
     if submission is None:
       return Response({'error': 'The student has no submission for this assignment to '
                                 'generate from.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -248,6 +280,30 @@ class QuizViewSet(ListProtectedViewSet):
                     status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(
+      responses=inline_serializer('BackfillPreviewResponse', {
+          'wouldGenerate': serializers.IntegerField(),
+          'missing': serializers.IntegerField(),
+      }),
+  )
+  @action(detail=True, methods=['GET'])
+  def backfillPreview(self, request, pk=None):
+    """How many students a backfill would touch — shown to the instructor before they
+    save a new AI section (``wouldGenerate``: submitters minus approved sets, i.e. the
+    section-create backfill) and on the review drawer's Generate-missing button
+    (``missing``: submitters without any set)."""
+    quiz = self.get_object()
+    denied = _review_guard(request.user, quiz)
+    if denied:
+      return denied
+    if quiz.assignment_id is None:
+      return Response({'wouldGenerate': 0, 'missing': 0})
+    from core.tasks import enqueue_personalized_backfill
+    return Response({
+        'wouldGenerate': enqueue_personalized_backfill(quiz, dry_run=True),
+        'missing': enqueue_personalized_backfill(quiz, dry_run=True, missing_only=True),
+    })
+
+  @extend_schema(
       request=None,
       responses=inline_serializer('GenerateMissingResponse', {'queued': serializers.IntegerField()}),
   )
@@ -256,23 +312,10 @@ class QuizViewSet(ListProtectedViewSet):
     """Queue question generation for every student who has a submission on the attached
     assignment but no question set yet — e.g. they submitted before the AI section
     existed, or the feature was off / generation failed at the time."""
-    from core.services.ai_service import AIService
-
     quiz = self.get_object()
-    if not canReviewGeneratedQuestions(request.user, quiz):
-      return Response({'detail': 'You do not have permission to review generated questions '
-                                 'on this quiz.'}, status=status.HTTP_403_FORBIDDEN)
-    if not quiz.generatedSections.exists():
-      return Response({'error': 'This quiz has no AI-generated sections.'},
-                      status=status.HTTP_400_BAD_REQUEST)
-    if quiz.assignment_id is None:
-      return Response({'error': 'This quiz is not attached to an assignment.'},
-                      status=status.HTTP_400_BAD_REQUEST)
-    if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
-      return Response({'error': "AI quiz question generation is not enabled for this course. "
-                                "Enable the 'AI-Generated Quiz Questions' AI feature in the "
-                                "course's AI settings first."},
-                      status=status.HTTP_400_BAD_REQUEST)
+    denied = (_review_guard(request.user, quiz) or _generation_ready_guard(quiz))
+    if denied:
+      return denied
 
     from core.tasks import enqueue_personalized_backfill
     queued = enqueue_personalized_backfill(quiz, requested_by_id=request.user.id,

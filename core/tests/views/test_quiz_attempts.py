@@ -31,71 +31,10 @@ def taking_setup(db):
     }
 
 
-# --------------------------------------------------------------------------- #
-# Question / quiz builders
-# --------------------------------------------------------------------------- #
-
-def _bank(course):
-    from core.models import QuestionBank
-    bank, _ = QuestionBank.objects.get_or_create(course=course, name='Bank')
-    return bank
-
-
-def _mc(course, bank, points='2'):
-    from core.models import Question
-    q = Question.objects.create(course=course, bank=bank, questionType='multiple_choice',
-                                text='2+2?', points=Decimal(points))
-    q.choices.create(text='3', isCorrect=False, sortKey=0)
-    q.choices.create(text='4', isCorrect=True, sortKey=1)
-    return q
-
-
-def _multi(course, bank, points='2'):
-    from core.models import Question
-    q = Question.objects.create(course=course, bank=bank, questionType='multiple_answers',
-                                text='Pick the even numbers', points=Decimal(points))
-    q.choices.create(text='2', isCorrect=True, sortKey=0)
-    q.choices.create(text='3', isCorrect=False, sortKey=1)
-    q.choices.create(text='4', isCorrect=True, sortKey=2)
-    return q
-
-
-def _short(course, bank, points='2'):
-    from core.models import Question
-    q = Question.objects.create(course=course, bank=bank, questionType='short_answer',
-                                text='Capital of France?', points=Decimal(points))
-    q.choices.create(text='Paris', isCorrect=True, sortKey=0)
-    return q
-
-
-def _numerical(course, bank, points='2'):
-    from core.models import Question
-    q = Question.objects.create(course=course, bank=bank, questionType='numerical',
-                                text='2+2?', points=Decimal(points))
-    q.choices.create(text='4', isCorrect=True, sortKey=0)
-    return q
-
-
-def _essay(course, bank, points='5'):
-    from core.models import Question
-    return Question.objects.create(course=course, bank=bank, questionType='essay',
-                                   text='Explain recursion.', points=Decimal(points))
-
-
-def _quiz(course, **kwargs):
-    from core.models import Quiz
-    opts = {'title': 'Quiz', 'isPublished': True}
-    opts.update(kwargs)
-    return Quiz.objects.create(course=course, **opts)
-
-
-def _add(quiz, question, sortKey=0, points=None):
-    from core.models import QuizQuestion
-    return QuizQuestion.objects.create(quiz=quiz, question=question, sortKey=sortKey, pointsOverride=points)
-
-
-def _dec(v):
-    return Decimal(str(v))
+# Shared question/quiz builders live in quiz_helpers (used by all three quiz test files).
+from core.tests.views.quiz_helpers import (  # noqa: E402
+    _add, _bank, _dec, _essay, _mc, _multi, _numerical, _quiz, _short,
+)
 
 
 # --------------------------------------------------------------------------- #

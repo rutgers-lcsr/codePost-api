@@ -38,15 +38,8 @@ def quiz_setup(db):
     }
 
 
-def _mc_question(course, text="What is 2+2?", bank=None):
-    """Create a saved multiple-choice Question (in a bank) with two choices."""
-    from core.models import Question, QuestionBank
-    if bank is None:
-        bank, _ = QuestionBank.objects.get_or_create(course=course, name='Default Bank')
-    q = Question.objects.create(course=course, bank=bank, questionType='multiple_choice', text=text)
-    q.choices.create(text="3", isCorrect=False, sortKey=0)
-    q.choices.create(text="4", isCorrect=True, sortKey=1)
-    return q
+# Shared question/quiz builders live in quiz_helpers (used by all three quiz test files).
+from core.tests.views.quiz_helpers import _enable_ai, _mc_question  # noqa: E402
 
 
 def _canvas_zip_bytes():
@@ -513,10 +506,7 @@ def _mock_ai(monkeypatch, json_text):
         return GenerationResult(text=json_text, success=True, input_tokens=10, output_tokens=20)
 
     monkeypatch.setattr('core.services.ai_service.AIService.generate_quiz_questions', mock_generate)
-    monkeypatch.setattr('core.services.ai_service.AIService.is_configured', property(lambda self: True))
-    monkeypatch.setattr('core.services.ai_service.AIService.is_globally_disabled', property(lambda self: False))
-    monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled', lambda self, key: True)
-    monkeypatch.setattr('core.services.ai_service.AIService.record_usage', lambda *a, **kw: None)
+    _enable_ai(monkeypatch)
 
 
 class TestAISuggestions:

@@ -11,6 +11,7 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from core.models import QuizResponse
@@ -291,18 +292,21 @@ def _attempt_metric(quiz, attempt):
   return (attempt.score / attempt.maxScore) if attempt.maxScore else Decimal('0')
 
 
-def official_score(quiz, student):
+def official_score(quiz, student, attempts=None):
   """The student's official (score, maxScore) per quiz.scoringPolicy and multiAttemptScoreMethod,
   or None if no fully graded attempt. Attempts still awaiting manual grading are excluded — their
-  stored score is only the auto-graded portion.
+  stored score is only the auto-graded portion. Pass ``attempts`` (the student's already-loaded
+  attempts) to skip the per-student query when a caller iterates a whole quiz.
 
   'highest'/'latest' return a real attempt's (score, maxScore), so the denominator always
   matches. 'average' combines attempts per the method — 'pooled' pools points (Σearned/Σpossible),
   'by_unit' averages by the passing unit (percentage, or points) — never pairing one attempt's
   score with another's max.
   """
-  attempts = [a for a in quiz.attempts.filter(student=student, status='submitted')
-              if a.score is not None and not a.needsManualGrading]
+  if attempts is None:
+    attempts = quiz.attempts.filter(student=student, status='submitted')
+  attempts = [a for a in attempts
+              if a.status == 'submitted' and a.score is not None and not a.needsManualGrading]
   if not attempts:
     return None
   policy = quiz.scoringPolicy
@@ -335,6 +339,16 @@ def official_passed(quiz, student, official=None):
   if official is None:
     return None
   return _passed_for(quiz, official[0], official[1])
+
+
+# "Newest submission wins": uploaded ones first (most recent), never-uploaded ones by id.
+LATEST_SUBMISSION_ORDERING = (F('dateUploaded').desc(nulls_last=True), '-id')
+
+
+def latest_submission_for(student, assignment):
+  """The student's newest submission on the assignment (the one AI generation reads)."""
+  return (assignment.submissions.filter(students=student)
+          .order_by(*LATEST_SUBMISSION_ORDERING).first())
 
 
 # --------------------------------------------------------------------------- #

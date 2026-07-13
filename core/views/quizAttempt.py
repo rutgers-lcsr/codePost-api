@@ -23,6 +23,7 @@ from core.serializers.studentQuiz import (
     StudentQuizAttemptSerializer,
     StudentQuizResponseSerializer,
     StudentQuizSerializer,
+    staff_reveal_context,
 )
 from core.services import quiz_grading
 from core.services.audit import record_audit_event
@@ -93,7 +94,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     if request.user != attempt.student and (
         request.user.is_superuser or isCourseStaff(request.user, attempt.quiz.course)):
       return Response(StaffQuizAttemptSerializer(
-          attempt, context={'request': request, 'reveal': True, 'revealScore': True}).data)
+          attempt, context=staff_reveal_context(request)).data)
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data)
 
   @extend_schema(
@@ -216,6 +217,18 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       _record_attempt_event(attempt, 'quiz_attempt_submitted')
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data)
 
+  def _manual_grading_guard(self, attempt, response):
+    """Shared preconditions for grading/reopening a response, or None when allowed."""
+    if attempt.quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+    if attempt.status != 'submitted':
+      return Response({'detail': 'Only submitted attempts can be graded.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if (response.questionSnapshot or {}).get('type') not in quiz_grading.MANUAL_TYPES:
+      return Response({'detail': 'Only essay/code responses are graded manually.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    return None
+
   @extend_schema(
       request=inline_serializer('GradeQuizResponseRequest', {
           'response': serializers.IntegerField(),
@@ -229,15 +242,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     """Manually grade one essay/code response (quiz graders and course admins only —
     gated by QuizAttemptPermissions). Recomputes the attempt's score and pass state."""
     attempt = self.get_object()
-    if attempt.quiz.course.archived:
-      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
-    if attempt.status != 'submitted':
-      return Response({'detail': 'Only submitted attempts can be graded.'},
-                      status=status.HTTP_400_BAD_REQUEST)
     response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
-    if (response.questionSnapshot or {}).get('type') not in quiz_grading.MANUAL_TYPES:
-      return Response({'detail': 'Only essay/code responses are graded manually.'},
-                      status=status.HTTP_400_BAD_REQUEST)
+    denied = self._manual_grading_guard(attempt, response)
+    if denied:
+      return denied
     points = quiz_grading._parse_decimal(request.data.get('pointsEarned'))
     if points is None:
       return Response({'detail': 'pointsEarned must be a number.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -248,7 +256,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     response.refresh_from_db()
     _record_grading_event(attempt, response, 'quiz_response_graded', request.user)
     return Response(StaffQuizAttemptSerializer(
-        attempt, context={'request': request, 'reveal': True, 'revealScore': True}).data)
+        attempt, context=staff_reveal_context(request)).data)
 
   @extend_schema(
       request=inline_serializer('ReopenQuizResponseRequest', {
@@ -261,15 +269,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     """Send a manually graded essay/code response back to the grading queue (undo the
     grade). The feedback text is kept as a draft; the attempt's totals are refreshed."""
     attempt = self.get_object()
-    if attempt.quiz.course.archived:
-      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
-    if attempt.status != 'submitted':
-      return Response({'detail': 'Only submitted attempts can be graded.'},
-                      status=status.HTTP_400_BAD_REQUEST)
     response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
-    if (response.questionSnapshot or {}).get('type') not in quiz_grading.MANUAL_TYPES:
-      return Response({'detail': 'Only essay/code responses are graded manually.'},
-                      status=status.HTTP_400_BAD_REQUEST)
+    denied = self._manual_grading_guard(attempt, response)
+    if denied:
+      return denied
     if response.needsManualGrading:
       return Response({'detail': 'This response has not been graded yet.'},
                       status=status.HTTP_400_BAD_REQUEST)
@@ -279,7 +282,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     response.refresh_from_db()
     _record_grading_event(attempt, response, 'quiz_response_grade_reopened', request.user)
     return Response(StaffQuizAttemptSerializer(
-        attempt, context={'request': request, 'reveal': True, 'revealScore': True}).data)
+        attempt, context=staff_reveal_context(request)).data)
 
   @extend_schema(
       parameters=[OpenApiParameter(name='quiz', type=int, location=OpenApiParameter.QUERY, required=True)],

@@ -491,10 +491,7 @@ def generate_personalized_quiz_sets(
     superseded by a newer run (resubmission while generating) discards its results.
     """
     import uuid
-    from asgiref.sync import async_to_sync
-    from django.db import transaction
-    from django.utils import timezone
-    from core.models import GeneratedQuestionSet, GeneratedQuizQuestion, Submission, User
+    from core.models import Submission, User
 
     submission = Submission.objects.filter(id=submission_id).select_related(
         'assignment', 'assignment__course', 'assignment__course__organization').first()
@@ -536,121 +533,150 @@ def generate_personalized_quiz_sets(
     user = User.objects.filter(id=requested_by_id).first() if requested_by_id else None
     service.set_request_context(user=user, request_type='personalized_quiz_generation')
 
-    CHOICE_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
     for quiz in quizzes:
         batch = uuid.uuid4()
-
-        # Claim: one set per student in the submission, stamped with this run's batch.
-        claimed_ids = []
-        with transaction.atomic():
-            for student in students:
-                gen_set, _ = GeneratedQuestionSet.objects.get_or_create(quiz=quiz, student=student)
-                if gen_set.status == 'approved' and not force:
-                    continue
-                gen_set.status = 'generating'
-                gen_set.submission = submission
-                gen_set.generationBatch = batch
-                gen_set.errorMessage = ''
-                gen_set.approvedBy = None
-                gen_set.approvedAt = None
-                gen_set.save(update_fields=['status', 'submission', 'generationBatch',
-                                            'errorMessage', 'approvedBy', 'approvedAt', 'modified'])
-                claimed_ids.append(gen_set.id)
+        claimed_ids = _claim_generation_sets(quiz, students, submission, force, batch)
         if not claimed_ids:
             continue
-
-        # One AI call per section; any failure fails the whole set (no partial sets).
-        question_rows: list[tuple] = []  # (section, normalized question dict)
-        error = ''
-        variant_id = None
-        input_tokens = output_tokens = 0
-        for section in quiz.generatedSections.all():
-            try:
-                result = async_to_sync(service.generate_personalized_quiz_questions)(section, submission)
-            except Exception as e:
-                logger.error(f"[PersonalQuizGen] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
-                error = f"Generation failed: {e}"
-                break
-            service.record_usage(result, user=user, request_type='personalized_quiz_generation')
-            variant_id = result.variant_id or variant_id
-            input_tokens += result.input_tokens
-            output_tokens += result.output_tokens
-            if not result.success or not result.text:
-                error = result.error or 'Empty model response.'
-                break
-            try:
-                parsed = _parse_json_questions(result.text)
-            except Exception as e:
-                logger.error(f"[PersonalQuizGen] Could not parse model output as JSON: {e}", exc_info=True)
-                error = 'Could not parse the model output.'
-                break
-            section_rows = []
-            for q in parsed:
-                if not isinstance(q, dict) or not q.get('text'):
-                    continue
-                qtype = q.get('type', 'multiple_choice')
-                choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
-                if qtype in CHOICE_TYPES and not choices:
-                    logger.warning(
-                        f"[PersonalQuizGen] Skipping a '{qtype}' question with no choices "
-                        f"(quiz {quiz.id}). Raw output (truncated): {(result.text or '')[:1500]}")
-                    continue
-                language = q.get('language')
-                if qtype == 'code' and not language:
-                    language = env_language or None
-                section_rows.append((section, {
-                    'questionType': qtype,
-                    'text': q.get('text', ''),
-                    'description': q.get('description', '') or '',
-                    'choicesData': choices,
-                    'language': language,
-                    'starterCode': q.get('starter_code'),
-                }))
-            if not section_rows:
-                error = 'The model returned no usable questions.'
-                break
-            question_rows.extend(section_rows[:section.numQuestions])
-
-        metadata = {
-            'provider': service.provider,
-            'model': service.model,
-            'input_tokens': input_tokens,
-            'output_tokens': output_tokens,
-        }
-
-        # Write results — but only to sets our batch still owns (a resubmission that
-        # started a newer run wins; our stale results are discarded).
-        auto_publish = quiz.autoPublishGenerated
-        with transaction.atomic():
-            gen_sets = list(GeneratedQuestionSet.objects.select_for_update().filter(
-                id__in=claimed_ids, generationBatch=batch))
-            for gen_set in gen_sets:
-                gen_set.questions.all().delete()
-                if error:
-                    gen_set.status = 'failed'
-                    gen_set.errorMessage = error
-                    gen_set.generationMetadata = metadata
-                    gen_set.save(update_fields=['status', 'errorMessage', 'generationMetadata', 'modified'])
-                    continue
-                GeneratedQuizQuestion.objects.bulk_create([
-                    GeneratedQuizQuestion(
-                        set=gen_set, section=section, sortKey=position,
-                        points=section.pointsPerQuestion, **fields)
-                    for position, (section, fields) in enumerate(question_rows)
-                ])
-                gen_set.status = 'approved' if auto_publish else 'ready'
-                gen_set.approvedAt = timezone.now() if auto_publish else None
-                gen_set.generationMetadata = metadata
-                gen_set.promptVariant_id = variant_id
-                gen_set.save(update_fields=['status', 'approvedAt', 'generationMetadata',
-                                            'promptVariant', 'modified'])
+        question_rows, error, variant_id, metadata = _generate_quiz_question_rows(
+            service, quiz, submission, env_language, user)
+        _write_generation_results(quiz, claimed_ids, batch, question_rows, error,
+                                  variant_id, metadata)
         logger.info(
             f"[PersonalQuizGen] Quiz {quiz.id}: {'failed' if error else 'generated'} "
             f"{len(question_rows)} questions for {len(claimed_ids)} student(s) (batch {batch})")
 
 
+_CHOICE_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
+
+
+def _claim_generation_sets(quiz, students, submission, force, batch):
+    """Claim one set per student, stamped with this run's batch UUID. Approved sets are
+    skipped unless ``force``. Returns the claimed set ids."""
+    from django.db import transaction
+    from core.models import GeneratedQuestionSet
+
+    claimed_ids = []
+    with transaction.atomic():
+        for student in students:
+            gen_set, _ = GeneratedQuestionSet.objects.get_or_create(quiz=quiz, student=student)
+            if gen_set.status == 'approved' and not force:
+                continue
+            gen_set.status = 'generating'
+            gen_set.submission = submission
+            gen_set.generationBatch = batch
+            gen_set.errorMessage = ''
+            gen_set.approvedBy = None
+            gen_set.approvedAt = None
+            gen_set.save(update_fields=['status', 'submission', 'generationBatch',
+                                        'errorMessage', 'approvedBy', 'approvedAt', 'modified'])
+            claimed_ids.append(gen_set.id)
+    return claimed_ids
+
+
+def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
+    """Run one AI call per section and normalize the output into question rows.
+
+    Returns ``(question_rows, error, variant_id, metadata)`` — any failure fails the
+    whole set (no partial sets), reported through ``error``."""
+    from asgiref.sync import async_to_sync
+
+    question_rows: list[tuple] = []  # (section, normalized question dict)
+    error = ''
+    variant_id = None
+    input_tokens = output_tokens = 0
+    for section in quiz.generatedSections.all():
+        try:
+            result = async_to_sync(service.generate_personalized_quiz_questions)(section, submission)
+        except Exception as e:
+            logger.error(f"[PersonalQuizGen] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
+            error = f"Generation failed: {e}"
+            break
+        service.record_usage(result, user=user, request_type='personalized_quiz_generation')
+        variant_id = result.variant_id or variant_id
+        input_tokens += result.input_tokens
+        output_tokens += result.output_tokens
+        if not result.success or not result.text:
+            error = result.error or 'Empty model response.'
+            break
+        try:
+            parsed = _parse_json_questions(result.text)
+        except Exception as e:
+            logger.error(f"[PersonalQuizGen] Could not parse model output as JSON: {e}", exc_info=True)
+            error = 'Could not parse the model output.'
+            break
+        section_rows = []
+        for q in parsed:
+            if not isinstance(q, dict) or not q.get('text'):
+                continue
+            qtype = q.get('type', 'multiple_choice')
+            choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
+            if qtype in _CHOICE_TYPES and not choices:
+                logger.warning(
+                    f"[PersonalQuizGen] Skipping a '{qtype}' question with no choices "
+                    f"(quiz {quiz.id}). Raw output (truncated): {(result.text or '')[:1500]}")
+                continue
+            language = q.get('language')
+            if qtype == 'code' and not language:
+                language = env_language or None
+            section_rows.append((section, {
+                'questionType': qtype,
+                'text': q.get('text', ''),
+                'description': q.get('description', '') or '',
+                'choicesData': choices,
+                'language': language,
+                'starterCode': q.get('starter_code'),
+            }))
+        if not section_rows:
+            error = 'The model returned no usable questions.'
+            break
+        question_rows.extend(section_rows[:section.numQuestions])
+
+    metadata = {
+        'provider': service.provider,
+        'model': service.model,
+        'input_tokens': input_tokens,
+        'output_tokens': output_tokens,
+    }
+    return question_rows, error, variant_id, metadata
+
+
+def _write_generation_results(quiz, claimed_ids, batch, question_rows, error,
+                              variant_id, metadata):
+    """Write questions/failure to the claimed sets — but only those our batch still owns
+    (a resubmission that started a newer run wins; our stale results are discarded)."""
+    from django.db import transaction
+    from django.utils import timezone
+    from core.models import GeneratedQuestionSet, GeneratedQuizQuestion
+
+    auto_publish = quiz.autoPublishGenerated
+    with transaction.atomic():
+        gen_sets = list(GeneratedQuestionSet.objects.select_for_update().filter(
+            id__in=claimed_ids, generationBatch=batch))
+        for gen_set in gen_sets:
+            gen_set.questions.all().delete()
+            if error:
+                gen_set.status = 'failed'
+                gen_set.errorMessage = error
+                gen_set.generationMetadata = metadata
+                gen_set.save(update_fields=['status', 'errorMessage', 'generationMetadata', 'modified'])
+                continue
+            GeneratedQuizQuestion.objects.bulk_create([
+                GeneratedQuizQuestion(
+                    set=gen_set, section=section, sortKey=position,
+                    points=section.pointsPerQuestion, **fields)
+                for position, (section, fields) in enumerate(question_rows)
+            ])
+            gen_set.status = 'approved' if auto_publish else 'ready'
+            gen_set.approvedAt = timezone.now() if auto_publish else None
+            gen_set.generationMetadata = metadata
+            gen_set.promptVariant_id = variant_id
+            gen_set.save(update_fields=['status', 'approvedAt', 'generationMetadata',
+                                        'promptVariant', 'modified'])
+
+
 def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
-                                  missing_only: bool = False) -> int:
+                                  missing_only: bool = False, dry_run: bool = False) -> int:
     """Enqueue per-student question generation for everyone who already submitted to the
     quiz's attached assignment. Returns the number of students queued.
 
@@ -659,43 +685,49 @@ def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
     ``missing_only`` the run is restricted to students without a set (the review drawer's
     "Generate missing"); otherwise non-approved sets regenerate too, since a new section
     changes what every set should contain. Approved sets are never touched either way
-    (the task's regenerate-unless-approved rule).
+    (the task's regenerate-unless-approved rule). ``dry_run`` only counts — it lets the
+    UI warn the instructor how many students a new section would generate for.
 
     Cheap to call inline (DB reads + .delay()s); the actual generation runs in the
     per-submission tasks. Group submissions are enqueued once (one shared AI call per
     section) unless only some members need generating.
     """
-    from django.db.models import F
     from core.models import GeneratedQuestionSet
+    from core.services.quiz_grading import LATEST_SUBMISSION_ORDERING
 
     assignment = quiz.assignment
-    if assignment is None or not quiz.generatedSections.exists():
+    if assignment is None:
         return 0
-    skip_ids = (set(GeneratedQuestionSet.objects.filter(quiz=quiz)
-                    .values_list('student_id', flat=True))
-                if missing_only else set())
+    if not dry_run and not quiz.generatedSections.exists():
+        return 0
+    approved_or_all = GeneratedQuestionSet.objects.filter(quiz=quiz)
+    if not missing_only:
+        # Non-approved sets regenerate; only approved ones are protected.
+        approved_or_all = approved_or_all.filter(status='approved')
+    skip_ids = set(approved_or_all.values_list('student_id', flat=True))
 
-    # Newest submission wins per student (mirrors generateForStudent's selection).
+    # Newest submission wins per student (same rule as latest_submission_for).
     covered = set(skip_ids)
     queued = 0
     submissions = assignment.submissions.prefetch_related('students').order_by(
-        F('dateUploaded').desc(nulls_last=True), '-id')
+        *LATEST_SUBMISSION_ORDERING)
     for submission in submissions:
         members = list(submission.students.all())
         targets = [s for s in members if s.id not in covered]
         if not targets:
             continue
         covered.update(s.id for s in targets)
-        if len(targets) == len(members):
-            generate_personalized_quiz_sets.delay(
-                submission.id, quiz_id=quiz.id, requested_by_id=requested_by_id)
-        else:
-            # Partial group (e.g. a partner already has a set): scope per student so the
-            # covered member's set isn't touched.
-            for s in targets:
+        if not dry_run:
+            if len(targets) == len(members):
                 generate_personalized_quiz_sets.delay(
-                    submission.id, quiz_id=quiz.id, requested_by_id=requested_by_id,
-                    student_id=s.id)
+                    submission.id, quiz_id=quiz.id, requested_by_id=requested_by_id)
+            else:
+                # Partial group (e.g. a partner already has a set): scope per student so
+                # the covered member's set isn't touched.
+                for s in targets:
+                    generate_personalized_quiz_sets.delay(
+                        submission.id, quiz_id=quiz.id, requested_by_id=requested_by_id,
+                        student_id=s.id)
         queued += len(targets)
     return queued
 

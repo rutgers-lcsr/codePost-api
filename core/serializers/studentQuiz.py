@@ -18,6 +18,16 @@ from core.services import quiz_grading
 _SCORE_FIELD = serializers.DecimalField(max_digits=8, decimal_places=2)
 
 
+def serialize_score(value):
+  """Render a score the way the attempt serializer's Decimal model fields do."""
+  return _SCORE_FIELD.to_representation(value) if value is not None else None
+
+
+def staff_reveal_context(request):
+  """Serializer context for staff grading views: full answer + score reveal."""
+  return {'request': request, 'reveal': True, 'revealScore': True}
+
+
 class QuizAvailabilitySerializer(serializers.Serializer):
   """Shape of StudentQuiz.availability (documents the SerializerMethodField for the client)."""
   isOpen = serializers.BooleanField()
@@ -221,12 +231,12 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   def get_myScore(self, obj):
     """The caller's official score per scoringPolicy; null until a fully graded attempt exists."""
     official = self._official_score(obj)
-    return _SCORE_FIELD.to_representation(official[0]) if official is not None else None
+    return serialize_score(official[0]) if official is not None else None
 
   @extend_schema_field(serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True))
   def get_myMaxScore(self, obj):
     official = self._official_score(obj)
-    return _SCORE_FIELD.to_representation(official[1]) if official is not None else None
+    return serialize_score(official[1]) if official is not None else None
 
   @extend_schema_field(serializers.BooleanField(allow_null=True))
   def get_myPassed(self, obj):

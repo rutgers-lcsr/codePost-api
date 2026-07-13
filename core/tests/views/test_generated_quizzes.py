@@ -13,6 +13,9 @@ from django.db.models.signals import post_save
 from django.utils import timezone
 from rest_framework import status
 
+# Shared across the three quiz test files.
+from core.tests.views.quiz_helpers import _enable_ai, _feature_on
+
 
 QUESTIONS_JSON = json.dumps([
     {'type': 'multiple_choice', 'text': 'What does your helper return?', 'points': 2,
@@ -68,10 +71,7 @@ def _mock_ai(monkeypatch, json_text=QUESTIONS_JSON, success=True, side_effect=No
 
     monkeypatch.setattr(
         'core.services.ai_service.AIService.generate_personalized_quiz_questions', mock_generate)
-    monkeypatch.setattr('core.services.ai_service.AIService.is_configured', property(lambda self: True))
-    monkeypatch.setattr('core.services.ai_service.AIService.is_globally_disabled', property(lambda self: False))
-    monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled', lambda self, key: True)
-    monkeypatch.setattr('core.services.ai_service.AIService.record_usage', lambda *a, **kw: None)
+    _enable_ai(monkeypatch)
 
 
 def _run_task(submission, **kwargs):
@@ -102,11 +102,7 @@ def _make_set(quiz, student, submission=None, status='ready', questions=True):
 # Section authoring
 # --------------------------------------------------------------------------- #
 
-def _feature_on(monkeypatch):
-    """Creating a section requires the personalized_quiz_generation feature; tests run
-    without an AI provider, so enable it explicitly where creation should succeed."""
-    monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
-                        lambda self, key: True)
+# _feature_on lives in quiz_helpers (shared with the other quiz test files).
 
 
 class TestSectionAuthoring:
@@ -726,3 +722,34 @@ class TestBackfill:
         off = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {}, format='json')
         assert off.status_code == status.HTTP_400_BAD_REQUEST
         assert 'not enabled' in str(off.data)
+
+    def test_backfill_preview_counts_without_enqueueing(self, api_client, gen_setup):
+        from core.models import GeneratedQuestionSet
+        from core.tests.factories import SubmissionFactory
+        # Two submitters; the first already has an APPROVED set.
+        with factory.django.mute_signals(post_save):
+            sub2 = SubmissionFactory(assignment=gen_setup['assignment'])
+            sub2.students.add(gen_setup['students'][1])
+            sub2.dateUploaded = timezone.now()
+            sub2.save()
+        _make_set(gen_setup['quiz'], gen_setup['students'][0],
+                  submission=gen_setup['submission'], status='approved')
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data == {'wouldGenerate': 1, 'missing': 1}
+        # Pure preview: nothing was queued or created.
+        assert GeneratedQuestionSet.objects.filter(quiz=gen_setup['quiz']).count() == 1
+
+        # A non-approved (ready) set still counts for wouldGenerate (a new section would
+        # refresh it) but no longer for missing.
+        _make_set(gen_setup['quiz'], gen_setup['students'][1], submission=sub2,
+                  status='ready', questions=False)
+        resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/")
+        assert resp.data == {'wouldGenerate': 1, 'missing': 0}
+
+        # Graders without the review flag can't peek.
+        api_client.force_authenticate(user=gen_setup['grader'])
+        assert api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/").status_code \
+            == status.HTTP_403_FORBIDDEN
