@@ -1,4 +1,4 @@
-# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 """Tests for per-student AI-generated quiz questions: section authoring (+ prompt
 validation), the submission-triggered generation task (claiming, regenerate-unless-
 approved, stale-batch discard, auto-publish), the review/approve/publish API and its

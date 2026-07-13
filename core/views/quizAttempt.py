@@ -1,4 +1,4 @@
-# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 """Student-facing quiz taking: start/resume an attempt, autosave answers, submit + auto-grade.
 
 Kept separate from the staff-only QuizViewSet. Only the mixins students need are exposed

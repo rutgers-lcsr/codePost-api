@@ -12,7 +12,7 @@ Django 6 + DRF REST API serving the codePost platform. The `core/` app holds all
 
 ## Code Style
 
-- Every file must start with: `# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.`
+- Every file must start with: `# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.`
 - camelCase for serializer field names and API responses (uses `djangorestframework-camel-case`); snake_case for Python internals.
 - Type checking: Pyright `basic` mode. Migrations, `.venv`, and `node_modules` are excluded.
 - Use `@extend_schema` / `@extend_schema_field` from `drf_spectacular` for all new endpoints.

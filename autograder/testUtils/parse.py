@@ -1,4 +1,4 @@
-# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 """
 DEPRECATED: This module contains legacy parsing logic for autograder results.
 Modern testing infrastructure uses TestService and Executor classes which handle parsing directly.

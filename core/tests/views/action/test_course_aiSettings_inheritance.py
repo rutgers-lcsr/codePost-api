@@ -1,4 +1,4 @@
-# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 """
 Integration tests for the course AI settings inheritance behavior:
 - Course inherits org AI config when ai_use_own_settings=False and org policy allows it

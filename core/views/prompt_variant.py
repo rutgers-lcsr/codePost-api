@@ -1,4 +1,4 @@
-# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rurtgers Non-Commercial Licensed, included with this software.
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from django.core.cache import cache as django_cache
 from django.db.models import Count, Case, When, IntegerField
 from drf_spectacular.utils import extend_schema, OpenApiParameter

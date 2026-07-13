@@ -1,4 +1,4 @@
-# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial Licensed, included with this software.
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 """Seed / reset the "QT · " test quizzes on a course for local quiz testing.
 
 Everything created is prefixed ``QT · `` and a run first deletes the previous ``QT · ``
