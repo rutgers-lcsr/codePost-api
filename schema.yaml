@@ -9720,6 +9720,35 @@ paths:
                 items:
                   $ref: '#/components/schemas/StaffQuizAttempt'
           description: ''
+  /quizzes/{id}/backfillPreview/:
+    get:
+      operationId: quizzes_backfillPreviewRetrieve
+      description: |-
+        How many students a backfill would touch — shown to the instructor before they
+        save a new AI section (``wouldGenerate``: submitters minus approved sets, i.e. the
+        section-create backfill) and on the review drawer's Generate-missing button
+        (``missing``: submitters without any set).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackfillPreviewResponse'
+          description: ''
   /quizzes/{id}/generateForStudent/:
     post:
       operationId: quizzes_generateForStudentCreate
@@ -16333,6 +16362,16 @@ components:
       required:
       - status
       - task_id
+    BackfillPreviewResponse:
+      type: object
+      properties:
+        wouldGenerate:
+          type: integer
+        missing:
+          type: integer
+      required:
+      - missing
+      - wouldGenerate
     BankCopyRequest:
       type: object
       properties:
