@@ -5772,6 +5772,58 @@ paths:
       responses:
         '204':
           description: No response body
+  /logout/:
+    post:
+      operationId: logout_create
+      description: |-
+        Revoke a single session by blacklisting its refresh token.
+
+        Idempotent: an already-blacklisted, expired, or malformed token still returns
+        200 so the client can proceed to clear local state and redirect to login.
+      tags:
+      - logout
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+          description: ''
+  /logout-all/:
+    post:
+      operationId: logoutAll_create
+      description: |-
+        Revoke every session for the authenticated user ("log out everywhere") by
+        blacklisting all of their outstanding refresh tokens.
+      tags:
+      - logout-all
+      security:
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+          description: ''
   /logs/log/:
     post:
       operationId: logs_logCreate
@@ -10008,7 +10060,12 @@ paths:
   /registration/current_user/:
     get:
       operationId: registration_currentUserRetrieve
-      description: Determine the current user by their token, and return their data
+      description: |-
+        Determine the current user by their token, and return their data.
+
+        Returns a fresh access token (as ``token``) plus a ``refresh`` token. This is
+        also how an SSO session (which only receives an access token via the redirect
+        URL) obtains its refresh token, without ever putting the refresh token in a URL.
       tags:
       - registration
       security:
@@ -14564,8 +14621,8 @@ paths:
     post:
       operationId: tokenAuth_create
       description: |-
-        Takes a set of user credentials and returns a sliding JSON web token to
-        prove the authentication of those credentials.
+        Takes a set of user credentials and returns an access and refresh JSON web
+        token pair to prove the authentication of those credentials.
       tags:
       - token-auth
       requestBody:
@@ -14591,21 +14648,21 @@ paths:
     post:
       operationId: tokenRefresh_create
       description: |-
-        Takes a sliding JSON web token and returns a new, refreshed version if the
-        token's refresh period has not expired.
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
       tags:
       - token-refresh
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TokenRefreshSliding'
+              $ref: '#/components/schemas/TokenRefresh'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TokenRefreshSliding'
+              $ref: '#/components/schemas/TokenRefresh'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TokenRefreshSliding'
+              $ref: '#/components/schemas/TokenRefresh'
         required: true
       security:
       - tokenAuth: []
@@ -14616,7 +14673,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenRefreshSliding'
+                $ref: '#/components/schemas/TokenRefresh'
           description: ''
   /token-verify/:
     post:
@@ -18450,6 +18507,12 @@ components:
           default: false
     JWT:
       type: object
+      description: |-
+        Password-login serializer issuing an access + refresh pair.
+
+        Extends the standard pair serializer to attach codePost's custom claims and to
+        embed the serialized user (and a backward-compatible ``token`` alias for the
+        access token) in the response.
       properties:
         username:
           type: string
@@ -18629,6 +18692,21 @@ components:
           type: boolean
       required:
       - success
+    LogoutRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          description: The refresh token to blacklist.
+      required:
+      - refresh
+    LogoutResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
     MainOrgSSOConfig:
       type: object
       properties:
@@ -24748,13 +24826,17 @@ components:
           description: Error message if test failed
       required:
       - success
-    TokenRefreshSliding:
+    TokenRefresh:
       type: object
       properties:
-        token:
+        access:
+          type: string
+          readOnly: true
+        refresh:
           type: string
       required:
-      - token
+      - access
+      - refresh
     TokenVerify:
       type: object
       properties:

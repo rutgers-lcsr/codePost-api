@@ -17,8 +17,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, re_path, include
 from rest_framework import routers
-from rest_framework_simplejwt.views import TokenRefreshSlidingView, TokenVerifyView
-from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token, NON_COURSE_KEY_AUTH
+from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
+from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token, logout, logout_all, NON_COURSE_KEY_AUTH
 
 from rest_framework.viewsets import ViewSet
 from core.views.user import UserViewSet
@@ -148,8 +148,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     re_path('^api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('token-auth/', obtain_jwt_token),
-    path('token-refresh/', TokenRefreshSlidingView.as_view(authentication_classes=NON_COURSE_KEY_AUTH), name='token_refresh'),
+    path('token-refresh/', TokenRefreshView.as_view(authentication_classes=NON_COURSE_KEY_AUTH), name='token_refresh'),
     path('token-verify/', TokenVerifyView.as_view(authentication_classes=NON_COURSE_KEY_AUTH), name='token_verify'),
+    path('logout/', logout, name='logout'),
+    path('logout-all/', logout_all, name='logout_all'),
     path('ott/generate/', generate_one_time_token, name='generate_one_time_token'),
     path('ott/validate/', validate_one_time_token, name='validate_one_time_token_by_query'),
     path('ott/', get_jwt_ott, name='get_jwt_ott'),

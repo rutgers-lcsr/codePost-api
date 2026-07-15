@@ -3,7 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.contrib.auth.models import User
 from core.serializers.user import UserSerializer
-from core.views.auth import JWTSerializer
+from core.views.auth import tokens_for_user
 from django.conf import settings
 from rest_framework import status
 
@@ -74,14 +74,15 @@ class LoginAsRoleView(APIView):
         if not user:
              return Response({"error": f"No user found for role '{role}'. ensure database is populated."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Generate Token and return same packet as login
-        token = JWTSerializer.get_token(user)
-        
         # We need to set request.user temporarily for serializer context to work properly if it checks permissions
         request.user = user
-        
+
+        # Generate an access + refresh pair and return the same packet as login
+        access, refresh = tokens_for_user(user)
+
         serializer = UserSerializer(user, context={'request': request})
         data = serializer.data
-        data['token'] = str(token)
+        data['token'] = access
+        data['refresh'] = refresh
 
         return Response(data)

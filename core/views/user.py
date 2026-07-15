@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 import time
 
-from core.views.auth import JWTSerializer
+from core.views.auth import tokens_for_user
 from core.views.template import SuperUserListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -68,11 +68,11 @@ class UserViewSet(SuperUserListProtectedViewSet):
       return Response({'error': 'user not found'}, status=status.HTTP_404_NOT_FOUND)
 
     serializer = UserSerializer(user, context={'request': request})
-    request.user = user  # hack to get JWTSerializer to work
-    data = serializer.data 
-    token = JWTSerializer.get_token(request.user)
-    
-    data['token'] = str(token)
+    request.user = user  # hack to get token issuance context to work
+    data = serializer.data
+    access, refresh = tokens_for_user(request.user)
+    data['token'] = access
+    data['refresh'] = refresh
     return Response(data)
 
   @action(detail=True, methods=['POST'])

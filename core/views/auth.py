@@ -14,6 +14,7 @@ from core.models import Course, OneTimeToken
 from core.serializers.user import UserSerializer
 from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt import serializers, views
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from codepost.settings import DEBUG
 from core.throttles import AuthAnonRateThrottle, AuthUserRateThrottle
 from core.serializers.auth import (
@@ -22,7 +23,10 @@ from core.serializers.auth import (
   ValidateOTTRequestSerializer,
   JwtOttResponseSerializer,
   ImpersonateRequestSerializer,
+  LogoutRequestSerializer,
+  LogoutResponseSerializer,
 )
+from rest_framework_simplejwt.exceptions import TokenError
 # Authentication classes that exclude CourseAPIKeyAuthentication.
 # Used on endpoints that issue unscoped tokens (current_user, get_jwt_ott,
 # token-auth, token-refresh) to prevent a course key holder from obtaining
@@ -34,59 +38,105 @@ NON_COURSE_KEY_AUTH = (
     SessionAuthentication,
 )
 
+
+# ---------------------------------------------------------------------------
+# Token issuance helpers (access + refresh model)
+#
+# The access token is the short-lived credential sent on every request. The
+# refresh token (long-lived) is exchanged at /token-refresh/ for a new access
+# token; rotation blacklists the old refresh token (see SIMPLE_JWT settings).
+# ---------------------------------------------------------------------------
+
+def _apply_claims(token, user, course_id=None):
+  """Attach codePost's custom claims to a token (access or refresh)."""
+  token['user_id'] = user.id
+  token['email'] = user.email
+  token['username'] = user.username
+  if course_id is not None:
+    token['course_id'] = course_id
+
+
+def tokens_for_user(user, *, course_id=None):
+  """Issue an (access, refresh) pair for an interactive browser session.
+
+  Uses ``RefreshToken.for_user`` which, with the token_blacklist app installed,
+  records an OutstandingToken so the session can later be revoked. Custom claims
+  set on the refresh token are copied onto the derived access token.
+  """
+  refresh = RefreshToken.for_user(user)
+  _apply_claims(refresh, user, course_id)
+  return str(refresh.access_token), str(refresh)
+
+
+def _access_token_obj(user, *, course_id=None, lifetime=None):
+  """Build a standalone AccessToken (no refresh token, no OutstandingToken row).
+
+  Used for embedded/machine tokens that are consumed directly as Bearer
+  credentials and are never refreshed: the token embedded in every user
+  serialization, the 5-minute iframe token, long-lived Jupyter/OTT tokens, the
+  SSO redirect token, and never-expire impersonation tokens.
+  """
+  access = AccessToken.for_user(user)
+  _apply_claims(access, user, course_id)
+  if lifetime is not None:
+    access.set_exp(lifetime=lifetime)
+  return access
+
+
+def access_token_for_user(user, *, course_id=None, lifetime=None):
+  """String form of :func:`_access_token_obj`."""
+  return str(_access_token_obj(user, course_id=course_id, lifetime=lifetime))
+
+
 @extend_schema(responses={200: UserSerializer})
 @api_view(['GET'])
 @authentication_classes(NON_COURSE_KEY_AUTH)
 @permission_classes([IsAuthenticated])
 def current_user(request):
   """
-  Determine the current user by their token, and return their data
+  Determine the current user by their token, and return their data.
+
+  Returns a fresh access token (as ``token``) plus a ``refresh`` token. This is
+  also how an SSO session (which only receives an access token via the redirect
+  URL) obtains its refresh token, without ever putting the refresh token in a URL.
   """
   serializer = UserSerializer(request.user, context={'request': request})
 
-  token = JWTSerializer.get_token(request.user)
+  access, refresh = tokens_for_user(request.user)
   data = serializer.data
-  data['token'] = str(token)
+  data['token'] = access
+  data['refresh'] = refresh
   return Response(data)
 
-# Plan to update this to Pair with the new JWTSerializer
-class JWTSerializer(serializers.TokenObtainSlidingSerializer):
-  
+
+class JWTSerializer(serializers.TokenObtainPairSerializer):
+  """Password-login serializer issuing an access + refresh pair.
+
+  Extends the standard pair serializer to attach codePost's custom claims and to
+  embed the serialized user (and a backward-compatible ``token`` alias for the
+  access token) in the response.
+  """
+
   @classmethod
-  def one_time_token(cls, user):
-      token = super().get_token(user)
-      token.set_exp(lifetime=timedelta(minutes=5))
-      token['user_id'] = user.id
-      token['email'] = user.email
-      token['username'] = user.username
-      return token
-  
-  @classmethod
-  def get_token(cls, user, never_expire=False, course_id=None):
-     
-      token = super().get_token(user)
-      if never_expire:
-          # Set the token to never expire
-          token.set_exp(lifetime=timedelta(days=365 * 1))
-      token['user_id'] = user.id
-      token['email'] = user.email
-      token['username'] = user.username
-      if course_id is not None:
-          token['course_id'] = course_id
-      return token
+  def get_token(cls, user):
+    token = super().get_token(user)  # RefreshToken; claims copy to access token
+    _apply_claims(token, user)
+    return token
+
   def validate(self, attrs):
-    data = super().validate(attrs)
-    
+    data = super().validate(attrs)  # {'access': ..., 'refresh': ...}
+
     self.context['request'].user = self.user
-    # raise Exception(f"{self.user} {self.user.profile}")
+    # Backward-compatible alias: existing clients read `token` as the credential.
+    data['token'] = data['access']  # type: ignore[index]  # dict-like access on ReturnDict
     data['user'] = UserSerializer(self.user, context=self.context).data  # type: ignore[assignment]  # JWT token data dict
-    data['user']['token'] = data['token']  # type: ignore[index]  # dict-like access on ReturnDict
+    data['user']['token'] = data['access']  # type: ignore[index]  # dict-like access on ReturnDict
 
     update_last_login(None, self.user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
     return data
 
 
-class AccountLoginAPIView(views.TokenObtainSlidingView):
+class AccountLoginAPIView(views.TokenObtainPairView):
   serializer_class = JWTSerializer
   throttle_classes = [AuthAnonRateThrottle]
 
@@ -161,12 +211,17 @@ class ImpersonateView(APIView):
     request.user = user
 
 
-    # Generate a token for the user — propagate course scope if present
-    token = JWTSerializer.get_token(request.user, never_expire=should_expire, course_id=course_scope_id)
+    # Generate a token for the user — propagate course scope if present.
     serializer = UserSerializer(request.user, context={'request': request})
-
     data = serializer.data
-    data['token'] = str(token)
+    if should_expire:
+      # Superuser long-lived impersonation token (used directly, not refreshed).
+      data['token'] = access_token_for_user(request.user, course_id=course_scope_id, lifetime=timedelta(days=365))
+    else:
+      # Interactive impersonation session — issue a refreshable pair.
+      access, refresh = tokens_for_user(request.user, course_id=course_scope_id)
+      data['token'] = access
+      data['refresh'] = refresh
 
     update_last_login(None, user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
     return Response(data)
@@ -281,12 +336,12 @@ def validate_one_time_token(request):
   request.user = user
   serializer = UserSerializer(user, context={'request': request})
 
-  # Propagate course scope from the OTT into the JWT
+  # Propagate course scope from the OTT into the JWT. Jupyter servers hold this
+  # token for a long-lived session and consume it directly (never refreshed), so
+  # issue a long-lived standalone access token.
   ott_course_id = token_obj.course_id if token_obj.course_id else None
-  jwt_token = JWTSerializer.get_token(user, never_expire=True, course_id=ott_course_id)
-
   data = serializer.data
-  data['token'] = str(jwt_token)
+  data['token'] = access_token_for_user(user, course_id=ott_course_id, lifetime=timedelta(days=365))
   
   update_last_login(None, user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
   
@@ -301,8 +356,46 @@ def get_jwt_ott(request):
   Generate a JWT short-lived 5 min token for the authenticated user.
   Used to exchange a one-time token for imbedding in an iframe or other uses.
   """
-  token = JWTSerializer.one_time_token(request.user)
+  token = _access_token_obj(request.user, lifetime=timedelta(minutes=5))
   return Response({
     "token": str(token),
     "expires_at": token['exp']
   })
+
+
+@extend_schema(request=LogoutRequestSerializer, responses={200: LogoutResponseSerializer})
+@api_view(['POST'])
+@authentication_classes(NON_COURSE_KEY_AUTH)
+@permission_classes([IsAuthenticated])
+def logout(request):
+  """
+  Revoke a single session by blacklisting its refresh token.
+
+  Idempotent: an already-blacklisted, expired, or malformed token still returns
+  200 so the client can proceed to clear local state and redirect to login.
+  """
+  refresh = request.data.get('refresh')
+  if refresh:
+    try:
+      RefreshToken(refresh).blacklist()
+    except TokenError:
+      # Already blacklisted / expired / invalid — nothing more to revoke.
+      pass
+  return Response({"detail": "Logged out."})
+
+
+@extend_schema(request=None, responses={200: LogoutResponseSerializer})
+@api_view(['POST'])
+@authentication_classes(NON_COURSE_KEY_AUTH)
+@permission_classes([IsAuthenticated])
+def logout_all(request):
+  """
+  Revoke every session for the authenticated user ("log out everywhere") by
+  blacklisting all of their outstanding refresh tokens.
+  """
+  from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+
+  tokens = OutstandingToken.objects.filter(user=request.user)
+  for token in tokens:
+    BlacklistedToken.objects.get_or_create(token=token)
+  return Response({"detail": "All sessions revoked."})

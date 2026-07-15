@@ -362,10 +362,19 @@ AUTH_PASSWORD_VALIDATORS = [
 
 SIMPLE_JWT = {
     "TOKEN_OBTAIN_SERIALIZER": "core.views.auth.JWTSerializer",
-    "JWT_ALLOW_REFRESH": True,
-    "JWT_EXPIRATION_DELTA": datetime.timedelta(days=7),
-    "JWT_REFRESH_EXPIRATION_DELTA": datetime.timedelta(days=7),
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.SlidingToken', 'rest_framework_simplejwt.tokens.AccessToken'),
+    # Access + refresh token model. The access token is the short-lived credential
+    # sent on every request; the refresh token (long-lived) is exchanged at
+    # /token-refresh/ for a fresh access token. Rotation issues a new refresh token
+    # on every refresh and blacklists the old one, which gives us server-side
+    # revocation ("log out everywhere") and refresh-token reuse detection.
+    "ACCESS_TOKEN_LIFETIME": datetime.timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": datetime.timedelta(days=14),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    # AccessToken is the auth credential. SlidingToken is kept transitionally so
+    # sessions issued before this migration keep validating until they expire
+    # (avoids a mass logout on deploy); it can be dropped in a later cleanup.
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken', 'rest_framework_simplejwt.tokens.SlidingToken'),
 }
 
 ################# End Authentication settings ##############################
@@ -450,6 +459,7 @@ INSTALLED_APPS = [
     "core",
     "autograder",
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "rest_framework.authtoken",
     "django_extensions",

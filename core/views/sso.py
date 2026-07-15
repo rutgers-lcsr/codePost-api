@@ -400,14 +400,15 @@ def sso_callback(request, provider):
     if not user:
          return error_redirect('Failed to create/retrieve user locally')
 
-    # Generate JWT
-    from rest_framework_simplejwt.tokens import RefreshToken
-    
-    refresh = RefreshToken.for_user(user)
-    token = str(refresh.access_token)
-    
+    # Generate a short-lived access token to hand off via the redirect URL. The
+    # refresh token is NOT put in the URL — the frontend exchanges this access
+    # token for a refresh token via the current_user endpoint after landing.
+    from core.views.auth import access_token_for_user
+
+    token = access_token_for_user(user)
+
     # Redirect to Frontend
-    # In production, frontend is served by Nginx. 
+    # In production, frontend is served by Nginx.
     frontend_url = getattr(settings, 'CLIENT_URL', 'http://localhost:3000') # Default for dev
     return HttpResponseRedirect(f"{frontend_url}/?token={token}")
 

@@ -24,3 +24,11 @@ class ImpersonateRequestSerializer(serializers.Serializer):
     username = serializers.CharField(required=False)
     email = serializers.EmailField(required=False)
     never_expire = serializers.BooleanField(required=False, default=False)
+
+
+class LogoutRequestSerializer(serializers.Serializer):
+    refresh = serializers.CharField(help_text="The refresh token to blacklist.")
+
+
+class LogoutResponseSerializer(serializers.Serializer):
+    detail = serializers.CharField()

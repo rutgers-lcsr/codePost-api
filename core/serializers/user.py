@@ -52,8 +52,8 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
 
   @extend_schema_field(serializers.CharField(allow_null=True))
   def get_token(self, obj):
-    from core.views.auth import JWTSerializer
- 
+    from core.views.auth import access_token_for_user
+
     # check if user is authenticated or admin
     request = self.context.get('request', None)
     if not request or not request.user.is_authenticated:
@@ -65,10 +65,9 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
       return None
     if not (user.is_superuser or user.id == obj.id):
       return None
-    token = JWTSerializer.get_token(obj)
-    
-  
-    return str(token)
+    # Access token only: this runs on every user serialization, so it must not
+    # mint a refresh token or write an OutstandingToken row.
+    return access_token_for_user(obj)
   
   def create(self, validated_data):
     # Extract parameters that can't be used in User constructor

@@ -58,10 +58,8 @@ class SSOTest(SimpleTestCase):
         mock_get_create_user.return_value = mock_user
         
         # Mock JWT Token generation (since we can't import RefreshToken easily without DB sometimes)
-        with patch('rest_framework_simplejwt.tokens.RefreshToken.for_user') as mock_refresh:
-            mock_token = MagicMock()
-            mock_token.access_token = "fake_token"
-            mock_refresh.return_value = mock_token
+        with patch('core.views.auth.access_token_for_user') as mock_token_fn:
+            mock_token_fn.return_value = "fake_token"
             
             request = self.factory.get('/auth/sso/callback/CAS/', {'org': '1', 'ticket': 'ST-12345'})
             response = sso_callback(request, 'CAS')
@@ -92,10 +90,8 @@ class SSOTest(SimpleTestCase):
             
         mock_get_create_user.side_effect = side_effect
         
-        with patch('rest_framework_simplejwt.tokens.RefreshToken.for_user') as mock_refresh:
-            mock_token = MagicMock()
-            mock_token.access_token = "fake_token"
-            mock_refresh.return_value = mock_token
+        with patch('core.views.auth.access_token_for_user') as mock_token_fn:
+            mock_token_fn.return_value = "fake_token"
             
             request = self.factory.get('/auth/sso/callback/CAS/', {'org': '1', 'ticket': 'ST-12345'})
             response = sso_callback(request, 'CAS')
@@ -132,10 +128,8 @@ class SSOTest(SimpleTestCase):
         
         mock_get_create_user.return_value = MagicMock()
 
-        with patch('rest_framework_simplejwt.tokens.RefreshToken.for_user') as mock_refresh:
-            mock_token = MagicMock()
-            mock_token.access_token = "fake_token"
-            mock_refresh.return_value = mock_token
+        with patch('core.views.auth.access_token_for_user') as mock_token_fn:
+            mock_token_fn.return_value = "fake_token"
 
             # Set up state in cache to pass CSRF validation
             cache.set('sso_state:test_azure_state', '1', timeout=600)
@@ -169,10 +163,8 @@ class SSOTest(SimpleTestCase):
         
         mock_get_create_user.return_value = MagicMock()
 
-        with patch('rest_framework_simplejwt.tokens.RefreshToken.for_user') as mock_refresh:
-            mock_token = MagicMock()
-            mock_token.access_token = "fake_token"
-            mock_refresh.return_value = mock_token
+        with patch('core.views.auth.access_token_for_user') as mock_token_fn:
+            mock_token_fn.return_value = "fake_token"
 
             # Set up state in cache to pass CSRF validation
             cache.set('sso_state:test_google_state', '1', timeout=600)
