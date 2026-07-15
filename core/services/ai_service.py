@@ -204,6 +204,9 @@ class GenerationResult:
     total_tokens: int = 0
     cached_tokens: int = 0
     variant_id: Optional[int] = None
+    # The instructor prompt after {variable} substitution — what the model actually saw
+    # (personalized quiz generation records it for staff review).
+    resolved_prompt: Optional[str] = None
 
 
 class AIService:
@@ -2068,6 +2071,8 @@ Provide a concise markdown summary following the guidelines in your instructions
             "discretion; if the stem refers to something specific, show it there."
         )
         result = await self._generate(system_prompt, user_prompt, label='personalized quiz generation')
+        # Recorded (success or not) so staff can inspect exactly what the model was given.
+        result.resolved_prompt = instructor_text
         if result.success:
             result.text = result.text.strip()
             result.variant_id = variant_id

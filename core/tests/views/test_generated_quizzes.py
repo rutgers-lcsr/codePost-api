@@ -67,7 +67,8 @@ def _mock_ai(monkeypatch, json_text=QUESTIONS_JSON, success=True, side_effect=No
             await sync_to_async(side_effect)(section, submission)
         if not success:
             return GenerationResult(text='', success=False, error='model unavailable')
-        return GenerationResult(text=json_text, success=True, input_tokens=10, output_tokens=20)
+        return GenerationResult(text=json_text, success=True, input_tokens=10, output_tokens=20,
+                                resolved_prompt=f'resolved prompt for section {section.id}')
 
     monkeypatch.setattr(
         'core.services.ai_service.AIService.generate_personalized_quiz_questions', mock_generate)
@@ -238,6 +239,13 @@ class TestGenerationTask:
         # The model's Markdown description (e.g. the referenced code excerpt) is kept.
         assert questions[0].description.startswith('```python')
         assert questions[1].description == ''
+        # The resolved per-section prompt is recorded for staff review.
+        section = gen_setup['quiz'].generatedSections.first()
+        assert gen_set.generationMetadata['sections'] == [{
+            'sectionId': section.id,
+            'sectionName': section.name or '',
+            'prompt': f'resolved prompt for section {section.id}',
+        }]
 
     def test_feature_disabled_skips(self, gen_setup, monkeypatch):
         _mock_ai(monkeypatch)

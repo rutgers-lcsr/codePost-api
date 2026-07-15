@@ -585,6 +585,7 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
     error = ''
     variant_id = None
     input_tokens = output_tokens = 0
+    section_prompts = []  # what the model actually saw, for staff review on the set
     for section in quiz.generatedSections.all():
         try:
             result = async_to_sync(service.generate_personalized_quiz_questions)(section, submission)
@@ -596,6 +597,13 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
         variant_id = result.variant_id or variant_id
         input_tokens += result.input_tokens
         output_tokens += result.output_tokens
+        if result.resolved_prompt:
+            section_prompts.append({
+                'sectionId': section.id,
+                'sectionName': section.name or '',
+                # Bounded: a prompt embedding large submission files could be huge.
+                'prompt': result.resolved_prompt[:100_000],
+            })
         if not result.success or not result.text:
             error = result.error or 'Empty model response.'
             break
@@ -637,6 +645,7 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
         'model': service.model,
         'input_tokens': input_tokens,
         'output_tokens': output_tokens,
+        'sections': section_prompts,
     }
     return question_rows, error, variant_id, metadata
 
