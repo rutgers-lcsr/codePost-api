@@ -268,8 +268,16 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
 
     _student = rc.is_student(course)
 
+    # Course staff reviewing AI-generated quiz questions may read the submission the
+    # questions were generated from (view only — every write capability still requires
+    # being staff of the submission). Checked last so the common cases short-circuit.
+    generated_review_access = False
+    if not staff_of_sub and not student_of_sub and rc.is_course_staff(course):
+        generated_review_access = assignment.quizzes.filter(
+            gradersCanReviewGenerated=True, generatedSections__isnull=False).exists()
+
     caps.update({
-        Capability.VIEW_SUBMISSION: staff_of_sub or student_of_sub,
+        Capability.VIEW_SUBMISSION: staff_of_sub or student_of_sub or generated_review_access,
         Capability.VIEW_FEEDBACK: staff_of_sub or (student_of_sub and feedback_available),
         Capability.GRADE_SUBMISSION: staff_of_sub and not archived,
         Capability.COMMENT_ON_SUBMISSION: staff_of_sub and not archived,

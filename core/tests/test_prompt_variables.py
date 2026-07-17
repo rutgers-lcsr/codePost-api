@@ -145,3 +145,18 @@ class TestDescribeAvailableVariables:
         entries = describe_available_variables(VariableContext(course=None))
         tokens = {e['token'] for e in entries}
         assert tokens == {'{num_questions}', '{question_types}'}
+
+
+class TestTemplateRequirements:
+    def test_classification_drives_generation_timing(self):
+        from core.prompts.variables import template_requirements, template_requires_submission
+        # Section-only / plain prompts need nothing → eager, standalone-capable.
+        assert template_requirements('Ask {num_questions} things about recursion.') == set()
+        assert template_requires_submission('Plain prompt, no variables.') is False
+        # Assignment data needs attachment but not a submission.
+        assert template_requirements('Use {assignment_name} and {assignment_files}.') == {'assignment'}
+        assert template_requires_submission('{assignment_file:main.py}') is False
+        # Per-student submission data needs both.
+        assert template_requirements('Read {submission_files}.') == {'assignment', 'submission'}
+        assert template_requires_submission('{submission_file:main.py}') is True
+        assert template_requires_submission('{submission_test_results}') is True

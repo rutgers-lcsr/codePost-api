@@ -153,15 +153,23 @@ class TestSectionAuthoring:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
         assert 'Unknown variable' in str(resp.data)
 
-    def test_unattached_quiz_rejected(self, api_client, gen_setup, monkeypatch):
+    def test_standalone_quiz_sections_follow_prompt_requirements(self, api_client, gen_setup, monkeypatch):
+        # Submission-free prompts are allowed on standalone quizzes (the eager path);
+        # prompts drawing on assignment/submission data still require attachment.
         from core.models import Quiz
         _feature_on(monkeypatch)
         standalone = Quiz.objects.create(course=gen_setup['course'], title='Standalone')
         api_client.force_authenticate(user=gen_setup['admin'])
-        resp = api_client.post('/quizGeneratedSections/', {
-            'quiz': standalone.id, 'systemPrompt': 'x',
+        ok = api_client.post('/quizGeneratedSections/', {
+            'quiz': standalone.id,
+            'systemPrompt': 'Ask {num_questions} conceptual questions about recursion.',
         }, format='json')
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert ok.status_code == status.HTTP_201_CREATED
+        bad = api_client.post('/quizGeneratedSections/', {
+            'quiz': standalone.id, 'systemPrompt': 'Ask about {submission_files}.',
+        }, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'attached to an assignment' in str(bad.data)
 
     def test_cannot_change_assignment_with_sections(self, api_client, gen_setup):
         api_client.force_authenticate(user=gen_setup['admin'])
@@ -403,7 +411,9 @@ class TestGenerateForStudent:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
         assert 'not enabled' in str(resp.data)
 
-    def test_grader_gate_follows_quiz_flag(self, api_client, gen_setup, monkeypatch):
+    def test_generation_is_admin_only_even_with_review_flag(self, api_client, gen_setup, monkeypatch):
+        # The review flag grants graders review/edit/approve — generation spends AI credits
+        # and stays admin-only.
         _mock_ai(monkeypatch)
         self._eager_task(monkeypatch)
         api_client.force_authenticate(user=gen_setup['grader'])
@@ -412,13 +422,118 @@ class TestGenerateForStudent:
         gen_setup['quiz'].gradersCanReviewGenerated = True
         gen_setup['quiz'].save()
         resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
-        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/") \
+            .status_code == status.HTTP_403_FORBIDDEN
 
     def test_student_forbidden(self, api_client, gen_setup, monkeypatch):
         _mock_ai(monkeypatch)
         api_client.force_authenticate(user=gen_setup['students'][0])
         resp = self._post(api_client, gen_setup, gen_setup['students'][0].email)
         assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# --------------------------------------------------------------------------- #
+# Eager (submission-free) generation
+# --------------------------------------------------------------------------- #
+
+class TestEagerGeneration:
+    def _standalone_quiz(self, gen_setup, prompt='Ask conceptual questions.'):
+        from core.models import Quiz, QuizGeneratedSection
+        quiz = Quiz.objects.create(course=gen_setup['course'], title='Concepts', isPublished=True)
+        section = QuizGeneratedSection.objects.create(
+            quiz=quiz, name='Concepts', systemPrompt=prompt, numQuestions=2,
+            pointsPerQuestion=Decimal('3'))
+        return quiz, section
+
+    def test_submissionless_task_generates_ready_set(self, gen_setup, monkeypatch):
+        from core.tasks import generate_personalized_quiz_sets
+        _mock_ai(monkeypatch)
+        quiz, _ = self._standalone_quiz(gen_setup)
+        student = gen_setup['students'][0]
+        generate_personalized_quiz_sets(quiz_id=quiz.id, student_id=student.id)
+        gen_set = quiz.generatedSets.get(student=student)
+        assert gen_set.status == 'ready'
+        assert gen_set.submission_id is None
+        assert gen_set.questions.count() == 2
+
+    def test_backfill_targets_all_enrolled_students_when_submission_free(self, gen_setup, monkeypatch):
+        from core.tasks import enqueue_personalized_backfill, generate_personalized_quiz_sets
+        _mock_ai(monkeypatch)
+        monkeypatch.setattr('core.tasks.generate_personalized_quiz_sets.delay',
+                            lambda *a, **kw: generate_personalized_quiz_sets(*a, **kw))
+        quiz, _ = self._standalone_quiz(gen_setup)
+        enrolled = gen_setup['course'].students.count()
+        queued = enqueue_personalized_backfill(quiz)
+        assert queued == enrolled
+        assert quiz.generatedSets.count() == enrolled
+        assert set(quiz.generatedSets.values_list('status', flat=True)) == {'ready'}
+        # The submission-seeded quiz still only targets submitters.
+        assert enqueue_personalized_backfill(gen_setup['quiz'], dry_run=True) == 1
+
+    def test_student_takes_standalone_generated_quiz_once_approved(self, api_client, gen_setup, monkeypatch):
+        from core.tasks import generate_personalized_quiz_sets
+        _mock_ai(monkeypatch)
+        quiz, _ = self._standalone_quiz(gen_setup)
+        student = gen_setup['students'][0]
+        generate_personalized_quiz_sets(quiz_id=quiz.id, student_id=student.id)
+        gen_set = quiz.generatedSets.get(student=student)
+        api_client.force_authenticate(user=student)
+        # Locked until the set is approved…
+        blocked = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert blocked.status_code == status.HTTP_403_FORBIDDEN
+        gen_set.status = 'approved'
+        gen_set.save()
+        # …then the standalone quiz opens with the generated questions — no submission ever.
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        assert len(start.data['responses']) == 2
+
+    def test_upload_only_fills_gaps_on_submission_free_quiz(self, gen_setup, monkeypatch):
+        from core.models import Quiz, QuizGeneratedSection
+        from core.tasks import generate_personalized_quiz_sets
+        _mock_ai(monkeypatch)
+        quiz = Quiz.objects.create(course=gen_setup['course'], title='Concepts',
+                                   assignment=gen_setup['assignment'], isPublished=True)
+        QuizGeneratedSection.objects.create(
+            quiz=quiz, name='Concepts', systemPrompt='Ask conceptual questions.',
+            numQuestions=2, pointsPerQuestion=Decimal('3'))
+        student = gen_setup['students'][0]  # on gen_setup['submission']
+        existing = _make_set(quiz, student, status='ready')
+        # An upload-triggered run must not clobber the reviewed set (its questions don't
+        # depend on the submission)…
+        generate_personalized_quiz_sets(gen_setup['submission'].id, quiz_id=quiz.id)
+        existing.refresh_from_db()
+        assert existing.status == 'ready'
+        assert existing.questions.count() == 2
+        # …but a student without a set (added to the group later) gets one.
+        gen_setup['submission'].students.add(gen_setup['students'][1])
+        generate_personalized_quiz_sets(gen_setup['submission'].id, quiz_id=quiz.id)
+        assert quiz.generatedSets.filter(student=gen_setup['students'][1]).exists()
+
+    def test_generate_for_student_without_submission(self, api_client, gen_setup, monkeypatch):
+        from core.tasks import generate_personalized_quiz_sets
+        _mock_ai(monkeypatch)
+        monkeypatch.setattr('core.tasks.generate_personalized_quiz_sets.delay',
+                            lambda *a, **kw: generate_personalized_quiz_sets(*a, **kw))
+        quiz, _ = self._standalone_quiz(gen_setup)
+        never_submitted = gen_setup['students'][1]
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/quizzes/{quiz.id}/generateForStudent/",
+                               {'student': never_submitted.email}, format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert quiz.generatedSets.get(student=never_submitted).status == 'ready'
+
+    def test_backfill_preview_counts_enrolled_for_submission_free(self, api_client, gen_setup):
+        quiz, _ = self._standalone_quiz(gen_setup)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.get(f"/quizzes/{quiz.id}/backfillPreview/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['needsSubmission'] is False
+        assert resp.data['missing'] == gen_setup['course'].students.count()
+        # The submission-seeded quiz reports the old semantics.
+        seeded = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/")
+        assert seeded.data['needsSubmission'] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -449,6 +564,19 @@ class TestReviewAPI:
         resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/approve/")
         assert resp.status_code == status.HTTP_200_OK
         assert resp.data['status'] == 'approved'
+
+    def test_grader_reads_seed_submission_only_while_review_flag_on(self, api_client, gen_setup):
+        # Question review needs the seeding submission for context: an unassigned grader
+        # may READ it (and its files) only while a generated-section quiz on the assignment
+        # allows grader review — and never write to it.
+        sub = gen_setup['submission']
+        api_client.force_authenticate(user=gen_setup['grader'])
+        assert api_client.get(f"/submissions/{sub.id}/").status_code == status.HTTP_403_FORBIDDEN
+        gen_setup['quiz'].gradersCanReviewGenerated = True
+        gen_setup['quiz'].save()
+        assert api_client.get(f"/submissions/{sub.id}/").status_code == status.HTTP_200_OK
+        assert api_client.patch(f"/submissions/{sub.id}/", {'grade': 1}, format='json') \
+            .status_code == status.HTTP_403_FORBIDDEN
 
     def test_student_never_accesses_sets(self, api_client, gen_setup):
         gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0])
@@ -488,6 +616,15 @@ class TestReviewAPI:
         resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/unapprove/")
         assert resp.status_code == status.HTTP_200_OK
         assert resp.data['status'] == 'ready'
+
+    def test_regenerate_is_admin_only_even_with_review_flag(self, api_client, gen_setup):
+        gen_setup['quiz'].gradersCanReviewGenerated = True
+        gen_setup['quiz'].save()
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0],
+                            submission=gen_setup['submission'])
+        api_client.force_authenticate(user=gen_setup['grader'])
+        assert api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/") \
+            .status_code == status.HTTP_403_FORBIDDEN
 
     def test_regenerate_requires_submission(self, api_client, gen_setup):
         gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0], submission=None)
@@ -746,7 +883,7 @@ class TestBackfill:
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/")
         assert resp.status_code == status.HTTP_200_OK
-        assert resp.data == {'wouldGenerate': 1, 'missing': 1}
+        assert resp.data == {'wouldGenerate': 1, 'missing': 1, 'needsSubmission': True}
         # Pure preview: nothing was queued or created.
         assert GeneratedQuestionSet.objects.filter(quiz=gen_setup['quiz']).count() == 1
 
@@ -755,7 +892,7 @@ class TestBackfill:
         _make_set(gen_setup['quiz'], gen_setup['students'][1], submission=sub2,
                   status='ready', questions=False)
         resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/")
-        assert resp.data == {'wouldGenerate': 1, 'missing': 0}
+        assert resp.data == {'wouldGenerate': 1, 'missing': 0, 'needsSubmission': True}
 
         # Graders without the review flag can't peek.
         api_client.force_authenticate(user=gen_setup['grader'])

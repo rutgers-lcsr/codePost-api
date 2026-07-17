@@ -286,11 +286,14 @@ class SubmissionPermissions(TemplatePermission):
         course = obj.assignment.course
         _assignment = obj.assignment
 
-        # GET: staff of submission, or students (if released/live feedback)
+        # GET: staff of submission, or students (if released/live feedback). Course staff
+        # reviewing AI-generated quiz questions get read-only access — the questions are
+        # generated from the submission (SubmissionFile GETs delegate here too).
         if request.method == "GET":
             return (
                 isStaffOfSub(user, obj)
                 or isStudentOfSub(user, obj)
+                or canViewSubmissionForGeneratedReview(user, obj)
             )
 
         # PUT/PATCH: course admin or staff of submission
@@ -745,8 +748,9 @@ class QuizAttemptPermissions(TemplatePermission):
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
-        # Manual grading (and undoing it) are the staff writes on someone else's attempt.
-        if getattr(view, 'action', None) in ('gradeResponse', 'reopenResponse'):
+        # Manual grading (undoing it, and pinning the official attempt) are the staff
+        # writes on someone else's attempt.
+        if getattr(view, 'action', None) in ('gradeResponse', 'reopenResponse', 'setOfficial'):
             return canGradeQuiz(user, obj.quiz.course)
         if user == obj.student:
             return True
@@ -770,6 +774,19 @@ def canReviewGeneratedQuestions(user, quiz):
     return quiz.gradersCanReviewGenerated and isCourseStaff(user, course)
 
 
+def canViewSubmissionForGeneratedReview(user, submission):
+    """Read-only submission access for reviewing AI-generated quiz questions: per-student
+    questions are generated FROM the submission, so a reviewer needs to read it for
+    context even when they aren't the assigned grader. Course staff only, and only when a
+    quiz on this submission's assignment has generated sections open to grader review
+    (admins/super graders already pass isStaffOfSub)."""
+    assignment = submission.assignment
+    if not isCourseStaff(user, assignment.course):
+        return False
+    return assignment.quizzes.filter(
+        gradersCanReviewGenerated=True, generatedSections__isnull=False).exists()
+
+
 class QuizGeneratedSectionPermissions(TemplatePermission):
     """Generated sections are quiz authoring config — same policy as random-draw groups."""
 
@@ -791,6 +808,10 @@ class GeneratedQuestionSetPermissions(TemplatePermission):
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
+        # Regeneration spends AI credits, so it is admin-only — the review flag only
+        # grants graders review/edit/approve.
+        if getattr(view, 'action', None) == 'regenerate':
+            return user.is_superuser or isCourseAdmin(user, obj.quiz.course)
         return canReviewGeneratedQuestions(user, obj.quiz)
 
 

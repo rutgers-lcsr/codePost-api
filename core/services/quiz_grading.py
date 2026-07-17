@@ -14,7 +14,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from core.models import QuizResponse
+from core.models import QuizAccommodation, QuizAttempt, QuizResponse
 
 AUTO_GRADED_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
 MANUAL_TYPES = {'essay', 'code'}
@@ -309,6 +309,11 @@ def official_score(quiz, student, attempts=None):
               if a.status == 'submitted' and a.score is not None and not a.needsManualGrading]
   if not attempts:
     return None
+  # A staff-pinned attempt overrides the policy (an ungraded pin falls through to the
+  # policy until its grading completes).
+  pinned = next((a for a in attempts if a.isOfficialOverride), None)
+  if pinned is not None:
+    return (pinned.score, pinned.maxScore)
   policy = quiz.scoringPolicy
   if policy == 'latest':
     chosen = max(attempts, key=lambda a: a.attemptNumber)
@@ -378,6 +383,15 @@ def _student_feedback_visible(student, assignment):
   return False
 
 
+def generation_needs_submission(quiz):
+  """Whether any of the quiz's AI-generated sections draws on the student's submission.
+  Submission-free quizzes generate per student eagerly — before (or entirely without) a
+  submission, including on standalone quizzes."""
+  from core.prompts.variables import template_requires_submission
+  return any(template_requires_submission(s.systemPrompt)
+             for s in quiz.generatedSections.all())
+
+
 def _generated_questions_ready(quiz, student):
   """Whether this student may take a quiz with generated sections: True when the quiz has
   none, or when the student's set is approved. Staff previews (student=None) never pass —
@@ -419,6 +433,24 @@ def quiz_is_closed(quiz, student=None, now=None):
   now = now or timezone.now()
   close = quiz_close_time(quiz, student, now)
   return bool(close and now >= close)
+
+
+def compute_attempt_deadline(quiz, student, started):
+  """The hard stop for an attempt started at ``started``: the time limit (scaled by the
+  student's course extra-time accommodation), capped by the quiz close when
+  ``endAttemptsAtClose``. None when untimed with no hard close."""
+  deadline = None
+  if quiz.timeLimitMinutes:
+    minutes = float(quiz.timeLimitMinutes)
+    accommodation = QuizAccommodation.objects.filter(course=quiz.course, student=student).first()
+    if accommodation is not None:
+      minutes *= float(accommodation.timeMultiplier)
+    deadline = started + timedelta(minutes=minutes)
+  if quiz.endAttemptsAtClose:
+    close = quiz_close_time(quiz, student, started)
+    if close is not None:
+      deadline = close if deadline is None else min(deadline, close)
+  return deadline
 
 
 def quiz_availability(quiz, student, now=None):
@@ -489,3 +521,63 @@ def answers_visible(quiz, attempt, now=None):
   if policy == 'after_close':
     return quiz_is_closed(quiz, attempt.student, now)
   return False
+
+
+def scores_released(quiz, student, now=None):
+  """Whether quiz results (scores, per-question earned points, grader feedback) are released
+  to this student. Results normally show as soon as an attempt is submitted, but under the
+  'after_close' reveal policy they stay sealed until the quiz closes — otherwise a student
+  with attempts remaining could brute-force the still-hidden answer key from immediate
+  scores, and per-question points would leak the correctness the policy is deferring."""
+  if quiz.showCorrectAnswers == 'after_close':
+    return quiz_is_closed(quiz, student, now)
+  return True
+
+
+def scores_visible(quiz, attempt, now=None):
+  """Whether this attempt's results may be revealed: submitted, and released per policy."""
+  if attempt is None or attempt.status != 'submitted':
+    return False
+  return scores_released(quiz, attempt.student, now)
+
+
+# --------------------------------------------------------------------------- #
+# Reflecting setting changes onto existing attempts
+# --------------------------------------------------------------------------- #
+
+# Quiz fields whose value is baked into existing attempts at grade/start time. Editing one
+# must be reflected onto those attempts or they silently keep the old behavior.
+PASSING_FIELDS = frozenset({'passingScore', 'passingScoreUnit'})
+DEADLINE_FIELDS = frozenset({'timeLimitMinutes', 'endAttemptsAtClose', 'availableUntil',
+                             'closeEvent', 'closeOffsetMinutes', 'assignment', 'assignmentTrigger'})
+
+
+def sync_attempts_to_settings(quiz, changed_fields):
+  """Reflect quiz setting changes onto existing attempts so results always follow the
+  current settings: stored pass/fail is re-derived for submitted attempts when the passing
+  threshold changes, and deadlines are re-derived for in-progress attempts when the time
+  limit or close changes (extending time mid-attempt takes effect; shortening ends attempts
+  at the new deadline via the usual expiry paths)."""
+  changed = set(changed_fields)
+  now = timezone.now()
+  if changed & PASSING_FIELDS:
+    stale = []
+    for attempt in quiz.attempts.filter(status='submitted'):
+      passed = None if attempt.needsManualGrading else _passed_for(
+          quiz, attempt.score or Decimal('0'), attempt.maxScore)
+      if passed != attempt.passed:
+        attempt.passed = passed
+        attempt.modified = now  # bulk_update bypasses BaseModel.save()
+        stale.append(attempt)
+    if stale:
+      QuizAttempt.objects.bulk_update(stale, ['passed', 'modified'])
+  if changed & DEADLINE_FIELDS:
+    stale = []
+    for attempt in quiz.attempts.filter(status='in_progress').select_related('student'):
+      deadline = compute_attempt_deadline(quiz, attempt.student, attempt.startedAt)
+      if deadline != attempt.deadline:
+        attempt.deadline = deadline
+        attempt.modified = now
+        stale.append(attempt)
+    if stale:
+      QuizAttempt.objects.bulk_update(stale, ['deadline', 'modified'])

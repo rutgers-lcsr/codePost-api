@@ -50,13 +50,15 @@ def _admin_guard(user, quiz, detail):
 
 
 def _generation_ready_guard(quiz):
-  """AI-generation actions need sections, an attached assignment, and the feature on."""
+  """AI-generation actions need sections, the feature on, and — only when the prompts
+  draw on submission data — an attached assignment."""
   from core.services.ai_service import AIService
   if not quiz.generatedSections.exists():
     return Response({'error': 'This quiz has no AI-generated sections.'},
                     status=status.HTTP_400_BAD_REQUEST)
-  if quiz.assignment_id is None:
-    return Response({'error': 'This quiz is not attached to an assignment.'},
+  if quiz.assignment_id is None and quiz_grading.generation_needs_submission(quiz):
+    return Response({'error': "This quiz's prompts use submission data, so it must be "
+                              'attached to an assignment.'},
                     status=status.HTTP_400_BAD_REQUEST)
   if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
     return Response({'error': "AI quiz question generation is not enabled for this course. "
@@ -242,7 +244,10 @@ class QuizViewSet(ListProtectedViewSet):
     from core.models import GeneratedQuestionSet, User
 
     quiz = self.get_object()
-    denied = (_review_guard(request.user, quiz) or _generation_ready_guard(quiz))
+    # Generation spends AI credits, so it is admin-only — graders review/edit/approve.
+    denied = (_admin_guard(request.user, quiz,
+                           'Only course admins can generate questions for a student.')
+              or _generation_ready_guard(quiz))
     if denied:
       return denied
 
@@ -250,8 +255,11 @@ class QuizViewSet(ListProtectedViewSet):
     if student is None or not isStudent(student, quiz.course):
       return Response({'error': 'No student with that email is enrolled in this course.'},
                       status=status.HTTP_400_BAD_REQUEST)
-    submission = quiz_grading.latest_submission_for(student, quiz.assignment)
-    if submission is None:
+    # Submission-free prompts generate without one (the eager path); otherwise the
+    # student's latest submission seeds the run.
+    submission = (quiz_grading.latest_submission_for(student, quiz.assignment)
+                  if quiz.assignment_id is not None else None)
+    if submission is None and quiz_grading.generation_needs_submission(quiz):
       return Response({'error': 'The student has no submission for this assignment to '
                                 'generate from.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -269,9 +277,14 @@ class QuizViewSet(ListProtectedViewSet):
     gen_set.approvedAt = None
     gen_set.save(update_fields=['status', 'approvedBy', 'approvedAt', 'modified'])
     from core.tasks import generate_personalized_quiz_sets
-    generate_personalized_quiz_sets.delay(
-        submission.id, quiz_id=quiz.id, force=True,
-        requested_by_id=request.user.id, student_id=student.id)
+    if submission is not None:
+      generate_personalized_quiz_sets.delay(
+          submission.id, quiz_id=quiz.id, force=True,
+          requested_by_id=request.user.id, student_id=student.id)
+    else:
+      generate_personalized_quiz_sets.delay(
+          quiz_id=quiz.id, student_id=student.id, force=True,
+          requested_by_id=request.user.id)
     record_audit_event(course=quiz.course, event_type='quiz_generated_set_regenerated',
                        user=request.user, quiz=quiz, assignment=quiz.assignment,
                        meta={'studentEmail': student.email, 'setId': gen_set.id,
@@ -283,24 +296,27 @@ class QuizViewSet(ListProtectedViewSet):
       responses=inline_serializer('BackfillPreviewResponse', {
           'wouldGenerate': serializers.IntegerField(),
           'missing': serializers.IntegerField(),
+          'needsSubmission': serializers.BooleanField(),
       }),
   )
   @action(detail=True, methods=['GET'])
   def backfillPreview(self, request, pk=None):
     """How many students a backfill would touch — shown to the instructor before they
-    save a new AI section (``wouldGenerate``: submitters minus approved sets, i.e. the
-    section-create backfill) and on the review drawer's Generate-missing button
-    (``missing``: submitters without any set)."""
+    save a new AI section (``wouldGenerate``: the section-create backfill) and on the
+    review drawer's Generate-missing button (``missing``: targets without any set).
+    Submission-seeded quizzes count submitters; submission-free ones count every
+    enrolled student (``needsSubmission`` says which applies)."""
     quiz = self.get_object()
     denied = _review_guard(request.user, quiz)
     if denied:
       return denied
-    if quiz.assignment_id is None:
-      return Response({'wouldGenerate': 0, 'missing': 0})
     from core.tasks import enqueue_personalized_backfill
+    needs_submission = (quiz_grading.generation_needs_submission(quiz)
+                        if quiz.generatedSections.exists() else True)
     return Response({
         'wouldGenerate': enqueue_personalized_backfill(quiz, dry_run=True),
         'missing': enqueue_personalized_backfill(quiz, dry_run=True, missing_only=True),
+        'needsSubmission': needs_submission,
     })
 
   @extend_schema(
@@ -313,7 +329,10 @@ class QuizViewSet(ListProtectedViewSet):
     assignment but no question set yet — e.g. they submitted before the AI section
     existed, or the feature was off / generation failed at the time."""
     quiz = self.get_object()
-    denied = (_review_guard(request.user, quiz) or _generation_ready_guard(quiz))
+    # Generation spends AI credits, so it is admin-only — graders review/edit/approve.
+    denied = (_admin_guard(request.user, quiz,
+                           'Only course admins can queue question generation.')
+              or _generation_ready_guard(quiz))
     if denied:
       return denied
 

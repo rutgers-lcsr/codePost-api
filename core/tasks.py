@@ -472,7 +472,7 @@ def generate_quiz_question_suggestions(
 
 @shared_task
 def generate_personalized_quiz_sets(
-    submission_id: int,
+    submission_id: int | None = None,
     quiz_id: int | None = None,
     force: bool = False,
     requested_by_id: int | None = None,
@@ -489,37 +489,57 @@ def generate_personalized_quiz_sets(
     is skipped once approved unless ``force`` (regenerate-unless-published). Each run
     claims its sets with a ``generationBatch`` UUID — a task whose batch has been
     superseded by a newer run (resubmission while generating) discards its results.
+
+    With ``submission_id=None`` (``quiz_id`` + ``student_id`` required) the run is
+    submission-less: the eager path for quizzes whose prompts don't draw on submission
+    data — including standalone quizzes with no assignment at all.
     """
     import uuid
-    from core.models import Submission, User
+    from core.models import Quiz, Submission, User
+    from core.services.quiz_grading import generation_needs_submission
 
-    submission = Submission.objects.filter(id=submission_id).select_related(
-        'assignment', 'assignment__course', 'assignment__course__organization').first()
-    if submission is None:
-        logger.warning(f"[PersonalQuizGen] Submission {submission_id} not found. Skipping.")
-        return
-    assignment = submission.assignment
-    course = assignment.course
-    if course.archived:
-        return
-    students = list(submission.students.all())
-    if student_id is not None:
-        students = [s for s in students if s.id == student_id]
-    if not students:
+    if submission_id is None:
+        # Submission-less (eager) generation: one student on one quiz.
+        if quiz_id is None or student_id is None:
+            logger.warning("[PersonalQuizGen] Submission-less run needs quiz_id and student_id. Skipping.")
+            return
+        quiz = Quiz.objects.filter(id=quiz_id).select_related(
+            'course', 'course__organization', 'assignment').prefetch_related(
+            'generatedSections').first()
+        student = User.objects.filter(id=student_id).first()
+        if quiz is None or quiz.course.archived or student is None:
+            return
+        submission = None
+        assignment = quiz.assignment
+        course = quiz.course
+        students = [student]
+        quizzes = [quiz] if quiz.generatedSections.exists() else []
+    else:
+        submission = Submission.objects.filter(id=submission_id).select_related(
+            'assignment', 'assignment__course', 'assignment__course__organization').first()
+        if submission is None:
+            logger.warning(f"[PersonalQuizGen] Submission {submission_id} not found. Skipping.")
+            return
+        assignment = submission.assignment
+        course = assignment.course
+        if course.archived:
+            return
+        students = list(submission.students.all())
+        if student_id is not None:
+            students = [s for s in students if s.id == student_id]
+
+        quiz_qs = assignment.quizzes.filter(generatedSections__isnull=False).distinct()
+        if quiz_id is not None:
+            quiz_qs = quiz_qs.filter(id=quiz_id)
+        quizzes = list(quiz_qs.prefetch_related('generatedSections'))
+    if not students or not quizzes:
         return
     # Code questions need a language for syntax highlighting; the model's output has no
     # language field, so default from the assignment's environment.
     try:
-        env_language = assignment.environment.language or ''
+        env_language = (assignment.environment.language or '') if assignment else ''
     except Exception:
         env_language = ''
-
-    quiz_qs = assignment.quizzes.filter(generatedSections__isnull=False).distinct()
-    if quiz_id is not None:
-        quiz_qs = quiz_qs.filter(id=quiz_id)
-    quizzes = list(quiz_qs.prefetch_related('generatedSections'))
-    if not quizzes:
-        return
 
     from core.services.ai_service import AIService
     service = AIService(course, assignment)
@@ -534,8 +554,16 @@ def generate_personalized_quiz_sets(
     service.set_request_context(user=user, request_type='personalized_quiz_generation')
 
     for quiz in quizzes:
+        target_students = students
+        if submission is not None and not force and not generation_needs_submission(quiz):
+            # Submission-free quiz: an upload doesn't change its questions — only fill
+            # gaps (e.g. a student who enrolled after the eager backfill ran).
+            target_students = [s for s in students
+                               if not quiz.generatedSets.filter(student=s).exists()]
+            if not target_students:
+                continue
         batch = uuid.uuid4()
-        claimed_ids = _claim_generation_sets(quiz, students, submission, force, batch)
+        claimed_ids = _claim_generation_sets(quiz, target_students, submission, force, batch)
         if not claimed_ids:
             continue
         question_rows, error, variant_id, metadata = _generate_quiz_question_rows(
@@ -697,23 +725,42 @@ def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
     (the task's regenerate-unless-approved rule). ``dry_run`` only counts — it lets the
     UI warn the instructor how many students a new section would generate for.
 
+    Quizzes whose prompts don't draw on submission data target every ENROLLED student
+    instead (no submission needed) — the eager path, which also covers standalone
+    quizzes with no assignment at all.
+
     Cheap to call inline (DB reads + .delay()s); the actual generation runs in the
     per-submission tasks. Group submissions are enqueued once (one shared AI call per
     section) unless only some members need generating.
     """
     from core.models import GeneratedQuestionSet
-    from core.services.quiz_grading import LATEST_SUBMISSION_ORDERING
+    from core.services.quiz_grading import LATEST_SUBMISSION_ORDERING, generation_needs_submission
 
     assignment = quiz.assignment
-    if assignment is None:
+    has_sections = quiz.generatedSections.exists()
+    if not dry_run and not has_sections:
         return 0
-    if not dry_run and not quiz.generatedSections.exists():
+    # Previewing before the first section exists: the prompt is unknown, so assume the
+    # submission-seeded path (the eager backfill on section save handles the rest).
+    needs_submission = generation_needs_submission(quiz) if has_sections else True
+    if assignment is None and needs_submission:
         return 0
     approved_or_all = GeneratedQuestionSet.objects.filter(quiz=quiz)
     if not missing_only:
         # Non-approved sets regenerate; only approved ones are protected.
         approved_or_all = approved_or_all.filter(status='approved')
     skip_ids = set(approved_or_all.values_list('student_id', flat=True))
+
+    if not needs_submission:
+        # Submission-free prompts: generate for every enrolled student, one task each.
+        targets = quiz.course.students.exclude(id__in=skip_ids)
+        queued = 0
+        for student in targets:
+            if not dry_run:
+                generate_personalized_quiz_sets.delay(
+                    quiz_id=quiz.id, student_id=student.id, requested_by_id=requested_by_id)
+            queued += 1
+        return queued
 
     # Newest submission wins per student (same rule as latest_submission_for).
     covered = set(skip_ids)

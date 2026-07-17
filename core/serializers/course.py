@@ -144,6 +144,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
             # Permission check: User must be admin of source course to clone its settings (esp. API keys)
             if isCourseStaff(courseAdmin, source_course) or courseAdmin.is_superuser:
                 from core.utils import copy_assignment
+                from core.services.quiz_cloning import clone_course_quizzes
 
                 # Copy AI Settings
                 obj.ai_provider = source_course.ai_provider
@@ -164,18 +165,38 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
                 obj.minComments = source_course.minComments
                 obj.noUnfinalize = source_course.noUnfinalize
                 obj.lateDayCreditsAllowable = source_course.lateDayCreditsAllowable
+                obj.timezone = source_course.timezone
+                obj.studentsCanSeeGraders = source_course.studentsCanSeeGraders
+                obj.useStudentCaptions = source_course.useStudentCaptions
+                obj.enableStudentFeedbackNotifications = source_course.enableStudentFeedbackNotifications
+                obj.activateQueue = source_course.activateQueue
+                # dict() copies so the two courses never share a mutable JSON value.
+                # Roster/invite/billing fields (emailWhitelist, rosterMap, inviteCodeEnabled,
+                # manual_payments, ai_token_rates, studentCaptions) intentionally stay unset.
+                obj.ai_feature_config = dict(source_course.ai_feature_config or {})
+                obj.ai_feature_models = dict(source_course.ai_feature_models or {})
 
-                # Copy assignments into the new course
+                # Copy assignments into the new course. copy_quizzes=False: quizzes
+                # (attached and standalone) are copied once at the course level below.
+                assignment_map = {}
                 for source_assignment in source_course.assignments.all().order_by('sortKey', 'id'):
-                    copied_assignment = copy_assignment(source_assignment, obj)
+                    # copy_assignment mutates its argument into the new assignment —
+                    # capture the source id first.
+                    source_assignment_id = source_assignment.id
+                    copied_assignment = copy_assignment(source_assignment, obj, copy_quizzes=False)
                     if copied_assignment is None:
                         logger.warning(
                             "Failed to clone assignment %s while cloning course %s into course %s",
-                            source_assignment.id,
+                            source_assignment_id,
                             source_course.id,
                             obj.id,
                         )
-                
+                    else:
+                        assignment_map[source_assignment_id] = copied_assignment
+
+                # Copy question banks and quizzes
+                clone_course_quizzes(source_course, obj, assignment_map)
+
             else:
                  logger.warning(f"User {courseAdmin.email} tried to clone course {clone_from_id} without permission")
 

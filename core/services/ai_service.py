@@ -2033,15 +2033,19 @@ Provide a concise markdown summary following the guidelines in your instructions
         from core.prompts.variables import VariableContext, substitute_variables
 
         def _collect_context():
-            assignment = submission.assignment
+            # Submission is None on the eager path (submission-free prompts, including
+            # standalone quizzes) — the service's own assignment (possibly None) provides
+            # whatever context exists.
+            assignment = submission.assignment if submission is not None else self.assignment
             ctx = VariableContext(course=self.course, assignment=assignment,
                                   submission=submission, section=section)
             instructor_text, _ = substitute_variables(section.systemPrompt, ctx)
             try:
-                language = assignment.environment.language or ''
+                language = (assignment.environment.language or '') if assignment else ''
             except Exception:
                 language = ''
-            return instructor_text, assignment.name, language
+            name = assignment.name if assignment is not None else section.quiz.title
+            return instructor_text, name, language
 
         instructor_text, assignment_name, language = await sync_to_async(_collect_context)()
 

@@ -236,6 +236,72 @@ class TestRevealAndAccess:
         # ...while correctness stays hidden under the 'never' policy.
         assert 'isCorrect' not in resp
 
+    def test_after_close_seals_results_until_close(self, api_client, taking_setup):
+        # Under 'after_close', a submitted attempt reveals NOTHING until the quiz closes —
+        # no totals, no per-question points/correctness (which would leak right/wrong), no
+        # key — and the quiz card's official score stays null. Everything opens at close.
+        from core.models import Quiz
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course, showCorrectAnswers='after_close',
+                     availableUntil=timezone.now() + timedelta(days=1))
+        _add(quiz, q)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        correct = q.choices.get(isCorrect=True)
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': start.data['responses'][0]['id'], 'selectedChoices': [correct.id]},
+                         format='json')
+        done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+
+        for key in ('score', 'maxScore', 'passed'):
+            assert key not in done.data
+        resp = done.data['responses'][0]
+        for key in ('pointsEarned', 'graderFeedback', 'isCorrect'):
+            assert key not in resp
+        assert all('isCorrect' not in c for c in resp['question']['choices'])
+        listed = api_client.get(f'/quizAttempts/availableQuizzes/?course={course.id}')
+        q_data = next(x for x in listed.data if x['id'] == quiz.id)
+        assert q_data['myScore'] is None and q_data['myPassed'] is None
+        assert q_data['hasSubmittedAttempt'] is True
+
+        Quiz.objects.filter(pk=quiz.id).update(availableUntil=timezone.now() - timedelta(minutes=1))
+        mine = api_client.get(f"/quizAttempts/{start.data['id']}/")
+        assert _dec(mine.data['score']) == _dec('2.00')
+        revealed = mine.data['responses'][0]
+        assert revealed['isCorrect'] is True
+        assert _dec(revealed['pointsEarned']) == _dec('2.00')
+        listed = api_client.get(f'/quizAttempts/availableQuizzes/?course={course.id}')
+        q_data = next(x for x in listed.data if x['id'] == quiz.id)
+        assert _dec(q_data['myScore']) == _dec('2.00')
+
+    def test_scores_only_quiz_hides_question_review_after_submit(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course, showResponses=False)
+        _add(quiz, q)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        # Taking still shows the questions.
+        assert len(start.data['responses']) == 1
+        correct = q.choices.get(isCorrect=True)
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': start.data['responses'][0]['id'], 'selectedChoices': [correct.id]},
+                         format='json')
+        done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        # The score shows (default after_submit release) but the question review does not.
+        assert _dec(done.data['score']) == _dec('2.00')
+        assert done.data['responses'] == []
+        assert done.data['showResponses'] is False
+        mine = api_client.get(f"/quizAttempts/{start.data['id']}/")
+        assert mine.data['responses'] == []
+        listed = api_client.get(f"/quizAttempts/myAttempts/?quiz={quiz.id}")
+        assert listed.data[0]['responses'] == []
+        # Staff keep the full grading view.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        staff = api_client.get(f"/quizAttempts/{start.data['id']}/")
+        assert len(staff.data['responses']) == 1
+
     def test_student_cannot_read_another_students_attempt(self, api_client, taking_setup):
         course = taking_setup['course']
         quiz = _quiz(course)
@@ -624,6 +690,187 @@ class TestClosing:
         resp = api_client.get(f'/quizAttempts/availableQuizzes/?course={course.id}')
         q_data = next(x for x in resp.data if x['id'] == q.id)
         assert q_data['closeAt'] is not None
+
+
+# --------------------------------------------------------------------------- #
+# Staff-pinned official attempt
+# --------------------------------------------------------------------------- #
+
+class TestOfficialAttemptPin:
+    def _submit(self, api_client, student, quiz, q, correct):
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        choice = q.choices.get(isCorrect=correct)
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': start.data['responses'][0]['id'], 'selectedChoices': [choice.id]},
+                         format='json')
+        return api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json').data
+
+    def test_pin_overrides_scoring_policy(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        from core.services.quiz_grading import official_score
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course, attemptsAllowed=0)  # unlimited; default policy 'highest'
+        _add(quiz, q)
+        student = taking_setup['students'][0]
+        first = self._submit(api_client, student, quiz, q, correct=True)    # 2/2
+        second = self._submit(api_client, student, quiz, q, correct=False)  # 0/2
+        assert _dec(official_score(quiz, student)[0]) == _dec('2.00')  # highest wins
+
+        # Staff pin the 0-point attempt → the official score follows the pin.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f"/quizAttempts/{second['id']}/setOfficial/", {}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['isOfficialOverride'] is True
+        results = api_client.get(f"/quizzes/{quiz.id}/results/")
+        assert _dec(results.data[0]['score']) == _dec('0.00')
+
+        # Pinning another attempt moves the pin (at most one per student).
+        api_client.post(f"/quizAttempts/{first['id']}/setOfficial/", {}, format='json')
+        assert QuizAttempt.objects.get(pk=second['id']).isOfficialOverride is False
+
+        # Unpinning restores the scoring policy.
+        resp = api_client.post(f"/quizAttempts/{first['id']}/setOfficial/",
+                               {'official': False}, format='json')
+        assert resp.data['isOfficialOverride'] is False
+        results = api_client.get(f"/quizzes/{quiz.id}/results/")
+        assert _dec(results.data[0]['score']) == _dec('2.00')
+
+    def test_pin_requires_grading_role(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course)
+        _add(quiz, q)
+        done = self._submit(api_client, taking_setup['students'][0], quiz, q, correct=True)
+        # Students cannot pin their own attempt.
+        resp = api_client.post(f"/quizAttempts/{done['id']}/setOfficial/", {}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# --------------------------------------------------------------------------- #
+# Setting changes reflect onto existing attempts
+# --------------------------------------------------------------------------- #
+
+class TestSettingsReflection:
+    def test_passing_threshold_change_updates_stored_passed(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))  # worth 2.00
+        quiz = _quiz(course)            # no passing threshold yet
+        _add(quiz, q)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        correct = q.choices.get(isCorrect=True)
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': start.data['responses'][0]['id'], 'selectedChoices': [correct.id]},
+                         format='json')
+        done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        assert done.data['passed'] is None
+
+        # Add a threshold the score meets → the stored pass flips True.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {'passingScore': '50'}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert QuizAttempt.objects.get(pk=done.data['id']).passed is True
+
+        # Raise it beyond the score (as points) → flips False, and the student payload agrees.
+        api_client.patch(f'/quizzes/{quiz.id}/',
+                         {'passingScore': '3', 'passingScoreUnit': 'points'}, format='json')
+        assert QuizAttempt.objects.get(pk=done.data['id']).passed is False
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        mine = api_client.get(f"/quizAttempts/{done.data['id']}/")
+        assert mine.data['passed'] is False
+
+    def test_time_limit_change_updates_in_progress_deadline(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        quiz = _quiz(course, timeLimitMinutes=30)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        assert attempt.deadline == attempt.startedAt + timedelta(minutes=30)
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.patch(f'/quizzes/{quiz.id}/', {'timeLimitMinutes': 60}, format='json')
+        attempt.refresh_from_db()
+        assert attempt.deadline == attempt.startedAt + timedelta(minutes=60)
+
+        # Removing the limit clears the deadline.
+        api_client.patch(f'/quizzes/{quiz.id}/', {'timeLimitMinutes': None}, format='json')
+        attempt.refresh_from_db()
+        assert attempt.deadline is None
+
+    def test_close_change_recaps_in_progress_deadline(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        close = timezone.now() + timedelta(days=2)
+        quiz = _quiz(course, availableUntil=close, endAttemptsAtClose=True)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        assert attempt.deadline == close
+
+        new_close = timezone.now() + timedelta(hours=1)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.patch(f'/quizzes/{quiz.id}/', {'availableUntil': new_close.isoformat()}, format='json')
+        attempt.refresh_from_db()
+        assert attempt.deadline == new_close
+
+    def test_accommodation_change_updates_in_progress_deadline(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        quiz = _quiz(course, timeLimitMinutes=30)
+        _add(quiz, _mc(course, _bank(course)))
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '2.0'}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        attempt.refresh_from_db()
+        assert attempt.deadline == attempt.startedAt + timedelta(minutes=60)
+
+        # Removing it (multiplier 1) restores the base limit.
+        api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                         {'student': student.email, 'timeMultiplier': '1'}, format='json')
+        attempt.refresh_from_db()
+        assert attempt.deadline == attempt.startedAt + timedelta(minutes=30)
+
+    def test_no_backtracking_only_locks_sequential_mode(self, api_client, taking_setup):
+        course = taking_setup['course']
+        bank = _bank(course)
+        # All questions on one page: answering out of order must work even with
+        # allowBacktracking=False left over from a sequential configuration.
+        quiz = _quiz(course, oneQuestionAtATime=False, allowBacktracking=False)
+        _add(quiz, _mc(course, bank), sortKey=0)
+        _add(quiz, _mc(course, bank), sortKey=1)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        responses = sorted(start.data['responses'], key=lambda r: r['sortKey'])
+        later = api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                                 {'response': responses[1]['id'], 'answerText': 'x'}, format='json')
+        assert later.status_code == status.HTTP_200_OK
+        earlier = api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                                   {'response': responses[0]['id'], 'answerText': 'y'}, format='json')
+        assert earlier.status_code == status.HTTP_200_OK
+
+        # Sequential mode still locks earlier questions.
+        quiz2 = _quiz(course, title='Seq', oneQuestionAtATime=True, allowBacktracking=False)
+        _add(quiz2, _mc(course, bank), sortKey=0)
+        _add(quiz2, _mc(course, bank), sortKey=1)
+        start2 = api_client.post('/quizAttempts/', {'quiz': quiz2.id}, format='json')
+        responses2 = sorted(start2.data['responses'], key=lambda r: r['sortKey'])
+        api_client.patch(f"/quizAttempts/{start2.data['id']}/saveAnswer/",
+                         {'response': responses2[1]['id'], 'answerText': 'x'}, format='json')
+        blocked = api_client.patch(f"/quizAttempts/{start2.data['id']}/saveAnswer/",
+                                   {'response': responses2[0]['id'], 'answerText': 'y'}, format='json')
+        assert blocked.status_code == status.HTTP_400_BAD_REQUEST
 
 
 # --------------------------------------------------------------------------- #

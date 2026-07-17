@@ -23,10 +23,10 @@ class QuizGeneratedSectionSerializer(ModelSerializerWithPOSTCheck):
     data = super().validate(data)
     proposed = self.genProposedFields(data)
     quiz = proposed.get('quiz')
-    # Generation is seeded by the student's submission, so the quiz must be attached.
-    if quiz is not None and quiz.assignment_id is None:
-      raise serializers.ValidationError(
-          "AI-generated sections require the quiz to be attached to an assignment.")
+    # Standalone quizzes may carry generated sections as long as the prompt doesn't draw
+    # on assignment/submission data — validate_template below rejects each offending
+    # {variable} with a helpful message when the quiz is unattached. Submission-free
+    # prompts generate eagerly per student instead of waiting for a submission.
     # Block creating a section when the AI feature is off/unconfigured — otherwise
     # generation never runs and students sit at 'questions_not_ready' forever.
     # (Editing/deleting existing sections stays allowed for cleanup.)

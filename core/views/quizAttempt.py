@@ -15,7 +15,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.models import Course, Quiz, QuizAccommodation, QuizAttempt
+from core.models import Course, Quiz, QuizAttempt
 from core.permissions.helpers import isCourseMember, isCourseStaff, isStudent
 from core.permissions.permissions import QuizAttemptPermissions
 from core.serializers.studentQuiz import (
@@ -83,7 +83,9 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     return {
         'request': self.request,
         'reveal': quiz_grading.answers_visible(attempt.quiz, attempt),
-        'revealScore': attempt.status == 'submitted',
+        'revealScore': quiz_grading.scores_visible(attempt.quiz, attempt),
+        # Scores-only quizzes stop sending question content once the attempt is submitted.
+        'revealResponses': attempt.status != 'submitted' or attempt.quiz.showResponses,
     }
 
   @extend_schema(responses=StaffQuizAttemptSerializer)
@@ -132,18 +134,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       return Response({'detail': 'This quiz has no questions yet.'}, status=status.HTTP_400_BAD_REQUEST)
 
     started = timezone.now()
-    deadline = None
-    if quiz.timeLimitMinutes:
-      minutes = float(quiz.timeLimitMinutes)
-      # Course-level per-student extra-time accommodation scales every timed quiz.
-      accommodation = QuizAccommodation.objects.filter(course=quiz.course, student=user).first()
-      if accommodation is not None:
-        minutes *= float(accommodation.timeMultiplier)
-      deadline = started + timedelta(minutes=minutes)
-    if quiz.endAttemptsAtClose:
-      close = quiz_grading.quiz_close_time(quiz, user, started)
-      if close is not None:
-        deadline = close if deadline is None else min(deadline, close)
+    deadline = quiz_grading.compute_attempt_deadline(quiz, user, started)
     try:
       with transaction.atomic():
         attempt = QuizAttempt.objects.create(
@@ -185,7 +176,11 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
 
     # Enforce no-backtracking server-side (otherwise the setting is only advisory in the UI):
     # once the student has moved past a question, its answer can't be changed via a direct call.
-    if not attempt.quiz.allowBacktracking and response.sortKey < attempt.furthestIndex:
+    # Only sequential mode locks earlier questions — with all questions on one page students
+    # answer in any order, and allowBacktracking may still be False left over from a previous
+    # sequential configuration (the builder hides the toggle outside sequential mode).
+    if attempt.quiz.oneQuestionAtATime and not attempt.quiz.allowBacktracking \
+        and response.sortKey < attempt.furthestIndex:
       return Response({'detail': 'Returning to earlier questions is not allowed.'},
                       status=status.HTTP_400_BAD_REQUEST)
 
@@ -283,6 +278,37 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     _record_grading_event(attempt, response, 'quiz_response_grade_reopened', request.user)
     return Response(StaffQuizAttemptSerializer(
         attempt, context=staff_reveal_context(request)).data)
+
+  @extend_schema(
+      request=inline_serializer('SetOfficialAttemptRequest', {
+          'official': serializers.BooleanField(required=False, default=True),
+      }),
+      responses=StaffQuizAttemptSerializer,
+      description="Pin this submitted attempt as the student's official score, overriding the "
+                  "quiz's scoringPolicy — or unpin with official=false to return to the policy. "
+                  "Quiz graders and course admins only; at most one pin per student.",
+  )
+  @action(detail=True, methods=['POST'])
+  def setOfficial(self, request, pk=None):
+    attempt = self.get_object()
+    if attempt.quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+    if attempt.status != 'submitted':
+      return Response({'detail': 'Only submitted attempts can be pinned as official.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    official = bool(request.data.get('official', True))
+    with transaction.atomic():
+      # At most one pin per (quiz, student) — pinning moves it, unpinning restores the policy.
+      attempt.quiz.attempts.filter(student=attempt.student).exclude(pk=attempt.pk).update(
+          isOfficialOverride=False, modified=timezone.now())
+      attempt.isOfficialOverride = official
+      attempt.save()
+    record_audit_event(
+        course=attempt.quiz.course,
+        event_type='quiz_attempt_pinned_official' if official else 'quiz_attempt_unpinned_official',
+        user=request.user, quiz=attempt.quiz, assignment=attempt.quiz.assignment,
+        meta={'student': attempt.student.email, 'attemptNumber': attempt.attemptNumber})
+    return Response(StaffQuizAttemptSerializer(attempt, context=staff_reveal_context(request)).data)
 
   @extend_schema(
       parameters=[OpenApiParameter(name='quiz', type=int, location=OpenApiParameter.QUERY, required=True)],

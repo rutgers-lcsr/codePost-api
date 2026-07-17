@@ -2972,6 +2972,10 @@ class Quiz(BaseModel):
       help_text=("When sequential, whether students may return to previous questions."))
   showCorrectAnswers = models.CharField(max_length=16, choices=SHOW_ANSWERS_CHOICES,
       default='after_submit', help_text=("When students may see the correct answers."))
+  showResponses = models.BooleanField(default=True,
+      help_text=("Whether students may review their questions and answers after submitting. "
+                 "When false, students only see scores (per the reveal policy) — the question "
+                 "content is never shown again after submission."))
   passingScore = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True,
       help_text=("Optional pass threshold. Interpreted per passingScoreUnit "
                  "(a percentage 0–100, or an absolute point value)."))
@@ -3096,6 +3100,9 @@ class QuizAttempt(BaseModel):
   furthestIndex = models.PositiveIntegerField(default=0,
       help_text=("Highest response sortKey the student has reached; enforces sequential "
                  "navigation (oneQuestionAtATime / no-backtracking) server-side."))
+  isOfficialOverride = models.BooleanField(default=False,
+      help_text=("Staff-pinned: this attempt is the student's official score, overriding "
+                 "the quiz's scoringPolicy. At most one per (quiz, student)."))
 
   course = property(lambda self: self.quiz.course)
 

@@ -1,6 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from core.forms.forms import IDForm
-from core.models import Course, QuizAccommodation, RubricCategory
+from core.models import Course, QuizAccommodation, QuizAttempt, RubricCategory
 from core.models import User
 from core.serializers.course import (
     CourseSerializer,
@@ -10,6 +10,7 @@ from core.serializers.course import (
     CourseRosterMapSerializer,
     CourseStudentCaptionsSerializer,
 )
+from core.serializers.gradebook import GradebookResponseSerializer
 from core.serializers.section import SectionSerializer
 from core.serializers.questionBank import QuestionBankSerializer
 from core.serializers.question import QuestionSerializer
@@ -926,8 +927,84 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         else:
             QuizAccommodation.objects.update_or_create(
                 course=course, student=student, defaults={'timeMultiplier': multiplier})
+        # Reflect the new multiplier onto the student's in-progress attempts — deadlines are
+        # stored at start, so without this an accommodation granted mid-quiz would do nothing.
+        from core.services import quiz_grading
+        for attempt in QuizAttempt.objects.filter(
+                quiz__course=course, student=student, status='in_progress').select_related('quiz'):
+            deadline = quiz_grading.compute_attempt_deadline(attempt.quiz, student, attempt.startedAt)
+            if deadline != attempt.deadline:
+                attempt.deadline = deadline
+                attempt.save()
         return Response(QuizAccommodationRowSerializer(
             {'student': student.email, 'timeMultiplier': multiplier}).data)
+
+    @extend_schema(responses=GradebookResponseSerializer)
+    @action(detail=True, methods=["GET"])
+    def gradebook(self, request, pk=None):
+        """The course gradebook: every active student × every assignment and quiz, with
+        totals over graded work (course admins only)."""
+        from core.services.gradebook import build_gradebook
+        course = self.get_object()
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+        return Response(GradebookResponseSerializer(build_gradebook(course)).data)
+
+    @extend_schema(
+        responses={(200, 'text/csv'): OpenApiTypes.STR},
+        parameters=[
+            OpenApiParameter(name='assignments', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                             required=False,
+                             description="Comma-separated assignment ids to include; omit for all."),
+            OpenApiParameter(name='quizzes', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                             required=False,
+                             description="Comma-separated quiz ids to include; omit for all."),
+            OpenApiParameter(name='section', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+                             required=False,
+                             description="Restrict rows to students in this section."),
+        ],
+    )
+    @action(detail=True, methods=["GET"])
+    def gradebookExport(self, request, pk=None):
+        """Export the course gradebook as CSV (course admins only). Same data as the
+        gradebook endpoint: one row per active student, blank cells for pending/missing.
+        Totals are computed over the included columns only."""
+        import csv
+        from django.http import HttpResponse
+        from core.services.gradebook import build_gradebook
+
+        course = self.get_object()
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+
+        def id_set(name):
+            # Absent → None (all); present → the listed ids (possibly none).
+            if name not in request.query_params:
+                return None
+            raw = request.query_params.get(name) or ''
+            return {int(x) for x in raw.split(',') if x.strip().isdigit()}
+
+        data = build_gradebook(course,
+                               assignment_ids=id_set('assignments'),
+                               quiz_ids=id_set('quizzes'),
+                               section=request.query_params.get('section') or None)
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="gradebook_course_{course.id}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            ['Student', 'Section']
+            + [f"{a['name']} ({a['points']})" for a in data['assignments']]
+            + [f"Quiz: {q['title']}" for q in data['quizzes']]
+            + ['Total Earned', 'Total Possible', 'Percent'])
+        for row in data['rows']:
+            writer.writerow(
+                [row['student'], row['section'] or '']
+                + [('' if c['grade'] is None else str(c['grade'])) for c in row['assignmentCells']]
+                + [('' if c['score'] is None else str(c['score'])) for c in row['quizCells']]
+                + [str(row['totalEarned']), str(row['totalPossible']),
+                   '' if row['percent'] is None else str(row['percent'])])
+        return response
 
     @extend_schema(responses=QuestionSerializer(many=True))
     @action(detail=True, methods=["GET"])

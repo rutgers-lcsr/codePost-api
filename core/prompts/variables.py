@@ -152,6 +152,24 @@ def validate_template(template: str, context: VariableContext) -> list[str]:
     return errors
 
 
+def template_requirements(template: str) -> set[str]:
+    """The union of ``requires`` over the registered variables used in ``template``
+    (e.g. {'assignment', 'submission'}). Drives generation timing: a prompt with no
+    'submission' requirement can generate before (or without) any submission, and one
+    with no 'assignment' requirement is usable on standalone quizzes."""
+    requirements: set[str] = set()
+    for m in TOKEN_RE.finditer(template):
+        variable = prompt_variable_registry.get(m.group(1))
+        if variable is not None:
+            requirements |= variable.requires
+    return requirements
+
+
+def template_requires_submission(template: str) -> bool:
+    """Whether any variable in ``template`` draws on a student's submission."""
+    return 'submission' in template_requirements(template)
+
+
 def describe_available_variables(context: VariableContext) -> list[dict]:
     """The autocomplete payload: one entry per usable token in this context.
 
@@ -347,19 +365,19 @@ for _variable in [
         name='submission_files', label="All the student's submitted files",
         description="The contents of every file in the student's submission "
                     '(resolved per student at generation time).',
-        resolver=_resolve_submission_files, requires=frozenset({'assignment'})),
+        resolver=_resolve_submission_files, requires=frozenset({'assignment', 'submission'})),
     PromptVariable(
         name='submission_file', label='Submitted file',
         description="One named file from the student's submission "
                     '(resolved per student at generation time).',
         resolver=_resolve_submission_file, takes_argument=True,
         list_arguments=_list_submission_file_arguments,
-        requires=frozenset({'assignment'})),
+        requires=frozenset({'assignment', 'submission'})),
     PromptVariable(
         name='submission_test_results', label="The student's test results",
         description="The student's autograder test results "
                     '(resolved per student at generation time).',
-        resolver=_resolve_submission_test_results, requires=frozenset({'assignment'})),
+        resolver=_resolve_submission_test_results, requires=frozenset({'assignment', 'submission'})),
     PromptVariable(
         name='num_questions', label='Number of questions',
         description="This section's configured question count.",

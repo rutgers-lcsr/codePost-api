@@ -3,8 +3,15 @@
 and hide correct answers / per-choice feedback / scores until the reveal context allows it.
 
 Context flags (set by the view):
-  reveal       — correct answers + per-choice/question feedback + per-response correctness may show.
-  revealScore  — the attempt's numeric score / pass-fail may show (i.e. it has been submitted).
+  reveal           — correct answers + per-choice/question feedback + per-response correctness
+                     may show.
+  revealScore      — the attempt's results (score / pass-fail / per-response earned points and
+                     grader feedback) may show: the attempt is submitted AND the quiz's results
+                     are released (sealed until close under the 'after_close' reveal policy —
+                     see quiz_grading.scores_visible).
+  revealResponses  — the attempt's responses (question content + the student's answers) may
+                     show. False only for submitted attempts on quizzes with
+                     showResponses=False (scores-only review); taking always shows them.
 """
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema_field
@@ -24,8 +31,8 @@ def serialize_score(value):
 
 
 def staff_reveal_context(request):
-  """Serializer context for staff grading views: full answer + score reveal."""
-  return {'request': request, 'reveal': True, 'revealScore': True}
+  """Serializer context for staff grading views: full answer + score + response reveal."""
+  return {'request': request, 'reveal': True, 'revealScore': True, 'revealResponses': True}
 
 
 class QuizAvailabilitySerializer(serializers.Serializer):
@@ -111,8 +118,9 @@ class StudentQuizResponseSerializer(serializers.ModelSerializer):
   def to_representation(self, instance):
     data = super().to_representation(instance)
     # Correctness follows the quiz's answer-reveal policy; the student's own earned points
-    # and grader feedback are not answer keys, so they show as soon as scores do (i.e.
-    # once the attempt is submitted) — even on showCorrectAnswers='never' quizzes.
+    # and grader feedback are not answer keys, so they show as soon as scores do — even on
+    # showCorrectAnswers='never' quizzes. Under 'after_close' the view seals revealScore
+    # until the quiz closes, so points can't leak per-question correctness early.
     if not self.context.get('reveal'):
       data.pop('isCorrect', None)
     if not self.context.get('revealScore'):
@@ -123,9 +131,11 @@ class StudentQuizResponseSerializer(serializers.ModelSerializer):
 
 class StudentQuizAttemptSerializer(serializers.ModelSerializer):
   responses = StudentQuizResponseSerializer(many=True, read_only=True)
-  # Navigation mode is denormalized from the quiz so the taking UI doesn't need a second fetch.
+  # Navigation mode and the review policy are denormalized from the quiz so the taking UI
+  # doesn't need a second fetch.
   oneQuestionAtATime = serializers.BooleanField(source='quiz.oneQuestionAtATime', read_only=True)
   allowBacktracking = serializers.BooleanField(source='quiz.allowBacktracking', read_only=True)
+  showResponses = serializers.BooleanField(source='quiz.showResponses', read_only=True)
   # The server's current time at response, so the client can run a skew-immune countdown
   # (it measures elapsed time locally from this anchor rather than trusting the device clock).
   serverNow = serializers.SerializerMethodField()
@@ -134,7 +144,9 @@ class StudentQuizAttemptSerializer(serializers.ModelSerializer):
     model = QuizAttempt
     fields = ('id', 'quiz', 'attemptNumber', 'status', 'startedAt', 'deadline',
               'submittedAt', 'score', 'maxScore', 'needsManualGrading', 'passed',
-              'oneQuestionAtATime', 'allowBacktracking', 'serverNow', 'responses')
+              'isOfficialOverride', 'oneQuestionAtATime', 'allowBacktracking', 'showResponses',
+              'serverNow', 'responses')
+    read_only_fields = ('isOfficialOverride',)
 
   @extend_schema_field(serializers.DateTimeField())
   def get_serverNow(self, obj):
@@ -145,6 +157,10 @@ class StudentQuizAttemptSerializer(serializers.ModelSerializer):
     if not self.context.get('revealScore'):
       for key in ('score', 'maxScore', 'passed'):
         data.pop(key, None)
+    # Scores-only review: once submitted, the question content and the student's answers are
+    # never sent again (staff contexts set revealResponses=True and keep the full view).
+    if not self.context.get('revealResponses', True):
+      data['responses'] = []
     return data
 
 
@@ -224,12 +240,18 @@ class StudentQuizSerializer(serializers.ModelSerializer):
       cache = self._official_score_cache = {}
     if obj.pk not in cache:
       student = self._student()
-      cache[obj.pk] = quiz_grading.official_score(obj, student) if student is not None else None
+      # Sealed results (after_close before the quiz closes) read as "no score yet", so the
+      # quiz card can't leak what the attempt payload is withholding.
+      if student is None or not quiz_grading.scores_released(obj, student):
+        cache[obj.pk] = None
+      else:
+        cache[obj.pk] = quiz_grading.official_score(obj, student)
     return cache[obj.pk]
 
   @extend_schema_field(serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True))
   def get_myScore(self, obj):
-    """The caller's official score per scoringPolicy; null until a fully graded attempt exists."""
+    """The caller's official score per scoringPolicy; null until a fully graded attempt
+    exists and results are released (sealed until close when answers show after close)."""
     official = self._official_score(obj)
     return serialize_score(official[0]) if official is not None else None
 

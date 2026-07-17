@@ -9,11 +9,15 @@ from core.models import (
     Assignment,
     AssignmentDataSet,
     AssignmentFile,
+    Question,
+    QuestionBank,
+    Quiz,
     TestCategory,
     TestCategoryResource,
 )
 from core.tests.utils import request_as, setUpBase
 from core.tests.views.personas import Persona
+from core.tests.views.quiz_helpers import _add, _bank, _mc, _quiz
 
 
 class TestPermissions_Assignment_Clone(APITestCase):
@@ -95,3 +99,66 @@ class TestPermissions_Assignment_Clone(APITestCase):
 
     response = cast(Any, request_as("create", grader, endpoint, {}))
     self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+  def _attach_quiz(self):
+    bank = _bank(self.course)
+    question = _mc(self.course, bank)
+    quiz = _quiz(self.course, title="Attached Quiz", assignment=self.assignment, isPublished=True)
+    _add(quiz, question, sortKey=1)
+    return bank, question, quiz
+
+  def test_clone_same_course_reuses_questions(self):
+    bank, question, quiz = self._attach_quiz()
+    admin = Persona.ADMIN_OF_COURSE(self)
+    endpoint = reverse("assignment-clone", args=[self.assignment.id])
+
+    question_count = Question.objects.count()
+    bank_count = QuestionBank.objects.count()
+
+    response = cast(Any, request_as("create", admin, endpoint, {}))
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    cloned_assignment = Assignment.objects.get(id=response.data["id"])
+    cloned_quiz = Quiz.objects.get(assignment=cloned_assignment)
+    self.assertNotEqual(cloned_quiz.id, quiz.id)
+    self.assertFalse(cloned_quiz.isPublished)
+    # Same-course clones link the SAME question rows — no content duplication.
+    self.assertEqual(cloned_quiz.quizQuestions.get().question_id, question.id)
+    self.assertEqual(Question.objects.count(), question_count)
+    self.assertEqual(QuestionBank.objects.count(), bank_count)
+
+  def test_clone_cross_course_copies_banks_and_resets_draft(self):
+    bank, question, quiz = self._attach_quiz()
+    admin = Persona.ADMIN_OF_COURSE(self)
+    self.other_course.courseAdmins.add(admin)
+    endpoint = reverse("assignment-clone", args=[self.assignment.id])
+
+    response = cast(Any, request_as("create", admin, endpoint, {"course": self.other_course.id}))
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    cloned_assignment = Assignment.objects.get(id=response.data["id"])
+    self.assertEqual(cloned_assignment.course_id, self.other_course.id)
+
+    cloned_quiz = Quiz.objects.get(assignment=cloned_assignment)
+    self.assertEqual(cloned_quiz.course_id, self.other_course.id)
+    self.assertFalse(cloned_quiz.isPublished)
+
+    cloned_bank = QuestionBank.objects.get(course=self.other_course)
+    self.assertEqual(cloned_bank.name, bank.name)
+    cloned_question = cloned_quiz.quizQuestions.get().question
+    self.assertEqual(cloned_question.course_id, self.other_course.id)
+    self.assertEqual(cloned_question.bank_id, cloned_bank.id)
+    self.assertNotEqual(cloned_question.id, question.id)
+
+  def test_clone_cross_course_bank_name_collision(self):
+    bank, _question, _quiz_obj = self._attach_quiz()
+    QuestionBank.objects.create(course=self.other_course, name=bank.name)
+    admin = Persona.ADMIN_OF_COURSE(self)
+    self.other_course.courseAdmins.add(admin)
+    endpoint = reverse("assignment-clone", args=[self.assignment.id])
+
+    response = cast(Any, request_as("create", admin, endpoint, {"course": self.other_course.id}))
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    self.assertTrue(QuestionBank.objects.filter(
+      course=self.other_course, name=f"{bank.name} (copy 1)").exists())

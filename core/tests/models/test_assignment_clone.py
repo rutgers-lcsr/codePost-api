@@ -8,7 +8,10 @@ from core.models import (
     AssignmentDataSet,
     AssignmentFile,
     Course,
+    LearningObjective,
     Organization,
+    RubricCategory,
+    RubricComment,
     User,
     TestCase as AssignmentTestCase,
     TestCategory,
@@ -110,6 +113,88 @@ class AssignmentCloneTests(TestCase):
             self.fail("Expected copied dataset resource to reference a dataset")
         self.assertEqual(copied_dataset.assignment.id, copied.id)
         self.assertEqual(copied_dataset.name, self.dataset.name)
+
+    def test_copy_assignment_copies_rubric_flags_and_remaps_rubric_items(self):
+        category = RubricCategory.objects.create(
+            assignment=self.assignment,
+            name="Style",
+            atMostOnce=True,
+        )
+        comment = RubricComment.objects.create(
+            category=category,
+            text="Missing docstring",
+            pointDelta=2,
+        )
+        AssignmentTestCase.objects.create(
+            testCategory=self.category,
+            description="docstring test",
+            type="script",
+            hidden=True,
+            rubricItem=comment,
+        )
+
+        copied = copy_assignment(self.assignment, self.destination_course)
+        self.assertIsNotNone(copied)
+
+        copied_category = copied.rubricCategories.get(name="Style")  # type: ignore[union-attr]
+        self.assertTrue(copied_category.atMostOnce)
+
+        copied_test = AssignmentTestCase.objects.get(
+            testCategory__assignment=copied, description="docstring test")
+        self.assertTrue(copied_test.hidden)
+        # The rubric item must be the CLONED comment, not a link back into the source course.
+        self.assertIsNotNone(copied_test.rubricItem)
+        self.assertNotEqual(copied_test.rubricItem.id, comment.id)
+        self.assertEqual(copied_test.rubricItem.category.assignment_id, copied.id)  # type: ignore[union-attr]
+        self.assertEqual(copied_test.rubricItem.text, "Missing docstring")
+
+    def test_copy_assignment_nullifies_stale_rubric_item(self):
+        # A rubricItem pointing at ANOTHER assignment's rubric (stale data) must become
+        # None on the clone rather than staying linked outside the cloned assignment.
+        other_assignment = Assignment.objects.create(
+            name="HW2", course=self.source_course, points=50)
+        other_category = RubricCategory.objects.create(assignment=other_assignment, name="Other")
+        other_comment = RubricComment.objects.create(
+            category=other_category, text="Elsewhere", pointDelta=1)
+        AssignmentTestCase.objects.create(
+            testCategory=self.category,
+            description="stale rubric test",
+            type="script",
+            rubricItem=other_comment,
+        )
+
+        copied = copy_assignment(self.assignment, self.destination_course)
+        self.assertIsNotNone(copied)
+
+        copied_test = AssignmentTestCase.objects.get(
+            testCategory__assignment=copied, description="stale rubric test")
+        self.assertIsNone(copied_test.rubricItem)
+
+    def test_copy_assignment_copies_learning_objectives(self):
+        objective = LearningObjective.objects.create(
+            assignment=self.assignment,
+            shortId="recursion",
+            name="Recursion",
+            description="Uses recursion correctly",
+            visibilityMode="on_pass",
+            aggregationMode="any",
+        )
+        test_case = self.category.testCases.get(description="sum test")
+        test_case.learningObjectives.add(objective)
+
+        copied = copy_assignment(self.assignment, self.destination_course)
+        self.assertIsNotNone(copied)
+
+        copied_objective = copied.learningObjectives.get()  # type: ignore[union-attr]
+        self.assertNotEqual(copied_objective.id, objective.id)
+        self.assertEqual(copied_objective.shortId, "recursion")
+        self.assertEqual(copied_objective.name, "Recursion")
+        self.assertEqual(copied_objective.visibilityMode, "on_pass")
+        self.assertEqual(copied_objective.aggregationMode, "any")
+
+        copied_test = AssignmentTestCase.objects.get(
+            testCategory__assignment=copied, description="sum test")
+        self.assertEqual(list(copied_test.learningObjectives.all()), [copied_objective])
 
 
 class CourseCloneTests(TestCase):

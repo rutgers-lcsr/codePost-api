@@ -4310,6 +4310,76 @@ paths:
       responses:
         '204':
           description: No response body
+  /courses/{id}/gradebook/:
+    get:
+      operationId: courses_gradebookRetrieve
+      description: |-
+        The course gradebook: every active student × every assignment and quiz, with
+        totals over graded work (course admins only).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GradebookResponse'
+          description: ''
+  /courses/{id}/gradebookExport/:
+    get:
+      operationId: courses_gradebookExportRetrieve
+      description: |-
+        Export the course gradebook as CSV (course admins only). Same data as the
+        gradebook endpoint: one row per active student, blank cells for pending/missing.
+        Totals are computed over the included columns only.
+      parameters:
+      - in: query
+        name: assignments
+        schema:
+          type: string
+        description: Comma-separated assignment ids to include; omit for all.
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      - in: query
+        name: quizzes
+        schema:
+          type: string
+        description: Comma-separated quiz ids to include; omit for all.
+      - in: query
+        name: section
+        schema:
+          type: string
+        description: Restrict rows to students in this section.
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            text/csv:
+              schema:
+                type: string
+          description: ''
   /courses/{id}/questionBanks/:
     get:
       operationId: courses_questionBanksList
@@ -8552,6 +8622,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/StudentQuizResponse'
           description: ''
+  /quizAttempts/{id}/setOfficial/:
+    post:
+      operationId: quizAttempts_setOfficialCreate
+      description: Pin this submitted attempt as the student's official score, overriding
+        the quiz's scoringPolicy — or unpin with official=false to return to the policy.
+        Quiz graders and course admins only; at most one pin per student.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetOfficialAttemptRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SetOfficialAttemptRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SetOfficialAttemptRequest'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffQuizAttempt'
+          description: ''
   /quizAttempts/{id}/submit/:
     post:
       operationId: quizAttempts_submitCreate
@@ -9777,9 +9885,10 @@ paths:
       operationId: quizzes_backfillPreviewRetrieve
       description: |-
         How many students a backfill would touch — shown to the instructor before they
-        save a new AI section (``wouldGenerate``: submitters minus approved sets, i.e. the
-        section-create backfill) and on the review drawer's Generate-missing button
-        (``missing``: submitters without any set).
+        save a new AI section (``wouldGenerate``: the section-create backfill) and on the
+        review drawer's Generate-missing button (``missing``: targets without any set).
+        Submission-seeded quizzes count submitters; submission-free ones count every
+        enrolled student (``needsSubmission`` says which applies).
       parameters:
       - in: path
         name: id
@@ -16426,8 +16535,11 @@ components:
           type: integer
         missing:
           type: integer
+        needsSubmission:
+          type: boolean
       required:
       - missing
+      - needsSubmission
       - wouldGenerate
     BankCopyRequest:
       type: object
@@ -18433,6 +18545,158 @@ components:
       required:
       - pointsEarned
       - response
+    GradebookAssignmentCell:
+      type: object
+      properties:
+        assignment:
+          type: integer
+        grade:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: The finalized grade; null until finalized.
+        hasSubmission:
+          type: boolean
+        isFinalized:
+          type: boolean
+      required:
+      - assignment
+      - grade
+      - hasSubmission
+      - isFinalized
+    GradebookAssignmentColumn:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        points:
+          type: number
+          format: double
+          maximum: 1000
+          minimum: -1000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+      required:
+      - id
+      - name
+      - points
+    GradebookQuizCell:
+      type: object
+      properties:
+        quiz:
+          type: integer
+        score:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Official score per scoringPolicy; null until fully graded.
+        maxScore:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+        needsGrading:
+          type: boolean
+        hasAttempts:
+          type: boolean
+      required:
+      - hasAttempts
+      - maxScore
+      - needsGrading
+      - quiz
+      - score
+    GradebookQuizColumn:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+      required:
+      - id
+      - title
+    GradebookResponse:
+      type: object
+      properties:
+        assignments:
+          type: array
+          items:
+            $ref: '#/components/schemas/GradebookAssignmentColumn'
+        quizzes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GradebookQuizColumn'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/GradebookRow'
+      required:
+      - assignments
+      - quizzes
+      - rows
+    GradebookRow:
+      type: object
+      properties:
+        student:
+          type: string
+          format: email
+        section:
+          type: string
+          nullable: true
+          description: The student's section name(s); null when unsectioned.
+        assignmentCells:
+          type: array
+          items:
+            $ref: '#/components/schemas/GradebookAssignmentCell'
+        quizCells:
+          type: array
+          items:
+            $ref: '#/components/schemas/GradebookQuizCell'
+        totalEarned:
+          type: number
+          format: double
+          maximum: 100000000
+          minimum: -100000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+        totalPossible:
+          type: number
+          format: double
+          maximum: 100000000
+          minimum: -100000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+        percent:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Earned/possible over graded work only; null when nothing is
+            graded.
+      required:
+      - assignmentCells
+      - percent
+      - quizCells
+      - section
+      - student
+      - totalEarned
+      - totalPossible
     GranularityEnum:
       enum:
       - hourly
@@ -20445,6 +20709,11 @@ components:
             * `never` - Never
             * `after_submit` - After submitting
             * `after_close` - After the quiz closes
+        showResponses:
+          type: boolean
+          description: Whether students may review their questions and answers after
+            submitting. When false, students only see scores (per the reveal policy)
+            — the question content is never shown again after submission.
         passingScore:
           type: number
           format: double
@@ -22081,6 +22350,11 @@ components:
             * `never` - Never
             * `after_submit` - After submitting
             * `after_close` - After the quiz closes
+        showResponses:
+          type: boolean
+          description: Whether students may review their questions and answers after
+            submitting. When false, students only see scores (per the reveal policy)
+            — the question content is never shown again after submission.
         passingScore:
           type: number
           format: double
@@ -22788,6 +23062,12 @@ components:
           type: boolean
       required:
       - isValid
+    SetOfficialAttemptRequest:
+      type: object
+      properties:
+        official:
+          type: boolean
+          default: true
     SeverityEnum:
       enum:
       - info
@@ -22906,10 +23186,18 @@ components:
           nullable: true
           description: Whether the attempt met quiz.passingScore. Null until fully
             graded or if no threshold.
+        isOfficialOverride:
+          type: boolean
+          readOnly: true
+          description: 'Staff-pinned: this attempt is the student''s official score,
+            overriding the quiz''s scoringPolicy. At most one per (quiz, student).'
         oneQuestionAtATime:
           type: boolean
           readOnly: true
         allowBacktracking:
+          type: boolean
+          readOnly: true
+        showResponses:
           type: boolean
           readOnly: true
         serverNow:
@@ -22929,10 +23217,12 @@ components:
       required:
       - allowBacktracking
       - id
+      - isOfficialOverride
       - oneQuestionAtATime
       - quiz
       - responses
       - serverNow
+      - showResponses
       - student
     StartQuizAttemptRequest:
       type: object
@@ -23211,10 +23501,18 @@ components:
           nullable: true
           description: Whether the attempt met quiz.passingScore. Null until fully
             graded or if no threshold.
+        isOfficialOverride:
+          type: boolean
+          readOnly: true
+          description: 'Staff-pinned: this attempt is the student''s official score,
+            overriding the quiz''s scoringPolicy. At most one per (quiz, student).'
         oneQuestionAtATime:
           type: boolean
           readOnly: true
         allowBacktracking:
+          type: boolean
+          readOnly: true
+        showResponses:
           type: boolean
           readOnly: true
         serverNow:
@@ -23229,10 +23527,12 @@ components:
       required:
       - allowBacktracking
       - id
+      - isOfficialOverride
       - oneQuestionAtATime
       - quiz
       - responses
       - serverNow
+      - showResponses
     StudentQuizResponse:
       type: object
       properties:

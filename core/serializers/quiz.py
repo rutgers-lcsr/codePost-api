@@ -4,6 +4,7 @@ from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.serializers.quizQuestionGroup import QuizQuestionGroupSerializer
 from core.serializers.generatedQuiz import QuizGeneratedSectionSerializer
 from core.models import Quiz, QuizQuestion
+from core.services import quiz_grading
 
 
 class QuizQuestionSerializer(ModelSerializerWithPOSTCheck):
@@ -42,7 +43,7 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
         'oneQuestionAtATime', 'allowBacktracking',
-        'showCorrectAnswers', 'passingScore', 'passingScoreUnit', 'scoringPolicy',
+        'showCorrectAnswers', 'showResponses', 'passingScore', 'passingScoreUnit', 'scoringPolicy',
         'multiAttemptScoreMethod', 'isPublished',
         # Per-student generated questions
         'gradersCanReviewGenerated', 'autoPublishGenerated', 'generatedSections',
@@ -79,14 +80,20 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
       if degenerate:
         raise serializers.ValidationError(
             "Set a duration for the close — it would otherwise close the moment the quiz opens.")
-    # Generated sections are seeded by submissions to the attached assignment; detaching
-    # or re-attaching the quiz would orphan them (and any per-student sets).
+    # Generated sections whose prompts draw on assignment/submission data are seeded by
+    # the attached assignment; detaching or re-attaching would orphan them (and any
+    # per-student sets). Submission-free sections don't depend on the assignment, so the
+    # quiz may attach/detach freely.
     if self.instance is not None and 'assignment' in data \
         and data.get('assignment') != self.instance.assignment \
         and self.instance.generatedSections.exists():
-      raise serializers.ValidationError(
-          "This quiz has personalized question sections — remove them before changing "
-          "the attached assignment.")
+      from core.prompts.variables import template_requirements
+      if any('assignment' in template_requirements(s.systemPrompt)
+             for s in self.instance.generatedSections.all()):
+        raise serializers.ValidationError(
+            "This quiz has personalized question sections whose prompts use assignment or "
+            "submission {variables} — remove those sections (or those variables) before "
+            "changing the attached assignment.")
     return data
 
   def create(self, validated_data):
@@ -94,3 +101,15 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
     if request is not None and validated_data.get('createdBy') is None:
       validated_data['createdBy'] = request.user
     return super().create(validated_data)
+
+  def update(self, instance, validated_data):
+    # Existing attempts bake in the passing threshold (stored passed) and the deadline
+    # (stored at start). Snapshot the fields they depend on and reflect any change onto
+    # those attempts, so edited settings apply retroactively instead of leaving stale state.
+    watched = quiz_grading.PASSING_FIELDS | quiz_grading.DEADLINE_FIELDS
+    old = {f: getattr(instance, f) for f in watched}
+    instance = super().update(instance, validated_data)
+    changed = {f for f in watched if getattr(instance, f) != old[f]}
+    if changed:
+      quiz_grading.sync_attempts_to_settings(instance, changed)
+    return instance

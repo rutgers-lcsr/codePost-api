@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from django.http import HttpRequest
 from core.serializers.user import UserSerializer
-from core.models import Assignment, Course, RubricCategory, Environment, TestCategory
+from core.models import Assignment, Course, RubricCategory, Environment, TestCategory, LearningObjective
 from django.template import loader
 from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ObjectDoesNotExist
@@ -120,7 +120,8 @@ def send_mail(subject_template_name: str, email_template_name: str,
 def domain_from_email(email: str) -> str:
   return '@' + email.split('@')[1]
 
-def copy_assignment(assignment: Assignment, destination_course: Course) -> Optional[Assignment]:
+def copy_assignment(assignment: Assignment, destination_course: Course,
+                    copy_quizzes: bool = True) -> Optional[Assignment]:
   new_assignment = assignment
   original_assignment = Assignment.objects.get(id=assignment.id)
 
@@ -188,6 +189,7 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
     assignment_file_map[assignmentFile.id] = new_file
 
   # copy rubric
+  rubric_comment_map = {}
   for rubricCategory in original_assignment.rubricCategories.all():
     original_rubricCategory = RubricCategory.objects.get(id=rubricCategory.id)
     new_rubricCategory = RubricCategory.objects.create(
@@ -195,12 +197,16 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
       name=rubricCategory.name,
       pointLimit=rubricCategory.pointLimit,
       helpText=rubricCategory.helpText,
-      sortKey=rubricCategory.sortKey
+      sortKey=rubricCategory.sortKey,
+      atMostOnce=rubricCategory.atMostOnce,
     )
     for rubricComment in original_rubricCategory.rubricComments.all():
+      old_comment_id = rubricComment.id  # capture before the pk=None mutation
+      rubricComment.id = None  # type: ignore[assignment]
       rubricComment.pk = None
       rubricComment.category = new_rubricCategory
       rubricComment.save()
+      rubric_comment_map[old_comment_id] = rubricComment
 
   try:
     environment = original_assignment.environment
@@ -256,6 +262,18 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
       except Exception as e:
         logger.error(f"Failed to clone dataset {dataset.id}: {e}")
 
+  # copy learning objectives (test cases relink to the copies below)
+  learning_objective_map = {}
+  for objective in original_assignment.learningObjectives.all():
+    learning_objective_map[objective.id] = LearningObjective.objects.create(
+      assignment=new_assignment,
+      shortId=objective.shortId,
+      name=objective.name,
+      description=objective.description,
+      visibilityMode=objective.visibilityMode,
+      aggregationMode=objective.aggregationMode,
+    )
+
   # copy tests (including test scripts and linked resources)
   for testCategory in original_assignment.testCategories.all():
     original_testCategory = TestCategory.objects.get(id=testCategory.id)
@@ -269,7 +287,7 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
     )
 
     for testCase in original_testCategory.testCases.all():
-      AssignmentTestCase.objects.create(
+      new_testCase = AssignmentTestCase.objects.create(
         testCategory=new_testCategory,
         sortKey=testCase.sortKey,
         description=testCase.description,
@@ -279,13 +297,19 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
         text=testCase.text,
         explanation=testCase.explanation,
         exposed=testCase.exposed,
+        hidden=testCase.hidden,
         lastSolutionRun=testCase.lastSolutionRun,
-        rubricItem=testCase.rubricItem,
+        # Remap to the cloned rubric comment; a stale pointer outside this
+        # assignment's rubric becomes None rather than a cross-course link.
+        rubricItem=rubric_comment_map.get(testCase.rubricItem_id) if testCase.rubricItem_id else None,
         functionName=testCase.functionName,
         testCode=testCase.testCode,
         targetCellId=testCase.targetCellId,
         timeout=testCase.timeout,
       )
+      source_objective_ids = testCase.learningObjectives.values_list('id', flat=True)
+      new_testCase.learningObjectives.set(
+        [learning_objective_map[oid] for oid in source_objective_ids if oid in learning_objective_map])
 
     for resource in original_testCategory.resources.all():  # type: ignore[attr-defined]  # Django reverse relation
       cloned_file = assignment_file_map.get(resource.file_id) if resource.file_id else None
@@ -305,6 +329,12 @@ def copy_assignment(assignment: Assignment, destination_course: Course) -> Optio
         dataset=cloned_dataset,
         target_path=resource.target_path,
       )
+
+  # copy attached quizzes (course cloning passes copy_quizzes=False and copies all
+  # quizzes — attached and standalone — once at the course level instead)
+  if copy_quizzes:
+    from core.services.quiz_cloning import clone_quizzes_for_assignment
+    clone_quizzes_for_assignment(original_assignment, new_assignment)
 
   return new_assignment
 

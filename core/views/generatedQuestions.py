@@ -97,8 +97,10 @@ class GeneratedQuestionSetViewSet(mixins.RetrieveModelMixin, viewsets.GenericVie
   )
   @action(detail=True, methods=['POST'])
   def regenerate(self, request, pk=None):
+    from core.services.quiz_grading import generation_needs_submission
     gen_set = self.get_object()
-    if gen_set.submission_id is None:
+    # Submission-free prompts regenerate without a seed submission (the eager path).
+    if gen_set.submission_id is None and generation_needs_submission(gen_set.quiz):
       return Response({'error': 'The set has no submission to regenerate from.'},
                       status=status.HTTP_400_BAD_REQUEST)
     if gen_set.status == 'generating':
@@ -109,9 +111,14 @@ class GeneratedQuestionSetViewSet(mixins.RetrieveModelMixin, viewsets.GenericVie
     gen_set.approvedAt = None
     gen_set.save(update_fields=['status', 'approvedBy', 'approvedAt', 'modified'])
     from core.tasks import generate_personalized_quiz_sets
-    generate_personalized_quiz_sets.delay(
-        gen_set.submission_id, quiz_id=gen_set.quiz_id, force=True,
-        requested_by_id=request.user.id, student_id=gen_set.student_id)
+    if gen_set.submission_id is not None:
+      generate_personalized_quiz_sets.delay(
+          gen_set.submission_id, quiz_id=gen_set.quiz_id, force=True,
+          requested_by_id=request.user.id, student_id=gen_set.student_id)
+    else:
+      generate_personalized_quiz_sets.delay(
+          quiz_id=gen_set.quiz_id, student_id=gen_set.student_id, force=True,
+          requested_by_id=request.user.id)
     record_audit_event(course=gen_set.quiz.course, event_type='quiz_generated_set_regenerated',
                        user=request.user, quiz=gen_set.quiz, assignment=gen_set.quiz.assignment,
                        meta={'studentEmail': gen_set.student.email, 'setId': gen_set.id})

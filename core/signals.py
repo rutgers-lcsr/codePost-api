@@ -143,10 +143,11 @@ def backfill_generated_sets_on_section_created(sender, instance, created, **kwar
     """Backfill question generation when an AI section is created AFTER students already
     submitted — the submission signal above only covers submissions made while a section
     exists, so without this, earlier submitters would sit on "being prepared" forever.
-    Also refreshes existing non-approved sets, which the new section makes incomplete."""
+    Also refreshes existing non-approved sets, which the new section makes incomplete.
+    Submission-free sections (no submission variables in the prompt) backfill every
+    enrolled student instead — the eager path, which also covers standalone quizzes
+    (the backfill itself no-ops for unattached quizzes that DO need submissions)."""
     if not created:
-        return
-    if instance.quiz.assignment_id is None:
         return
     try:
         from core.tasks import backfill_personalized_quiz_sets
