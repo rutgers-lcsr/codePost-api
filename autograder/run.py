@@ -653,7 +653,199 @@ def RunSubmission(self, submissionID: int):
     except Exception as e:
         logger.warning(f"[RunSubmission] Failed to queue AI grading assistance: {e}")
 
+    # --- Variant-robustness check (opt-in, only when finalized) ---
+    try:
+        queue_variant_robustness_reruns(submission)
+    except Exception as e:
+        logger.warning(f"[RunSubmission] Failed to queue variant-robustness reruns: {e}")
+
     return summary
+
+
+def queue_variant_robustness_reruns(submission):
+    """If the assignment's dataset pool has autogradeAllVariants on, rerun this finalized
+    submission against every OTHER variant (not just the student's own) to catch code
+    that's hardcoded to one dataset's numbers — one RunSubmissionVariant task per variant.
+    Never fires for non-finalized submissions (never on every intermediate save) or when
+    no pool has the flag on. Returns the number of reruns queued."""
+    if not submission.isFinalized:
+        return 0
+    from core.models import AssignmentDataSet
+    from core.services.dataset_assignment import get_or_assign_for_submission
+    pool = list(AssignmentDataSet.objects.filter(
+        assignment=submission.assignment, is_student_variant=True,
+        is_active=True, autogradeAllVariants=True))
+    if not pool:
+        return 0
+    own_variant = get_or_assign_for_submission(submission.assignment, submission)
+    other_variants = [v for v in pool if own_variant is None or v.id != own_variant.id]
+    for variant in other_variants:
+        RunSubmissionVariant.delay(submission.id, variant.id)
+    if other_variants:
+        logger.info(
+            f"[RunSubmission] Queued {len(other_variants)} variant-robustness "
+            f"rerun(s) for submission {submission.id}")
+    return len(other_variants)
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=30, time_limit=300, soft_time_limit=270)
+def RunSubmissionVariant(self, submission_id: int, dataset_id: int):
+    """Rerun a finalized submission's main file against ONE dataset variant OTHER than the
+    student's own (AssignmentDataSet.autogradeAllVariants) — an anti-hardcoding check: does
+    the submission's code still produce sensible output when the numbers are different?
+    Writes one SubmissionVariantRun row per (submission, dataset)."""
+    from django.utils import timezone
+    from core.models import AssignmentDataSet, Submission, SubmissionVariantRun
+
+    try:
+        submission = Submission.objects.get(id=submission_id)
+        dataset = AssignmentDataSet.objects.get(id=dataset_id)
+    except (Submission.DoesNotExist, AssignmentDataSet.DoesNotExist) as e:
+        logger.error(f"[RunSubmissionVariant] {e}")
+        return {"success": False, "error": str(e)}
+
+    run, _ = SubmissionVariantRun.objects.update_or_create(
+        submission=submission, dataset=dataset,
+        defaults={'result': {'status': 'running'}},
+    )
+
+    # Everything past this point can fail in ways that shouldn't leave the row stuck at
+    # 'running' — any exception (a bad file, a Docker hiccup, whatever) lands as 'error'.
+    try:
+        file_objs = submission.files.all()
+        target_file = None
+        for f in file_objs:
+            if Executor.factory(cast(Any, f)):
+                target_file = f
+                break
+        if target_file is None:
+            raise ValueError("No executable file found.")
+
+        image_name = None
+        try:
+            environment = Environment.objects.get(assignment_id=submission.assignment_id)
+            image_name = environment.image_name or None
+        except Environment.DoesNotExist:
+            pass
+
+        # Same shared datasets as a normal run, but with this ONE variant swapped in for
+        # the student's own — everything else about the execution context is unchanged.
+        shared = list(AssignmentDataSet.objects.filter(
+            assignment=submission.assignment, is_active=True, is_student_variant=False))
+
+        started = timezone.now()
+        executor = Executor.factory(cast(Any, target_file), image_name=image_name,
+                                    datasets=shared + [dataset])
+        if not executor:
+            raise ValueError("No executor available for this file.")
+        result = executor.execute()
+        elapsed = (timezone.now() - started).total_seconds()
+        run.result = {
+            'status': 'success' if result.success else 'error',
+            'stdout': (result.stdout or '')[:MAX_LOG_LENGTH],
+            'stderr': (result.stderr or '')[:MAX_LOG_LENGTH],
+            'error': None if result.success else (result.err or 'Execution failed'),
+            'images': (result.output_data or {}).get('images', [])[:3],
+            'executionTime': elapsed,
+        }
+    except Exception as e:
+        logger.error(
+            f"[RunSubmissionVariant] Execution failed for submission {submission_id} "
+            f"variant {dataset_id}: {e}", exc_info=True)
+        run.result = {'status': 'error', 'error': str(e)}
+    run.save(update_fields=['result', 'modified'])
+    return {"success": run.result.get('status') == 'success', "status": run.result.get('status')}
+
+
+@shared_task(time_limit=240, soft_time_limit=210)
+def RunQuizResponseCode(response_id: int):
+    """Sandbox-execute a student's code answer to one quiz question so a grader can see
+    what it produces (see QuizResponse.codeExecution). Reuses the standard Executor: the
+    seeding submission's files + assignment datasets (incl. the student's dataset variant)
+    are staged automatically, so an answer referencing 'their' dataset just works."""
+    from django.utils import timezone
+    from core.models import Environment, QuizResponse
+    from autograder.services.executors import get_executor_class
+
+    try:
+        response = QuizResponse.objects.select_related(
+            'attempt__quiz__assignment', 'generatedQuestion__set__submission').get(id=response_id)
+    except QuizResponse.DoesNotExist:
+        logger.error(f"[RunQuizResponseCode] Response {response_id} not found")
+        return {"success": False, "error": "Response not found"}
+
+    def _write(result_dict):
+        base = response.codeExecution or {}
+        base.update(result_dict)
+        base['finishedAt'] = timezone.now().isoformat()
+        response.codeExecution = base
+        response.save(update_fields=['codeExecution', 'modified'])
+
+    try:
+        snapshot = response.questionSnapshot or {}
+        quiz = response.attempt.quiz
+        assignment = quiz.assignment
+        gq = response.generatedQuestion
+        seed = gq.set.submission if (gq and gq.set) else None
+
+        # Language: the question's own, else the (attached) assignment's environment.
+        language = snapshot.get('language') or (gq.language if gq else None)
+        if not language and assignment is not None:
+            try:
+                language = assignment.environment.language
+            except Exception:
+                language = None
+        if not language:
+            _write({'status': 'error', 'error': 'No language is set for this code question.'})
+            return {"success": False}
+
+        executor_cls = get_executor_class(language)
+        if executor_cls is Executor:
+            _write({'status': 'error', 'error': f"No sandbox available for language '{language}'."})
+            return {"success": False}
+
+        # Build a duck-typed FileLike carrying the student's answer as the target file. A
+        # collision-proof name keeps it distinct from any staged submission/assignment file.
+        ext = (executor_cls.EXECUTABLE_EXTENSIONS or ['.txt'])[0]
+        answer_assignment = seed.assignment if seed is not None else assignment
+        mock_file = cast(Any, type('QuizAnswerFile', (), {
+            'id': -response.id,
+            'name': f'__quiz_answer__{ext}',
+            'extension': ext,
+            'data': response.answerText or '',
+            'path': '',
+            'get_file_info': lambda self: (seed, answer_assignment, quiz.course),
+        })())
+
+        image_name = None
+        if assignment is not None:
+            try:
+                env = Environment.objects.get(assignment_id=assignment.id)
+                image_name = env.image_name or None
+            except Environment.DoesNotExist:
+                pass
+
+        started = timezone.now()
+        # executor_cls is a concrete subclass here (the `is Executor` guard above returned
+        # early otherwise); cast so the type checker doesn't flag abstract instantiation.
+        executor = cast(Any, executor_cls)(mock_file, image_name=image_name)
+        executor.DEFAULT_TIMEOUT = 60  # instance override; a quiz answer isn't a full run
+        result = executor.execute()
+        elapsed = (timezone.now() - started).total_seconds()
+        _write({
+            'status': 'success' if result.success else 'error',
+            'stdout': (result.stdout or '')[:MAX_LOG_LENGTH],
+            'stderr': (result.stderr or '')[:MAX_LOG_LENGTH],
+            'error': None if result.success else (result.err or 'Execution failed'),
+            'images': (result.output_data or {}).get('images', [])[:3],
+            'executionTime': elapsed,
+        })
+        return {"success": result.success}
+    except Exception as e:
+        logger.error(f"[RunQuizResponseCode] Execution failed for response {response_id}: {e}",
+                     exc_info=True)
+        _write({'status': 'error', 'error': str(e)})
+        return {"success": False, "error": str(e)}
 
 
 @app.task

@@ -1086,8 +1086,26 @@ class AssignmentDataSet(BaseModel):
       default=False,
       help_text="If True, this dataset is used as a resource for a TestCategory.")
 
+  # Per-student variant pool: when True, this dataset is one of several interchangeable
+  # variants for the assignment (same mount_path across the pool) and students are each
+  # deterministically assigned exactly one, rather than all sharing this file.
+  is_student_variant = models.BooleanField(
+      default=False,
+      help_text=("If True, this dataset is one variant in a per-student pool — each "
+                 "student is assigned exactly one variant from the pool (see "
+                 "StudentDataSetAssignment) instead of everyone sharing this file."))
+
+  # Autograder scope for a variant pool: rerun a submission against every other variant
+  # (not just the student's own) to catch code that's hardcoded to one dataset's numbers.
+  autogradeAllVariants = models.BooleanField(
+      default=False,
+      help_text=("Only meaningful when is_student_variant is True. If True, the autograder "
+                 "reruns a finalized submission against every OTHER variant in the pool "
+                 "(in addition to the student's own), recording one SubmissionVariantRun per "
+                 "variant — an anti-hardcoding check. Must be set consistently across a pool."))
+
   course = property(lambda self: self.assignment.course)
-  
+
   def save(self, *args, **kwargs):
     # Test resources should never be student-visible.
     if self.is_test_resource:
@@ -1099,7 +1117,18 @@ class AssignmentDataSet(BaseModel):
       safe_name = self.name.lower().replace(' ', '_')
       safe_name = ''.join(c for c in safe_name if c.isalnum() or c in '_-.')
       self.mount_path = f'shared/{safe_name}'
-    
+
+    # A per-student variant pool must all mount at the same path — that's what lets
+    # student code reference the dataset by one fixed path regardless of which variant
+    # they got. Rather than making the instructor get every variant's path to match by
+    # hand, align this one to whatever the pool already uses.
+    if self.is_student_variant and self.assignment_id:
+      sibling = AssignmentDataSet.objects.filter(
+          assignment_id=self.assignment_id, is_student_variant=True,
+      ).exclude(pk=self.pk).order_by('id').first()
+      if sibling is not None:
+        self.mount_path = sibling.mount_path
+
     super(AssignmentDataSet, self).save(*args, **kwargs)
   
   def delete(self, *args, **kwargs):
@@ -1114,6 +1143,64 @@ class AssignmentDataSet(BaseModel):
   class Meta:
     unique_together = ('assignment', 'name')
     ordering = ('name',)
+
+
+class StudentDataSetAssignment(BaseModel):
+  """Which variant of a per-student dataset pool (AssignmentDataSet.is_student_variant=True)
+  a given student is assigned. Per-student data — never cloned with the assignment.
+  Auto-assigned (assignedBy=None) by core.services.dataset_assignment.get_or_assign(),
+  or overridden by staff."""
+  if TYPE_CHECKING:
+    id: int
+    assignment: models.ForeignKey[Assignment, Assignment]
+    student: models.ForeignKey[User, User]
+    dataset: models.ForeignKey[AssignmentDataSet, AssignmentDataSet]
+
+  assignment = models.ForeignKey("Assignment", on_delete=models.CASCADE,
+      related_name="studentDataSetAssignments", help_text=("The related assignment_id."))
+  student = models.ForeignKey(User, on_delete=models.CASCADE,
+      related_name="dataset_assignments", help_text=("The assigned student."))
+  dataset = models.ForeignKey(AssignmentDataSet, on_delete=models.CASCADE,
+      related_name="student_assignments", help_text=("The variant this student was assigned."))
+  assignedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="+", help_text=("The staff member who manually assigned this override. "
+                 "Null means it was assigned automatically."))
+
+  course = property(lambda self: self.assignment.course)
+
+  class Meta:
+    unique_together = ('assignment', 'student')
+
+  def __str__(self):
+    return f"StudentDataSetAssignment assignment={self.assignment_id} student={self.student_id} dataset={self.dataset_id}"
+
+
+class SubmissionVariantRun(BaseModel):
+  """One autograder rerun of a finalized submission against a dataset variant OTHER than the
+  student's own assigned one (AssignmentDataSet.autogradeAllVariants) — an anti-hardcoding
+  check: does the submission's code still work when the numbers are different?"""
+  if TYPE_CHECKING:
+    id: int
+    submission: 'Submission'
+    dataset: models.ForeignKey[AssignmentDataSet, AssignmentDataSet]
+
+  submission = models.ForeignKey('Submission', on_delete=models.CASCADE,
+      related_name="variant_runs", help_text=("The related submission_id."))
+  dataset = models.ForeignKey(AssignmentDataSet, on_delete=models.CASCADE,
+      related_name="variant_runs", help_text=("The variant this rerun used."))
+  result = models.JSONField(null=True, blank=True,
+      help_text=("{status: running|success|error, stdout, stderr, images, error, "
+                 "executionTime}. Staff-internal — never shown to students."))
+
+  course = property(lambda self: self.submission.course)
+
+  class Meta:
+    unique_together = ('submission', 'dataset')
+    ordering = ('dataset__name',)
+
+  def __str__(self):
+    return f"SubmissionVariantRun submission={self.submission_id} dataset={self.dataset_id}"
+
 
 class CachedExecutionResult(BaseModel):
   """
@@ -3192,6 +3279,10 @@ class QuizResponse(BaseModel):
       help_text=("Optional feedback from the grader on a manually graded response."))
   gradedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
       related_name="+", help_text=("The staff user who manually graded this response."))
+  codeExecution = models.JSONField(null=True, blank=True,
+      help_text=("Staff-triggered sandbox run of a code answer: {status: running|success|"
+                 "error, stdout, stderr, images, error, executionTime, requestedBy, "
+                 "requestedAt, finishedAt}. Staff-internal — never shown to students."))
 
   course = property(lambda self: self.attempt.quiz.course)
 

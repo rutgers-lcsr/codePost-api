@@ -750,7 +750,7 @@ class QuizAttemptPermissions(TemplatePermission):
         user = cast(User, request.user)
         # Manual grading (undoing it, and pinning the official attempt) are the staff
         # writes on someone else's attempt.
-        if getattr(view, 'action', None) in ('gradeResponse', 'reopenResponse', 'setOfficial'):
+        if getattr(view, 'action', None) in ('gradeResponse', 'reopenResponse', 'setOfficial', 'runCode'):
             return canGradeQuiz(user, obj.quiz.course)
         if user == obj.student:
             return True

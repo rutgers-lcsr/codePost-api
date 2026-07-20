@@ -40,6 +40,7 @@ from core.views.testCategory import TestCategoryViewSet
 from core.views.testCategoryResource import TestCategoryResourceViewSet
 from core.views.learningObjective import LearningObjectiveViewSet
 from core.views.assignmentDataSet import AssignmentDataSetViewSet
+from core.views.studentDataSetAssignment import StudentDataSetAssignmentViewSet
 from core.views.dashboard import DashboardViewSet
 from core.views.commentTemplate import CommentTemplateViewSet
 from core.views.suggested_comment import SuggestedCommentViewSet
@@ -111,6 +112,7 @@ router.register(r'learningObjectives', LearningObjectiveViewSet)
 router.register(r'submissionTests', SubmissionTestViewSet)
 router.register(r'webhooks', WebhookViewSet)
 router.register(r'assignmentDataSets', AssignmentDataSetViewSet)
+router.register(r'studentDataSetAssignments', StudentDataSetAssignmentViewSet)
 router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 router.register(r'commentTemplates', CommentTemplateViewSet, basename='commentTemplate')
 router.register(r'suggestedComments', SuggestedCommentViewSet)

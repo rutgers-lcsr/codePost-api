@@ -52,6 +52,13 @@ def _essay(course, bank, points='5'):
                                    text='Explain recursion.', points=Decimal(points))
 
 
+def _code(course, bank, points='5', language='r'):
+    from core.models import Question
+    return Question.objects.create(course=course, bank=bank, questionType='code',
+                                   text='Write code that prints the mean.', points=Decimal(points),
+                                   language=language)
+
+
 def _quiz(course, **kwargs):
     from core.models import Quiz
     opts = {'title': 'Quiz', 'isPublished': True}

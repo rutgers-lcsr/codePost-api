@@ -251,6 +251,8 @@ def copy_assignment(assignment: Assignment, destination_course: Course,
         is_active=dataset.is_active,
         hidden=dataset.hidden,
         is_test_resource=dataset.is_test_resource,
+        is_student_variant=dataset.is_student_variant,
+        autogradeAllVariants=dataset.autogradeAllVariants,
       )
       # Read original file and save to new dataset
       # This creates a new physical file in storage

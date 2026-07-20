@@ -84,16 +84,18 @@ from core.emails import StudentUploadReceiptEmail
 import logging
 logger = logging.getLogger(__name__)
 
-def encoded_zip(files: list[AssignmentFile]) -> str:
+def encoded_zip(files: list[AssignmentFile], datasets: list | None = None) -> str:
   """
-  Create zip from files in memory
+  Create zip from files in memory. `datasets` (AssignmentDataSet rows, already filtered
+  to what the requesting user may see) are added under a `data/` prefix so their names
+  never collide with assignment file names.
   """
   zip_buffer = io.BytesIO()
 
   with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
     for file in files:
       data = file.data
-      
+
       # Data URI content ("data:<mime>;base64,...") is binary — decode before adding to zip.
       if data.startswith('data:'):
           try:
@@ -101,8 +103,19 @@ def encoded_zip(files: list[AssignmentFile]) -> str:
               data = base64.b64decode(encoded)
           except Exception:
               pass
-                  
+
       zip_file.writestr(file.name, data)
+
+    # Datasets use a real FileField (binary storage), not the text `data` field above.
+    for dataset in (datasets or []):
+      if not dataset.file:
+        continue
+      try:
+        with dataset.file.open('rb') as f:
+          filename = dataset.file.name.split('/')[-1]
+          zip_file.writestr(f'data/{filename}', f.read())
+      except Exception:
+        logger.warning(f"[AssignmentDownload] Failed to zip dataset {dataset.id}")
 
   return base64.b64encode(zip_buffer.getvalue()).decode()
 
@@ -753,7 +766,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     """
     download all files for an assignment files as a zip
     """
-    user = request.user
+    user = cast(User, request.user)
     assignment = self.get_object()
     _course = assignment.course
 
@@ -761,14 +774,26 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 
     files = assignment.files.all()
-    if len(files) == 0:
-      return Response("No files to download", status=status.HTTP_204_NO_CONTENT)
-    
-    files_to_zip = []
-    for f in files:
-      files_to_zip.append(f)
 
-    encoded = encoded_zip(files_to_zip)
+    # Bundle the assignment's shared (non-hidden) datasets plus — for a per-student
+    # variant pool — only the requesting student's own assigned variant (auto-assigned
+    # here on first access), never a classmate's. Staff get the shared set only; they can
+    # pull any specific variant via the per-dataset download endpoint.
+    from core.models import AssignmentDataSet
+    datasets = list(AssignmentDataSet.objects.filter(
+        assignment=assignment, hidden=False, is_student_variant=False))
+    if not isCourseStaff(user, assignment.course):
+      from core.services.dataset_assignment import get_or_assign
+      variant = get_or_assign(assignment, user)
+      if variant is not None and not variant.hidden:
+        datasets.append(variant)
+
+    if len(files) == 0 and not datasets:
+      return Response("No files to download", status=status.HTTP_204_NO_CONTENT)
+
+    files_to_zip = list(files)
+
+    encoded = encoded_zip(files_to_zip, datasets)
     return Response({
         "zip": encoded,
         "filename": f"assignment{assignment.id}_files.zip"
@@ -986,15 +1011,26 @@ class AssignmentViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["GET"])
   def datasets(self, request, pk=None):
     """
-    Return all datasets for this assignment
-    
+    Return the datasets for this assignment. Staff see everything; students see shared
+    (non-hidden) datasets plus only the variant assigned to them from a per-student pool
+    (auto-assigned here on first access).
+
     GET /api/assignments/{id}/datasets/
     """
+    from django.db.models import Q
     from core.models import AssignmentDataSet
     from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
-    
+
     assignment = self.get_object()
-    datasets = AssignmentDataSet.objects.filter(assignment=assignment).order_by('name')
+    user = cast(User, request.user)
+    if isCourseStaff(user, assignment.course):
+      datasets = AssignmentDataSet.objects.filter(assignment=assignment).order_by('name')
+    else:
+      from core.services.dataset_assignment import get_or_assign
+      get_or_assign(assignment, user)
+      datasets = AssignmentDataSet.objects.filter(
+          assignment=assignment, hidden=False,
+      ).exclude(Q(is_student_variant=True) & ~Q(student_assignments__student=user)).order_by('name')
     serializer = AssignmentDataSetSerializer(datasets, many=True, context={'request': request})
     return Response(serializer.data)
 

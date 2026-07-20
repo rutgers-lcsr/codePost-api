@@ -1443,6 +1443,11 @@ end"""
                 # Parse notebook and present as enumerated cells so the AI model
                 # returns 0-based cell indices instead of raw JSON line numbers.
                 content = _format_notebook_as_cells(content)
+            elif sf.name.lower().endswith('.pdf'):
+                # Extract PDF text rather than dumping the raw base64 data URI.
+                content = extract_pdf_text(content) or f"(could not extract text from PDF '{sf.name}')"
+                if len(content) > 50000:
+                    content = content[:50000] + "\n... (truncated)"
             elif len(content) > 50000:
                 content = content[:50000] + "\n... (truncated)"
 
@@ -2240,10 +2245,10 @@ def build_context_from_file(
         selected_content = _extract_pdf_selection(
             doc, selected_pages, start_char, end_char
         )
-        
-        # Convert entire PDF to markdown for full file content
-        file_content_markdown = str(pdf_utils.to_markdown(doc))
         doc.close()
+
+        # Convert entire PDF to markdown for full file content (shared extraction path).
+        file_content_markdown = extract_pdf_text(file.data) or "(could not extract PDF text)"
     else:
         # Standard text file handling
         lines = file.data.split('\n')
@@ -2296,6 +2301,34 @@ def build_context_from_file(
         context.all_files_content = '\n\n'.join(other_files)
     
     return context
+
+
+def extract_pdf_text(data: str) -> str | None:
+    """Extract a PDF's full text as markdown from its stored ``File.data``.
+
+    ``data`` is either a ``data:application/pdf;base64,...`` URI (how binary files are
+    stored) or raw bytes-as-str. Returns the markdown, or ``None`` on any failure — callers
+    substitute a placeholder so a bad PDF never leaks raw base64 into a prompt. This is the
+    single extraction path shared by ``build_context_from_file`` and the prompt-variable
+    resolvers (core/prompts/variables.py)."""
+    try:
+        import pymupdf
+        import pymupdf4llm as pdf_utils
+
+        prefix = "data:application/pdf;base64,"
+        if data.startswith(prefix):
+            pdf_bytes, _ = base64_decode(data[len(prefix):].encode())
+        else:
+            pdf_bytes = data.encode() if isinstance(data, str) else data
+
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            return str(pdf_utils.to_markdown(doc))
+        finally:
+            doc.close()
+    except Exception:
+        logger.exception("Failed to extract PDF text")
+        return None
 
 
 def _format_notebook_as_cells(raw_json: str) -> str:

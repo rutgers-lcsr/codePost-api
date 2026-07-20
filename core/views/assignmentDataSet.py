@@ -10,6 +10,7 @@ import logging
 from typing import cast
 
 from django.http import FileResponse, Http404
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -54,26 +55,36 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         return AssignmentDataSetSerializer
     
     def get_queryset(self):
-        """Filter datasets based on user permissions"""
+        """Filter datasets based on user permissions.
+
+        Staff (course admins/graders/super graders) see every dataset in their courses.
+        Students see shared (non-hidden) datasets, plus — for a per-student variant pool
+        (is_student_variant=True) — only the one variant already assigned to them via
+        StudentDataSetAssignment. This governs list() directly and, via get_object()'s
+        queryset filtering, retrieve()/download() too: a dataset the student can't see
+        404s rather than confirming it exists.
+        """
         user = cast(User, self.request.user)
-        
+
         if not isAuthenticated(user):
             return AssignmentDataSet.objects.none()
-        
+
         # Superusers see all datasets
         if user.is_superuser:
             return AssignmentDataSet.objects.all()
-        
-        # Filter to datasets in courses where user has access
+
         from django.db.models import Q
-        
-        # Build query for courses user has access to
-        course_query = Q(assignment__course__courseAdmins=user) | \
+
+        staff_query = Q(assignment__course__courseAdmins=user) | \
                       Q(assignment__course__graders=user) | \
-                      Q(assignment__course__superGraders=user) | \
-                      Q(assignment__course__students=user)
-        
-        return AssignmentDataSet.objects.filter(course_query).distinct()
+                      Q(assignment__course__superGraders=user)
+        staff_qs = AssignmentDataSet.objects.filter(staff_query)
+
+        student_qs = AssignmentDataSet.objects.filter(
+            assignment__course__students=user, hidden=False,
+        ).exclude(Q(is_student_variant=True) & ~Q(student_assignments__student=user))
+
+        return (staff_qs | student_qs).distinct()
     
     def create(self, request, *args, **kwargs):
         """Create a new dataset"""
@@ -189,7 +200,55 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         )
         
         return Response(status=status.HTTP_204_NO_CONTENT)
-    
+
+    @extend_schema(
+        request={'application/json': {
+            'type': 'object',
+            'properties': {
+                'rowsPerChunk': {'type': 'integer', 'minimum': 1},
+                'hasHeader': {'type': 'boolean'},
+            },
+            'required': ['rowsPerChunk'],
+        }},
+        responses=AssignmentDataSetSerializer(many=True),
+    )
+    @action(detail=True, methods=['post'])
+    def splitIntoVariants(self, request, pk=None):
+        """
+        Split this dataset's file into disjoint row-chunks, one per generated variant,
+        forming a per-student pool (see core.services.dataset_split). The chunk count is
+        driven by rowsPerChunk, not current enrollment, so the pool stays stable as
+        students enroll or drop.
+
+        POST /assignmentDataSets/{id}/splitIntoVariants/
+        """
+        if not isAuthenticated(request.user):
+            return returnNotAuthorized()
+
+        master = self.get_object()
+        require_capability(request.user, 'manage_datasets', master.assignment)
+
+        rows_per_chunk = request.data.get('rowsPerChunk')
+        try:
+            rows_per_chunk = int(rows_per_chunk)
+        except (TypeError, ValueError):
+            return Response({"error": "rowsPerChunk must be an integer."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        has_header = bool(request.data.get('hasHeader', True))
+
+        from core.services.dataset_split import DatasetSplitError, split_master_dataset
+        try:
+            chunks = split_master_dataset(master, rows_per_chunk, has_header)
+        except DatasetSplitError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info(
+            f"[AssignmentDataSet] Split dataset {master.id} ('{master.name}') into "
+            f"{len(chunks)} variants by user {cast(User, request.user).username}"
+        )
+        serializer = AssignmentDataSetSerializer(chunks, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
         """
@@ -234,6 +293,14 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name='assignment_id', required=True, type=int,
+                             location=OpenApiParameter.QUERY,
+                             description='The assignment whose datasets to list.'),
+        ],
+        responses=AssignmentDataSetSerializer(many=True),
+    )
     @action(detail=False, methods=['get'])
     def by_assignment(self, request):
         """
@@ -262,12 +329,21 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         # Check if user has access to the course
         if not self._can_access_course(request.user, assignment.course):
             return returnForbidden()
-        
-        # Get all datasets for this assignment (including inactive ones for management)
-        datasets = AssignmentDataSet.objects.filter(
-            assignment=assignment
-        ).order_by('name')
-        
+
+        user = cast(User, request.user)
+        if self._is_course_staff(user, assignment.course):
+            # Staff see everything (including inactive ones) for management.
+            datasets = AssignmentDataSet.objects.filter(assignment=assignment).order_by('name')
+        else:
+            # Assign the student's variant now if this is their first time asking, so
+            # "first access" actually shows them one instead of nothing.
+            from django.db.models import Q
+            from core.services.dataset_assignment import get_or_assign
+            get_or_assign(assignment, user)
+            datasets = AssignmentDataSet.objects.filter(
+                assignment=assignment, hidden=False,
+            ).exclude(Q(is_student_variant=True) & ~Q(student_assignments__student=user)).order_by('name')
+
         serializer = self.get_serializer(datasets, many=True)
         return Response(serializer.data)
     
@@ -275,7 +351,16 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         """Check if user can access a dataset"""
         course = dataset.assignment.course
         return self._can_access_course(user, course)
-    
+
+    def _is_course_staff(self, user, course):
+        """Course admin, grader, or super grader (or superuser) — sees every dataset."""
+        return (
+            user.is_superuser or
+            course.courseAdmins.filter(id=user.id).exists() or
+            course.graders.filter(id=user.id).exists() or
+            course.superGraders.filter(id=user.id).exists()
+        )
+
     def _can_access_course(self, user, course):
         """Check if user has access to a course"""
         if user.is_superuser:

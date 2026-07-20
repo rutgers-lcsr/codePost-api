@@ -1,0 +1,626 @@
+# Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+"""Tests for per-student dataset variant assignment: deterministic auto-assign, group
+sharing, the hidden/variant access fix on AssignmentDataSetViewSet (list/retrieve/download/
+by_assignment), datasets bundled into the assignment zip download, the staff override API,
+executor dataset staging, and the autograder variant-robustness rerun dispatch."""
+import factory
+import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models.signals import post_save
+from rest_framework import status
+
+from core.models import AssignmentDataSet, StudentDataSetAssignment
+from core.services.dataset_assignment import get_or_assign, get_or_assign_for_submission
+
+
+@pytest.fixture
+def variant_setup(db):
+    from core.tests.factories import CourseFactory, SubmissionFactory
+
+    with factory.django.mute_signals(post_save):
+        course = CourseFactory(name="ds101", period="s2026", organization__name="Rutgers")
+        assignment = course.assignments.first()
+        students = list(course.students.all())
+        submission = SubmissionFactory(assignment=assignment)
+        submission.students.add(students[0])
+        submission.isFinalized = True
+        submission.save()
+
+    v1 = AssignmentDataSet.objects.create(
+        assignment=assignment, name='shopping_a.csv', is_student_variant=True,
+        mount_path='shared/shopping.csv', file=SimpleUploadedFile('shopping_a.csv', b'a,b\n1,2\n'))
+    v2 = AssignmentDataSet.objects.create(
+        assignment=assignment, name='shopping_b.csv', is_student_variant=True,
+        mount_path='shared/shopping.csv', file=SimpleUploadedFile('shopping_b.csv', b'a,b\n3,4\n'))
+    shared = AssignmentDataSet.objects.create(
+        assignment=assignment, name='readme.txt',
+        file=SimpleUploadedFile('readme.txt', b'shared instructions'))
+    hidden = AssignmentDataSet.objects.create(
+        assignment=assignment, name='answer_key.csv', hidden=True,
+        file=SimpleUploadedFile('answer_key.csv', b'secret'))
+
+    return {
+        'course': course,
+        'assignment': assignment,
+        'submission': submission,
+        'admin': course.courseAdmins.first(),
+        'grader': course.graders.first(),
+        'students': students,
+        'v1': v1,
+        'v2': v2,
+        'shared': shared,
+        'hidden': hidden,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Pool integrity: all variants share one mount_path
+# --------------------------------------------------------------------------- #
+
+class TestMountPathConsistency:
+    def test_new_variant_aligns_to_pool_mount_path(self, variant_setup):
+        assert variant_setup['v1'].mount_path == variant_setup['v2'].mount_path
+        v3 = AssignmentDataSet.objects.create(
+            assignment=variant_setup['assignment'], name='shopping_c.csv', is_student_variant=True,
+            mount_path='some/other/path.csv', file=SimpleUploadedFile('shopping_c.csv', b'a,b\n5,6\n'))
+        assert v3.mount_path == variant_setup['v1'].mount_path
+
+    def test_shared_datasets_unaffected(self, variant_setup):
+        assert variant_setup['shared'].mount_path != variant_setup['v1'].mount_path
+
+
+# --------------------------------------------------------------------------- #
+# Assignment service: deterministic auto-assign + group sharing
+# --------------------------------------------------------------------------- #
+
+class TestGetOrAssign:
+    def test_auto_assigns_from_pool(self, variant_setup):
+        student = variant_setup['students'][0]
+        dataset = get_or_assign(variant_setup['assignment'], student)
+        assert dataset is not None
+        assert dataset.is_student_variant is True
+
+    def test_idempotent_on_repeat_calls(self, variant_setup):
+        student = variant_setup['students'][0]
+        first = get_or_assign(variant_setup['assignment'], student)
+        second = get_or_assign(variant_setup['assignment'], student)
+        assert first.id == second.id
+        assert StudentDataSetAssignment.objects.filter(
+            assignment=variant_setup['assignment'], student=student).count() == 1
+
+    def test_balances_across_pool(self, variant_setup):
+        assignment = variant_setup['assignment']
+        students = variant_setup['students']
+        for student in students:
+            get_or_assign(assignment, student)
+        counts = {}
+        for row in StudentDataSetAssignment.objects.filter(assignment=assignment):
+            counts[row.dataset_id] = counts.get(row.dataset_id, 0) + 1
+        # 4 students over a 2-variant pool: no variant should be starved.
+        assert set(counts.keys()) == {variant_setup['v1'].id, variant_setup['v2'].id}
+        assert max(counts.values()) - min(counts.values()) <= 1
+
+    def test_no_pool_returns_none(self, variant_setup):
+        variant_setup['v1'].delete()
+        variant_setup['v2'].delete()
+        student = variant_setup['students'][0]
+        assert get_or_assign(variant_setup['assignment'], student) is None
+
+    def test_group_submission_shares_one_variant(self, variant_setup):
+        assignment = variant_setup['assignment']
+        submission = variant_setup['submission']
+        a, b = variant_setup['students'][0], variant_setup['students'][1]
+        submission.students.add(b)
+
+        dataset_a = get_or_assign(assignment, a)
+        dataset_b = get_or_assign(assignment, b)
+        assert dataset_a.id == dataset_b.id
+
+    def test_get_or_assign_for_submission(self, variant_setup):
+        dataset = get_or_assign_for_submission(variant_setup['assignment'], variant_setup['submission'])
+        assert dataset is not None
+        assert dataset.is_student_variant is True
+
+    def test_get_or_assign_for_submission_no_students(self, variant_setup):
+        from core.tests.factories import SubmissionFactory
+        with factory.django.mute_signals(post_save):
+            empty_submission = SubmissionFactory(assignment=variant_setup['assignment'])
+        assert get_or_assign_for_submission(variant_setup['assignment'], empty_submission) is None
+
+
+# --------------------------------------------------------------------------- #
+# Access control: hidden datasets + variant ownership
+# --------------------------------------------------------------------------- #
+
+class TestDatasetAccess:
+    def test_staff_sees_everything_including_hidden(self, api_client, variant_setup):
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.get(
+            f"/assignmentDataSets/by_assignment/?assignment_id={variant_setup['assignment'].id}")
+        assert resp.status_code == status.HTTP_200_OK
+        names = {d['name'] for d in resp.data}
+        assert names == {'shopping_a.csv', 'shopping_b.csv', 'readme.txt', 'answer_key.csv'}
+
+    def test_student_never_sees_hidden_dataset(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(
+            f"/assignmentDataSets/by_assignment/?assignment_id={variant_setup['assignment'].id}")
+        assert resp.status_code == status.HTTP_200_OK
+        names = {d['name'] for d in resp.data}
+        assert 'answer_key.csv' not in names
+        assert 'readme.txt' in names
+
+    def test_student_sees_only_own_variant(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        assigned = get_or_assign(variant_setup['assignment'], student)
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(
+            f"/assignmentDataSets/by_assignment/?assignment_id={variant_setup['assignment'].id}")
+        variant_names_seen = {d['name'] for d in resp.data} & {'shopping_a.csv', 'shopping_b.csv'}
+        assert variant_names_seen == {assigned.name}
+
+    def test_by_assignment_auto_assigns_on_first_access(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        assert not StudentDataSetAssignment.objects.filter(
+            assignment=variant_setup['assignment'], student=student).exists()
+        api_client.force_authenticate(user=student)
+        api_client.get(f"/assignmentDataSets/by_assignment/?assignment_id={variant_setup['assignment'].id}")
+        assert StudentDataSetAssignment.objects.filter(
+            assignment=variant_setup['assignment'], student=student).exists()
+
+    def test_student_cannot_download_hidden_dataset(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f"/assignmentDataSets/{variant_setup['hidden'].id}/download/")
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_student_cannot_download_classmates_variant(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        assigned = get_or_assign(variant_setup['assignment'], student)
+        other = variant_setup['v1'] if assigned.id == variant_setup['v2'].id else variant_setup['v2']
+
+        api_client.force_authenticate(user=student)
+        own = api_client.get(f"/assignmentDataSets/{assigned.id}/download/")
+        assert own.status_code == status.HTTP_200_OK
+        denied = api_client.get(f"/assignmentDataSets/{other.id}/download/")
+        assert denied.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_student_can_download_shared_dataset(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f"/assignmentDataSets/{variant_setup['shared'].id}/download/")
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_staff_can_download_hidden_dataset(self, api_client, variant_setup):
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.get(f"/assignmentDataSets/{variant_setup['hidden'].id}/download/")
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_assignment_datasets_action_filters_for_student(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f"/assignments/{variant_setup['assignment'].id}/datasets/")
+        assert resp.status_code == status.HTTP_200_OK
+        names = {d['name'] for d in resp.data}
+        assert 'answer_key.csv' not in names
+
+
+# --------------------------------------------------------------------------- #
+# Assignment zip download: datasets bundled in
+# --------------------------------------------------------------------------- #
+
+class TestAssignmentZipDownload:
+    def test_student_zip_contains_shared_and_own_variant_only(self, api_client, variant_setup):
+        import base64
+        import zipfile
+        import io
+
+        student = variant_setup['students'][0]
+        assigned = get_or_assign(variant_setup['assignment'], student)
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f"/assignments/{variant_setup['assignment'].id}/download/")
+        assert resp.status_code == status.HTTP_200_OK
+        zip_bytes = base64.b64decode(resp.data['zip'])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = set(zf.namelist())
+            assert f'data/{assigned.file.name.split("/")[-1]}' in names
+            other = variant_setup['v1'] if assigned.id == variant_setup['v2'].id else variant_setup['v2']
+            assert f'data/{other.file.name.split("/")[-1]}' not in names
+            assert f'data/{variant_setup["shared"].file.name.split("/")[-1]}' in names
+            assert 'data/answer_key.csv' not in names
+            # Round-trip the bytes for the student's own variant.
+            content = zf.read(f'data/{assigned.file.name.split("/")[-1]}')
+            assert content in (b'a,b\n1,2\n', b'a,b\n3,4\n')
+
+    def test_staff_zip_excludes_variants(self, api_client, variant_setup):
+        import base64
+        import zipfile
+        import io
+
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.get(f"/assignments/{variant_setup['assignment'].id}/download/")
+        assert resp.status_code == status.HTTP_200_OK
+        zip_bytes = base64.b64decode(resp.data['zip'])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = set(zf.namelist())
+            assert f'data/{variant_setup["v1"].file.name.split("/")[-1]}' not in names
+            assert f'data/{variant_setup["v2"].file.name.split("/")[-1]}' not in names
+            assert f'data/{variant_setup["shared"].file.name.split("/")[-1]}' in names
+
+
+# --------------------------------------------------------------------------- #
+# Staff override API
+# --------------------------------------------------------------------------- #
+
+class TestStudentDataSetAssignmentAPI:
+    def test_admin_lists_assignments_for_assignment(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        get_or_assign(variant_setup['assignment'], student)
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.get(f"/studentDataSetAssignments/?assignment={variant_setup['assignment'].id}")
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(resp.data) == 1
+        assert resp.data[0]['studentEmail'] == student.email
+
+    def test_list_requires_assignment_param(self, api_client, variant_setup):
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.get("/studentDataSetAssignments/")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_student_cannot_list(self, api_client, variant_setup):
+        api_client.force_authenticate(user=variant_setup['students'][0])
+        resp = api_client.get(f"/studentDataSetAssignments/?assignment={variant_setup['assignment'].id}")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_grader_without_role_cannot_override(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        row_dataset = get_or_assign(variant_setup['assignment'], student)
+        row = StudentDataSetAssignment.objects.get(assignment=variant_setup['assignment'], student=student)
+        other = variant_setup['v1'] if row_dataset.id == variant_setup['v2'].id else variant_setup['v2']
+
+        api_client.force_authenticate(user=variant_setup['grader'])
+        resp = api_client.patch(f"/studentDataSetAssignments/{row.id}/", {'dataset': other.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_overrides_assignment(self, api_client, variant_setup):
+        student = variant_setup['students'][0]
+        assigned = get_or_assign(variant_setup['assignment'], student)
+        row = StudentDataSetAssignment.objects.get(assignment=variant_setup['assignment'], student=student)
+        other = variant_setup['v1'] if assigned.id == variant_setup['v2'].id else variant_setup['v2']
+
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.patch(f"/studentDataSetAssignments/{row.id}/", {'dataset': other.id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        row.refresh_from_db()
+        assert row.dataset_id == other.id
+        assert row.assignedBy_id == variant_setup['admin'].id
+
+    def test_override_rejects_dataset_from_other_assignment(self, api_client, variant_setup):
+        from core.tests.factories import AssignmentFactory
+        student = variant_setup['students'][0]
+        get_or_assign(variant_setup['assignment'], student)
+        row = StudentDataSetAssignment.objects.get(assignment=variant_setup['assignment'], student=student)
+
+        with factory.django.mute_signals(post_save):
+            other_assignment = AssignmentFactory(name='Other', course=variant_setup['course'])
+        foreign_dataset = AssignmentDataSet.objects.create(
+            assignment=other_assignment, name='foreign.csv', is_student_variant=True,
+            file=SimpleUploadedFile('foreign.csv', b'x'))
+
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.patch(f"/studentDataSetAssignments/{row.id}/",
+                                {'dataset': foreign_dataset.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# --------------------------------------------------------------------------- #
+# Executor dataset staging (unit-level, no Docker)
+# --------------------------------------------------------------------------- #
+
+class TestExecutorStaging:
+    def _mock_file(self, submission, assignment, course):
+        class MockFile:
+            id = -1
+            name = 'main.py'
+            extension = 'py'
+            data = 'print(1)'
+            path = ''
+
+            def get_file_info(self):
+                return (submission, assignment, course)
+
+        return MockFile()
+
+    def test_stages_shared_and_own_variant(self, variant_setup):
+        from autograder.services.executors.python import PythonExecutor
+
+        student = variant_setup['students'][0]
+        submission = variant_setup['submission']
+        assignment = variant_setup['assignment']
+        assigned = get_or_assign(assignment, student)
+
+        executor = PythonExecutor(self._mock_file(submission, assignment, assignment.course))
+        staged_ids = {d.id for d in executor.datasets}
+        assert variant_setup['shared'].id in staged_ids
+        assert assigned.id in staged_ids
+        other = variant_setup['v1'] if assigned.id == variant_setup['v2'].id else variant_setup['v2']
+        assert other.id not in staged_ids
+        # hidden only controls student-facing visibility (downloads/zip), not execution
+        # staging — a hidden shared dataset (e.g. a grader-only reference file) still mounts.
+        assert variant_setup['hidden'].id in staged_ids
+
+    def test_no_submission_context_stages_shared_only(self, variant_setup):
+        from autograder.services.executors.python import PythonExecutor
+
+        assignment = variant_setup['assignment']
+        executor = PythonExecutor(self._mock_file(None, assignment, assignment.course))
+        staged_ids = {d.id for d in executor.datasets}
+        assert staged_ids == {variant_setup['shared'].id, variant_setup['hidden'].id}
+
+    def test_datasets_kwarg_overrides_everything(self, variant_setup):
+        from autograder.services.executors.python import PythonExecutor
+
+        assignment = variant_setup['assignment']
+        executor = PythonExecutor(
+            self._mock_file(variant_setup['submission'], assignment, assignment.course),
+            datasets=[variant_setup['v1']])
+        assert [d.id for d in executor.datasets] == [variant_setup['v1'].id]
+
+
+# --------------------------------------------------------------------------- #
+# Autograder variant-robustness rerun dispatch
+# --------------------------------------------------------------------------- #
+
+class TestVariantRobustnessDispatch:
+    def test_flag_off_queues_nothing(self, variant_setup, monkeypatch):
+        from autograder.run import queue_variant_robustness_reruns
+
+        calls = []
+        monkeypatch.setattr('autograder.run.RunSubmissionVariant.delay',
+                            lambda *a, **kw: calls.append((a, kw)))
+        assert queue_variant_robustness_reruns(variant_setup['submission']) == 0
+        assert calls == []
+
+    def test_not_finalized_queues_nothing(self, variant_setup, monkeypatch):
+        from autograder.run import queue_variant_robustness_reruns
+
+        variant_setup['v1'].autogradeAllVariants = True
+        variant_setup['v1'].save()
+        variant_setup['v2'].autogradeAllVariants = True
+        variant_setup['v2'].save()
+        variant_setup['submission'].isFinalized = False
+        variant_setup['submission'].save()
+
+        calls = []
+        monkeypatch.setattr('autograder.run.RunSubmissionVariant.delay',
+                            lambda *a, **kw: calls.append((a, kw)))
+        assert queue_variant_robustness_reruns(variant_setup['submission']) == 0
+        assert calls == []
+
+    def test_flag_on_queues_one_rerun_per_other_variant(self, variant_setup, monkeypatch):
+        from autograder.run import queue_variant_robustness_reruns
+
+        variant_setup['v1'].autogradeAllVariants = True
+        variant_setup['v1'].save()
+        variant_setup['v2'].autogradeAllVariants = True
+        variant_setup['v2'].save()
+
+        student = variant_setup['students'][0]
+        assigned = get_or_assign(variant_setup['assignment'], student)
+
+        calls = []
+        monkeypatch.setattr('autograder.run.RunSubmissionVariant.delay',
+                            lambda *a, **kw: calls.append(a))
+        queued = queue_variant_robustness_reruns(variant_setup['submission'])
+        assert queued == 1
+        (sub_id, dataset_id), = calls
+        assert sub_id == variant_setup['submission'].id
+        other = variant_setup['v1'] if assigned.id == variant_setup['v2'].id else variant_setup['v2']
+        assert dataset_id == other.id
+
+    def test_run_submission_variant_writes_result(self, variant_setup, monkeypatch):
+        from autograder.run import RunSubmissionVariant
+        from core.models import SubmissionVariantRun
+
+        class FakeResult:
+            success = True
+            stdout = 'ok'
+            stderr = ''
+            err = None
+            output_data = {'images': []}
+
+        class FakeExecutor:
+            def execute(self):
+                return FakeResult()
+
+        monkeypatch.setattr('autograder.run.Executor.factory', lambda *a, **kw: FakeExecutor())
+        RunSubmissionVariant(variant_setup['submission'].id, variant_setup['v1'].id)
+
+        run = SubmissionVariantRun.objects.get(
+            submission=variant_setup['submission'], dataset=variant_setup['v1'])
+        assert run.result['status'] == 'success'
+        assert run.result['stdout'] == 'ok'
+
+    def test_run_submission_variant_records_error_on_exception(self, variant_setup, monkeypatch):
+        from autograder.run import RunSubmissionVariant
+        from core.models import SubmissionVariantRun
+
+        def boom(*a, **kw):
+            raise RuntimeError("sandbox exploded")
+
+        monkeypatch.setattr('autograder.run.Executor.factory', boom)
+        RunSubmissionVariant(variant_setup['submission'].id, variant_setup['v1'].id)
+
+        run = SubmissionVariantRun.objects.get(
+            submission=variant_setup['submission'], dataset=variant_setup['v1'])
+        assert run.result['status'] == 'error'
+        assert 'sandbox exploded' in run.result['error']
+
+    def test_run_submission_variant_no_executable_file(self, variant_setup, monkeypatch):
+        from autograder.run import RunSubmissionVariant
+        from core.models import SubmissionVariantRun
+
+        monkeypatch.setattr('autograder.run.Executor.factory', lambda *a, **kw: None)
+        RunSubmissionVariant(variant_setup['submission'].id, variant_setup['v1'].id)
+
+        run = SubmissionVariantRun.objects.get(
+            submission=variant_setup['submission'], dataset=variant_setup['v1'])
+        assert run.result['status'] == 'error'
+
+
+# --------------------------------------------------------------------------- #
+# Submission variantRuns endpoint: staff-only
+# --------------------------------------------------------------------------- #
+
+class TestVariantRunsEndpoint:
+    def test_staff_sees_variant_runs(self, api_client, variant_setup):
+        from core.models import SubmissionVariantRun
+        SubmissionVariantRun.objects.create(
+            submission=variant_setup['submission'], dataset=variant_setup['v1'],
+            result={'status': 'success', 'stdout': 'ok'})
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.get(f"/submissions/{variant_setup['submission'].id}/variantRuns/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(resp.data) == 1
+        assert resp.data[0]['datasetName'] == variant_setup['v1'].name
+
+    def test_student_forbidden(self, api_client, variant_setup):
+        api_client.force_authenticate(user=variant_setup['students'][0])
+        resp = api_client.get(f"/submissions/{variant_setup['submission'].id}/variantRuns/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# --------------------------------------------------------------------------- #
+# Split a master dataset into a per-student variant pool
+# --------------------------------------------------------------------------- #
+
+class TestSplitMasterDataset:
+    def _master(self, variant_setup, rows=10, name='master.csv'):
+        content = 'a,b\n' + ''.join(f'{i},{i * 2}\n' for i in range(rows))
+        return AssignmentDataSet.objects.create(
+            assignment=variant_setup['assignment'], name=name,
+            file=SimpleUploadedFile(name, content.encode()))
+
+    def test_service_splits_into_disjoint_chunks(self, variant_setup):
+        from core.services.dataset_split import split_master_dataset
+
+        master = self._master(variant_setup, rows=10)
+        chunks = split_master_dataset(master, rows_per_chunk=4)
+        assert len(chunks) == 3  # ceil(10/4)
+        for c in chunks:
+            assert c.is_student_variant is True
+            assert c.mount_path == chunks[0].mount_path
+
+        # Header repeated in every chunk; data rows partitioned with none dropped or duplicated.
+        all_data_rows = []
+        for c in chunks:
+            with c.file.open('rb') as f:
+                text = f.read().decode()
+            lines = text.splitlines()
+            assert lines[0] == 'a,b'
+            all_data_rows.extend(lines[1:])
+        assert len(all_data_rows) == 10
+        assert len(set(all_data_rows)) == 10  # no duplicates
+
+        master.refresh_from_db()
+        assert master.is_active is False
+        assert master.is_student_variant is False
+
+    def test_service_respects_max_chunks(self, variant_setup, monkeypatch):
+        from core.services import dataset_split
+
+        monkeypatch.setattr(dataset_split, 'MAX_SPLIT_CHUNKS', 2)
+        master = self._master(variant_setup, rows=10)
+        with pytest.raises(dataset_split.DatasetSplitError):
+            dataset_split.split_master_dataset(master, rows_per_chunk=4)  # would need 3 > cap of 2
+
+    def test_service_rejects_resplit_without_cleanup(self, variant_setup):
+        from core.services.dataset_split import DatasetSplitError, split_master_dataset
+
+        master = self._master(variant_setup, rows=6)
+        split_master_dataset(master, rows_per_chunk=3)
+
+        # Re-splitting the same (now-inactive) master again — without deleting the
+        # previous chunks first — must fail clearly instead of silently colliding.
+        with pytest.raises(DatasetSplitError):
+            split_master_dataset(master, rows_per_chunk=2)
+
+    def test_service_no_header_mode(self, variant_setup):
+        from core.services.dataset_split import split_master_dataset
+
+        content = ''.join(f'{i},{i * 2}\n' for i in range(6))
+        master = AssignmentDataSet.objects.create(
+            assignment=variant_setup['assignment'], name='noheader.csv',
+            file=SimpleUploadedFile('noheader.csv', content.encode()))
+        chunks = split_master_dataset(master, rows_per_chunk=3, has_header=False)
+        assert len(chunks) == 2
+        with chunks[0].file.open('rb') as f:
+            assert len(f.read().decode().splitlines()) == 3
+
+    def test_api_split_endpoint(self, api_client, variant_setup):
+        master = self._master(variant_setup, rows=8)
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.post(f"/assignmentDataSets/{master.id}/splitIntoVariants/",
+                               {'rowsPerChunk': 3, 'hasHeader': True}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert len(resp.data) == 3  # ceil(8/3)
+        assert all(d['isStudentVariant'] for d in resp.data)
+
+    def test_api_split_requires_manage_datasets(self, api_client, variant_setup):
+        master = self._master(variant_setup, rows=8)
+        api_client.force_authenticate(user=variant_setup['grader'])
+        resp = api_client.post(f"/assignmentDataSets/{master.id}/splitIntoVariants/",
+                               {'rowsPerChunk': 3}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_api_split_bad_rows_per_chunk(self, api_client, variant_setup):
+        master = self._master(variant_setup, rows=8)
+        api_client.force_authenticate(user=variant_setup['admin'])
+        resp = api_client.post(f"/assignmentDataSets/{master.id}/splitIntoVariants/",
+                               {'rowsPerChunk': 'not-a-number'}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_generated_pool_stays_stable_as_enrollment_changes(self, variant_setup):
+        """The core scenario the split feature exists for: enrollment can change mid-
+        semester without needing to re-split (chunk count is fixed by rows_per_chunk).
+        New students just balance across the existing pool; only once enrollment exceeds
+        the pool size does a chunk get shared, gracefully."""
+        from core.services.dataset_split import split_master_dataset
+        from core.tests.factories import StudentFactory
+
+        master = self._master(variant_setup, rows=10)
+        chunks = split_master_dataset(master, rows_per_chunk=4)  # 3 chunks
+        assert len(chunks) == 3
+
+        students = variant_setup['students'][:2]
+        for s in students:
+            get_or_assign(variant_setup['assignment'], s)
+        # A late-enrolling student still gets a distinct, never-before-used chunk.
+        with factory.django.mute_signals(post_save):
+            late_student = StudentFactory(
+                course=variant_setup['course'].name, organization=variant_setup['course'].organization, count=99)
+        variant_setup['course'].students.add(late_student)
+        third = get_or_assign(variant_setup['assignment'], late_student)
+        used_ids = {get_or_assign(variant_setup['assignment'], s).id for s in students}
+        assert third.id not in used_ids  # each of the first 3 students got a unique chunk
+
+
+# --------------------------------------------------------------------------- #
+# Cloning: dataset flags copy, per-student rows never do
+# --------------------------------------------------------------------------- #
+
+class TestCloning:
+    def test_copy_assignment_copies_variant_flags(self, variant_setup):
+        from core.tests.factories import CourseFactory
+        from core.utils import copy_assignment
+
+        with factory.django.mute_signals(post_save):
+            dest_course = CourseFactory(name="ds102", period="s2026", organization__name="Rutgers")
+
+        new_assignment = copy_assignment(variant_setup['assignment'], dest_course)
+        assert new_assignment is not None
+        cloned = list(new_assignment.dataSets.all())
+        assert any(d.name == 'shopping_a.csv' and d.is_student_variant for d in cloned)
+        # Per-student assignment rows are never cloned — the clone's pool starts unassigned.
+        assert not StudentDataSetAssignment.objects.filter(assignment=new_assignment).exists()

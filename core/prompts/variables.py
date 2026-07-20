@@ -221,7 +221,22 @@ def _visible_assignment_files(assignment):
     return assignment.files.filter(hidden=False, is_test_resource=False)
 
 
+def _file_content_for_prompt(name: str, data: str) -> str:
+    """Turn a stored File.data into readable prompt text based on its type: PDFs are
+    extracted to markdown (never emitted as raw base64), notebooks to enumerated cells,
+    everything else passed through. Caps are applied afterward by _format_file_block."""
+    lower = name.lower()
+    if lower.endswith('.pdf'):
+        from core.services.ai_service import extract_pdf_text
+        return extract_pdf_text(data) or f"(could not extract text from PDF '{name}')"
+    if lower.endswith('.ipynb'):
+        from core.services.ai_service import _format_notebook_as_cells
+        return _format_notebook_as_cells(data)
+    return data
+
+
 def _format_file_block(name: str, content: str, cap: int) -> str:
+    content = _file_content_for_prompt(name, content)
     if len(content) > cap:
         content = content[:cap] + "\n... (truncated)"
     return f"### {name}\n```\n{content}\n```"
@@ -361,6 +376,26 @@ def _resolve_submission_test_results(ctx, argument):
     return _submission_context(ctx)['test_results'] or "(no test results)"
 
 
+def _resolve_student_dataset(ctx, argument):
+    # The submitting student's assigned dataset variant (per-student pool) — resolved per
+    # student at generation time, like {submission_files}. Datasets use a real FileField
+    # (binary storage), so this decodes as text rather than reusing _format_file_block's
+    # File.data path.
+    if ctx.assignment is None or ctx.submission is None:
+        return None
+    from core.services.dataset_assignment import get_or_assign_for_submission
+    dataset = get_or_assign_for_submission(ctx.assignment, ctx.submission)
+    if dataset is None or not dataset.file:
+        return None
+    try:
+        with dataset.file.open('rb') as f:
+            content = f.read().decode('utf-8', errors='replace')
+    except Exception:
+        return "(could not read the assigned dataset file)"
+    filename = dataset.file.name.split('/')[-1]
+    return _format_file_block(filename, content, ASSIGNMENT_FILE_CHAR_CAP)
+
+
 def _resolve_num_questions(ctx, argument):
     return str(ctx.section.numQuestions) if ctx.section is not None else None
 
@@ -422,6 +457,12 @@ for _variable in [
         description="The student's autograder test results "
                     '(resolved per student at generation time).',
         resolver=_resolve_submission_test_results, requires=frozenset({'assignment', 'submission'})),
+    PromptVariable(
+        name='student_dataset', label="The student's assigned dataset",
+        description="The contents of the dataset variant assigned to this student, for "
+                    'assignments with a per-student dataset pool '
+                    '(resolved per student at generation time).',
+        resolver=_resolve_student_dataset, requires=frozenset({'assignment', 'submission'})),
     PromptVariable(
         name='num_questions', label='Number of questions',
         description="This section's configured question count.",

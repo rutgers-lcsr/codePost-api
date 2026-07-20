@@ -105,6 +105,81 @@ class TestSubstitution:
         assert text == '4 of essay'
 
 
+class TestFileContentConversion:
+    """PDF and notebook file variables resolve to readable text/cells, never raw base64."""
+
+    def _pdf_data_uri(self, text):
+        import base64
+        import pymupdf
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), text)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+        return 'data:application/pdf;base64,' + base64.b64encode(pdf_bytes).decode()
+
+    def test_assignment_pdf_resolves_to_text_not_base64(self, db):
+        from core.tests.factories import CourseFactory, AssignmentFileFactory
+        with factory.django.mute_signals(post_save):
+            course = CourseFactory(name="pdf101", period="s2026", organization__name="Rutgers")
+            assignment = course.assignments.first()
+            AssignmentFileFactory(assignment=assignment, name='spec.pdf',
+                                  data=self._pdf_data_uri('Compute the z-score.'), extension='.pdf')
+        ctx = VariableContext(course=course, assignment=assignment)
+        text, used = substitute_variables('Spec:\n{assignment_file:spec.pdf}', ctx)
+        assert 'assignment_file' in used
+        assert 'Compute the z-score.' in text
+        assert 'base64' not in text
+        assert 'data:application/pdf' not in text
+
+    def test_bad_pdf_becomes_placeholder_not_base64(self, db):
+        from core.tests.factories import CourseFactory, AssignmentFileFactory
+        with factory.django.mute_signals(post_save):
+            course = CourseFactory(name="pdf102", period="s2026", organization__name="Rutgers")
+            assignment = course.assignments.first()
+            # A file named .pdf whose bytes aren't a real PDF — extraction fails gracefully.
+            AssignmentFileFactory(assignment=assignment, name='broken.pdf',
+                                  data='not actually a pdf', extension='.pdf')
+        ctx = VariableContext(course=course, assignment=assignment)
+        text, _ = substitute_variables('{assignment_file:broken.pdf}', ctx)
+        assert "could not extract text from PDF 'broken.pdf'" in text
+        assert 'not actually a pdf' not in text or 'could not extract' in text
+
+    def test_course_pdf_resolves_to_text(self, db):
+        from core.models import CourseFile
+        from core.tests.factories import CourseFactory
+        with factory.django.mute_signals(post_save):
+            course = CourseFactory(name="pdf103", period="s2026", organization__name="Rutgers")
+            CourseFile.objects.create(course=course, name='rubric.pdf',
+                                      data=self._pdf_data_uri('Grade on clarity.'), extension='.pdf')
+        ctx = VariableContext(course=course)
+        text, _ = substitute_variables('{course_file:rubric.pdf}', ctx)
+        assert 'Grade on clarity.' in text
+        assert 'base64' not in text
+
+    def test_notebook_assignment_file_resolves_to_cells(self, db):
+        import json
+        from core.tests.factories import CourseFactory, AssignmentFileFactory
+        notebook = json.dumps({
+            'cells': [
+                {'cell_type': 'markdown', 'source': ['# Analysis']},
+                {'cell_type': 'code', 'source': ['mean(shop$price)'], 'outputs': []},
+            ],
+            'metadata': {'kernelspec': {'language': 'R', 'name': 'ir'}},
+            'nbformat': 4, 'nbformat_minor': 5,
+        })
+        with factory.django.mute_signals(post_save):
+            course = CourseFactory(name="nb101", period="s2026", organization__name="Rutgers")
+            assignment = course.assignments.first()
+            AssignmentFileFactory(assignment=assignment, name='hw.ipynb', data=notebook,
+                                  extension='.ipynb')
+        ctx = VariableContext(course=course, assignment=assignment)
+        text, _ = substitute_variables('{assignment_file:hw.ipynb}', ctx)
+        assert '--- CELL 1 [MARKDOWN] ---' in text
+        assert '--- CELL 2 [CODE] ---' in text
+        assert 'mean(shop$price)' in text
+
+
 class TestValidation:
     def test_valid_template(self, assignment_setup):
         ctx = VariableContext(course=assignment_setup['course'],

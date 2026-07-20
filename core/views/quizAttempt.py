@@ -280,6 +280,54 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
         attempt, context=staff_reveal_context(request)).data)
 
   @extend_schema(
+      request=inline_serializer('RunQuizResponseCodeRequest', {
+          'response': serializers.IntegerField(),
+      }),
+      responses=StaffQuizAttemptSerializer,
+      description="Run a student's code answer in the sandbox (quiz graders and course admins "
+                  "only). Dispatches an async execution; poll the attempt to see the result "
+                  "land in the response's codeExecution field.",
+  )
+  @action(detail=True, methods=['POST'])
+  def runCode(self, request, pk=None):
+    """Sandbox-execute one code response's answer so a grader can see what it produces.
+    Async: sets codeExecution.status='running' and dispatches RunQuizResponseCode; the
+    grading UI polls the attempt until it lands."""
+    attempt = self.get_object()
+    if attempt.quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+    response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
+    if attempt.status != 'submitted':
+      return Response({'detail': 'Only submitted attempts can be run.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if (response.questionSnapshot or {}).get('type') != 'code':
+      return Response({'detail': 'Only code responses can be executed.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if not (response.answerText or '').strip():
+      return Response({'detail': 'This response has no code to run.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    # Guard against a double-click re-dispatching while a run is in flight (but let a
+    # stale 'running' — a task that died without writing back — be retried after a while).
+    existing = response.codeExecution or {}
+    if existing.get('status') == 'running':
+      requested_at = existing.get('requestedAt')
+      if requested_at and (timezone.now() - timezone.datetime.fromisoformat(requested_at)).total_seconds() < 180:
+        return Response({'detail': 'This answer is already running.'},
+                        status=status.HTTP_409_CONFLICT)
+
+    response.codeExecution = {
+        'status': 'running',
+        'requestedBy': request.user.email,
+        'requestedAt': timezone.now().isoformat(),
+    }
+    response.save(update_fields=['codeExecution', 'modified'])
+
+    from autograder.run import RunQuizResponseCode
+    RunQuizResponseCode.delay(response.id)
+    return Response(StaffQuizAttemptSerializer(
+        attempt, context=staff_reveal_context(request)).data)
+
+  @extend_schema(
       request=inline_serializer('SetOfficialAttemptRequest', {
           'official': serializers.BooleanField(required=False, default=True),
       }),

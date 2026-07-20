@@ -298,13 +298,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/AssignmentDataSet'
           description: ''
+  /assignmentDataSets/{id}/splitIntoVariants/:
+    post:
+      operationId: assignmentDataSets_splitIntoVariantsCreate
+      description: |-
+        Split this dataset's file into disjoint row-chunks, one per generated variant,
+        forming a per-student pool (see core.services.dataset_split). The chunk count is
+        driven by rowsPerChunk, not current enrollment, so the pool stays stable as
+        students enroll or drop.
+
+        POST /assignmentDataSets/{id}/splitIntoVariants/
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this assignment data set.
+        required: true
+      tags:
+      - assignmentDataSets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rowsPerChunk:
+                  type: integer
+                  minimum: 1
+                hasHeader:
+                  type: boolean
+              required:
+              - rowsPerChunk
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AssignmentDataSet'
+          description: ''
   /assignmentDataSets/by_assignment/:
     get:
-      operationId: assignmentDataSets_byAssignmentRetrieve
+      operationId: assignmentDataSets_byAssignmentList
       description: |-
         List datasets for a specific assignment
 
         GET /assignments/datasets/by_assignment/?assignment_id=123
+      parameters:
+      - in: query
+        name: assignment_id
+        schema:
+          type: integer
+        description: The assignment whose datasets to list.
+        required: true
       tags:
       - assignmentDataSets
       security:
@@ -317,7 +370,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AssignmentDataSet'
+                type: array
+                items:
+                  $ref: '#/components/schemas/AssignmentDataSet'
           description: ''
   /assignmentFiles/:
     get:
@@ -1052,7 +1107,9 @@ paths:
     get:
       operationId: assignments_datasetsList
       description: |-
-        Return all datasets for this assignment
+        Return the datasets for this assignment. Staff see everything; students see shared
+        (non-hidden) datasets plus only the variant assigned to them from a per-student pool
+        (auto-assigned here on first access).
 
         GET /api/assignments/{id}/datasets/
       parameters:
@@ -8578,6 +8635,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/StaffQuizAttempt'
           description: ''
+  /quizAttempts/{id}/runCode/:
+    post:
+      operationId: quizAttempts_runCodeCreate
+      description: Run a student's code answer in the sandbox (quiz graders and course
+        admins only). Dispatches an async execution; poll the attempt to see the result
+        land in the response's codeExecution field.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunQuizResponseCodeRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RunQuizResponseCodeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RunQuizResponseCodeRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffQuizAttempt'
+          description: ''
   /quizAttempts/{id}/saveAnswer/:
     patch:
       operationId: quizAttempts_saveAnswerPartialUpdate
@@ -11413,6 +11509,99 @@ paths:
                 items:
                   $ref: '#/components/schemas/Submission'
           description: ''
+  /studentDataSetAssignments/:
+    get:
+      operationId: studentDataSetAssignments_list
+      description: |-
+        list: mappings for one assignment (?assignment=<id>, required).
+        partial_update: override a student's assigned variant.
+      parameters:
+      - in: query
+        name: assignment
+        schema:
+          type: integer
+        description: The assignment whose dataset-variant mappings to list.
+        required: true
+      tags:
+      - studentDataSetAssignments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentDataSetAssignment'
+          description: ''
+  /studentDataSetAssignments/{id}/:
+    get:
+      operationId: studentDataSetAssignments_retrieve
+      description: |-
+        list: mappings for one assignment (?assignment=<id>, required).
+        partial_update: override a student's assigned variant.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this student data set assignment.
+        required: true
+      tags:
+      - studentDataSetAssignments
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentDataSetAssignment'
+          description: ''
+    patch:
+      operationId: studentDataSetAssignments_partialUpdate
+      description: |-
+        list: mappings for one assignment (?assignment=<id>, required).
+        partial_update: override a student's assigned variant.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this student data set assignment.
+        required: true
+      tags:
+      - studentDataSetAssignments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedStudentDataSetAssignment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedStudentDataSetAssignment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedStudentDataSetAssignment'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentDataSetAssignment'
+          description: ''
   /submissionFiles/:
     get:
       operationId: submissionFiles_list
@@ -13029,6 +13218,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StudentSubmission'
+          description: ''
+  /submissions/{id}/variantRuns/:
+    get:
+      operationId: submissions_variantRunsList
+      description: |-
+        Variant-robustness reruns (see AssignmentDataSet.autogradeAllVariants) — staff-only,
+        never shown to students.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this submission.
+        required: true
+      tags:
+      - submissions
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubmissionVariantRun'
           description: ''
   /subscribe/:
     post:
@@ -16164,6 +16382,15 @@ components:
           description: If True, this dataset will be hidden from students.
         isTestResource:
           type: boolean
+        isStudentVariant:
+          type: boolean
+        autogradeAllVariants:
+          type: boolean
+          description: Only meaningful when is_student_variant is True. If True, the
+            autograder reruns a finalized submission against every OTHER variant in
+            the pool (in addition to the student's own), recording one SubmissionVariantRun
+            per variant — an anti-hardcoding check. Must be set consistently across
+            a pool.
       required:
       - assignment
       - created
@@ -16202,6 +16429,15 @@ components:
           description: If True, this dataset will be hidden from students.
         isTestResource:
           type: boolean
+        isStudentVariant:
+          type: boolean
+        autogradeAllVariants:
+          type: boolean
+          description: Only meaningful when is_student_variant is True. If True, the
+            autograder reruns a finalized submission against every OTHER variant in
+            the pool (in addition to the student's own), recording one SubmissionVariantRun
+            per variant — an anti-hardcoding check. Must be set consistently across
+            a pool.
       required:
       - assignment
       - file
@@ -16223,6 +16459,15 @@ components:
           type: boolean
         isTestResource:
           type: boolean
+        isStudentVariant:
+          type: boolean
+        autogradeAllVariants:
+          type: boolean
+          description: Only meaningful when is_student_variant is True. If True, the
+            autograder reruns a finalized submission against every OTHER variant in
+            the pool (in addition to the student's own), recording one SubmissionVariantRun
+            per variant — an anti-hardcoding check. Must be set consistently across
+            a pool.
       required:
       - name
     AssignmentDeadline:
@@ -19608,6 +19853,15 @@ components:
           type: boolean
         isTestResource:
           type: boolean
+        isStudentVariant:
+          type: boolean
+        autogradeAllVariants:
+          type: boolean
+          description: Only meaningful when is_student_variant is True. If True, the
+            autograder reruns a finalized submission against every OTHER variant in
+            the pool (in addition to the student's own), recording one SubmissionVariantRun
+            per variant — an anti-hardcoding check. Must be set consistently across
+            a pool.
     PatchedAssignmentFile:
       type: object
       description: |-
@@ -21138,6 +21392,53 @@ components:
             format: email
             title: Email address
             nullable: true
+    PatchedStudentDataSetAssignment:
+      type: object
+      description: |-
+        Staff-facing view of one student's dataset-variant assignment. `dataset` is the
+        only writable field (staff overriding the auto-assignment) — `assignedBy` is set
+        server-side to the requesting staff member.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          readOnly: true
+          description: The related assignment_id.
+        student:
+          type: integer
+          readOnly: true
+          description: The assigned student.
+        studentEmail:
+          type: string
+          format: email
+          readOnly: true
+        dataset:
+          type: integer
+          description: The variant this student was assigned.
+        datasetName:
+          type: string
+          readOnly: true
+        assignedBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff member who manually assigned this override. Null
+            means it was assigned automatically.
+        assignedByEmail:
+          type: string
+          format: email
+          readOnly: true
+          nullable: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
     PatchedSubmission:
       type: object
       properties:
@@ -23042,6 +23343,13 @@ components:
       - category
       - id
       - pointDelta
+    RunQuizResponseCodeRequest:
+      type: object
+      properties:
+        response:
+          type: integer
+      required:
+      - response
     Section:
       type: object
       properties:
@@ -23261,9 +23569,10 @@ components:
     StaffQuizResponse:
       type: object
       description: |-
-        A response as staff (grading/review) sees it: adds the grader-only answer key.
-        NEVER used for student-facing payloads — referenceSolution is not in the student's
-        Meta.fields, so StudentQuizResponseSerializer is structurally incapable of exposing it.
+        A response as staff (grading/review) sees it: adds the grader-only answer key and the
+        sandbox code-execution result. NEVER used for student-facing payloads — neither field is
+        in the student's Meta.fields, so StudentQuizResponseSerializer is structurally incapable
+        of exposing them.
       properties:
         id:
           type: integer
@@ -23318,7 +23627,10 @@ components:
           type: string
           nullable: true
           readOnly: true
+        codeExecution:
+          readOnly: true
       required:
+      - codeExecution
       - id
       - question
       - referenceSolution
@@ -23352,6 +23664,64 @@ components:
         * `ok` - ok
         * `warning` - warning
         * `error` - error
+    StudentDataSetAssignment:
+      type: object
+      description: |-
+        Staff-facing view of one student's dataset-variant assignment. `dataset` is the
+        only writable field (staff overriding the auto-assignment) — `assignedBy` is set
+        server-side to the requesting staff member.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        assignment:
+          type: integer
+          readOnly: true
+          description: The related assignment_id.
+        student:
+          type: integer
+          readOnly: true
+          description: The assigned student.
+        studentEmail:
+          type: string
+          format: email
+          readOnly: true
+        dataset:
+          type: integer
+          description: The variant this student was assigned.
+        datasetName:
+          type: string
+          readOnly: true
+        assignedBy:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The staff member who manually assigned this override. Null
+            means it was assigned automatically.
+        assignedByEmail:
+          type: string
+          format: email
+          readOnly: true
+          nullable: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assignedBy
+      - assignedByEmail
+      - assignment
+      - created
+      - dataset
+      - datasetName
+      - id
+      - modified
+      - student
+      - studentEmail
     StudentQuestion:
       type: object
       description: Shape of a rendered snapshot question for a student (documents
@@ -24502,6 +24872,45 @@ components:
       required:
       - logs
       - submissionTests
+    SubmissionVariantRun:
+      type: object
+      description: One variant-robustness rerun. Staff-only — never exposed to students.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        submission:
+          type: integer
+          readOnly: true
+          description: The related submission_id.
+        dataset:
+          type: integer
+          readOnly: true
+          description: The variant this rerun used.
+        datasetName:
+          type: string
+          readOnly: true
+        result:
+          readOnly: true
+          nullable: true
+          description: '{status: running|success|error, stdout, stderr, images, error,
+            executionTime}. Staff-internal — never shown to students.'
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        modified:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - dataset
+      - datasetName
+      - id
+      - modified
+      - result
+      - submission
     SubmissionWithTests:
       type: object
       properties:

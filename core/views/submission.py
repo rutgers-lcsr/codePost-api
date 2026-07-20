@@ -5,6 +5,7 @@ from core.models import User
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionFilesOnlySerializer, SubmissionConsoleDataSerializer, StudentConsoleDataSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
+from core.serializers.submissionVariantRun import SubmissionVariantRunSerializer
 from core.serializers.file import SubmissionFileEditSaveSerializer, SubmissionFileEditSerializer
 
 from rest_framework.response import Response
@@ -366,6 +367,19 @@ class SubmissionViewSet(ListProtectedViewSet):
         return returnForbidden()
 
     serializer = SubmissionTestSerializer(tests, many=True, context={"request": request})
+    return Response(serializer.data)
+
+  @extend_schema(responses=SubmissionVariantRunSerializer(many=True))
+  @action(detail=True, methods=["GET"])
+  def variantRuns(self, request, pk=None):
+    """Variant-robustness reruns (see AssignmentDataSet.autogradeAllVariants) — staff-only,
+    never shown to students."""
+    user = request.user
+    submission = self.get_object()
+    if not isStaffOfSub(user, submission):
+      return returnForbidden()
+    runs = submission.variant_runs.select_related('dataset').all()
+    serializer = SubmissionVariantRunSerializer(runs, many=True, context={"request": request})
     return Response(serializer.data)
 
   #################################################################################

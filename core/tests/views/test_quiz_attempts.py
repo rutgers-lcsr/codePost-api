@@ -33,7 +33,7 @@ def taking_setup(db):
 
 # Shared question/quiz builders live in quiz_helpers (used by all three quiz test files).
 from core.tests.views.quiz_helpers import (  # noqa: E402
-    _add, _bank, _dec, _essay, _mc, _multi, _numerical, _quiz, _short,
+    _add, _bank, _code, _dec, _essay, _mc, _multi, _numerical, _quiz, _short,
 )
 
 
@@ -1313,6 +1313,214 @@ class TestManualGrading:
         api_client.force_authenticate(user=taking_setup['admin'])
         admin_caps = api_client.get(f'/courses/{course.id}/capabilities/')
         assert admin_caps.data['capabilitiesMap']['grade_quiz'] is True
+
+
+class TestRunCode:
+    """Phase 4: grader-triggered sandbox execution of a student's code answer."""
+
+    def _code_quiz(self, taking_setup, **kw):
+        course = taking_setup['course']
+        bank = _bank(course)
+        quiz = _quiz(course, **kw)
+        _add(quiz, _mc(course, bank), sortKey=0)
+        _add(quiz, _code(course, bank), sortKey=1)
+        return quiz
+
+    def _submitted_with_code(self, api_client, taking_setup, quiz, answer='print(mean(1:10))'):
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        code_id = None
+        for r in start.data['responses']:
+            if r['question']['questionType'] == 'code':
+                code_id = r['id']
+                api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                                 {'response': r['id'], 'answerText': answer}, format='json')
+        api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        return start.data['id'], code_id
+
+    def _mock_dispatch(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr('autograder.run.RunQuizResponseCode.delay',
+                            lambda *a, **kw: calls.append(a))
+        return calls
+
+    def test_quiz_grader_can_run_code(self, api_client, taking_setup, monkeypatch):
+        calls = self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+
+        grader = taking_setup['course'].graders.first()
+        taking_setup['course'].quizGraders.add(grader)
+        api_client.force_authenticate(user=grader)
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(calls) == 1 and calls[0][0] == code_id
+        code_resp = next(r for r in resp.data['responses'] if r['id'] == code_id)
+        assert code_resp['codeExecution']['status'] == 'running'
+
+    def test_student_cannot_run_code(self, api_client, taking_setup, monkeypatch):
+        self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_plain_grader_without_role_cannot_run_code(self, api_client, taking_setup, monkeypatch):
+        self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+        api_client.force_authenticate(user=taking_setup['course'].graders.first())
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_cannot_run_non_code_response(self, api_client, taking_setup, monkeypatch):
+        self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, _ = self._submitted_with_code(api_client, taking_setup, quiz)
+        # The MC response isn't a code type.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        attempt = api_client.get(f'/quizAttempts/{attempt_id}/')
+        mc_id = next(r['id'] for r in attempt.data['responses']
+                     if r['question']['questionType'] == 'multiple_choice')
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': mc_id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_cannot_run_empty_answer(self, api_client, taking_setup, monkeypatch):
+        self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz, answer='   ')
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_double_run_conflicts_while_running(self, api_client, taking_setup, monkeypatch):
+        self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        first = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                                {'response': code_id}, format='json')
+        assert first.status_code == status.HTTP_200_OK
+        second = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                                 {'response': code_id}, format='json')
+        assert second.status_code == status.HTTP_409_CONFLICT
+
+    def test_run_blocked_on_archived_course(self, api_client, taking_setup, monkeypatch):
+        self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+        taking_setup['course'].archived = True
+        taking_setup['course'].save()
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_code_execution_never_in_student_payload(self, api_client, taking_setup, monkeypatch):
+        self._mock_dispatch(monkeypatch)
+        quiz = self._code_quiz(taking_setup, showCorrectAnswers='after_submit')
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+        # Staff triggers a run (writes codeExecution), then simulate a completed result.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.post(f'/quizAttempts/{attempt_id}/runCode/', {'response': code_id}, format='json')
+        from core.models import QuizResponse
+        r = QuizResponse.objects.get(id=code_id)
+        r.codeExecution = {'status': 'success', 'stdout': 'SECRET_OUTPUT'}
+        r.save(update_fields=['codeExecution'])
+
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        own = api_client.get(f'/quizAttempts/{attempt_id}/')
+        payload = own.content.decode()
+        assert 'codeExecution' not in payload
+        assert 'SECRET_OUTPUT' not in payload
+
+
+class TestRunQuizResponseCodeTask:
+    """The celery task itself (executor patched — no Docker)."""
+
+    def _prep(self, taking_setup, api_client, language='r'):
+        course = taking_setup['course']
+        bank = _bank(course)
+        quiz = _quiz(course)
+        code_q = _code(course, bank, language=language)
+        _add(quiz, code_q, sortKey=0)
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        code_id = start.data['responses'][0]['id']
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': code_id, 'answerText': 'print(1)'}, format='json')
+        api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        return code_id
+
+    def test_success_writes_result(self, api_client, taking_setup, monkeypatch):
+        from core.models import QuizResponse
+
+        code_id = self._prep(taking_setup, api_client)
+
+        class FakeResult:
+            success = True
+            stdout = '5.5'
+            stderr = ''
+            err = None
+            output_data = {'images': []}
+
+        class FakeExecutor:
+            EXECUTABLE_EXTENSIONS = ['.r']
+            def __init__(self, *a, **kw):
+                pass
+            def execute(self):
+                return FakeResult()
+
+        monkeypatch.setattr('autograder.services.executors.get_executor_class',
+                            lambda lang: FakeExecutor)
+        from autograder.run import RunQuizResponseCode
+        RunQuizResponseCode(code_id)
+        r = QuizResponse.objects.get(id=code_id)
+        assert r.codeExecution['status'] == 'success'
+        assert r.codeExecution['stdout'] == '5.5'
+        assert 'finishedAt' in r.codeExecution
+
+    def test_no_sandbox_for_language(self, api_client, taking_setup, monkeypatch):
+        from core.models import QuizResponse
+        from autograder.services.executors import Executor
+
+        code_id = self._prep(taking_setup, api_client, language='cobol')
+        monkeypatch.setattr('autograder.services.executors.get_executor_class',
+                            lambda lang: Executor)
+        from autograder.run import RunQuizResponseCode
+        RunQuizResponseCode(code_id)
+        r = QuizResponse.objects.get(id=code_id)
+        assert r.codeExecution['status'] == 'error'
+        assert 'sandbox' in r.codeExecution['error'].lower()
+
+    def test_exception_records_error(self, api_client, taking_setup, monkeypatch):
+        from core.models import QuizResponse
+
+        code_id = self._prep(taking_setup, api_client)
+
+        class BoomExecutor:
+            EXECUTABLE_EXTENSIONS = ['.r']
+            def __init__(self, *a, **kw):
+                pass
+            def execute(self):
+                raise RuntimeError('sandbox exploded')
+
+        monkeypatch.setattr('autograder.services.executors.get_executor_class',
+                            lambda lang: BoomExecutor)
+        from autograder.run import RunQuizResponseCode
+        RunQuizResponseCode(code_id)
+        r = QuizResponse.objects.get(id=code_id)
+        assert r.codeExecution['status'] == 'error'
+        assert 'sandbox exploded' in r.codeExecution['error']
 
 
 class TestQuizAuditLog:

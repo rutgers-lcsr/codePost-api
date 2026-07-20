@@ -18,7 +18,8 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
     mountPath = serializers.CharField(source='mount_path', required=False, allow_blank=True)
     isActive = serializers.BooleanField(source='is_active', required=False)
     isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
-    
+    isStudentVariant = serializers.BooleanField(source='is_student_variant', required=False)
+
     class Meta:
         model = AssignmentDataSet
         fields = [
@@ -36,6 +37,8 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
             'modified',
             'hidden',
             'isTestResource',
+            'isStudentVariant',
+            'autogradeAllVariants',
         ]
         read_only_fields = ['id', 'created', 'modified', 'fileUrl', 'fileSize', 'fileName', 'hidden']
 
@@ -45,6 +48,8 @@ class AssignmentDataSetSerializer(serializers.ModelSerializer):
             data['mountPath'] = data['mount_path']
         if 'is_active' in data and 'isActive' not in data:
             data['isActive'] = data['is_active']
+        if 'is_student_variant' in data and 'isStudentVariant' not in data:
+            data['isStudentVariant'] = data['is_student_variant']
         return super().to_internal_value(data)
     
     @extend_schema_field(serializers.URLField(allow_null=True))
@@ -84,7 +89,8 @@ class AssignmentDataSetCreateSerializer(serializers.ModelSerializer):
     mountPath = serializers.CharField(source='mount_path', required=False, allow_blank=True)
     isActive = serializers.BooleanField(source='is_active', required=False)
     isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
-    
+    isStudentVariant = serializers.BooleanField(source='is_student_variant', required=False)
+
     class Meta:
         model = AssignmentDataSet
         fields = [
@@ -96,6 +102,8 @@ class AssignmentDataSetCreateSerializer(serializers.ModelSerializer):
             'isActive',
             'hidden',
             'isTestResource',
+            'isStudentVariant',
+            'autogradeAllVariants',
         ]
 
     def to_internal_value(self, data):
@@ -106,8 +114,10 @@ class AssignmentDataSetCreateSerializer(serializers.ModelSerializer):
             data['isActive'] = data['is_active']
         if 'is_test_resource' in data and 'isTestResource' not in data:
             data['isTestResource'] = data['is_test_resource']
+        if 'is_student_variant' in data and 'isStudentVariant' not in data:
+            data['isStudentVariant'] = data['is_student_variant']
         return super().to_internal_value(data)
-    
+
     def validate_file(self, value):
         """Validate file size"""
         if value.size > MAX_DATASET_SIZE:
@@ -124,7 +134,8 @@ class AssignmentDataSetUpdateSerializer(serializers.ModelSerializer):
     mountPath = serializers.CharField(source='mount_path', required=False, allow_blank=True)
     isActive = serializers.BooleanField(source='is_active', required=False)
     isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
-    
+    isStudentVariant = serializers.BooleanField(source='is_student_variant', required=False)
+
     class Meta:
         model = AssignmentDataSet
         fields = [
@@ -133,6 +144,8 @@ class AssignmentDataSetUpdateSerializer(serializers.ModelSerializer):
             'mountPath',
             'isActive',
             'isTestResource',
+            'isStudentVariant',
+            'autogradeAllVariants',
         ]
 
     def to_internal_value(self, data):
@@ -143,4 +156,6 @@ class AssignmentDataSetUpdateSerializer(serializers.ModelSerializer):
             data['isActive'] = data['is_active']
         if 'is_test_resource' in data and 'isTestResource' not in data:
             data['isTestResource'] = data['is_test_resource']
+        if 'is_student_variant' in data and 'isStudentVariant' not in data:
+            data['isStudentVariant'] = data['is_student_variant']
         return super().to_internal_value(data)

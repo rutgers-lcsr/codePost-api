@@ -28,6 +28,7 @@ import nbformat
 from docker import DockerClient
 
 from core.models import User
+from core.services.dataset_assignment import get_or_assign_for_submission
 
 # pkg_resources shim is installed via core.compat for setuptools >= 82 compatibility
 
@@ -883,11 +884,19 @@ class Executor(abc.ABC):
         self.assignment = assignment or None
         self.course = course or None
         
-        # Datasets priority: kwargs > assignment.active
+        # Datasets priority: kwargs > assignment.active. Shared datasets (is_student_variant=
+        # False) go to everyone; a variant pool contributes only the submitting student's
+        # assigned variant, so different students' code sees different data at the same path.
         if 'datasets' in kwargs:
              self.datasets = kwargs['datasets']
+        elif assignment:
+             shared = list(assignment.dataSets.filter(is_active=True, is_student_variant=False))
+             variant = get_or_assign_for_submission(assignment, submission) if submission else None
+             if variant is not None and variant.is_active:
+                 shared.append(variant)
+             self.datasets = shared
         else:
-             self.datasets = list(assignment.dataSets.filter(is_active=True)) if assignment else []
+             self.datasets = []
 
         # Input Data (Stdin)
         self.input_data = kwargs.get('input_data')
