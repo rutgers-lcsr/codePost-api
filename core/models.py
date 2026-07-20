@@ -561,6 +561,13 @@ class Assignment(BaseModel):
       help_text="System prompt for AI comment generation. "
                 "Placeholders: {assignment_name}, {file_content}, {selected_content}, {rubric_context}, {grader_draft}"
   )
+  ai_summary_prompt = models.TextField(
+      blank=True,
+      default="",
+      help_text="Per-assignment override of the submission-summary system prompt. "
+                "Placeholders: {assignment_name}, {assignment_description}, {test_results}, {rubric}, "
+                "{description_comparison}. Blank uses the global default."
+  )
   ai_description = models.TextField(
       blank=True,
       default="",

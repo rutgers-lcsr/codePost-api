@@ -7466,7 +7466,7 @@ paths:
   /promptTypes/:
     get:
       operationId: promptTypes_list
-      description: List all registered AI prompt types.
+      description: List all registered AI prompt types with their insertable {placeholders}.
       tags:
       - promptTypes
       security:
@@ -7481,14 +7481,7 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    key:
-                      type: string
-                    label:
-                      type: string
-                    description:
-                      type: string
+                  $ref: '#/components/schemas/PromptType'
           description: ''
   /promptVariants/:
     get:
@@ -15705,6 +15698,11 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        ai_summary_prompt:
+          type: string
+          description: 'Per-assignment override of the submission-summary system prompt.
+            Placeholders: {assignment_name}, {assignment_description}, {test_results},
+            {rubric}, {description_comparison}. Blank uses the global default.'
         ai_description:
           type: string
           description: AI-generated description of the assignment used as context
@@ -19561,6 +19559,11 @@ components:
           type: string
           description: 'System prompt for AI comment generation. Placeholders: {assignment_name},
             {file_content}, {selected_content}, {rubric_context}, {grader_draft}'
+        ai_summary_prompt:
+          type: string
+          description: 'Per-assignment override of the submission-summary system prompt.
+            Placeholders: {assignment_name}, {assignment_description}, {test_results},
+            {rubric}, {description_comparison}. Blank uses the global default.'
         ai_description:
           type: string
           description: AI-generated description of the assignment used as context
@@ -22022,6 +22025,24 @@ components:
       - modified
       - promptType
       - user
+    PromptType:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        placeholders:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptVariable'
+      required:
+      - description
+      - key
+      - label
+      - placeholders
     PromptVariable:
       type: object
       properties:

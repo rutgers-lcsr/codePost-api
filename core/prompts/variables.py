@@ -42,6 +42,7 @@ TOKEN_RE = re.compile(r'\{([a-z][a-z0-9_]*)(?::([^{}\n]+))?\}')
 # Per-file / total character caps, matching the existing AI context collection.
 ASSIGNMENT_FILE_CHAR_CAP = 15000     # as in AIService.generate_quiz_questions
 SUBMISSION_FILE_CHAR_CAP = 50000     # as in AIService._collect_submission_context
+COURSE_FILE_CHAR_CAP = 15000         # course-level reference files (mirrors assignment files)
 
 
 @dataclass(frozen=True)
@@ -170,6 +171,16 @@ def template_requires_submission(template: str) -> bool:
     return 'submission' in template_requirements(template)
 
 
+def referenced_course_files(template: str) -> set[str]:
+    """The set of course-file names a template references via ``{course_file:name}``.
+    Used by cross-course cloning to carry along only the course files a prompt needs."""
+    names: set[str] = set()
+    for m in TOKEN_RE.finditer(template):
+        if m.group(1) == 'course_file' and m.group(2):
+            names.add(m.group(2))
+    return names
+
+
 def describe_available_variables(context: VariableContext) -> list[dict]:
     """The autocomplete payload: one entry per usable token in this context.
 
@@ -264,6 +275,33 @@ def _validate_assignment_file_argument(ctx, argument):
     return None
 
 
+# Course files are course-level reference material (CourseFile via course.files). Unlike
+# AssignmentFile, CourseFile has no hidden/is_test_resource fields, so no filtering — and
+# no 'assignment' requirement, so these resolve on any quiz (attached or standalone).
+def _resolve_course_file(ctx, argument):
+    if ctx.course is None:
+        return None
+    cf = ctx.course.files.filter(name=argument).first()
+    if cf is None:
+        return None
+    return _format_file_block(cf.name, cf.data, COURSE_FILE_CHAR_CAP)
+
+
+def _list_course_file_arguments(ctx):
+    if ctx.course is None:
+        return []
+    return [{'argument': name, 'label': name}
+            for name in ctx.course.files.values_list('name', flat=True)]
+
+
+def _validate_course_file_argument(ctx, argument):
+    if ctx.course is None:
+        return None
+    if not ctx.course.files.filter(name=argument).exists():
+        return f"'{{course_file:{argument}}}': the course has no file named '{argument}'."
+    return None
+
+
 def _resolve_test_cases(ctx, argument):
     if ctx.assignment is None:
         return None
@@ -353,6 +391,12 @@ for _variable in [
         list_arguments=_list_assignment_file_arguments,
         validate_argument=_validate_assignment_file_argument,
         requires=frozenset({'assignment'})),
+    PromptVariable(
+        name='course_file', label='Course file',
+        description='The contents of one course-level file (usable on any quiz, attached or not).',
+        resolver=_resolve_course_file, takes_argument=True,
+        list_arguments=_list_course_file_arguments,
+        validate_argument=_validate_course_file_argument),
     PromptVariable(
         name='test_cases', label='Test cases',
         description="Descriptions of the assignment's test cases.",

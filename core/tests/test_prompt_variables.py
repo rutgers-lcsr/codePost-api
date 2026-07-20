@@ -22,6 +22,18 @@ def assignment_setup(db):
     return {'course': course, 'assignment': assignment}
 
 
+@pytest.fixture
+def course_file_setup(db):
+    from core.models import CourseFile
+    from core.tests.factories import CourseFactory
+
+    with factory.django.mute_signals(post_save):
+        course = CourseFactory(name="cos226", period="s2026", organization__name="Princeton")
+        CourseFile.objects.create(course=course, name='style.md', data='Use camelCase.',
+                                  extension='.md')
+    return {'course': course}
+
+
 class TestSubstitution:
     def test_literal_braces_pass_through(self):
         ctx = VariableContext(course=None)
@@ -68,6 +80,18 @@ class TestSubstitution:
         ctx = VariableContext(course=None)
         text, _ = substitute_variables('{num_questions:5}', ctx)
         assert text == '(unavailable: {num_questions:5})'
+
+    def test_course_file_resolves(self, course_file_setup):
+        # Course files resolve from ctx.course alone — no assignment/submission needed.
+        ctx = VariableContext(course=course_file_setup['course'])
+        text, used = substitute_variables('Guide:\n{course_file:style.md}', ctx)
+        assert 'Use camelCase.' in text
+        assert used == {'course_file'}
+
+    def test_missing_course_file_becomes_marker(self, course_file_setup):
+        ctx = VariableContext(course=course_file_setup['course'])
+        text, _ = substitute_variables('{course_file:nope.md}', ctx)
+        assert text == '(unavailable: {course_file:nope.md})'
 
     def test_section_variables(self, assignment_setup):
         from core.models import Quiz, QuizGeneratedSection
@@ -124,6 +148,17 @@ class TestValidation:
         errors = validate_template('{bogus} then {bogus}', ctx)
         assert len(errors) == 1
 
+    def test_unknown_course_file_is_error(self, course_file_setup):
+        ctx = VariableContext(course=course_file_setup['course'])
+        errors = validate_template('{course_file:missing.md}', ctx)
+        assert len(errors) == 1 and 'no file named' in errors[0]
+
+    def test_course_file_valid_without_assignment(self, course_file_setup):
+        # A known course file validates even with no attached assignment — the whole point
+        # is that course files work on standalone quizzes.
+        ctx = VariableContext(course=course_file_setup['course'], assignment=None)
+        assert validate_template('Refer to {course_file:style.md}.', ctx) == []
+
 
 class TestDescribeAvailableVariables:
     def test_expands_assignment_files(self, assignment_setup):
@@ -146,6 +181,13 @@ class TestDescribeAvailableVariables:
         tokens = {e['token'] for e in entries}
         assert tokens == {'{num_questions}', '{question_types}'}
 
+    def test_expands_course_files(self, course_file_setup):
+        # Course files expand per-file (kind 'file') and appear with no attached assignment.
+        entries = describe_available_variables(VariableContext(course=course_file_setup['course']))
+        by_token = {e['token']: e['kind'] for e in entries}
+        assert by_token.get('{course_file:style.md}') == 'file'
+        assert '{assignment_file:starter.py}' not in by_token
+
 
 class TestTemplateRequirements:
     def test_classification_drives_generation_timing(self):
@@ -160,3 +202,6 @@ class TestTemplateRequirements:
         assert template_requirements('Read {submission_files}.') == {'assignment', 'submission'}
         assert template_requires_submission('{submission_file:main.py}') is True
         assert template_requires_submission('{submission_test_results}') is True
+        # Course files require nothing → keep prompts on the eager, standalone-capable path.
+        assert template_requirements('Use {course_file:style.md}.') == set()
+        assert template_requires_submission('{course_file:style.md}') is False

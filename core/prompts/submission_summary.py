@@ -1,15 +1,24 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-from core.prompts.registry import register_prompt
+from core.prompts.registry import Placeholder, register_prompt
 
 
 @register_prompt(
     'submission_summary',
     label='Submission Summary',
     description='Generate a summary overview of the student submission',
-    allowed_placeholders=frozenset({
-        'assignment_name', 'assignment_description',
-        'test_results', 'rubric', 'description_comparison',
-    }),
+    placeholders=[
+        Placeholder('assignment_name', 'Name of the assignment',
+                    'The name of the assignment.'),
+        Placeholder('assignment_description', 'Assignment context description',
+                    "The assignment's AI context description (from AI Grading Assistance)."),
+        Placeholder('test_results', 'Autograder test results',
+                    "Overview of the student's autograder test results."),
+        Placeholder('rubric', 'Grading rubric',
+                    "The assignment's grading rubric."),
+        Placeholder('description_comparison', 'Requirements-comparison instruction',
+                    'A sentence instructing the AI to compare the submission to the '
+                    'assignment requirements (only when a description exists).'),
+    ],
 )
 def DEFAULT_TEMPLATE():
     return """You are an assistant helping graders understand student submissions.

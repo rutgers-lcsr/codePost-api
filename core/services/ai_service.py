@@ -1721,17 +1721,27 @@ Generate only substantive comments. Return an empty array [] if no issues found.
 
         # Pass test_results="" for backward compat with DB-stored prompt variants.
         # Actual test results go in user prompt to keep system prompt cacheable.
-        system_prompt, variant_id = await self._resolve_and_format_prompt(
-            'submission_summary',
-            dict(
-                assignment_name=assignment.name,
-                assignment_description=ctx['assignment_description'],
-                test_results="",
-                rubric=ctx['rubric_context'] or "No rubric defined.",
-                description_comparison=description_comparison,
-            ),
-            variant_id_override=variant_id_override,
+        format_kwargs = dict(
+            assignment_name=assignment.name,
+            assignment_description=ctx['assignment_description'],
+            test_results="",
+            rubric=ctx['rubric_context'] or "No rubric defined.",
+            description_comparison=description_comparison,
         )
+
+        # A per-assignment override wins over the global/active variant (A/B experiments,
+        # which force a specific variant_id_override, still take precedence over the override).
+        assignment_override = (assignment.ai_summary_prompt or "").strip()
+        if assignment_override and variant_id_override is None:
+            try:
+                system_prompt = assignment_override.format(**format_kwargs)
+            except (KeyError, IndexError, ValueError):
+                system_prompt = assignment_override
+            variant_id = None
+        else:
+            system_prompt, variant_id = await self._resolve_and_format_prompt(
+                'submission_summary', format_kwargs, variant_id_override=variant_id_override,
+            )
 
         test_results_section = ctx['test_results'] or "No test results available."
 

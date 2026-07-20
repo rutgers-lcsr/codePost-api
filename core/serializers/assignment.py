@@ -95,10 +95,45 @@ class AssignmentSerializer(AssignmentSerializerBase):
                                                      'hideGradersFromStudents', 'commentFeedback', 'additiveGrading', 'allowRegradeRequests', 'regradeInstructions',
                                                      'regradeDeadline', 'forcedRubricMode', 'templateMode', 'collaborativeRubricMode', 'gradersCanEditSubmissions',
                                                      'testCategories', 'showFrequentlyUsedRubricComments', 'ai_system_prompt',
-                                                     'ai_description', 'ai_description_locked',
+                                                     'ai_summary_prompt', 'ai_description', 'ai_description_locked',
                                                      'runFilesOnSubmit', 'runTestsOnSubmit', 'testsAffectGrade')
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + ('testCategories',)
 
+
+  def validate(self, data):
+    data = super().validate(data)
+    self._validate_prompt_placeholders(data, 'ai_system_prompt', 'comment_generation')
+    self._validate_prompt_placeholders(data, 'ai_summary_prompt', 'submission_summary')
+    return data
+
+  @staticmethod
+  def _validate_prompt_placeholders(data, field, prompt_type):
+    """Reject a per-assignment prompt override that uses {placeholders} outside the
+    prompt type's allowed set — same check the Prompt Lab applies to global variants
+    (see core/serializers/prompt_variant.py)."""
+    template = data.get(field)
+    if not template:
+      return
+    import string
+    from core.prompts.registry import prompt_registry
+    allowed = prompt_registry.get_allowed_placeholders(prompt_type)
+    used = set()
+    try:
+      for _, field_name, _, _ in string.Formatter().parse(template):
+        if field_name is not None:
+          root = field_name.split('.')[0].split('[')[0]
+          if root:
+            used.add(root)
+    except (ValueError, KeyError):
+      raise serializers.ValidationError({
+          field: 'Invalid template syntax. Check for unmatched or malformed {placeholders}.'
+      })
+    invalid = used - allowed
+    if invalid:
+      raise serializers.ValidationError({
+          field: (f"Unknown placeholder(s): {{{', '.join(sorted(invalid))}}}. "
+                  f"Allowed placeholders: {{{', '.join(sorted(allowed))}}}.")
+      })
 
   def create(self, validated_data):
     user = self.context['request'].user

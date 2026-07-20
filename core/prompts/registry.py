@@ -17,13 +17,41 @@ from typing import Callable
 
 
 @dataclass(frozen=True)
+class Placeholder:
+    """A single ``{placeholder}`` available to a prompt type, with UI metadata.
+
+    ``label``/``description`` power the variable-dropdown editors (they default to the
+    bare name when a type is registered with only ``allowed_placeholders``)."""
+    name: str
+    label: str = ''
+    description: str = ''
+
+
+@dataclass(frozen=True)
 class PromptTypeEntry:
     """A registered prompt type."""
     key: str
     label: str
     description: str
     default_template: str
-    allowed_placeholders: frozenset[str] = frozenset()
+    placeholders: tuple[Placeholder, ...] = ()
+
+    @property
+    def allowed_placeholders(self) -> frozenset[str]:
+        """The set of valid placeholder names (used for save-time template validation)."""
+        return frozenset(p.name for p in self.placeholders)
+
+
+def _coerce_placeholders(
+    placeholders: 'list[Placeholder] | None',
+    allowed_placeholders: frozenset[str] | None,
+) -> tuple[Placeholder, ...]:
+    """Accept either rich ``Placeholder`` objects or a bare name set (back-compat)."""
+    if placeholders:
+        return tuple(placeholders)
+    if allowed_placeholders:
+        return tuple(Placeholder(name=n) for n in sorted(allowed_placeholders))
+    return ()
 
 
 class PromptRegistry:
@@ -39,9 +67,13 @@ class PromptRegistry:
         label: str,
         description: str = '',
         default_template: str = '',
+        placeholders: 'list[Placeholder] | None' = None,
         allowed_placeholders: frozenset[str] | None = None,
     ) -> None:
-        """Register a prompt type. Raises ``ValueError`` on duplicate keys."""
+        """Register a prompt type. Raises ``ValueError`` on duplicate keys.
+
+        Pass ``placeholders`` (rich, with labels for the editor dropdowns) or a bare
+        ``allowed_placeholders`` name set — the latter builds label-less placeholders."""
         if key in self._entries:
             raise ValueError(f"Prompt type '{key}' is already registered.")
         self._entries[key] = PromptTypeEntry(
@@ -49,7 +81,7 @@ class PromptRegistry:
             label=label,
             description=description,
             default_template=default_template,
-            allowed_placeholders=allowed_placeholders or frozenset(),
+            placeholders=_coerce_placeholders(placeholders, allowed_placeholders),
         )
 
     def choices(self) -> list[tuple[str, str]]:
@@ -66,6 +98,10 @@ class PromptRegistry:
     def get_allowed_placeholders(self, key: str) -> frozenset[str]:
         entry = self._entries.get(key)
         return entry.allowed_placeholders if entry else frozenset()
+
+    def get_placeholders(self, key: str) -> tuple[Placeholder, ...]:
+        entry = self._entries.get(key)
+        return entry.placeholders if entry else ()
 
     def all(self) -> list[PromptTypeEntry]:
         return list(self._entries.values())
@@ -84,11 +120,31 @@ class PromptRegistry:
 prompt_registry = PromptRegistry()
 
 
+def describe_prompt_placeholders(key: str) -> list[dict]:
+    """The autocomplete payload for a prompt type's ``{placeholders}``.
+
+    Matches the shape the frontend already consumes for quiz variables
+    (see ``core/prompts/variables.py``): ``{token, name, argument, label, description, kind}``
+    — so the editor and its ``PromptVariable`` type are reused unchanged."""
+    return [
+        {
+            'token': f'{{{p.name}}}',
+            'name': p.name,
+            'argument': None,
+            'label': p.label or p.name,
+            'description': p.description,
+            'kind': 'static',
+        }
+        for p in prompt_registry.get_placeholders(key)
+    ]
+
+
 def register_prompt(
     key: str,
     *,
     label: str,
     description: str = '',
+    placeholders: 'list[Placeholder] | None' = None,
     allowed_placeholders: frozenset[str] | None = None,
 ) -> Callable[[str], str]:
     """Decorator that registers a prompt type and returns the template string unchanged.
@@ -110,6 +166,7 @@ def register_prompt(
             label=label,
             description=description,
             default_template=template,
+            placeholders=placeholders,
             allowed_placeholders=allowed_placeholders,
         )
         return template

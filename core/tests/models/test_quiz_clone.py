@@ -15,6 +15,7 @@ from rest_framework.test import APIRequestFactory
 from core.models import (
     Assignment,
     Course,
+    CourseFile,
     GeneratedQuestionSet,
     Organization,
     Question,
@@ -31,7 +32,9 @@ from core.models import (
 from core.serializers.course import CourseSerializer
 from core.services.quiz_cloning import (
     QuizImageRewriter,
+    clone_course_files,
     clone_course_quizzes,
+    clone_quizzes_for_assignment,
     copy_question_bank,
     copy_quiz,
 )
@@ -487,3 +490,70 @@ class CourseCloneQuizTests(TestCase):
         # The backfill signal fired for the cloned section must not create any
         # per-student sets (the cloned assignment has no submissions).
         self.assertFalse(GeneratedQuestionSet.objects.filter(quiz=cloned_attached).exists())
+
+    def test_course_clone_copies_course_files(self):
+        # Course files back {course_file:name} prompts, so a full course clone must carry
+        # them over (fresh rows in the destination, not shared).
+        CourseFile.objects.create(course=self.source_course, name="style.md",
+                                  data="Use camelCase.", extension=".md")
+        CourseFile.objects.create(course=self.source_course, name="topics.txt",
+                                  data="recursion, trees", extension=".txt")
+
+        cloned_course = self._clone()
+
+        cloned_files = {f.name: f for f in cloned_course.files.all()}
+        self.assertEqual(set(cloned_files), {"style.md", "topics.txt"})
+        self.assertEqual(cloned_files["style.md"].data, "Use camelCase.")
+        self.assertEqual(cloned_files["style.md"].extension, ".md")
+        self.assertNotEqual(cloned_files["style.md"].course_id, self.source_course.id)
+
+
+class CourseFileCloneTests(TestCase):
+    """Course-file cloning (clone_course_files) and its use by cross-course assignment
+    cloning so {course_file:name} prompts keep resolving in the destination course."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="CF Clone Org", shortname="cfclone")
+        self.source = Course.objects.create(name="Src", period="F2026", organization=self.org)
+        self.dest = Course.objects.create(name="Dst", period="S2027", organization=self.org)
+
+    def test_clone_all_files_dedups_by_name(self):
+        CourseFile.objects.create(course=self.source, name="a.md", data="A", extension=".md")
+        CourseFile.objects.create(course=self.source, name="b.md", data="B", extension=".md")
+        # Destination already has a file named a.md — it must be left untouched, not duplicated.
+        CourseFile.objects.create(course=self.dest, name="a.md", data="existing", extension=".md")
+
+        created = clone_course_files(self.source, self.dest)
+
+        self.assertEqual(created, 1)
+        self.assertEqual(self.dest.files.filter(name="a.md").count(), 1)
+        self.assertEqual(self.dest.files.get(name="a.md").data, "existing")
+        self.assertEqual(self.dest.files.get(name="b.md").data, "B")
+
+    def test_clone_files_limited_to_names(self):
+        CourseFile.objects.create(course=self.source, name="used.md", data="U", extension=".md")
+        CourseFile.objects.create(course=self.source, name="unused.md", data="X", extension=".md")
+
+        clone_course_files(self.source, self.dest, names={"used.md"})
+
+        self.assertEqual(set(self.dest.files.values_list("name", flat=True)), {"used.md"})
+
+    def test_cross_course_assignment_clone_copies_referenced_files(self):
+        # A source assignment whose attached quiz references a course file: cloning the
+        # assignment into another course must bring the referenced file along (and only it).
+        CourseFile.objects.create(course=self.source, name="rubric.md", data="Grade fairly.",
+                                  extension=".md")
+        CourseFile.objects.create(course=self.source, name="other.md", data="ignore", extension=".md")
+        src_assignment = Assignment.objects.create(name="HW", course=self.source, points=10)
+        quiz = _quiz(self.source, title="HW Quiz", assignment=src_assignment)
+        QuizGeneratedSection.objects.create(
+            quiz=quiz, name="From the rubric", systemPrompt="Base questions on {course_file:rubric.md}.",
+            numQuestions=2, pointsPerQuestion=Decimal("3"))
+        dest_assignment = Assignment.objects.create(name="HW", course=self.dest, points=10)
+
+        clone_quizzes_for_assignment(src_assignment, dest_assignment)
+
+        # Only the referenced file crossed over; the cloned prompt still points at it by name.
+        self.assertEqual(set(self.dest.files.values_list("name", flat=True)), {"rubric.md"})
+        cloned_quiz = self.dest.quizzes.get(title="HW Quiz")
+        self.assertIn("{course_file:rubric.md}", cloned_quiz.generatedSections.get().systemPrompt)

@@ -16,8 +16,8 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 
 from core.models import (
-    Assignment, Course, Question, QuestionBank, Quiz, QuizGeneratedSection, QuizImage,
-    QuizQuestion, QuizQuestionGroup,
+    Assignment, Course, CourseFile, Question, QuestionBank, Quiz, QuizGeneratedSection,
+    QuizImage, QuizQuestion, QuizQuestionGroup,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,6 +81,33 @@ class QuizImageRewriter:
       logger.warning(
           f"Failed to clone quiz image {token} into course {self.destination_course.id}: {e}")
       return None
+
+
+def clone_course_files(source_course: Course, destination_course: Course, *,
+                       names: set[str] | None = None) -> int:
+  """Copy course-level files (CourseFile) from source into destination_course. These back
+  the {course_file:name} prompt variable, so a cloned quiz's generated-section prompts keep
+  resolving. Returns the number of files created.
+
+  ``names`` limits the copy to those file names (used by cross-course assignment cloning,
+  which only needs the files its quizzes reference); None copies every file (full course
+  clone). Files are matched to prompts by name, so a name already present in the
+  destination is left as-is — never duplicated — making repeat/overlapping clones safe.
+  """
+  source_files = source_course.files.all()
+  if names is not None:
+    source_files = source_files.filter(name__in=names)
+  existing_names = set(destination_course.files.values_list('name', flat=True))
+  created = 0
+  for cf in source_files:
+    if cf.name in existing_names:
+      continue
+    CourseFile.objects.create(
+        course=destination_course, name=cf.name, data=cf.data,
+        extension=cf.extension, path=cf.path)
+    existing_names.add(cf.name)
+    created += 1
+  return created
 
 
 def copy_question_bank(bank: QuestionBank, destination_course: Course, *,
@@ -245,6 +272,14 @@ def clone_course_quizzes(source_course: Course, destination_course: Course,
   question_map: dict[int, Question] = {}
   bank_map: dict[int, QuestionBank] = {}
 
+  # Course files back {course_file:name} prompts; copy them all so cloned quizzes resolve.
+  try:
+    with transaction.atomic():
+      clone_course_files(source_course, destination_course)
+  except Exception as e:
+    logger.warning(
+        f"Failed to clone course files into course {destination_course.id}: {e}")
+
   for bank in source_course.questionBanks.all():
     # Merge into the shared maps only on success so a rolled-back bank can't leak
     # references to nonexistent rows into later quiz copies.
@@ -292,13 +327,23 @@ def clone_quizzes_for_assignment(source_assignment: Assignment,
       copy_quiz(quiz, new_assignment.course, assignment=new_assignment)
     return
 
+  from core.prompts.variables import referenced_course_files
+
   rewriter = QuizImageRewriter(source_assignment.course, new_assignment.course)
   referenced_banks: dict[int, QuestionBank] = {}
+  referenced_files: set[str] = set()
   for quiz in quizzes:
     for quiz_question in quiz.quizQuestions.select_related('question__bank'):
       referenced_banks[quiz_question.question.bank_id] = quiz_question.question.bank
     for group in quiz.questionGroups.select_related('bank'):
       referenced_banks[group.bank_id] = group.bank
+    for section in quiz.generatedSections.all():
+      referenced_files |= referenced_course_files(section.systemPrompt)
+
+  # Carry along the course files the cloned prompts reference so {course_file:name} still
+  # resolves in the destination course.
+  if referenced_files:
+    clone_course_files(source_assignment.course, new_assignment.course, names=referenced_files)
 
   question_map: dict[int, Question] = {}
   bank_map: dict[int, QuestionBank] = {}
