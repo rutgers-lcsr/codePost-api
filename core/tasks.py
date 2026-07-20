@@ -662,6 +662,7 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
                 'choicesData': choices,
                 'language': language,
                 'starterCode': q.get('starter_code'),
+                'referenceSolution': q.get('reference_solution') or q.get('referenceSolution') or '',
             }))
         if not section_rows:
             error = 'The model returned no usable questions.'

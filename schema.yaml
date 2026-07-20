@@ -18521,6 +18521,12 @@ components:
           type: string
           nullable: true
           description: 'For code questions: optional starter code shown to students.'
+        referenceSolution:
+          type: string
+          nullable: true
+          description: 'Grader-facing answer key generated alongside the question:
+            the correct answer/code and, for hand-computation questions, the worked
+            steps. NEVER shown to students and never snapshotted into questionSnapshot.'
       required:
       - id
       - section
@@ -20231,6 +20237,12 @@ components:
           type: string
           nullable: true
           description: 'For code questions: optional starter code shown to students.'
+        referenceSolution:
+          type: string
+          nullable: true
+          description: 'Grader-facing answer key generated alongside the question:
+            the correct answer/code and, for hand-computation questions, the worked
+            steps. NEVER shown to students and never snapshotted into questionSnapshot.'
     PatchedLearningObjective:
       type: object
       properties:
@@ -23144,7 +23156,8 @@ components:
       type: object
       description: |-
         A quiz attempt as staff (grading) sees it: the student's identity plus every response
-        with answers and grading state. Callers set reveal/revealScore context to True.
+        with answers, grading state, and the grader-only answer key. Callers set
+        reveal/revealScore context to True.
       properties:
         id:
           type: integer
@@ -23228,7 +23241,7 @@ components:
         responses:
           type: array
           items:
-            $ref: '#/components/schemas/StudentQuizResponse'
+            $ref: '#/components/schemas/StaffQuizResponse'
           readOnly: true
         student:
           type: string
@@ -23245,6 +23258,71 @@ components:
       - serverNow
       - showResponses
       - student
+    StaffQuizResponse:
+      type: object
+      description: |-
+        A response as staff (grading/review) sees it: adds the grader-only answer key.
+        NEVER used for student-facing payloads — referenceSolution is not in the student's
+        Meta.fields, so StudentQuizResponseSerializer is structurally incapable of exposing it.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        question:
+          allOf:
+          - $ref: '#/components/schemas/StudentQuestion'
+          readOnly: true
+        sortKey:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Presentation order within the attempt (randomized when shuffleQuestions).
+        points:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Points this question is worth in this attempt (snapshot of
+            override/base).
+        answerText:
+          type: string
+          description: Typed answer for short-answer/numerical/essay/code questions.
+        selectedChoices:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+        pointsEarned:
+          type: number
+          format: double
+          maximum: 10000
+          minimum: -10000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          nullable: true
+          description: Points awarded after grading. Null until graded.
+        isCorrect:
+          type: boolean
+          nullable: true
+          description: Whether the auto-graded answer was correct. Null for manual/ungraded.
+        needsManualGrading:
+          type: boolean
+          description: True for essay/code responses awaiting manual grading.
+        graderFeedback:
+          type: string
+          description: Optional feedback from the grader on a manually graded response.
+        referenceSolution:
+          type: string
+          nullable: true
+          readOnly: true
+      required:
+      - id
+      - question
+      - referenceSolution
+      - selectedChoices
     StartQuizAttemptRequest:
       type: object
       properties:
@@ -23293,6 +23371,9 @@ components:
           type: string
           nullable: true
         language:
+          type: string
+          nullable: true
+        label:
           type: string
           nullable: true
         choices:

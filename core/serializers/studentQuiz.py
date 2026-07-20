@@ -64,6 +64,8 @@ class StudentQuestionSerializer(serializers.Serializer):
   description = serializers.CharField(allow_null=True)
   starterCode = serializers.CharField(allow_null=True)
   language = serializers.CharField(allow_null=True)
+  # The label of the question's random-draw group or AI section (null for fixed questions).
+  label = serializers.CharField(required=False, allow_null=True)
   choices = StudentQuestionChoiceSerializer(many=True, required=False)
   generalFeedback = serializers.CharField(required=False, allow_null=True)
 
@@ -81,6 +83,9 @@ def render_question_snapshot(snap, reveal):
       'description': snap.get('description'),
       'starterCode': snap.get('starterCode'),
       'language': snap.get('language'),
+      # The group / AI-section label — an organizational caption, not answer-key content,
+      # so it shows in every reveal state (while taking and on review).
+      'label': snap.get('label'),
   }
   if reveal:
     data['generalFeedback'] = snap.get('generalFeedback')
@@ -276,10 +281,30 @@ class StudentQuizSerializer(serializers.ModelSerializer):
         student=student, status='submitted', needsManualGrading=True).exists()
 
 
+class StaffQuizResponseSerializer(StudentQuizResponseSerializer):
+  """A response as staff (grading/review) sees it: adds the grader-only answer key.
+  NEVER used for student-facing payloads — referenceSolution is not in the student's
+  Meta.fields, so StudentQuizResponseSerializer is structurally incapable of exposing it."""
+  referenceSolution = serializers.SerializerMethodField()
+
+  class Meta(StudentQuizResponseSerializer.Meta):
+    fields = StudentQuizResponseSerializer.Meta.fields + ('referenceSolution',)
+
+  @extend_schema_field(serializers.CharField(allow_null=True))
+  def get_referenceSolution(self, obj):
+    if obj.generatedQuestion_id:
+      return obj.generatedQuestion.referenceSolution
+    if obj.question_id:
+      return obj.question.referenceSolution
+    return None
+
+
 class StaffQuizAttemptSerializer(StudentQuizAttemptSerializer):
   """A quiz attempt as staff (grading) sees it: the student's identity plus every response
-  with answers and grading state. Callers set reveal/revealScore context to True."""
+  with answers, grading state, and the grader-only answer key. Callers set
+  reveal/revealScore context to True."""
   student = serializers.SlugRelatedField(slug_field='email', read_only=True)
+  responses = StaffQuizResponseSerializer(many=True, read_only=True)
 
   class Meta(StudentQuizAttemptSerializer.Meta):
     fields = StudentQuizAttemptSerializer.Meta.fields + ('student',)

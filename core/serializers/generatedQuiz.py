@@ -62,7 +62,7 @@ class GeneratedQuizQuestionSerializer(ModelSerializerWithPOSTCheck):
   class Meta:
     model = GeneratedQuizQuestion
     fields = ('id', 'set', 'section', 'questionType', 'text', 'description', 'choicesData',
-              'points', 'sortKey', 'language', 'starterCode')
+              'points', 'sortKey', 'language', 'starterCode', 'referenceSolution')
     read_only_fields = ('set', 'section')
 
   def validate_choicesData(self, value):

@@ -20,8 +20,10 @@ from core.tests.views.quiz_helpers import _enable_ai, _feature_on
 QUESTIONS_JSON = json.dumps([
     {'type': 'multiple_choice', 'text': 'What does your helper return?', 'points': 2,
      'description': '```python\ndef helper():\n    return []\n```',
-     'choices': [{'text': 'A list', 'is_correct': True}, {'text': 'None', 'is_correct': False}]},
-    {'type': 'essay', 'text': 'Explain your loop.', 'points': 5, 'choices': []},
+     'choices': [{'text': 'A list', 'is_correct': True}, {'text': 'None', 'is_correct': False}],
+     'reference_solution': "Correct: 'A list' — helper() returns [] which is a list."},
+    {'type': 'essay', 'text': 'Explain your loop.', 'points': 5, 'choices': [],
+     'reference_solution': 'A correct answer covers: what the loop iterates over and why.'},
 ])
 
 
@@ -92,10 +94,12 @@ def _make_set(quiz, student, submission=None, status='ready', questions=True):
             set=gen_set, section=section, questionType='multiple_choice',
             text='About your code?', points=Decimal('3'), sortKey=0,
             choicesData=[{'text': 'Right', 'isCorrect': True, 'feedback': ''},
-                         {'text': 'Wrong', 'isCorrect': False, 'feedback': ''}])
+                         {'text': 'Wrong', 'isCorrect': False, 'feedback': ''}],
+            referenceSolution="Correct: 'Right'.")
         GeneratedQuizQuestion.objects.create(
             set=gen_set, section=section, questionType='essay',
-            text='Explain it.', points=Decimal('3'), sortKey=1)
+            text='Explain it.', points=Decimal('3'), sortKey=1,
+            referenceSolution='Key points a correct explanation should cover.')
     return gen_set
 
 
@@ -247,6 +251,9 @@ class TestGenerationTask:
         # The model's Markdown description (e.g. the referenced code excerpt) is kept.
         assert questions[0].description.startswith('```python')
         assert questions[1].description == ''
+        # The grader-only answer key is stored on the row.
+        assert questions[0].referenceSolution.startswith("Correct: 'A list'")
+        assert questions[1].referenceSolution.startswith('A correct answer covers')
         # The resolved per-section prompt is recorded for staff review.
         section = gen_setup['quiz'].generatedSections.first()
         assert gen_set.generationMetadata['sections'] == [{
@@ -254,6 +261,17 @@ class TestGenerationTask:
             'sectionName': section.name or '',
             'prompt': f'resolved prompt for section {section.id}',
         }]
+
+    def test_missing_reference_solution_does_not_fail_generation(self, gen_setup, monkeypatch):
+        # A stale prompt variant (or a model that ignores the instruction) that omits
+        # reference_solution must still produce a usable set — just with an empty key.
+        _mock_ai(monkeypatch, json_text=json.dumps([
+            {'type': 'essay', 'text': 'Explain your loop.', 'points': 5, 'choices': []},
+        ]))
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'ready'
+        assert gen_set.questions.get().referenceSolution == ''
 
     def test_feature_disabled_skips(self, gen_setup, monkeypatch):
         _mock_ai(monkeypatch)
@@ -673,6 +691,16 @@ class TestReviewAPI:
         assert question.text == 'Improved stem'
         assert question.choicesData[0] == {'text': 'A', 'isCorrect': True, 'feedback': ''}
 
+    def test_edit_answer_key(self, api_client, gen_setup):
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0])
+        question = gen_set.questions.first()
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.patch(f"/generatedQuizQuestions/{question.id}/",
+                                {'referenceSolution': 'Updated key.'}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        question.refresh_from_db()
+        assert question.referenceSolution == 'Updated key.'
+
     def test_edit_gate_follows_quiz_flag(self, api_client, gen_setup):
         gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0])
         question = gen_set.questions.first()
@@ -757,8 +785,15 @@ class TestStudentTaking:
         # No answer key or provenance leaks pre-reveal.
         assert 'isCorrect' not in generated_mc['question']['choices'][0]
         payload = resp.content.decode()
-        for banned in ('generationMetadata', 'promptVariant', 'generationBatch', '"source"'):
+        for banned in ('generationMetadata', 'promptVariant', 'generationBatch', '"source"',
+                       'referenceSolution', "Correct: 'Right'", 'Key points a correct'):
             assert banned not in payload
+
+        # The DB-level answer-key link is set even though it never reaches the student payload.
+        from core.models import QuizResponse
+        db_response = QuizResponse.objects.get(id=generated_mc['id'])
+        assert db_response.generatedQuestion_id is not None
+        assert db_response.generatedQuestion.referenceSolution == "Correct: 'Right'."
 
         # Answer the generated MC correctly and submit: auto-graded from the snapshot.
         attempt_id = resp.data['id']

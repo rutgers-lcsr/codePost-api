@@ -99,6 +99,64 @@ class TestStartAttempt:
 
 
 # --------------------------------------------------------------------------- #
+# Question labels (random-draw group / AI-section name shown to students)
+# --------------------------------------------------------------------------- #
+
+class TestQuestionLabels:
+    def test_group_label_shown_on_drawn_questions_not_fixed(self, api_client, taking_setup):
+        from core.models import QuizQuestionGroup
+        course = taking_setup['course']
+        bank = _bank(course)
+        _mc(course, bank)  # pool the group draws from
+        quiz = _quiz(course)
+        fixed = _mc(course, bank)
+        _add(quiz, fixed, sortKey=0)  # fixed question has no group → no label
+        QuizQuestionGroup.objects.create(quiz=quiz, bank=bank, name='Chapter 3',
+                                         pickCount=1, pointsPerQuestion=Decimal('2'))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        labels = {r['question']['id']: r['question']['label'] for r in resp.data['responses']}
+        assert labels[fixed.id] is None
+        drawn = [lbl for qid, lbl in labels.items() if qid != fixed.id]
+        assert drawn == ['Chapter 3']
+
+    def test_blank_group_name_gives_null_label(self, api_client, taking_setup):
+        from core.models import QuizQuestionGroup
+        course = taking_setup['course']
+        bank = _bank(course)
+        _mc(course, bank)
+        quiz = _quiz(course)
+        QuizQuestionGroup.objects.create(quiz=quiz, bank=bank, pickCount=1,
+                                         pointsPerQuestion=Decimal('2'))  # name defaults blank
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.data['responses'][0]['question']['label'] is None
+
+    def test_ai_section_label_shown(self, api_client, taking_setup):
+        from core.models import (GeneratedQuestionSet, GeneratedQuizQuestion,
+                                 QuizGeneratedSection)
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        quiz = _quiz(course)
+        with factory.django.mute_signals(post_save):
+            section = QuizGeneratedSection.objects.create(
+                quiz=quiz, name='About your solution', systemPrompt='x',
+                numQuestions=1, pointsPerQuestion=Decimal('3'))
+            gen_set = GeneratedQuestionSet.objects.create(
+                quiz=quiz, student=student, status='approved')
+            GeneratedQuizQuestion.objects.create(
+                set=gen_set, section=section, questionType='multiple_choice', text='Q?',
+                points=Decimal('3'), sortKey=0,
+                choicesData=[{'text': 'a', 'isCorrect': True},
+                             {'text': 'b', 'isCorrect': False}])
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data['responses'][0]['question']['label'] == 'About your solution'
+
+
+# --------------------------------------------------------------------------- #
 # Auto-grading per type
 # --------------------------------------------------------------------------- #
 
@@ -1171,6 +1229,31 @@ class TestManualGrading:
         mc_own = next(r for r in own.data['responses']
                       if r['question']['questionType'] == 'multiple_choice')
         assert 'isCorrect' not in mc_own
+
+    def test_staff_sees_bank_question_answer_key_never_student(self, api_client, taking_setup):
+        course = taking_setup['course']
+        bank = _bank(course)
+        essay = _essay(course, bank)
+        essay.referenceSolution = 'Key points: base case, recursive case, stack growth.'
+        essay.save()
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, bank), sortKey=0)
+        _add(quiz, essay, sortKey=1)
+        attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
+        student = taking_setup['students'][0]
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        staff_view = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert staff_view.status_code == status.HTTP_200_OK
+        essay_resp = next(r for r in staff_view.data['responses'] if r['id'] == essay_id)
+        assert essay_resp['referenceSolution'] == 'Key points: base case, recursive case, stack growth.'
+
+        api_client.force_authenticate(user=student)
+        own = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert own.status_code == status.HTTP_200_OK
+        payload = own.content.decode()
+        assert 'referenceSolution' not in payload
+        assert 'Key points: base case' not in payload
 
     def test_results_reports_official_scores_per_student(self, api_client, taking_setup):
         quiz = self._essay_quiz(taking_setup, passingScore=Decimal('6'), passingScoreUnit='points')

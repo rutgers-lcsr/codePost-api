@@ -31,6 +31,12 @@ Guidelines:
   relevant test output, sample input/output, a small table — at your discretion. If the
   stem refers to something specific, the student should be able to see it rather than
   guess. Keep it brief; use fenced code blocks for code.
+- Every question needs a `reference_solution`: a grader-only answer key, never shown to the
+  student. For `code` questions, give working code that answers the prompt. For questions
+  that ask the student to hand-compute a result, give the computed answer AND the
+  intermediate steps a grader can check against. For `multiple_choice`/`multiple_answers`/
+  `true_false`/`short_answer`/`numerical`, briefly restate which choice(s) are correct and why.
+  For `essay`, give the key points a correct answer should cover.
 
 CHOICES ARE REQUIRED for these types — never return them with an empty `choices` array:
 - `multiple_choice`: 3-5 plausible choices; exactly ONE has "is_correct": true.
@@ -51,11 +57,12 @@ Output format: respond with ONLY a JSON array (no markdown, no prose). Each elem
   "description": "<optional Markdown shown beneath the stem — code/test excerpts or other helpful context>",
   "points": <integer>,
   "choices": [{{"text": "<choice text>", "is_correct": <true|false>, "feedback": "<optional>"}}],
-  "starter_code": "<optional, code questions only>"
+  "starter_code": "<optional, code questions only>",
+  "reference_solution": "<grader-only answer key — required for every question, never shown to the student>"
 }}
 
 Worked example (a multiple_choice question MUST look like this — note the populated choices,
-and the description carrying the exact excerpt the stem refers to):
+the description carrying the exact excerpt the stem refers to, and the reference_solution):
 [
   {{
     "type": "multiple_choice",
@@ -67,7 +74,8 @@ and the description carrying the exact excerpt the stem refers to):
       {{"text": "The input list, mutated in place", "is_correct": false}},
       {{"text": "An iterator over pairs", "is_correct": false}},
       {{"text": "None", "is_correct": false}}
-    ]
+    ],
+    "reference_solution": "Correct answer: 'A new sorted list'. merge_runs builds a fresh list `out` via extend() and returns sorted(out), a new list — it never mutates `runs` in place."
   }}
 ]
 """

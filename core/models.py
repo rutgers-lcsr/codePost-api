@@ -3157,6 +3157,7 @@ class QuizResponse(BaseModel):
     id: int
     attempt: QuizAttempt
     question: Question | None
+    generatedQuestion: 'GeneratedQuizQuestion | None'
 
   attempt: QuizAttempt = models.ForeignKey(QuizAttempt, on_delete=models.CASCADE,  # type: ignore[assignment]
       related_name="responses", help_text=("The attempt this response belongs to."))
@@ -3164,6 +3165,11 @@ class QuizResponse(BaseModel):
       null=True, blank=True, related_name="+",
       help_text=("The live question this was drawn from (analytics only; may be deleted). "
                  "Grading/rendering use questionSnapshot, so this is nullable and SET_NULL."))
+  generatedQuestion: 'GeneratedQuizQuestion | None' = models.ForeignKey('GeneratedQuizQuestion',  # type: ignore[assignment]
+      on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+      help_text=("The per-student generated question this was drawn from (analytics/answer-key "
+                 "link only; may be deleted on regeneration). Grading/rendering use "
+                 "questionSnapshot, so this is nullable and SET_NULL."))
   questionSnapshot = models.JSONField(default=dict,
       help_text=("Immutable copy of the presented question at attempt time: "
                  "{questionId, type, text, description, starterCode, language, generalFeedback, "
@@ -3527,6 +3533,10 @@ class GeneratedQuizQuestion(BaseModel):
       help_text=("For code questions: the language."))
   starterCode = models.TextField(blank=True, null=True,
       help_text=("For code questions: optional starter code shown to students."))
+  referenceSolution = models.TextField(blank=True, null=True,
+      help_text=("Grader-facing answer key generated alongside the question: the correct "
+                 "answer/code and, for hand-computation questions, the worked steps. "
+                 "NEVER shown to students and never snapshotted into questionSnapshot."))
 
   course = property(lambda self: self.set.quiz.course)
 

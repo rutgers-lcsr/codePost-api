@@ -80,14 +80,19 @@ def build_attempt_responses(attempt):
   attempt survives later question edits/deletion.
   """
   quiz = attempt.quiz
-  picked = []  # list of (question_or_none, points, snapshot)
+  picked = []  # list of (question_or_none, points, snapshot, generated_question_or_none)
   used_ids = set()
 
-  def add(question, points):
+  def add(question, points, label=None):
     if question.id in used_ids:
       return
     used_ids.add(question.id)
-    picked.append((question, points, _question_snapshot(question)))
+    snapshot = _question_snapshot(question)
+    # The group's label is shown to students on each drawn question (fixed questions have
+    # no group, so no label). Blank labels add nothing.
+    if label:
+      snapshot['label'] = label
+    picked.append((question, points, snapshot, None))
 
   for m in quiz.quizQuestions.select_related('question').prefetch_related('question__choices').all():
     add(m.question, m.pointsOverride if m.pointsOverride is not None else m.question.points)
@@ -95,19 +100,23 @@ def build_attempt_responses(attempt):
   for group in quiz.questionGroups.select_related('bank').prefetch_related('bank__questions__choices').all():
     pool = [q for q in group.bank.questions.all() if q.id not in used_ids]
     for question in random.sample(pool, min(group.pickCount, len(pool))):
-      add(question, group.pointsPerQuestion)
+      add(question, group.pointsPerQuestion, label=group.name)
 
   gen_set = quiz.generatedSets.filter(student=attempt.student, status='approved').first()
   if gen_set is not None:
-    for gq in gen_set.questions.all():
-      picked.append((None, gq.points, _generated_question_snapshot(gq)))
+    for gq in gen_set.questions.select_related('section').all():
+      snapshot = _generated_question_snapshot(gq)
+      # The AI section's label rides along the same way a group's does.
+      if gq.section is not None and gq.section.name:
+        snapshot['label'] = gq.section.name
+      picked.append((None, gq.points, snapshot, gq))
 
   if quiz.shuffleQuestions:
     random.shuffle(picked)
   responses = [
-      QuizResponse(attempt=attempt, question=question, sortKey=position, points=points,
-                   questionSnapshot=snapshot)
-      for position, (question, points, snapshot) in enumerate(picked)
+      QuizResponse(attempt=attempt, question=question, generatedQuestion=generated_question,
+                   sortKey=position, points=points, questionSnapshot=snapshot)
+      for position, (question, points, snapshot, generated_question) in enumerate(picked)
   ]
   QuizResponse.objects.bulk_create(responses)
 

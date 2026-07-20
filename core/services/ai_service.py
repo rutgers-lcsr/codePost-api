@@ -2082,7 +2082,10 @@ Provide a concise markdown summary following the guidelines in your instructions
             "Only essay and code questions omit choices. "
             'Use the optional "description" (Markdown, fenced code blocks) for any context '
             "that helps the student answer — their code, test output, examples — at your "
-            "discretion; if the stem refers to something specific, show it there."
+            "discretion; if the stem refers to something specific, show it there. "
+            'CRITICAL: every question MUST include a non-empty "reference_solution" — a '
+            "grader-only answer key (correct answer/working code, plus worked steps for "
+            "hand-computation questions). It is never shown to the student."
         )
         result = await self._generate(system_prompt, user_prompt, label='personalized quiz generation')
         # Recorded (success or not) so staff can inspect exactly what the model was given.
