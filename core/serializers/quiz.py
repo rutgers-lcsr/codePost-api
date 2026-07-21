@@ -71,24 +71,29 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
       if proposed.get('passingScoreUnit') == 'percent' and passing_score > 100:
         raise serializers.ValidationError("passingScore cannot exceed 100 when expressed as a percent.")
     # Holding results until close only makes sense if the quiz actually closes — otherwise
-    # scores/answers are hidden forever. Block the definitively-never-closes cases (runtime
-    # close events like assignment-due/submission depend on assignment data and are left alone,
-    # matching the frontend warning).
-    if proposed.get('sealResultsUntilClose'):
-      assignment = proposed.get('assignment')
-      close_event = proposed.get('closeEvent')
+    # scores/answers are hidden forever. Enforce only when THIS change introduces the bad state
+    # (turns the seal on, or removes the close): the settings form PATCHes every field each save,
+    # so an already-misconfigured quiz must stay editable for unrelated settings (the frontend
+    # warns about the standing misconfiguration). Runtime close events (assignment-due/submission/
+    # feedback) depend on assignment data and are left alone, matching the frontend warning.
+    def _never_closes(assignment, until, close_event):
       if assignment is None:
-        never_closes = available_until is None
-      elif close_event == 'none':
-        never_closes = True
-      elif close_event == 'fixed_date':
-        never_closes = available_until is None
-      else:
-        never_closes = False
-      if never_closes:
-        raise serializers.ValidationError(
-            "Results are set to release after the quiz closes, but this quiz has no close "
-            "configured — set a close time (or an end date) so students can see their results.")
+        return until is None
+      if close_event == 'none':
+        return True
+      if close_event == 'fixed_date':
+        return until is None
+      return False
+
+    proposed_sealed_no_close = bool(proposed.get('sealResultsUntilClose')) and _never_closes(
+        proposed.get('assignment'), available_until, proposed.get('closeEvent'))
+    instance = self.instance
+    already_sealed_no_close = instance is not None and instance.sealResultsUntilClose and _never_closes(
+        instance.assignment, instance.availableUntil, instance.closeEvent)
+    if proposed_sealed_no_close and not already_sealed_no_close:
+      raise serializers.ValidationError(
+          "Results are set to release after the quiz closes, but this quiz has no close "
+          "configured — set a close time (or an end date) so students can see their results.")
     # A close anchored on the same moment the quiz opens needs a positive offset, or it
     # would close the instant it opens.
     if proposed.get('assignment') is not None and (proposed.get('closeOffsetMinutes') or 0) == 0:

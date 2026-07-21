@@ -301,6 +301,21 @@ class TestQuizAuthoring:
         }, format='json')
         assert ok.status_code == status.HTTP_201_CREATED
 
+    def test_seal_no_close_does_not_block_unrelated_edits(self, api_client, quiz_setup):
+        # A quiz already in the seal-with-no-close state (created directly, before the guard
+        # existed) must stay editable for unrelated settings — the settings form re-sends every
+        # field each save, so only the change that INTRODUCES the bad state is blocked.
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Legacy sealed',
+                                   sealResultsUntilClose=True)
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'shuffleQuestions': True, 'oneQuestionAtATime': True,
+            'sealResultsUntilClose': True,  # the form re-sends this on every save
+        }, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['shuffleQuestions'] is True
+
     def test_quiz_availability_window_must_be_ordered(self, api_client, quiz_setup):
         from core.models import Quiz
         api_client.force_authenticate(user=quiz_setup['admin'])
