@@ -1,4 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+from typing import Optional
+
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import (
@@ -12,12 +14,35 @@ class QuizGeneratedSectionSerializer(ModelSerializerWithPOSTCheck):
   (unknown {variables} are rejected with helpful messages)."""
 
   questionTypes = serializers.JSONField(required=False)
+  datasetTruncationWarning = serializers.SerializerMethodField()
 
   class Meta:
     model = QuizGeneratedSection
     fields = ('id', 'quiz', 'name', 'systemPrompt', 'numQuestions', 'pointsPerQuestion',
-              'questionTypes', 'sortKey')
+              'questionTypes', 'sortKey', 'datasetTruncationWarning')
     POST_permissions_fields = ('quiz',)
+
+  def get_datasetTruncationWarning(self, obj) -> Optional[str]:
+    """Non-blocking authoring hint: if the prompt pulls in {student_dataset} and any active
+    variant is larger than the prompt cap, the model won't see the whole file. Returns a
+    message or None. Uses file size (bytes) as a proxy for character length."""
+    from core.prompts.variables import STUDENT_DATASET_CHAR_CAP
+    if 'student_dataset' not in (obj.systemPrompt or ''):
+      return None
+    assignment = getattr(obj.quiz, 'assignment', None)
+    if assignment is None:
+      return None
+    oversized = 0
+    for d in assignment.dataSets.filter(is_student_variant=True, is_active=True):
+      try:
+        if d.file and d.file.size > STUDENT_DATASET_CHAR_CAP:
+          oversized += 1
+      except Exception:
+        continue
+    if not oversized:
+      return None
+    return (f"{oversized} dataset variant(s) exceed the {STUDENT_DATASET_CHAR_CAP:,}-character "
+            "prompt limit and will be truncated where {student_dataset} is inserted.")
 
   def validate(self, data):
     data = super().validate(data)

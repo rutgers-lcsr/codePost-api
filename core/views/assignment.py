@@ -1213,7 +1213,12 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     # Return the newly created assignment data so frontend can navigate to it
     serializer = AssignmentSerializer(copied_assignment, context={'request': request})
-    return Response(serializer.data)
+    data = dict(serializer.data)
+    # Surface any datasets that failed to copy so the clone isn't silently missing data.
+    failed_datasets = getattr(copied_assignment, '_datasets_failed_to_copy', [])
+    if failed_datasets:
+      data['datasetsFailedToCopy'] = failed_datasets
+    return Response(data)
 
   @extend_schema(
     request=None,

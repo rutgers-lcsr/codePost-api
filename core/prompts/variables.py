@@ -43,6 +43,9 @@ TOKEN_RE = re.compile(r'\{([a-z][a-z0-9_]*)(?::([^{}\n]+))?\}')
 ASSIGNMENT_FILE_CHAR_CAP = 15000     # as in AIService.generate_quiz_questions
 SUBMISSION_FILE_CHAR_CAP = 50000     # as in AIService._collect_submission_context
 COURSE_FILE_CHAR_CAP = 15000         # course-level reference files (mirrors assignment files)
+# The assigned dataset variant IS the core content of a retasking prompt, so it gets a
+# larger cap than a generic assignment file — a 15k cap silently clipped most real CSVs.
+STUDENT_DATASET_CHAR_CAP = 40000
 
 
 @dataclass(frozen=True)
@@ -393,7 +396,15 @@ def _resolve_student_dataset(ctx, argument):
     except Exception:
         return "(could not read the assigned dataset file)"
     filename = dataset.file.name.split('/')[-1]
-    return _format_file_block(filename, content, ASSIGNMENT_FILE_CHAR_CAP)
+    if len(content) > STUDENT_DATASET_CHAR_CAP:
+        # Truncation is silent to the model (just "... (truncated)"); log so a variant that's
+        # too big to fully fit the prompt is diagnosable, and surfaced at authoring time via
+        # QuizGeneratedSectionSerializer.datasetTruncationWarning.
+        logger.warning(
+            "[student_dataset] Variant '%s' (dataset %s, %d chars) exceeds the %d-char cap "
+            "and will be truncated in the generation prompt.",
+            filename, dataset.id, len(content), STUDENT_DATASET_CHAR_CAP)
+    return _format_file_block(filename, content, STUDENT_DATASET_CHAR_CAP)
 
 
 def _resolve_num_questions(ctx, argument):

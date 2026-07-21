@@ -573,7 +573,15 @@ class Executor(abc.ABC):
         
         if not temp_dir:
             raise ValueError("Temporary directory is required for dataset staging")
-        
+
+        # The direct host-mount fast path (below) needs these env vars; without them every
+        # dataset file is copied per run via shutil.copy2. Warn once per staging call so a
+        # misconfigured worker silently falling back to copies is visible in the logs.
+        if not (os.environ.get('WORKER_DATASET_ROOT') and os.environ.get('HOST_DATASET_ROOT')):
+            logger.warning(
+                "[DatasetMount] WORKER_DATASET_ROOT/HOST_DATASET_ROOT not set — staging "
+                "%d dataset(s) by copy instead of direct mount.", len(self.datasets))
+
         # We use the provided temp_dir directly. No subdirectories.
         # This temp_dir is already created in the correct location (shared root or tmp) by the caller.
 

@@ -7,7 +7,7 @@ Context flags (set by the view):
                      may show.
   revealScore      — the attempt's results (score / pass-fail / per-response earned points and
                      grader feedback) may show: the attempt is submitted AND the quiz's results
-                     are released (sealed until close under the 'after_close' reveal policy —
+                     are released (sealed until close when sealResultsUntilClose is set —
                      see quiz_grading.scores_visible).
   revealResponses  — the attempt's responses (question content + the student's answers) may
                      show. False only for submitted attempts on quizzes with
@@ -123,8 +123,8 @@ class StudentQuizResponseSerializer(serializers.ModelSerializer):
   def to_representation(self, instance):
     data = super().to_representation(instance)
     # Correctness follows the quiz's answer-reveal policy; the student's own earned points
-    # and grader feedback are not answer keys, so they show as soon as scores do — even on
-    # showCorrectAnswers='never' quizzes. Under 'after_close' the view seals revealScore
+    # and grader feedback are not answer keys, so they show as soon as scores do — even when
+    # showCorrectAnswers is off. When sealResultsUntilClose is set the view seals revealScore
     # until the quiz closes, so points can't leak per-question correctness early.
     if not self.context.get('reveal'):
       data.pop('isCorrect', None)
@@ -136,21 +136,25 @@ class StudentQuizResponseSerializer(serializers.ModelSerializer):
 
 class StudentQuizAttemptSerializer(serializers.ModelSerializer):
   responses = StudentQuizResponseSerializer(many=True, read_only=True)
-  # Navigation mode and the review policy are denormalized from the quiz so the taking UI
-  # doesn't need a second fetch.
+  # The quiz title/description and the navigation/review policy are denormalized from the
+  # quiz so the taking UI can render its header without a second fetch (and so they survive
+  # a page reload, unlike route state).
+  title = serializers.CharField(source='quiz.title', read_only=True)
+  description = serializers.CharField(source='quiz.description', read_only=True)
   oneQuestionAtATime = serializers.BooleanField(source='quiz.oneQuestionAtATime', read_only=True)
   allowBacktracking = serializers.BooleanField(source='quiz.allowBacktracking', read_only=True)
   showResponses = serializers.BooleanField(source='quiz.showResponses', read_only=True)
+  allowSubmissionReview = serializers.BooleanField(source='quiz.allowSubmissionReview', read_only=True)
   # The server's current time at response, so the client can run a skew-immune countdown
   # (it measures elapsed time locally from this anchor rather than trusting the device clock).
   serverNow = serializers.SerializerMethodField()
 
   class Meta:
     model = QuizAttempt
-    fields = ('id', 'quiz', 'attemptNumber', 'status', 'startedAt', 'deadline',
+    fields = ('id', 'quiz', 'title', 'description', 'attemptNumber', 'status', 'startedAt', 'deadline',
               'submittedAt', 'score', 'maxScore', 'needsManualGrading', 'passed',
               'isOfficialOverride', 'oneQuestionAtATime', 'allowBacktracking', 'showResponses',
-              'serverNow', 'responses')
+              'allowSubmissionReview', 'serverNow', 'responses')
     read_only_fields = ('isOfficialOverride',)
 
   @extend_schema_field(serializers.DateTimeField())
@@ -186,7 +190,7 @@ class StudentQuizSerializer(serializers.ModelSerializer):
     model = Quiz
     fields = ('id', 'course', 'assignment', 'title', 'description', 'timeLimitMinutes',
               'attemptsAllowed', 'scoringPolicy', 'passingScore', 'passingScoreUnit',
-              'showCorrectAnswers', 'questionCount', 'availability', 'attemptsUsed',
+              'showCorrectAnswers', 'allowSubmissionReview', 'questionCount', 'availability', 'attemptsUsed',
               'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt',
               'myScore', 'myMaxScore', 'myPassed', 'myScorePending')
 
@@ -212,27 +216,39 @@ class StudentQuizSerializer(serializers.ModelSerializer):
     request = self.context.get('request')
     return request.user if request is not None else None
 
+  def _cached_attempts(self, obj):
+    """The caller's attempts for this quiz. availableQuizzes batches them into context
+    ('studentAttempts') so the card's counts/score don't fire a query per quiz; other callers
+    fall back to a per-quiz query."""
+    student = self._student()
+    if student is None:
+      return []
+    batched = self.context.get('studentAttempts')
+    if batched is not None:
+      return batched.get(obj.id, [])
+    return list(obj.attempts.filter(student=student))
+
   @extend_schema_field(QuizAvailabilitySerializer)
   def get_availability(self, obj):
-    is_open, reason = quiz_grading.quiz_availability(obj, self._student())
+    # availableQuizzes computes availability once and passes it in; recompute only otherwise.
+    cached = self.context.get('availability')
+    if cached is not None and obj.id in cached:
+      is_open, reason = cached[obj.id]
+    else:
+      is_open, reason = quiz_grading.quiz_availability(obj, self._student())
     return {'isOpen': is_open, 'reason': reason}
 
   @extend_schema_field(serializers.IntegerField())
   def get_attemptsUsed(self, obj):
-    student = self._student()
-    if student is None:
-      return 0
-    return obj.attempts.filter(student=student).count()
+    return len(self._cached_attempts(obj))
 
   @extend_schema_field(serializers.BooleanField())
   def get_hasOpenAttempt(self, obj):
-    student = self._student()
-    return student is not None and obj.attempts.filter(student=student, status='in_progress').exists()
+    return any(a.status == 'in_progress' for a in self._cached_attempts(obj))
 
   @extend_schema_field(serializers.BooleanField())
   def get_hasSubmittedAttempt(self, obj):
-    student = self._student()
-    return student is not None and obj.attempts.filter(student=student, status='submitted').exists()
+    return any(a.status == 'submitted' for a in self._cached_attempts(obj))
 
   @extend_schema_field(serializers.DateTimeField(allow_null=True))
   def get_closeAt(self, obj):
@@ -250,7 +266,8 @@ class StudentQuizSerializer(serializers.ModelSerializer):
       if student is None or not quiz_grading.scores_released(obj, student):
         cache[obj.pk] = None
       else:
-        cache[obj.pk] = quiz_grading.official_score(obj, student)
+        submitted = [a for a in self._cached_attempts(obj) if a.status == 'submitted']
+        cache[obj.pk] = quiz_grading.official_score(obj, student, attempts=submitted)
     return cache[obj.pk]
 
   @extend_schema_field(serializers.DecimalField(max_digits=8, decimal_places=2, allow_null=True))
@@ -276,9 +293,7 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   @extend_schema_field(serializers.BooleanField())
   def get_myScorePending(self, obj):
     """True while any of the caller's submitted attempts awaits manual grading."""
-    student = self._student()
-    return student is not None and obj.attempts.filter(
-        student=student, status='submitted', needsManualGrading=True).exists()
+    return any(a.status == 'submitted' and a.needsManualGrading for a in self._cached_attempts(obj))
 
 
 class StaffQuizResponseSerializer(StudentQuizResponseSerializer):

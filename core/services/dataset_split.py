@@ -27,12 +27,18 @@ def _chunk_name(stem: str, ext: str, index: int) -> str:
 
 
 def split_master_dataset(master: AssignmentDataSet, rows_per_chunk: int,
-                         has_header: bool = True) -> list[AssignmentDataSet]:
+                         has_header: bool = True,
+                         replace: bool = False) -> list[AssignmentDataSet]:
     """Split ``master``'s file into disjoint row-chunks, each becoming its own
     ``is_student_variant=True`` dataset sharing one mount_path (enforced by
     AssignmentDataSet.save()). The header row (if any) is repeated in every chunk.
     ``master`` itself is deactivated and excluded from the pool — it's the whole file, not
-    a per-student slice — but its data is kept, not deleted. Returns the created chunks."""
+    a per-student slice — but its data is kept, not deleted. Returns the created chunks.
+
+    ``replace=True`` regenerates in place: this master's prior auto-generated variants
+    (``<stem>_variant_*``) are deleted first instead of raising on the name collision. That
+    delete cascades to StudentDataSetAssignment and SubmissionVariantRun, so every student's
+    variant assignment is reset and they are reassigned on next access — callers must warn."""
     if rows_per_chunk < 1:
         raise DatasetSplitError("Rows per chunk must be at least 1.")
     if not master.file:
@@ -63,15 +69,24 @@ def split_master_dataset(master: AssignmentDataSet, rows_per_chunk: int,
     dot = master.name.rfind('.')
     stem, ext = (master.name[:dot], master.name[dot:]) if dot > 0 else (master.name, '')
 
-    existing_names = set(AssignmentDataSet.objects.filter(
-        assignment=master.assignment,
-        name__in=[_chunk_name(stem, ext, i + 1) for i in range(chunk_count)],
-    ).values_list('name', flat=True))
-    if existing_names:
-        raise DatasetSplitError(
-            "This assignment already has datasets named like the ones this split would "
-            f"create ({', '.join(sorted(existing_names))}) — delete the previous split's "
-            "variants first if you're regenerating.")
+    if replace:
+        # Regenerating in place: drop this master's prior auto-generated variants (any count,
+        # not just the ones the new split would collide with, so a smaller split doesn't
+        # leave stale higher-numbered variants). Cascades to student assignments + variant
+        # runs — students are reassigned on next access.
+        AssignmentDataSet.objects.filter(
+            assignment=master.assignment, is_student_variant=True,
+            name__startswith=f"{stem}_variant_").delete()
+    else:
+        existing_names = set(AssignmentDataSet.objects.filter(
+            assignment=master.assignment,
+            name__in=[_chunk_name(stem, ext, i + 1) for i in range(chunk_count)],
+        ).values_list('name', flat=True))
+        if existing_names:
+            raise DatasetSplitError(
+                "This assignment already has datasets named like the ones this split would "
+                f"create ({', '.join(sorted(existing_names))}) — delete the previous split's "
+                "variants first, or re-run with 'replace existing variants'.")
 
     created = []
     for i in range(chunk_count):

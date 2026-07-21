@@ -43,7 +43,8 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
         'oneQuestionAtATime', 'allowBacktracking',
-        'showCorrectAnswers', 'showResponses', 'passingScore', 'passingScoreUnit', 'scoringPolicy',
+        'showCorrectAnswers', 'sealResultsUntilClose', 'showResponses', 'allowSubmissionReview',
+        'passingScore', 'passingScoreUnit', 'scoringPolicy',
         'multiAttemptScoreMethod', 'isPublished',
         # Per-student generated questions
         'gradersCanReviewGenerated', 'autoPublishGenerated', 'generatedSections',
@@ -69,6 +70,25 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         raise serializers.ValidationError("passingScore cannot be negative.")
       if proposed.get('passingScoreUnit') == 'percent' and passing_score > 100:
         raise serializers.ValidationError("passingScore cannot exceed 100 when expressed as a percent.")
+    # Holding results until close only makes sense if the quiz actually closes — otherwise
+    # scores/answers are hidden forever. Block the definitively-never-closes cases (runtime
+    # close events like assignment-due/submission depend on assignment data and are left alone,
+    # matching the frontend warning).
+    if proposed.get('sealResultsUntilClose'):
+      assignment = proposed.get('assignment')
+      close_event = proposed.get('closeEvent')
+      if assignment is None:
+        never_closes = available_until is None
+      elif close_event == 'none':
+        never_closes = True
+      elif close_event == 'fixed_date':
+        never_closes = available_until is None
+      else:
+        never_closes = False
+      if never_closes:
+        raise serializers.ValidationError(
+            "Results are set to release after the quiz closes, but this quiz has no close "
+            "configured — set a close time (or an end date) so students can see their results.")
     # A close anchored on the same moment the quiz opens needs a positive offset, or it
     # would close the instant it opens.
     if proposed.get('assignment') is not None and (proposed.get('closeOffsetMinutes') or 0) == 0:

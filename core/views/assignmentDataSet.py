@@ -32,6 +32,15 @@ from core.serializers.assignmentDataSet import (
 logger = logging.getLogger(__name__)
 
 
+def _other_students_variant_exclusion(user):
+    """Q to exclude every OTHER student's per-student variant from a student's dataset view:
+    a variant is visible only if it's the one assigned to ``user``. Shared (non-variant)
+    datasets are unaffected. Used by both get_queryset() and by_assignment() so their
+    student-visibility rule can't drift apart."""
+    from django.db.models import Q
+    return Q(is_student_variant=True) & ~Q(student_assignments__student=user)
+
+
 class AssignmentDataSetViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing assignment datasets
@@ -82,7 +91,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
 
         student_qs = AssignmentDataSet.objects.filter(
             assignment__course__students=user, hidden=False,
-        ).exclude(Q(is_student_variant=True) & ~Q(student_assignments__student=user))
+        ).exclude(_other_students_variant_exclusion(user))
 
         return (staff_qs | student_qs).distinct()
     
@@ -207,6 +216,7 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
             'properties': {
                 'rowsPerChunk': {'type': 'integer', 'minimum': 1},
                 'hasHeader': {'type': 'boolean'},
+                'replace': {'type': 'boolean'},
             },
             'required': ['rowsPerChunk'],
         }},
@@ -219,6 +229,10 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         forming a per-student pool (see core.services.dataset_split). The chunk count is
         driven by rowsPerChunk, not current enrollment, so the pool stays stable as
         students enroll or drop.
+
+        Pass replace=true to regenerate in place: prior auto-generated variants of this
+        master are deleted first (which resets every student's variant assignment) instead
+        of erroring on the name collision.
 
         POST /assignmentDataSets/{id}/splitIntoVariants/
         """
@@ -235,10 +249,11 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
             return Response({"error": "rowsPerChunk must be an integer."},
                             status=status.HTTP_400_BAD_REQUEST)
         has_header = bool(request.data.get('hasHeader', True))
+        replace = bool(request.data.get('replace', False))
 
         from core.services.dataset_split import DatasetSplitError, split_master_dataset
         try:
-            chunks = split_master_dataset(master, rows_per_chunk, has_header)
+            chunks = split_master_dataset(master, rows_per_chunk, has_header, replace=replace)
         except DatasetSplitError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -337,12 +352,11 @@ class AssignmentDataSetViewSet(viewsets.ModelViewSet):
         else:
             # Assign the student's variant now if this is their first time asking, so
             # "first access" actually shows them one instead of nothing.
-            from django.db.models import Q
             from core.services.dataset_assignment import get_or_assign
             get_or_assign(assignment, user)
             datasets = AssignmentDataSet.objects.filter(
                 assignment=assignment, hidden=False,
-            ).exclude(Q(is_student_variant=True) & ~Q(student_assignments__student=user)).order_by('name')
+            ).exclude(_other_students_variant_exclusion(user)).order_by('name')
 
         serializer = self.get_serializer(datasets, many=True)
         return Response(serializer.data)

@@ -129,7 +129,7 @@ class Command(BaseCommand):
         make_quiz('All question types', ALL,
                   description='One question of **every** type. Auto-graded types score on submit; '
                               'essay & code are saved and marked *pending grading*.',
-                  showCorrectAnswers='after_submit')
+                  showCorrectAnswers=True)
         make_quiz('Timed · sequential · 3 attempts', AUTO,
                   description='5-minute timer, **one question at a time**, no going back, shuffled. '
                               'Best of 3 attempts; pass at 70%.',
@@ -139,23 +139,26 @@ class Command(BaseCommand):
         make_quiz('Sequential · can go back', AUTO,
                   description='One question at a time, but you **can** navigate back.',
                   oneQuestionAtATime=True, allowBacktracking=True)
-        make_quiz('Unlimited attempts · points pass · reveal after close', AUTO,
-                  description='Unlimited attempts, pass at **6 points**, correct answers revealed only '
-                              'after the quiz closes. Closes in 2 hours.',
+        make_quiz('Unlimited attempts · points pass', AUTO,
+                  description='Unlimited attempts, pass at **6 points**. Scores show as soon as you submit.',
+                  attemptsAllowed=0, passingScore=Decimal('6'), passingScoreUnit='points')
+        make_quiz('Results sealed until close', AUTO,
+                  description='Unlimited attempts, pass at **6 points**; scores and answers stay hidden '
+                              'until the quiz closes (in 2 hours).',
                   attemptsAllowed=0, passingScore=Decimal('6'), passingScoreUnit='points',
-                  showCorrectAnswers='after_close', availableUntil=now + timedelta(hours=2))
+                  sealResultsUntilClose=True, availableUntil=now + timedelta(hours=2))
         make_quiz('Random draw (2 from bank) + 1 fixed', [tf],
                   description='One fixed question, then **2 randomly drawn** from the bank (3 pts each). '
                               'Each attempt draws a different set.',
                   groups=[dict(bank=bank, name='Draw 2', pickCount=2, pointsPerQuestion=Decimal('3'))])
         make_quiz('Answers never shown', AUTO,
                   description='You get a score after submitting, but correct answers are **never** revealed.',
-                  showCorrectAnswers='never')
+                  showCorrectAnswers=False)
         make_quiz('Essay · manual grading', [es],
                   description='A single **essay**, for staff manual-grading flows. Unlimited attempts; '
                               'pass at 3 points once graded.',
                   attemptsAllowed=0, passingScore=Decimal('3'), passingScoreUnit='points',
-                  showCorrectAnswers='after_submit')
+                  showCorrectAnswers=True)
         make_quiz('DRAFT — students should NOT see this', AUTO,
                   description='Unpublished draft. Only the instructor should see it.', published=False)
 

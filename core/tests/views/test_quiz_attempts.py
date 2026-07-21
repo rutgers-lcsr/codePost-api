@@ -184,7 +184,7 @@ class TestAutoGrading:
         assert done.status_code == status.HTTP_200_OK
         assert _dec(done.data['score']) == _dec('2.00')
         assert _dec(done.data['maxScore']) == _dec('2.00')
-        # showCorrectAnswers defaults to after_submit → revealed now.
+        # showCorrectAnswers defaults to on → revealed now.
         assert done.data['responses'][0]['isCorrect'] is True
 
     def test_multiple_choice_incorrect_scores_zero(self, api_client, taking_setup):
@@ -256,7 +256,7 @@ class TestRevealAndAccess:
     def test_show_answers_never_hides_correctness_but_shows_score(self, api_client, taking_setup):
         course = taking_setup['course']
         q = _mc(course, _bank(course))
-        quiz = _quiz(course, showCorrectAnswers='never')
+        quiz = _quiz(course, showCorrectAnswers=False)
         _add(quiz, q)
         api_client.force_authenticate(user=taking_setup['students'][0])
         start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
@@ -266,14 +266,14 @@ class TestRevealAndAccess:
         done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
         # Score visible after submit...
         assert _dec(done.data['score']) == _dec('2.00')
-        # ...but correctness / isCorrect stays hidden when policy is 'never'.
+        # ...but correctness / isCorrect stays hidden when answers are off.
         resp = done.data['responses'][0]
         assert 'isCorrect' not in resp
         assert all('isCorrect' not in c for c in resp['question']['choices'])
 
     def test_feedback_and_points_show_after_submit_even_when_answers_never(self, api_client, taking_setup):
         course = taking_setup['course']
-        quiz = _quiz(course, showCorrectAnswers='never')
+        quiz = _quiz(course, showCorrectAnswers=False)
         _add(quiz, _essay(course, _bank(course)))
         student = taking_setup['students'][0]
         api_client.force_authenticate(user=student)
@@ -291,17 +291,17 @@ class TestRevealAndAccess:
         # they show once the attempt is submitted...
         assert resp['graderFeedback'] == 'Add detail.'
         assert _dec(resp['pointsEarned']) == _dec('3.00')
-        # ...while correctness stays hidden under the 'never' policy.
+        # ...while correctness stays hidden when answers are off.
         assert 'isCorrect' not in resp
 
     def test_after_close_seals_results_until_close(self, api_client, taking_setup):
-        # Under 'after_close', a submitted attempt reveals NOTHING until the quiz closes —
+        # With results sealed until close, a submitted attempt reveals NOTHING until the quiz closes —
         # no totals, no per-question points/correctness (which would leak right/wrong), no
         # key — and the quiz card's official score stays null. Everything opens at close.
         from core.models import Quiz
         course = taking_setup['course']
         q = _mc(course, _bank(course))
-        quiz = _quiz(course, showCorrectAnswers='after_close',
+        quiz = _quiz(course, sealResultsUntilClose=True,
                      availableUntil=timezone.now() + timedelta(days=1))
         _add(quiz, q)
         api_client.force_authenticate(user=taking_setup['students'][0])
@@ -347,7 +347,7 @@ class TestRevealAndAccess:
                          {'response': start.data['responses'][0]['id'], 'selectedChoices': [correct.id]},
                          format='json')
         done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
-        # The score shows (default after_submit release) but the question review does not.
+        # The score shows (default immediate release) but the question review does not.
         assert _dec(done.data['score']) == _dec('2.00')
         assert done.data['responses'] == []
         assert done.data['showResponses'] is False
@@ -359,6 +359,65 @@ class TestRevealAndAccess:
         api_client.force_authenticate(user=taking_setup['admin'])
         staff = api_client.get(f"/quizAttempts/{start.data['id']}/")
         assert len(staff.data['responses']) == 1
+
+    def test_no_review_quiz_blocks_reopening_submitted_attempt(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course, allowSubmissionReview=False)
+        _add(quiz, q)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        # Taking is unaffected: the in-progress attempt is still the student's own.
+        assert start.data['allowSubmissionReview'] is False
+        assert api_client.get(f"/quizAttempts/{start.data['id']}/").status_code == status.HTTP_200_OK
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': start.data['responses'][0]['id'],
+                          'selectedChoices': [q.choices.get(isCorrect=True).id]}, format='json')
+        done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        assert done.status_code == status.HTTP_200_OK
+        # Once submitted, the student can no longer reopen it, and it drops out of the review history.
+        assert api_client.get(f"/quizAttempts/{start.data['id']}/").status_code == status.HTTP_403_FORBIDDEN
+        assert api_client.get(f"/quizAttempts/myAttempts/?quiz={quiz.id}").data == []
+        # Staff may still read it.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        assert api_client.get(f"/quizAttempts/{start.data['id']}/").status_code == status.HTTP_200_OK
+
+    def test_only_quiz_graders_and_admins_can_read_an_attempt(self, api_client, taking_setup):
+        # Reading an attempt exposes the answer key (correct choices, referenceSolution), so it
+        # must match the quiz-grading gate — NOT the broader course-staff one. An assignment
+        # grader who is not a quiz grader must be denied.
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        attempt_id = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json').data['id']
+
+        grader = course.graders.first()  # assignment grader, without the quiz-grader role
+        api_client.force_authenticate(user=grader)
+        assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_403_FORBIDDEN
+        # Granting the quiz-grader role unlocks it.
+        course.quizGraders.add(grader)
+        assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_200_OK
+        # Course admins can always read; the owner keeps their own view.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_200_OK
+        api_client.force_authenticate(user=student)
+        assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_200_OK
+
+    def test_code_question_seeds_starter_code_as_the_answer(self, api_client, taking_setup):
+        # A code question's starter code is what the student sees in the editor, so it must be
+        # persisted as the answer at attempt start — otherwise an unedited submit is a silent blank.
+        from core.models import Question
+        course = taking_setup['course']
+        code_q = Question.objects.create(
+            course=course, bank=_bank(course), questionType='code', text='Print the mean.',
+            points=_dec('5'), language='r', starterCode='# write your code here')
+        quiz = _quiz(course)
+        _add(quiz, code_q)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.data['responses'][0]['answerText'] == '# write your code here'
 
     def test_student_cannot_read_another_students_attempt(self, api_client, taking_setup):
         course = taking_setup['course']
@@ -730,7 +789,7 @@ class TestClosing:
         from core.models import Quiz, QuizAttempt
         from core.services.quiz_grading import answers_visible
         course, student = taking_setup['course'], taking_setup['students'][0]
-        q = _quiz(course, showCorrectAnswers='after_close', availableUntil=timezone.now() + timedelta(days=1))
+        q = _quiz(course, sealResultsUntilClose=True, availableUntil=timezone.now() + timedelta(days=1))
         attempt = QuizAttempt.objects.create(quiz=q, student=student, attemptNumber=1, status='submitted')
         assert answers_visible(q, attempt) is False  # not closed yet
         Quiz.objects.filter(pk=q.id).update(availableUntil=timezone.now() - timedelta(minutes=1))
@@ -1136,7 +1195,7 @@ class TestManualGrading:
         assert _dec(essay['pointsEarned']) == _dec('5.00')  # capped at the question's worth
 
     def test_student_sees_manual_grade_and_feedback_when_revealed(self, api_client, taking_setup):
-        quiz = self._essay_quiz(taking_setup, showCorrectAnswers='after_submit')
+        quiz = self._essay_quiz(taking_setup, showCorrectAnswers=True)
         attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
         api_client.force_authenticate(user=taking_setup['admin'])
         api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
@@ -1207,7 +1266,7 @@ class TestManualGrading:
                                format='json').status_code == status.HTTP_403_FORBIDDEN
 
     def test_staff_retrieve_returns_grading_projection(self, api_client, taking_setup):
-        quiz = self._essay_quiz(taking_setup, showCorrectAnswers='never')
+        quiz = self._essay_quiz(taking_setup, showCorrectAnswers=False)
         attempt_id, _ = self._submitted_attempt(api_client, taking_setup, quiz)
         student = taking_setup['students'][0]
 
@@ -1222,7 +1281,7 @@ class TestManualGrading:
                   if r['question']['questionType'] == 'multiple_choice')
         assert 'isCorrect' in mc
 
-        # The owner keeps the policy-gated student view ('never' → no correctness, no email).
+        # The owner keeps the policy-gated student view (answers off → no correctness, no email).
         api_client.force_authenticate(user=student)
         own = api_client.get(f'/quizAttempts/{attempt_id}/')
         assert 'student' not in own.data
@@ -1426,7 +1485,7 @@ class TestRunCode:
 
     def test_code_execution_never_in_student_payload(self, api_client, taking_setup, monkeypatch):
         self._mock_dispatch(monkeypatch)
-        quiz = self._code_quiz(taking_setup, showCorrectAnswers='after_submit')
+        quiz = self._code_quiz(taking_setup, showCorrectAnswers=True)
         attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
         # Staff triggers a run (writes codeExecution), then simulate a completed result.
         api_client.force_authenticate(user=taking_setup['admin'])
@@ -1606,7 +1665,7 @@ class TestReviewFixRegressions:
         # The accepted answer for short-answer/numerical is stored as a choice; it must not
         # ship to a student mid-attempt, but is fine to reveal after submitting.
         course = taking_setup['course']
-        quiz = _quiz(course, showCorrectAnswers='after_submit')
+        quiz = _quiz(course, showCorrectAnswers=True)
         _add(quiz, _short(course, _bank(course)))
         attempt = self._take(api_client, taking_setup['students'][0], quiz)
         resp = attempt['responses'][0]
@@ -1691,11 +1750,11 @@ class TestReviewFixRegressions:
         assert quiz.isPublished is False  # never silently becomes an open standalone quiz
 
     def test_after_close_does_not_reveal_to_in_progress_attempt(self, api_client, taking_setup):
-        # A quiz with 'after_close' reveal must not leak correct answers to an attempt that is
+        # A quiz that seals results until close must not leak correct answers to an attempt that is
         # still in progress once the close time passes.
         from core.models import QuizAttempt
         course = taking_setup['course']
-        quiz = _quiz(course, showCorrectAnswers='after_close',
+        quiz = _quiz(course, sealResultsUntilClose=True,
                      availableUntil=timezone.now() - timedelta(minutes=1))
         _add(quiz, _mc(course, _bank(course)))
         # availableUntil is in the past → a fresh start is closed; craft an in-progress attempt.

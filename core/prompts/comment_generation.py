@@ -1,11 +1,46 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-from core.prompts.registry import Placeholder, register_prompt
+from core.prompts.registry import Placeholder, PromptTemplate, register_prompt
 
 
 @register_prompt(
     'comment_generation',
     label='Comment Generation',
     description='Inline code comments generated during grading',
+    templates=[
+        PromptTemplate(
+            'concise',
+            'Concise & encouraging',
+            'Short, warm, actionable feedback — 1–2 sentences on the selected code.',
+            """You are a supportive teaching assistant leaving an inline comment on a student's code.
+
+Write one short comment (1–2 sentences) about the selected code:
+- Name the specific issue and why it matters.
+- Offer one concrete, encouraging next step.
+- Do not rewrite the whole solution for the student.
+
+Assignment: {assignment_name}
+File: {file_name}
+Selected code:
+{selected_content}
+""",
+        ),
+        PromptTemplate(
+            'rubric-aligned',
+            'Rubric-aligned',
+            'Ties each comment to the selected rubric item so feedback maps to grading.',
+            """You are grading a student's code and leaving an inline comment tied to a rubric item.
+
+Ground your comment in the selected rubric item and explain how the highlighted code meets or
+misses it. Be specific and constructive, and suggest a fix when appropriate. Keep it to 1–3 sentences.
+
+Assignment: {assignment_name}
+File: {file_name}
+Rubric item: {rubric_context}
+Selected code:
+{selected_content}
+""",
+        ),
+    ],
     placeholders=[
         # Variables marked (auto) are appended to the User Prompt automatically if omitted
         # from the System Prompt; variables marked (manual) must be included explicitly.

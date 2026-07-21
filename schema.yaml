@@ -307,6 +307,10 @@ paths:
         driven by rowsPerChunk, not current enrollment, so the pool stays stable as
         students enroll or drop.
 
+        Pass replace=true to regenerate in place: prior auto-generated variants of this
+        master are deleted first (which resets every student's variant assignment) instead
+        of erroring on the name collision.
+
         POST /assignmentDataSets/{id}/splitIntoVariants/
       parameters:
       - in: path
@@ -327,6 +331,8 @@ paths:
                   type: integer
                   minimum: 1
                 hasHeader:
+                  type: boolean
+                replace:
                   type: boolean
               required:
               - rowsPerChunk
@@ -10095,6 +10101,34 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/GeneratedQuestionSetList'
+          description: ''
+  /quizzes/{id}/promptTemplates/:
+    get:
+      operationId: quizzes_promptTemplatesList
+      description: Starter templates for this quiz's AI-generated section prompts
+        (powers the prompt editor's 'start from a template' picker).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuizSectionTemplate'
           description: ''
   /quizzes/{id}/promptVariables/:
     get:
@@ -20970,19 +21004,26 @@ components:
           type: boolean
           description: When sequential, whether students may return to previous questions.
         showCorrectAnswers:
-          allOf:
-          - $ref: '#/components/schemas/QuizShowAnswersEnum'
-          description: |-
-            When students may see the correct answers.
-
-            * `never` - Never
-            * `after_submit` - After submitting
-            * `after_close` - After the quiz closes
+          type: boolean
+          description: Whether the correct-answer key is shown when a student reviews
+            a submitted attempt. Reveal timing follows sealResultsUntilClose.
+        sealResultsUntilClose:
+          type: boolean
+          description: Hold scores, per-question points, and the answer key until
+            the quiz closes for the student. When false, results release as soon as
+            an attempt is submitted. Stops students with attempts remaining from mining
+            the key.
         showResponses:
           type: boolean
           description: Whether students may review their questions and answers after
             submitting. When false, students only see scores (per the reveal policy)
             — the question content is never shown again after submission.
+        allowSubmissionReview:
+          type: boolean
+          description: Whether students may reopen and review a submitted attempt
+            afterward. When false, submitting shows a confirmation only — the past
+            attempt cannot be reopened (scores may still surface on the quiz card
+            per the reveal policy).
         passingScore:
           type: number
           format: double
@@ -21122,6 +21163,14 @@ components:
           minimum: -9223372036854775808
           format: int64
           description: Order of this section within the quiz.
+        datasetTruncationWarning:
+          type: string
+          nullable: true
+          description: |-
+            Non-blocking authoring hint: if the prompt pulls in {student_dataset} and any active
+            variant is larger than the prompt cap, the model won't see the whole file. Returns a
+            message or None. Uses file size (bytes) as a proxy for character length.
+          readOnly: true
     PatchedQuizImage:
       type: object
       description: |-
@@ -22338,6 +22387,22 @@ components:
       - modified
       - promptType
       - user
+    PromptTemplate:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        text:
+          type: string
+      required:
+      - description
+      - key
+      - label
+      - text
     PromptType:
       type: object
       properties:
@@ -22351,11 +22416,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PromptVariable'
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptTemplate'
       required:
       - description
       - key
       - label
       - placeholders
+      - templates
     PromptVariable:
       type: object
       properties:
@@ -22676,19 +22746,26 @@ components:
           type: boolean
           description: When sequential, whether students may return to previous questions.
         showCorrectAnswers:
-          allOf:
-          - $ref: '#/components/schemas/QuizShowAnswersEnum'
-          description: |-
-            When students may see the correct answers.
-
-            * `never` - Never
-            * `after_submit` - After submitting
-            * `after_close` - After the quiz closes
+          type: boolean
+          description: Whether the correct-answer key is shown when a student reviews
+            a submitted attempt. Reveal timing follows sealResultsUntilClose.
+        sealResultsUntilClose:
+          type: boolean
+          description: Hold scores, per-question points, and the answer key until
+            the quiz closes for the student. When false, results release as soon as
+            an attempt is submitted. Stops students with attempts remaining from mining
+            the key.
         showResponses:
           type: boolean
           description: Whether students may review their questions and answers after
             submitting. When false, students only see scores (per the reveal policy)
             — the question content is never shown again after submission.
+        allowSubmissionReview:
+          type: boolean
+          description: Whether students may reopen and review a submitted attempt
+            afterward. When false, submitting shows a confirmation only — the past
+            attempt cannot be reopened (scores may still surface on the quiz card
+            per the reveal policy).
         passingScore:
           type: number
           format: double
@@ -22889,7 +22966,16 @@ components:
           minimum: -9223372036854775808
           format: int64
           description: Order of this section within the quiz.
+        datasetTruncationWarning:
+          type: string
+          nullable: true
+          description: |-
+            Non-blocking authoring hint: if the prompt pulls in {student_dataset} and any active
+            variant is larger than the prompt cap, the model won't see the whole file. Returns a
+            message or None. Uses file size (bytes) as a proxy for character length.
+          readOnly: true
       required:
+      - datasetTruncationWarning
       - id
       - quiz
       - systemPrompt
@@ -23150,16 +23236,30 @@ components:
         * `highest` - Highest attempt counts
         * `latest` - Latest attempt counts
         * `average` - Average of attempts
-    QuizShowAnswersEnum:
-      enum:
-      - never
-      - after_submit
-      - after_close
-      type: string
-      description: |-
-        * `never` - Never
-        * `after_submit` - After submitting
-        * `after_close` - After the quiz closes
+    QuizSectionTemplate:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        attachedOnly:
+          type: boolean
+        questionTypes:
+          type: array
+          items:
+            type: string
+        text:
+          type: string
+      required:
+      - attachedOnly
+      - description
+      - key
+      - label
+      - questionTypes
+      - text
     QuizSourceEnum:
       enum:
       - manual
@@ -23473,6 +23573,12 @@ components:
         quiz:
           type: integer
           description: The quiz being attempted.
+        title:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
         attemptNumber:
           type: integer
           maximum: 9223372036854775807
@@ -23542,6 +23648,9 @@ components:
         showResponses:
           type: boolean
           readOnly: true
+        allowSubmissionReview:
+          type: boolean
+          readOnly: true
         serverNow:
           type: string
           format: date-time
@@ -23558,6 +23667,8 @@ components:
           readOnly: true
       required:
       - allowBacktracking
+      - allowSubmissionReview
+      - description
       - id
       - isOfficialOverride
       - oneQuestionAtATime
@@ -23566,6 +23677,7 @@ components:
       - serverNow
       - showResponses
       - student
+      - title
     StaffQuizResponse:
       type: object
       description: |-
@@ -23842,14 +23954,15 @@ components:
             * `percent` - Percent
             * `points` - Points
         showCorrectAnswers:
-          allOf:
-          - $ref: '#/components/schemas/QuizShowAnswersEnum'
-          description: |-
-            When students may see the correct answers.
-
-            * `never` - Never
-            * `after_submit` - After submitting
-            * `after_close` - After the quiz closes
+          type: boolean
+          description: Whether the correct-answer key is shown when a student reviews
+            a submitted attempt. Reveal timing follows sealResultsUntilClose.
+        allowSubmissionReview:
+          type: boolean
+          description: Whether students may reopen and review a submitted attempt
+            afterward. When false, submitting shows a confirmation only — the past
+            attempt cannot be reopened (scores may still surface on the quiz card
+            per the reveal policy).
         questionCount:
           type: integer
           readOnly: true
@@ -23919,6 +24032,12 @@ components:
         quiz:
           type: integer
           description: The quiz being attempted.
+        title:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
         attemptNumber:
           type: integer
           maximum: 9223372036854775807
@@ -23987,6 +24106,9 @@ components:
         showResponses:
           type: boolean
           readOnly: true
+        allowSubmissionReview:
+          type: boolean
+          readOnly: true
         serverNow:
           type: string
           format: date-time
@@ -23998,6 +24120,8 @@ components:
           readOnly: true
       required:
       - allowBacktracking
+      - allowSubmissionReview
+      - description
       - id
       - isOfficialOverride
       - oneQuestionAtATime
@@ -24005,6 +24129,7 @@ components:
       - responses
       - serverNow
       - showResponses
+      - title
     StudentQuizResponse:
       type: object
       properties:

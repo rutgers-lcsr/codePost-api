@@ -754,9 +754,11 @@ class QuizAttemptPermissions(TemplatePermission):
             return canGradeQuiz(user, obj.quiz.course)
         if user == obj.student:
             return True
-        # Staff may read (never mutate) a student's attempt.
+        # Quiz graders / admins may read (never mutate) a student's attempt. Assignment-only
+        # graders are excluded — reading an attempt exposes the answer key, so it matches the
+        # quiz-grading gate rather than the broader course-staff one.
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
-            return user.is_superuser or isCourseStaff(user, obj.quiz.course)
+            return canGradeQuiz(user, obj.quiz.course)
         return False
 
 

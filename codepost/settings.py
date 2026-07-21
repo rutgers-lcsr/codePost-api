@@ -198,9 +198,6 @@ SPECTACULAR_SETTINGS = {
             ('after_feedback', 'After feedback is released (whole assignment)'),
             ('after_student_feedback', "After each student's feedback is ready (self-paced)"),
         ],
-        'QuizShowAnswersEnum': [
-            ('never', 'Never'), ('after_submit', 'After submitting'), ('after_close', 'After the quiz closes'),
-        ],
         'QuizPassingScoreUnitEnum': [
             ('percent', 'Percent'), ('points', 'Points'),
         ],

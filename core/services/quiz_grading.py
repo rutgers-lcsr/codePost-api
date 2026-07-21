@@ -115,7 +115,12 @@ def build_attempt_responses(attempt):
     random.shuffle(picked)
   responses = [
       QuizResponse(attempt=attempt, question=question, generatedQuestion=generated_question,
-                   sortKey=position, points=points, questionSnapshot=snapshot)
+                   sortKey=position, points=points, questionSnapshot=snapshot,
+                   # Seed code questions with their starter code: it's what the student sees in
+                   # the editor, so an unedited code answer must persist as that (not a silent
+                   # blank), and grading reads the same text. Non-code snapshots have no
+                   # starterCode, so this is '' for them (the field default).
+                   answerText=(snapshot.get('starterCode') or ''))
       for position, (question, points, snapshot, generated_question) in enumerate(picked)
   ]
   QuizResponse.objects.bulk_create(responses)
@@ -518,27 +523,24 @@ def quiz_availability(quiz, student, now=None):
 
 def answers_visible(quiz, attempt, now=None):
   """Whether correct answers / per-choice feedback may be revealed for this attempt."""
-  policy = quiz.showCorrectAnswers
-  if policy == 'never':
+  if not quiz.showCorrectAnswers:
     return False
   # Answers only ever reveal on a SUBMITTED attempt — never while it is still in progress,
   # or a student could read the key mid-attempt (e.g. after the quiz closes) and then answer.
   if attempt is None or attempt.status != 'submitted':
     return False
-  if policy == 'after_submit':
-    return True
-  if policy == 'after_close':
-    return quiz_is_closed(quiz, attempt.student, now)
-  return False
+  # Reveal timing follows the results-seal policy: right after submit, unless results are
+  # held until the quiz closes.
+  return not quiz.sealResultsUntilClose or quiz_is_closed(quiz, attempt.student, now)
 
 
 def scores_released(quiz, student, now=None):
   """Whether quiz results (scores, per-question earned points, grader feedback) are released
-  to this student. Results normally show as soon as an attempt is submitted, but under the
-  'after_close' reveal policy they stay sealed until the quiz closes — otherwise a student
+  to this student. Results normally show as soon as an attempt is submitted, but when
+  sealResultsUntilClose is set they stay sealed until the quiz closes — otherwise a student
   with attempts remaining could brute-force the still-hidden answer key from immediate
-  scores, and per-question points would leak the correctness the policy is deferring."""
-  if quiz.showCorrectAnswers == 'after_close':
+  scores, and per-question points would leak the correctness the seal is deferring."""
+  if quiz.sealResultsUntilClose:
     return quiz_is_closed(quiz, student, now)
   return True
 

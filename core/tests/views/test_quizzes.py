@@ -248,7 +248,8 @@ class TestQuizAuthoring:
         assert resp.data['assignmentTrigger'] == 'during'
         assert resp.data['attemptsAllowed'] == 1
         assert resp.data['isPublished'] is False
-        assert resp.data['showCorrectAnswers'] == 'after_submit'
+        assert resp.data['showCorrectAnswers'] is True
+        assert resp.data['sealResultsUntilClose'] is False
         assert resp.data['timeLimitMinutes'] is None
         assert resp.data['passingScoreUnit'] == 'percent'
         assert resp.data['oneQuestionAtATime'] is False
@@ -264,7 +265,8 @@ class TestQuizAuthoring:
             'shuffleQuestions': True,
             'oneQuestionAtATime': True,
             'allowBacktracking': False,
-            'showCorrectAnswers': 'after_close',
+            'showCorrectAnswers': True,
+            'sealResultsUntilClose': True,
             'passingScore': '70.00',
             'isPublished': True,
         }, format='json')
@@ -277,10 +279,27 @@ class TestQuizAuthoring:
         assert quiz.shuffleQuestions is True
         assert quiz.oneQuestionAtATime is True
         assert quiz.allowBacktracking is False
-        assert quiz.showCorrectAnswers == 'after_close'
+        assert quiz.showCorrectAnswers is True
+        assert quiz.sealResultsUntilClose is True
         assert str(quiz.passingScore) == '70.00'
         assert quiz.isPublished is True
         assert quiz.availableFrom is not None and quiz.availableUntil is not None
+
+    def test_seal_results_requires_a_close(self, api_client, quiz_setup):
+        # Holding results until close on a quiz that never closes would hide them forever.
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        course = quiz_setup['course']
+        # Standalone quiz with no end date → rejected.
+        bad = api_client.post('/quizzes/', {
+            'course': course.id, 'title': 'Sealed', 'sealResultsUntilClose': True,
+        }, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        # With a close (availableUntil) it's allowed.
+        ok = api_client.post('/quizzes/', {
+            'course': course.id, 'title': 'Sealed OK', 'sealResultsUntilClose': True,
+            'availableUntil': '2026-12-01T00:00:00Z',
+        }, format='json')
+        assert ok.status_code == status.HTTP_201_CREATED
 
     def test_quiz_availability_window_must_be_ordered(self, api_client, quiz_setup):
         from core.models import Quiz

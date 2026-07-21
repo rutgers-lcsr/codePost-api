@@ -28,6 +28,18 @@ class Placeholder:
 
 
 @dataclass(frozen=True)
+class PromptTemplate:
+    """A curated starter prompt an instructor can load into the editor and customize.
+
+    ``text`` may contain ``{placeholder}`` variables (restricted to the type's
+    ``allowed_placeholders``). ``label``/``description`` drive the template-picker dropdown."""
+    key: str
+    label: str
+    description: str
+    text: str
+
+
+@dataclass(frozen=True)
 class PromptTypeEntry:
     """A registered prompt type."""
     key: str
@@ -35,6 +47,7 @@ class PromptTypeEntry:
     description: str
     default_template: str
     placeholders: tuple[Placeholder, ...] = ()
+    templates: tuple[PromptTemplate, ...] = ()
 
     @property
     def allowed_placeholders(self) -> frozenset[str]:
@@ -69,11 +82,13 @@ class PromptRegistry:
         default_template: str = '',
         placeholders: 'list[Placeholder] | None' = None,
         allowed_placeholders: frozenset[str] | None = None,
+        templates: 'list[PromptTemplate] | None' = None,
     ) -> None:
         """Register a prompt type. Raises ``ValueError`` on duplicate keys.
 
         Pass ``placeholders`` (rich, with labels for the editor dropdowns) or a bare
-        ``allowed_placeholders`` name set — the latter builds label-less placeholders."""
+        ``allowed_placeholders`` name set — the latter builds label-less placeholders.
+        ``templates`` are curated starter prompts offered in the editor's template picker."""
         if key in self._entries:
             raise ValueError(f"Prompt type '{key}' is already registered.")
         self._entries[key] = PromptTypeEntry(
@@ -82,6 +97,7 @@ class PromptRegistry:
             description=description,
             default_template=default_template,
             placeholders=_coerce_placeholders(placeholders, allowed_placeholders),
+            templates=tuple(templates or ()),
         )
 
     def choices(self) -> list[tuple[str, str]]:
@@ -102,6 +118,10 @@ class PromptRegistry:
     def get_placeholders(self, key: str) -> tuple[Placeholder, ...]:
         entry = self._entries.get(key)
         return entry.placeholders if entry else ()
+
+    def get_templates(self, key: str) -> tuple[PromptTemplate, ...]:
+        entry = self._entries.get(key)
+        return entry.templates if entry else ()
 
     def all(self) -> list[PromptTypeEntry]:
         return list(self._entries.values())
@@ -139,6 +159,30 @@ def describe_prompt_placeholders(key: str) -> list[dict]:
     ]
 
 
+def describe_prompt_templates(key: str) -> list[dict]:
+    """The starter-template picker payload for a prompt type: ``{key, label, description, text}``.
+
+    Always leads with a synthesized ``basic`` entry whose text is the type's
+    ``default_template`` (so every type offers its default as a loadable template with no
+    source duplication), followed by any curated ``templates``."""
+    entry = prompt_registry.get(key)
+    if entry is None:
+        return []
+    templates: list[dict] = [{
+        'key': 'basic',
+        'label': 'Basic (default)',
+        'description': "The built-in default prompt for this feature.",
+        'text': entry.default_template,
+    }]
+    templates.extend({
+        'key': t.key,
+        'label': t.label,
+        'description': t.description,
+        'text': t.text,
+    } for t in entry.templates)
+    return templates
+
+
 def register_prompt(
     key: str,
     *,
@@ -146,6 +190,7 @@ def register_prompt(
     description: str = '',
     placeholders: 'list[Placeholder] | None' = None,
     allowed_placeholders: frozenset[str] | None = None,
+    templates: 'list[PromptTemplate] | None' = None,
 ) -> Callable[[str], str]:
     """Decorator that registers a prompt type and returns the template string unchanged.
 
@@ -168,6 +213,7 @@ def register_prompt(
             default_template=template,
             placeholders=placeholders,
             allowed_placeholders=allowed_placeholders,
+            templates=templates,
         )
         return template
     return decorator  # type: ignore[return-value]

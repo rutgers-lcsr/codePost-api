@@ -116,6 +116,28 @@ class TestGetOrAssign:
         dataset_b = get_or_assign(assignment, b)
         assert dataset_a.id == dataset_b.id
 
+    def test_group_share_with_divergent_variants_picks_earliest(self, variant_setup):
+        """If group members somehow hold different variants (a staff override / regroup), a
+        new member deterministically inherits the earliest-assigned one, not an arbitrary
+        pick."""
+        assignment = variant_setup['assignment']
+        submission = variant_setup['submission']  # already has students[0]
+        from core.tests.factories import StudentFactory
+        with factory.django.mute_signals(post_save):
+            c = StudentFactory(course=variant_setup['course'].name,
+                               organization=variant_setup['course'].organization, count=98)
+        variant_setup['course'].students.add(c)
+        b = variant_setup['students'][1]
+        submission.students.add(b, c)
+        # b's assignment is created first, so it's the earliest.
+        StudentDataSetAssignment.objects.create(
+            assignment=assignment, student=b, dataset=variant_setup['v2'])
+        StudentDataSetAssignment.objects.create(
+            assignment=assignment, student=c, dataset=variant_setup['v1'])
+
+        chosen = get_or_assign(assignment, variant_setup['students'][0])
+        assert chosen.id == variant_setup['v2'].id
+
     def test_get_or_assign_for_submission(self, variant_setup):
         dataset = get_or_assign_for_submission(variant_setup['assignment'], variant_setup['submission'])
         assert dataset is not None
@@ -419,6 +441,32 @@ class TestVariantRobustnessDispatch:
         other = variant_setup['v1'] if assigned.id == variant_setup['v2'].id else variant_setup['v2']
         assert dataset_id == other.id
 
+    def test_flag_on_samples_capped_number_of_variants(self, variant_setup, monkeypatch):
+        """A large pool is not rerun in full — at most DATASET_VARIANT_RERUN_SAMPLE_SIZE
+        other variants are sampled, so compute doesn't scale with pool size."""
+        from autograder.run import queue_variant_robustness_reruns
+        from core.constants import DATASET_VARIANT_RERUN_SAMPLE_SIZE
+
+        assignment = variant_setup['assignment']
+        variant_setup['v1'].autogradeAllVariants = True
+        variant_setup['v1'].save()
+        variant_setup['v2'].autogradeAllVariants = True
+        variant_setup['v2'].save()
+        # Grow the flagged pool well beyond the sample size.
+        for i in range(DATASET_VARIANT_RERUN_SAMPLE_SIZE + 3):
+            AssignmentDataSet.objects.create(
+                assignment=assignment, name=f'extra_{i}.csv', is_student_variant=True,
+                autogradeAllVariants=True, mount_path='shared/shopping.csv',
+                file=SimpleUploadedFile(f'extra_{i}.csv', b'a,b\n9,9\n'))
+
+        calls = []
+        monkeypatch.setattr('autograder.run.RunSubmissionVariant.delay',
+                            lambda *a, **kw: calls.append(a))
+        queued = queue_variant_robustness_reruns(variant_setup['submission'])
+        assert queued == DATASET_VARIANT_RERUN_SAMPLE_SIZE
+        # Distinct variants, none sampled twice.
+        assert len({dataset_id for _, dataset_id in calls}) == DATASET_VARIANT_RERUN_SAMPLE_SIZE
+
     def test_run_submission_variant_writes_result(self, variant_setup, monkeypatch):
         from autograder.run import RunSubmissionVariant
         from core.models import SubmissionVariantRun
@@ -546,6 +594,33 @@ class TestSplitMasterDataset:
         with pytest.raises(DatasetSplitError):
             split_master_dataset(master, rows_per_chunk=2)
 
+    def test_service_replace_regenerates_in_place(self, variant_setup):
+        """replace=True drops this master's prior variants (cascading to student assignments)
+        and recreates from the retained master, instead of erroring on the name collision."""
+        from core.services.dataset_split import split_master_dataset
+        master = self._master(variant_setup, rows=6)
+        first = split_master_dataset(master, rows_per_chunk=3)  # 2 chunks
+        assert len(first) == 2
+
+        # Pin a student to one of the first-split chunks (explicit, so the shared fixture's
+        # shopping_* pool doesn't decide which variant they get).
+        student = variant_setup['students'][0]
+        StudentDataSetAssignment.objects.create(
+            assignment=variant_setup['assignment'], student=student, dataset=first[0])
+
+        master.refresh_from_db()
+        second = split_master_dataset(master, rows_per_chunk=2, replace=True)  # 3 chunks
+        assert len(second) == 3
+
+        names = set(AssignmentDataSet.objects.filter(
+            assignment=variant_setup['assignment'], is_student_variant=True,
+            name__startswith='master_variant_').values_list('name', flat=True))
+        assert names == {'master_variant_1.csv', 'master_variant_2.csv', 'master_variant_3.csv'}
+        # The stale assignment to a now-deleted chunk was cascade-removed (student reassigns
+        # on next access). Other assignments' variants (shopping_*) are untouched.
+        assert not StudentDataSetAssignment.objects.filter(
+            assignment=variant_setup['assignment'], student=student).exists()
+
     def test_service_no_header_mode(self, variant_setup):
         from core.services.dataset_split import split_master_dataset
 
@@ -580,6 +655,21 @@ class TestSplitMasterDataset:
         resp = api_client.post(f"/assignmentDataSets/{master.id}/splitIntoVariants/",
                                {'rowsPerChunk': 'not-a-number'}, format='json')
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_api_split_replace(self, api_client, variant_setup):
+        master = self._master(variant_setup, rows=6)
+        api_client.force_authenticate(user=variant_setup['admin'])
+        r1 = api_client.post(f"/assignmentDataSets/{master.id}/splitIntoVariants/",
+                             {'rowsPerChunk': 3}, format='json')
+        assert r1.status_code == status.HTTP_201_CREATED and len(r1.data) == 2
+        # Re-splitting without replace collides and 400s.
+        r2 = api_client.post(f"/assignmentDataSets/{master.id}/splitIntoVariants/",
+                             {'rowsPerChunk': 2}, format='json')
+        assert r2.status_code == status.HTTP_400_BAD_REQUEST
+        # With replace it regenerates in place.
+        r3 = api_client.post(f"/assignmentDataSets/{master.id}/splitIntoVariants/",
+                             {'rowsPerChunk': 2, 'replace': True}, format='json')
+        assert r3.status_code == status.HTTP_201_CREATED and len(r3.data) == 3
 
     def test_generated_pool_stays_stable_as_enrollment_changes(self, variant_setup):
         """The core scenario the split feature exists for: enrollment can change mid-
@@ -624,3 +714,128 @@ class TestCloning:
         assert any(d.name == 'shopping_a.csv' and d.is_student_variant for d in cloned)
         # Per-student assignment rows are never cloned — the clone's pool starts unassigned.
         assert not StudentDataSetAssignment.objects.filter(assignment=new_assignment).exists()
+
+    def test_clone_reports_failed_datasets(self, variant_setup):
+        """A dataset whose file can't be read is skipped (the rest still clone) but surfaced
+        on the returned assignment so the clone isn't silently missing data."""
+        import os
+        from core.tests.factories import CourseFactory
+        from core.utils import copy_assignment
+
+        # Make one source dataset's file unreadable.
+        os.remove(variant_setup['v1'].file.path)
+        with factory.django.mute_signals(post_save):
+            dest_course = CourseFactory(name="ds104", period="s2026", organization__name="Rutgers")
+
+        new_assignment = copy_assignment(variant_setup['assignment'], dest_course)
+        assert new_assignment is not None
+        assert 'shopping_a.csv' in new_assignment._datasets_failed_to_copy
+        cloned_names = {d.name for d in new_assignment.dataSets.all()}
+        assert 'shopping_b.csv' in cloned_names   # the readable ones still cloned
+        assert 'shopping_a.csv' not in cloned_names
+
+
+# --------------------------------------------------------------------------- #
+# Quiz code-answer execution mounts the acting student's variant (A1)
+# --------------------------------------------------------------------------- #
+
+class TestQuizResponseCodeVariant:
+    def test_fixed_code_question_stages_acting_students_variant(self, variant_setup, monkeypatch):
+        """A fixed (non-AI) code question has no seeding submission, so the executor can't
+        resolve the student's dataset variant on its own — RunQuizResponseCode must resolve
+        it from the attempt and stage it explicitly (regression: previously only AI-generated
+        questions got a variant)."""
+        from core.models import Quiz, QuizAttempt, QuizResponse, Question, QuestionBank
+        from core.services.dataset_assignment import get_or_assign
+
+        assignment = variant_setup['assignment']
+        course = variant_setup['course']
+        student = variant_setup['students'][0]
+        with factory.django.mute_signals(post_save):
+            quiz = Quiz.objects.create(course=course, assignment=assignment,
+                                       title='Q', isPublished=True)
+            bank = QuestionBank.objects.create(course=course, name='B')
+            code_q = Question.objects.create(course=course, bank=bank, questionType='code',
+                                             text='print the mean', language='python')
+            attempt = QuizAttempt.objects.create(quiz=quiz, student=student)
+            response = QuizResponse.objects.create(
+                attempt=attempt, question=code_q,
+                questionSnapshot={'language': 'python'}, answerText='print(1)')
+
+        captured = {}
+
+        class FakeResult:
+            success = True
+            stdout = 'ok'
+            stderr = ''
+            err = None
+            output_data = {'images': []}
+
+        class FakeExecutor:
+            EXECUTABLE_EXTENSIONS = ['.py']
+
+            def __init__(self, *a, **kw):
+                captured['datasets'] = kw.get('datasets')
+
+            def execute(self):
+                return FakeResult()
+
+        monkeypatch.setattr('autograder.services.executors.get_executor_class',
+                            lambda lang: FakeExecutor)
+        from autograder.run import RunQuizResponseCode
+        RunQuizResponseCode(response.id)
+
+        assigned = get_or_assign(assignment, student)
+        staged_ids = {d.id for d in (captured['datasets'] or [])}
+        assert assigned.id in staged_ids                 # the student's own variant mounts
+        assert variant_setup['shared'].id in staged_ids  # shared datasets still mount
+        other = variant_setup['v1'] if assigned.id == variant_setup['v2'].id else variant_setup['v2']
+        assert other.id not in staged_ids                # never another student's variant
+
+
+# --------------------------------------------------------------------------- #
+# Authoring-time truncation warning for {student_dataset} (D1)
+# --------------------------------------------------------------------------- #
+
+class TestDatasetTruncationWarning:
+    def _section(self, variant_setup, system_prompt):
+        from core.models import Quiz, QuizGeneratedSection
+        with factory.django.mute_signals(post_save):
+            quiz = Quiz.objects.create(course=variant_setup['course'],
+                                       assignment=variant_setup['assignment'],
+                                       title='Q', isPublished=True)
+            return QuizGeneratedSection.objects.create(
+                quiz=quiz, name='S', systemPrompt=system_prompt)
+
+    def test_warns_when_variant_exceeds_cap(self, variant_setup):
+        from core.prompts.variables import STUDENT_DATASET_CHAR_CAP
+        from core.serializers.generatedQuiz import QuizGeneratedSectionSerializer
+
+        AssignmentDataSet.objects.create(
+            assignment=variant_setup['assignment'], name='big_variant.csv',
+            is_student_variant=True, mount_path='shared/shopping.csv',
+            file=SimpleUploadedFile('big_variant.csv', b'x' * (STUDENT_DATASET_CHAR_CAP + 10)))
+        section = self._section(variant_setup, 'Use {student_dataset} to write questions.')
+        data = QuizGeneratedSectionSerializer(section).data
+        assert data['datasetTruncationWarning'] is not None
+        assert 'truncat' in data['datasetTruncationWarning'].lower()
+
+    def test_no_warning_when_prompt_omits_dataset(self, variant_setup):
+        from core.prompts.variables import STUDENT_DATASET_CHAR_CAP
+        from core.serializers.generatedQuiz import QuizGeneratedSectionSerializer
+
+        AssignmentDataSet.objects.create(
+            assignment=variant_setup['assignment'], name='big_variant.csv',
+            is_student_variant=True, mount_path='shared/shopping.csv',
+            file=SimpleUploadedFile('big_variant.csv', b'x' * (STUDENT_DATASET_CHAR_CAP + 10)))
+        section = self._section(variant_setup, 'Write questions about {assignment_name}.')
+        data = QuizGeneratedSectionSerializer(section).data
+        assert data['datasetTruncationWarning'] is None
+
+    def test_no_warning_when_variants_fit(self, variant_setup):
+        from core.serializers.generatedQuiz import QuizGeneratedSectionSerializer
+
+        # variant_setup's variants (v1/v2) are tiny and well under the cap.
+        section = self._section(variant_setup, 'Use {student_dataset} to write questions.')
+        data = QuizGeneratedSectionSerializer(section).data
+        assert data['datasetTruncationWarning'] is None

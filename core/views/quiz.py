@@ -6,8 +6,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from django.utils import timezone
+from django.db.models import Prefetch
 
-from core.models import Quiz
+from core.models import Quiz, QuizResponse
 from core.serializers.quiz import QuizSerializer, QuizQuestionSerializer
 from core.serializers.generatedQuiz import (
     GeneratedQuestionSetListSerializer, GeneratedQuestionSetSerializer,
@@ -122,8 +123,11 @@ class QuizViewSet(ListProtectedViewSet):
                             'Only quiz graders and course admins can view attempts for grading.')
     if denied:
       return denied
-    attempts = quiz.attempts.filter(status='submitted').select_related(
-        'student', 'quiz').prefetch_related('responses').order_by('student__email', 'attemptNumber')
+    # Prefetch each response's question/generatedQuestion — StaffQuizResponseSerializer reads
+    # referenceSolution off them, which would otherwise be an N+1 per response.
+    attempts = quiz.attempts.filter(status='submitted').select_related('student', 'quiz').prefetch_related(
+        Prefetch('responses', queryset=QuizResponse.objects.select_related('question', 'generatedQuestion'))
+    ).order_by('student__email', 'attemptNumber')
     if request.query_params.get('needsGrading') in ('true', 'True', '1'):
       attempts = attempts.filter(needsManualGrading=True)
     return Response(StaffQuizAttemptSerializer(
@@ -363,3 +367,22 @@ class QuizViewSet(ListProtectedViewSet):
     from core.prompts.variables import VariableContext, describe_available_variables
     return Response(describe_available_variables(
         VariableContext(course=quiz.course, assignment=quiz.assignment)))
+
+  @extend_schema(
+      responses=inline_serializer('QuizSectionTemplate', {
+          'key': serializers.CharField(), 'label': serializers.CharField(),
+          'description': serializers.CharField(), 'attachedOnly': serializers.BooleanField(),
+          'questionTypes': serializers.ListField(child=serializers.CharField()),
+          'text': serializers.CharField()},
+          many=True),
+      description="Starter templates for this quiz's AI-generated section prompts "
+                  "(powers the prompt editor's 'start from a template' picker).",
+  )
+  @action(detail=True, methods=['GET'])
+  def promptTemplates(self, request, pk=None):
+    quiz = self.get_object()
+    if not (request.user.is_superuser or isCourseStaff(request.user, quiz.course)):
+      return Response({'detail': 'Only course staff can list prompt templates.'},
+                      status=status.HTTP_403_FORBIDDEN)
+    from core.prompts.quiz_section_templates import describe_quiz_section_templates
+    return Response(describe_quiz_section_templates())

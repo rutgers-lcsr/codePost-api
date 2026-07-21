@@ -2989,11 +2989,6 @@ class Quiz(BaseModel):
       ('after_feedback', 'After feedback is released (whole assignment)'),
       ('after_student_feedback', "After each student's feedback is ready (self-paced)"),
   ]
-  SHOW_ANSWERS_CHOICES = [
-      ('never', 'Never'),
-      ('after_submit', 'After submitting'),
-      ('after_close', 'After the quiz closes'),
-  ]
   PASSING_SCORE_UNIT_CHOICES = [
       ('percent', 'Percent'),
       ('points', 'Points'),
@@ -3064,12 +3059,21 @@ class Quiz(BaseModel):
       help_text=("Sequential mode: show one question at a time instead of all on one page."))
   allowBacktracking = models.BooleanField(default=True,
       help_text=("When sequential, whether students may return to previous questions."))
-  showCorrectAnswers = models.CharField(max_length=16, choices=SHOW_ANSWERS_CHOICES,
-      default='after_submit', help_text=("When students may see the correct answers."))
+  showCorrectAnswers = models.BooleanField(default=True,
+      help_text=("Whether the correct-answer key is shown when a student reviews a submitted "
+                 "attempt. Reveal timing follows sealResultsUntilClose."))
+  sealResultsUntilClose = models.BooleanField(default=False,
+      help_text=("Hold scores, per-question points, and the answer key until the quiz closes "
+                 "for the student. When false, results release as soon as an attempt is "
+                 "submitted. Stops students with attempts remaining from mining the key."))
   showResponses = models.BooleanField(default=True,
       help_text=("Whether students may review their questions and answers after submitting. "
                  "When false, students only see scores (per the reveal policy) — the question "
                  "content is never shown again after submission."))
+  allowSubmissionReview = models.BooleanField(default=True,
+      help_text=("Whether students may reopen and review a submitted attempt afterward. When "
+                 "false, submitting shows a confirmation only — the past attempt cannot be "
+                 "reopened (scores may still surface on the quiz card per the reveal policy)."))
   passingScore = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True,
       help_text=("Optional pass threshold. Interpreted per passingScoreUnit "
                  "(a percentage 0–100, or an absolute point value)."))

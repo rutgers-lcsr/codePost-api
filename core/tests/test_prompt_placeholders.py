@@ -8,7 +8,11 @@ from asgiref.sync import async_to_sync
 from django.db.models.signals import post_save
 from rest_framework import status
 
-from core.prompts.registry import describe_prompt_placeholders, prompt_registry
+from core.prompts.registry import (
+    describe_prompt_placeholders,
+    describe_prompt_templates,
+    prompt_registry,
+)
 
 
 @pytest.fixture
@@ -69,6 +73,10 @@ class TestPromptTypesEndpoint:
         assert 'submission_summary' in by_key
         tokens = {p['token'] for p in by_key['submission_summary']['placeholders']}
         assert '{assignment_description}' in tokens
+        # Each type also carries starter templates, led by the synthesized 'basic' entry.
+        comment_templates = {t['key'] for t in by_key['comment_generation']['templates']}
+        assert 'basic' in comment_templates
+        assert 'concise' in comment_templates
 
     def test_requires_authentication(self, api_client):
         response = api_client.get('/promptTypes/')
@@ -149,3 +157,69 @@ class TestSummaryOverrideAtGeneration:
         # Falls back to the registered default template.
         assert 'CUSTOM SUMMARY' not in system
         assert 'grader' in system.lower()
+
+
+class TestDescribePromptTemplates:
+    def test_leads_with_basic_matching_default(self):
+        for key in prompt_registry.keys():
+            templates = describe_prompt_templates(key)
+            assert templates, f'{key} has no templates'
+            assert templates[0]['key'] == 'basic'
+            assert templates[0]['text'] == prompt_registry.get_default_template(key)
+
+    def test_curated_templates_included(self):
+        keys = {t['key'] for t in describe_prompt_templates('comment_generation')}
+        assert {'basic', 'concise', 'rubric-aligned'} <= keys
+        summary_keys = {t['key'] for t in describe_prompt_templates('submission_summary')}
+        assert {'basic', 'quick-triage', 'rubric-aligned'} <= summary_keys
+
+    def test_all_template_text_uses_valid_placeholders(self):
+        import string
+        for key in prompt_registry.keys():
+            allowed = prompt_registry.get_allowed_placeholders(key)
+            if not allowed:
+                continue
+            for tpl in describe_prompt_templates(key):
+                used = {
+                    f.split('.')[0].split('[')[0]
+                    for _, f, _, _ in string.Formatter().parse(tpl['text'])
+                    if f
+                }
+                invalid = used - allowed
+                assert not invalid, f"{key}/{tpl['key']} uses invalid placeholders: {invalid}"
+
+
+class TestQuizSectionTemplates:
+    def test_templates_use_registered_variables(self):
+        from core.prompts.quiz_section_templates import describe_quiz_section_templates
+        from core.prompts.variables import TOKEN_RE, prompt_variable_registry
+        templates = describe_quiz_section_templates()
+        keys = {t['key'] for t in templates}
+        assert {'basic-attached', 'basic-standalone'} <= keys
+        for tpl in templates:
+            unknown = {
+                m.group(1) for m in TOKEN_RE.finditer(tpl['text'])
+                if prompt_variable_registry.get(m.group(1)) is None
+            }
+            assert not unknown, f"{tpl['key']} references unknown variables: {unknown}"
+
+    def test_endpoint_accessible_to_course_staff(self, api_client, course_setup):
+        from core.models import Quiz
+        with factory.django.mute_signals(post_save):
+            quiz = Quiz.objects.create(course=course_setup['course'], title='T',
+                                       assignment=course_setup['assignment'])
+        api_client.force_authenticate(user=course_setup['grader'])
+        response = api_client.get(f'/quizzes/{quiz.id}/promptTemplates/')
+        assert response.status_code == status.HTTP_200_OK
+        keys = {t['key'] for t in response.data}
+        assert 'retasking' in keys
+        assert all('attachedOnly' in t and 'questionTypes' in t for t in response.data)
+
+    def test_endpoint_forbidden_for_non_staff(self, api_client, course_setup):
+        from core.models import Quiz
+        with factory.django.mute_signals(post_save):
+            quiz = Quiz.objects.create(course=course_setup['course'], title='T',
+                                       assignment=course_setup['assignment'])
+        api_client.force_authenticate(user=course_setup['student'])
+        response = api_client.get(f'/quizzes/{quiz.id}/promptTemplates/')
+        assert response.status_code == status.HTTP_403_FORBIDDEN

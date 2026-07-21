@@ -5,7 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.prompts.registry import describe_prompt_placeholders, prompt_registry
+from core.prompts.registry import (
+    describe_prompt_placeholders,
+    describe_prompt_templates,
+    prompt_registry,
+)
 
 
 class PromptTypeListView(APIView):
@@ -33,6 +37,12 @@ class PromptTypeListView(APIView):
                 'description': serializers.CharField(),
                 'kind': serializers.CharField(),
             }, many=True),
+            'templates': inline_serializer('PromptTemplate', {
+                'key': serializers.CharField(),
+                'label': serializers.CharField(),
+                'description': serializers.CharField(),
+                'text': serializers.CharField(),
+            }, many=True),
         }, many=True)},
     )
     def get(self, request):
@@ -42,6 +52,7 @@ class PromptTypeListView(APIView):
                 'label': entry.label,
                 'description': entry.description,
                 'placeholders': describe_prompt_placeholders(entry.key),
+                'templates': describe_prompt_templates(entry.key),
             }
             for entry in prompt_registry.all()
         ]

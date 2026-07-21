@@ -1,11 +1,43 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-from core.prompts.registry import Placeholder, register_prompt
+from core.prompts.registry import Placeholder, PromptTemplate, register_prompt
 
 
 @register_prompt(
     'submission_summary',
     label='Submission Summary',
     description='Generate a summary overview of the student submission',
+    templates=[
+        PromptTemplate(
+            'quick-triage',
+            'Quick triage',
+            'A very short orientation: what was built and the top things to check first.',
+            """You help graders triage a submission before they dig in.
+
+In 3–5 markdown bullets, state what the student implemented and the top 1–3 places the grader
+should look first — each with a one-line reason. Respond with only the summary.
+
+Assignment: {assignment_name}
+{assignment_description}
+{description_comparison}
+""",
+        ),
+        PromptTemplate(
+            'rubric-aligned',
+            'Rubric-aligned review',
+            'Organizes the summary around the rubric categories to speed up grading.',
+            """You help graders by summarizing a submission against the rubric.
+
+For each rubric category below, note in one or two bullets how well the submission addresses it
+and anything the grader should verify. End with the single area most in need of attention. Use
+markdown; respond with only the summary.
+
+Assignment: {assignment_name}
+{assignment_description}
+
+{rubric}
+""",
+        ),
+    ],
     placeholders=[
         Placeholder('assignment_name', 'Name of the assignment',
                     'The name of the assignment.'),

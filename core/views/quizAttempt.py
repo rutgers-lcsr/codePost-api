@@ -4,9 +4,11 @@
 Kept separate from the staff-only QuizViewSet. Only the mixins students need are exposed
 (create + retrieve + a few actions) — no list/update/destroy.
 """
+from collections import defaultdict
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
@@ -15,9 +17,9 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.models import Course, Quiz, QuizAttempt
-from core.permissions.helpers import isCourseMember, isCourseStaff, isStudent
-from core.permissions.permissions import QuizAttemptPermissions
+from core.models import Course, Quiz, QuizAttempt, QuizResponse
+from core.permissions.helpers import isCourseMember, isStudent
+from core.permissions.permissions import QuizAttemptPermissions, canGradeQuiz
 from core.serializers.studentQuiz import (
     StaffQuizAttemptSerializer,
     StudentQuizAttemptSerializer,
@@ -79,6 +81,16 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   serializer_class = StudentQuizAttemptSerializer
   permission_classes = (IsAuthenticated, QuizAttemptPermissions)
 
+  def get_queryset(self):
+    # Only the read-only retrieve prefetches responses' question/generatedQuestion (they feed
+    # referenceSolution in the staff view). The mutating actions must NOT prefetch: they grade
+    # a response then recompute totals off attempt.responses, which would read a stale cache.
+    qs = super().get_queryset()
+    if getattr(self, 'action', None) == 'retrieve':
+      qs = qs.prefetch_related(
+          Prefetch('responses', queryset=QuizResponse.objects.select_related('question', 'generatedQuestion')))
+    return qs
+
   def _attempt_context(self, attempt):
     return {
         'request': self.request,
@@ -91,12 +103,18 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   @extend_schema(responses=StaffQuizAttemptSerializer)
   def retrieve(self, request, *args, **kwargs):
     attempt = self.get_object()
-    # Staff reading someone else's attempt get the grading projection (student identity,
-    # answers and scores revealed); the owner keeps the policy-gated student view.
-    if request.user != attempt.student and (
-        request.user.is_superuser or isCourseStaff(request.user, attempt.quiz.course)):
+    # Quiz graders / admins reading someone else's attempt get the grading projection
+    # (student identity, answers, scores, and the answer key revealed); the owner keeps the
+    # policy-gated student view. Assignment-only graders are NOT quiz graders — the answer
+    # key must not leak to them (mirrors the attempts/results list gate).
+    if request.user != attempt.student and canGradeQuiz(request.user, attempt.quiz.course):
       return Response(StaffQuizAttemptSerializer(
           attempt, context=staff_reveal_context(request)).data)
+    # The owner is a student here: when the quiz disallows reviewing past submissions, a
+    # submitted attempt can no longer be reopened (an in-progress attempt is still theirs).
+    if attempt.status == 'submitted' and not attempt.quiz.allowSubmissionReview:
+      return Response({'detail': 'Reviewing past submissions is disabled for this quiz.'},
+                      status=status.HTTP_403_FORBIDDEN)
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data)
 
   @extend_schema(
@@ -370,6 +388,9 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       return Response({'detail': 'A valid quiz id is required.'}, status=status.HTTP_400_BAD_REQUEST)
     quiz = get_object_or_404(Quiz, pk=quiz_id)
     attempts = quiz.attempts.filter(student=request.user).order_by('attemptNumber')
+    # Review disabled: submitted attempts can't be reopened, so the review history is empty.
+    if not quiz.allowSubmissionReview:
+      attempts = attempts.exclude(status='submitted')
     data = [StudentQuizAttemptSerializer(a, context=self._attempt_context(a)).data for a in attempts]
     return Response(data)
 
@@ -391,15 +412,27 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     course = get_object_or_404(Course, pk=course_id)
     if not isCourseMember(request.user, course):
       return Response({'detail': 'Not a member of this course.'}, status=status.HTTP_403_FORBIDDEN)
+    quizzes = list(course.quizzes.filter(isPublished=True).select_related('assignment'))
+    # One query for the caller's attempts across these quizzes, grouped by quiz — so neither
+    # the inclusion check here nor the serializer's per-card counts/score fire a query per quiz.
+    attempts_by_quiz = defaultdict(list)
+    for a in QuizAttempt.objects.filter(quiz__in=quizzes, student=request.user):
+      attempts_by_quiz[a.quiz_id].append(a)
+    availability = {}
     result = []
-    for quiz in course.quizzes.filter(isPublished=True).select_related('assignment'):
+    for quiz in quizzes:
       if not quiz_grading.quiz_has_content(quiz):
         continue  # skip quizzes with no fixed questions and no drawable bank questions
-      is_open, _ = quiz_grading.quiz_availability(quiz, request.user)
-      attempted = quiz.attempts.filter(student=request.user).exists()
+      is_open, reason = quiz_grading.quiz_availability(quiz, request.user)
+      availability[quiz.id] = (is_open, reason)  # computed once, reused by the serializer
+      attempted = bool(attempts_by_quiz.get(quiz.id))
       if quiz.assignment_id is not None:
         if quiz.assignment.isReleased or attempted:
           result.append(quiz)
       elif is_open or attempted:
         result.append(quiz)
-    return Response(StudentQuizSerializer(result, many=True, context={'request': request}).data)
+    return Response(StudentQuizSerializer(result, many=True, context={
+        'request': request,
+        'availability': availability,
+        'studentAttempts': attempts_by_quiz,
+    }).data)

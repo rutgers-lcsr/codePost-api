@@ -240,6 +240,10 @@ def copy_assignment(assignment: Assignment, destination_course: Course,
 
   # Copy DataSets
   dataset_map = {}
+  # Datasets that couldn't be copied (a read/storage error on the source file). We keep
+  # cloning the rest rather than aborting, but surface the names so a clone isn't silently
+  # missing data — see the clone view, which reports these to the instructor.
+  failed_datasets = []
   for dataset in original_assignment.dataSets.all():
     # We must duplicate the file content so the new dataset has its own file
     if dataset.file:
@@ -263,6 +267,9 @@ def copy_assignment(assignment: Assignment, destination_course: Course,
         dataset_map[dataset.id] = new_dataset
       except Exception as e:
         logger.error(f"Failed to clone dataset {dataset.id}: {e}")
+        failed_datasets.append(dataset.name)
+  # Transient attribute (not a model field) so callers can report partial dataset loss.
+  new_assignment._datasets_failed_to_copy = failed_datasets
 
   # copy learning objectives (test cases relink to the copies below)
   learning_objective_map = {}
