@@ -513,9 +513,14 @@ class TestEagerGeneration:
         _mock_ai(monkeypatch)
         quiz = Quiz.objects.create(course=gen_setup['course'], title='Concepts',
                                    assignment=gen_setup['assignment'], isPublished=True)
-        QuizGeneratedSection.objects.create(
-            quiz=quiz, name='Concepts', systemPrompt='Ask conceptual questions.',
-            numQuestions=2, pointsPerQuestion=Decimal('3'))
+        # Mute the section's post_save backfill: this test builds the "already reviewed"
+        # state itself below. Without muting, an eager Celery (CELERY_TASK_ALWAYS_EAGER,
+        # which CI sets) runs the backfill inline and creates the set first, so _make_set
+        # then collides on the (quiz, student) unique constraint.
+        with factory.django.mute_signals(post_save):
+            QuizGeneratedSection.objects.create(
+                quiz=quiz, name='Concepts', systemPrompt='Ask conceptual questions.',
+                numQuestions=2, pointsPerQuestion=Decimal('3'))
         student = gen_setup['students'][0]  # on gen_setup['submission']
         existing = _make_set(quiz, student, status='ready')
         # An upload-triggered run must not clobber the reviewed set (its questions don't

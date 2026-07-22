@@ -84,8 +84,10 @@ def build_gradebook(course, assignment_ids=None, quiz_ids=None, section=None):
     assignment_cells = []
     for assignment in assignments:
       found = best.get((student.email, assignment.id))
-      is_finalized = bool(found and found[2])
-      grade = found[1] if is_finalized else None
+      is_finalized = found is not None and bool(found[2])
+      # Re-check `found` (rather than relying on is_finalized implying it) so the
+      # indexing below is provably safe to the type checker.
+      grade = found[1] if (found is not None and is_finalized) else None
       if grade is not None:
         earned += grade
         possible += assignment.points or Decimal('0')

@@ -263,8 +263,10 @@ def _parse_document(xml_bytes: bytes, default_title: str, result: dict) -> None:
     question_idents: list[str] = []
     for item in items:
         question, skip_reason = _parse_item(item)
-        if skip_reason:
-            result['skipped'].append({'ident': item.get('ident') or '', 'reason': skip_reason})
+        # _parse_item returns question=None exactly when skip_reason is set; the explicit
+        # None check makes that invariant visible to the type checker.
+        if skip_reason or question is None:
+            result['skipped'].append({'ident': item.get('ident') or '', 'reason': skip_reason or 'unparsable item'})
             continue
         sig = _content_sig(question)
         canonical = result['_sig_to_ident'].get(sig)
