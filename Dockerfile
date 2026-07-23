@@ -6,13 +6,16 @@ COPY pyproject.toml poetry.lock* /opt/app/
 
 
 RUN pip install poetry
+# Install from the committed poetry.lock — don't delete it, or builds float to the newest
+# releases on PyPI and can break with no change on our side.
 RUN poetry config virtualenvs.create false \
-    && rm -f poetry.lock \
     && poetry install --no-root
 
 COPY . .
 
-RUN python manage.py collectstatic --no-input
+# Skip stray node_modules bundled in package static dirs (viewflow); their CSS references
+# fonts they don't ship, which fails the manifest storage's strict post-processing.
+RUN python manage.py collectstatic --no-input --ignore node_modules
 
 RUN chmod +x init.sh
 
@@ -31,7 +34,6 @@ WORKDIR /opt/app
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
-    && rm -f poetry.lock \
     && poetry install --no-root
 
 RUN pip install celery
@@ -52,7 +54,6 @@ WORKDIR /opt/app
 
 RUN pip install poetry
 RUN poetry config virtualenvs.create false \
-    && rm -f poetry.lock \
     && poetry install --no-root
 RUN pip install celery
 
