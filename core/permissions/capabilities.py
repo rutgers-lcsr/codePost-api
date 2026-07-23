@@ -29,6 +29,7 @@ class Capability(str, Enum):
     CHANGE_INVITE_CODE = "change_invite_code"
     MANAGE_COURSE_API_KEYS = "manage_course_api_keys"
     GRADE_QUIZ = "grade_quiz"
+    GENERATE_AI_QUIZ_QUESTIONS = "generate_ai_quiz_questions"
 
     # -- Assignment-level --
     EDIT_ASSIGNMENT = "edit_assignment"
@@ -91,6 +92,7 @@ CAPABILITY_DESCRIPTIONS: dict[Capability, str] = {
     Capability.CHANGE_INVITE_CODE: "Regenerate the course join invite code.",
     Capability.MANAGE_COURSE_API_KEYS: "Create, revoke, and manage course-scoped API keys.",
     Capability.GRADE_QUIZ: "View quiz attempts and manually grade essay/code responses (course admins and quiz graders).",
+    Capability.GENERATE_AI_QUIZ_QUESTIONS: "Request AI-suggested quiz questions for a bank or an existing question (requires the course's quiz_generation AI feature to be on).",
     # Assignment
     Capability.EDIT_ASSIGNMENT: "Modify assignment settings including name, deadlines, point values, and visibility.",
     Capability.COPY_ASSIGNMENT: "Duplicate an assignment's configuration, rubric, and test cases to another course.",
@@ -155,6 +157,16 @@ COURSE_SCOPED_BLOCKED_CAPABILITIES: set[Capability] = {
 # Compute functions
 # ---------------------------------------------------------------------------
 
+def _quiz_generation_enabled(course) -> bool:
+    """Whether the course's ``quiz_generation`` AI feature is on and AI is configured.
+
+    Only called after a role check has passed, so students and non-staff never
+    pay the extra organization lookup ``AIService`` performs.
+    """
+    from core.services.ai_service import AIService
+
+    return AIService(course).is_feature_enabled('quiz_generation')
+
 def compute_course_capabilities(user, course, *, is_course_scoped: bool = False, _rc: RoleCache | None = None) -> dict[Capability, bool]:
     """Return a dict of ``{capability_key: bool}`` for the given user/course.
 
@@ -188,6 +200,7 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
         Capability.CLAIM_SUBMISSIONS: (grader or admin) and course.activateQueue and not archived,
         Capability.EDIT_RUBRIC: (admin or rubric_editor or (grader and course.allowGradersToEditRubric)) and not archived,
         Capability.GRADE_QUIZ: admin or quiz_grader,
+        Capability.GENERATE_AI_QUIZ_QUESTIONS: staff and not archived and _quiz_generation_enabled(course),
         Capability.MANAGE_REGRADES: admin or super_grader,
         Capability.VIEW_AUDIT_LOG: admin,
         Capability.CHANGE_INVITE_CODE: admin,

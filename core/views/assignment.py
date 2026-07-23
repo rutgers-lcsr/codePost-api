@@ -398,7 +398,8 @@ class AssignmentViewSet(ListProtectedViewSet):
           'status': serializers.CharField(),
       }),
       description="Enqueue AI generation of suggested quiz questions for this assignment. "
-                  "Instructors review the suggestions and accept the good ones.",
+                  "Instructors review the suggestions and accept the good ones. Returns 403 when the "
+                  "course has the quiz_generation AI feature turned off.",
   )
   @action(detail=True, methods=['POST'], permission_classes=[IsAuthenticated])
   def generateQuizQuestions(self, request, pk=None):
@@ -406,6 +407,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     assignment = self.get_object()
     if not isCourseStaff(request.user, assignment.course):
       return returnForbidden()
+    require_capability(request.user, Capability.GENERATE_AI_QUIZ_QUESTIONS, assignment.course)
     from core.tasks import generate_quiz_question_suggestions
     task = generate_quiz_question_suggestions.delay(
         requested_by_id=request.user.id,

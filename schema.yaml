@@ -1223,7 +1223,8 @@ paths:
     post:
       operationId: assignments_generateQuizQuestionsCreate
       description: Enqueue AI generation of suggested quiz questions for this assignment.
-        Instructors review the suggestions and accept the good ones.
+        Instructors review the suggestions and accept the good ones. Returns 403 when
+        the course has the quiz_generation AI feature turned off.
       parameters:
       - in: path
         name: id
@@ -8381,6 +8382,7 @@ paths:
       operationId: questions_regenerateSuggestionCreate
       description: Generate a refreshed AI suggestion seeded from this existing question
         (cross-semester update). The instructor reviews and accepts the suggestion.
+        Returns 403 when the course has the quiz_generation AI feature turned off.
       parameters:
       - in: path
         name: id
@@ -16900,6 +16902,8 @@ components:
                 type: boolean
               grade_quiz:
                 type: boolean
+              generate_ai_quiz_questions:
+                type: boolean
               edit_assignment:
                 type: boolean
               copy_assignment:
@@ -17103,6 +17107,8 @@ components:
             manage_course_api_keys:
               type: boolean
             grade_quiz:
+              type: boolean
+            generate_ai_quiz_questions:
               type: boolean
             edit_assignment:
               type: boolean
@@ -24453,6 +24459,8 @@ components:
             manage_course_api_keys:
               type: boolean
             grade_quiz:
+              type: boolean
+            generate_ai_quiz_questions:
               type: boolean
             edit_assignment:
               type: boolean

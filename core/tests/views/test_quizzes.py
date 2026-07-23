@@ -575,6 +575,7 @@ class TestAISuggestions:
         assert not SuggestedQuizQuestion.objects.filter(assignment=quiz_setup['assignment']).exists()
 
     def test_generate_endpoint_permissions(self, api_client, quiz_setup, monkeypatch):
+        _enable_ai(monkeypatch)
         monkeypatch.setattr('core.tasks.generate_quiz_question_suggestions.delay',
                             lambda *a, **kw: type('R', (), {'id': 'x'})())
         url = f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/"
@@ -584,6 +585,34 @@ class TestAISuggestions:
 
         api_client.force_authenticate(user=quiz_setup['student'])
         assert api_client.post(url, format='json').status_code == status.HTTP_403_FORBIDDEN
+
+    def test_generate_endpoints_403_when_feature_disabled(self, api_client, quiz_setup, monkeypatch):
+        """The quiz_generation toggle is a capability, so the endpoints reject the request
+        instead of queueing a task the worker silently drops."""
+        _enable_ai(monkeypatch)
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: key != 'quiz_generation')
+        monkeypatch.setattr('core.tasks.generate_quiz_question_suggestions.delay',
+                            lambda *a, **kw: type('R', (), {'id': 'x'})())
+        question = _mc_question(quiz_setup['course'])
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        assert api_client.post(
+            f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/",
+            format='json').status_code == status.HTTP_403_FORBIDDEN
+        assert api_client.post(
+            f'/questions/{question.id}/regenerateSuggestion/',
+            format='json').status_code == status.HTTP_403_FORBIDDEN
+
+    def test_course_capability_follows_feature_toggle(self, api_client, quiz_setup, monkeypatch):
+        _enable_ai(monkeypatch)
+        url = f"/courses/{quiz_setup['course'].id}/capabilities/"
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        assert api_client.get(url).data['capabilitiesMap']['generate_ai_quiz_questions'] is True
+
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: key != 'quiz_generation')
+        assert api_client.get(url).data['capabilitiesMap']['generate_ai_quiz_questions'] is False
 
     def test_accept_creates_question_authored_by_instructor(self, api_client, quiz_setup):
         from core.models import SuggestedQuizQuestion, Question, QuestionBank

@@ -14,6 +14,7 @@ from core.serializers.suggestedQuizQuestion import SuggestedQuizQuestionSerializ
 from core.views.template import ListProtectedViewSet
 from core.permissions.permissions import QuestionPermissions
 from core.permissions.helpers import isCourseStaff, returnForbidden
+from core.permissions.capabilities import Capability, require_capability
 
 
 class QuestionViewSet(ListProtectedViewSet):
@@ -103,12 +104,14 @@ class QuestionViewSet(ListProtectedViewSet):
           'status': serializers.CharField(),
       }),
       description="Generate a refreshed AI suggestion seeded from this existing question "
-                  "(cross-semester update). The instructor reviews and accepts the suggestion.",
+                  "(cross-semester update). The instructor reviews and accepts the suggestion. "
+                  "Returns 403 when the course has the quiz_generation AI feature turned off.",
   )
   @action(detail=True, methods=['POST'])
   def regenerateSuggestion(self, request, pk=None):
     """Enqueue an AI task to suggest an updated version of this question."""
     question = self.get_object()  # triggers object-level permission check
+    require_capability(request.user, Capability.GENERATE_AI_QUIZ_QUESTIONS, question.course)
     from core.tasks import generate_quiz_question_suggestions
 
     # A cross-course assignment_id would resolve the task's course to that other course and
