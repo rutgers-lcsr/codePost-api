@@ -1152,6 +1152,14 @@ paths:
           type: integer
         description: A unique integer value identifying this assignment.
         required: true
+      - in: query
+        name: includeDatasets
+        schema:
+          type: boolean
+        description: Bundle the assignment's datasets into the zip (default true).
+          Pass false for callers that mount datasets separately — e.g. JupyterHub
+          — to get the assignment files alone; this also skips the per-student variant
+          auto-assignment side effect.
       tags:
       - assignments
       security:

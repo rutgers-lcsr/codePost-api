@@ -762,7 +762,19 @@ class AssignmentViewSet(ListProtectedViewSet):
           "adjustedDaysLate": handler.calculated_days_late()
       }, status=status.HTTP_200_OK)
 
-  @extend_schema(responses=AssignmentDownloadResponseSerializer)
+  @extend_schema(
+      parameters=[
+          OpenApiParameter(
+              name="includeDatasets", required=False, type=bool,
+              location=OpenApiParameter.QUERY,
+              description=("Bundle the assignment's datasets into the zip (default true). "
+                           "Pass false for callers that mount datasets separately — e.g. "
+                           "JupyterHub — to get the assignment files alone; this also skips "
+                           "the per-student variant auto-assignment side effect."),
+          ),
+      ],
+      responses=AssignmentDownloadResponseSerializer,
+  )
   @action(detail=True, methods=["GET"])
   def download(self, request: Request, pk=None):
     """
@@ -781,14 +793,20 @@ class AssignmentViewSet(ListProtectedViewSet):
     # variant pool — only the requesting student's own assigned variant (auto-assigned
     # here on first access), never a classmate's. Staff get the shared set only; they can
     # pull any specific variant via the per-dataset download endpoint.
-    from core.models import AssignmentDataSet
-    datasets = list(AssignmentDataSet.objects.filter(
-        assignment=assignment, hidden=False, is_student_variant=False))
-    if not isCourseStaff(user, assignment.course):
-      from core.services.dataset_assignment import get_or_assign
-      variant = get_or_assign(assignment, user)
-      if variant is not None and not variant.hidden:
-        datasets.append(variant)
+    # Callers that mount datasets themselves (JupyterHub) pass includeDatasets=false: the
+    # zip carries only the assignment files, and no variant is auto-assigned as a side effect.
+    include_datasets = request.query_params.get(
+        'includeDatasets', 'true').lower() in ('true', '1', 'yes')
+    datasets = []
+    if include_datasets:
+      from core.models import AssignmentDataSet
+      datasets = list(AssignmentDataSet.objects.filter(
+          assignment=assignment, hidden=False, is_student_variant=False))
+      if not isCourseStaff(user, assignment.course):
+        from core.services.dataset_assignment import get_or_assign
+        variant = get_or_assign(assignment, user)
+        if variant is not None and not variant.hidden:
+          datasets.append(variant)
 
     if len(files) == 0 and not datasets:
       return Response("No files to download", status=status.HTTP_204_NO_CONTENT)

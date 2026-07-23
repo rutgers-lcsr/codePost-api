@@ -270,6 +270,57 @@ class TestAssignmentZipDownload:
             assert f'data/{variant_setup["v2"].file.name.split("/")[-1]}' not in names
             assert f'data/{variant_setup["shared"].file.name.split("/")[-1]}' in names
 
+    def test_include_datasets_false_returns_files_without_datasets(self, api_client, variant_setup):
+        """Callers that mount datasets themselves (JupyterHub) get the assignment files
+        alone — no data/ entries at all."""
+        import base64
+        import zipfile
+        import io
+        from core.tests.factories import AssignmentFileFactory
+
+        with factory.django.mute_signals(post_save):
+            AssignmentFileFactory(assignment=variant_setup['assignment'], name='starter.py')
+
+        student = variant_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(
+            f"/assignments/{variant_setup['assignment'].id}/download/?includeDatasets=false")
+        assert resp.status_code == status.HTTP_200_OK
+        zip_bytes = base64.b64decode(resp.data['zip'])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = set(zf.namelist())
+            assert 'starter.py' in names                          # assignment files still ship
+            assert not any(n.startswith('data/') for n in names)  # no datasets bundled
+
+    def test_include_datasets_false_does_not_auto_assign_a_variant(self, api_client, variant_setup):
+        """The opt-out must also skip get_or_assign's side effect — a JupyterHub file sync
+        shouldn't silently claim a variant for the student."""
+        from core.tests.factories import AssignmentFileFactory
+
+        with factory.django.mute_signals(post_save):
+            AssignmentFileFactory(assignment=variant_setup['assignment'], name='starter.py')
+
+        student = variant_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        api_client.get(
+            f"/assignments/{variant_setup['assignment'].id}/download/?includeDatasets=false")
+        assert not StudentDataSetAssignment.objects.filter(
+            assignment=variant_setup['assignment'], student=student).exists()
+
+    def test_datasets_included_by_default(self, api_client, variant_setup):
+        """Omitting the param keeps the existing behaviour (the student download path)."""
+        import base64
+        import zipfile
+        import io
+
+        student = variant_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f"/assignments/{variant_setup['assignment'].id}/download/")
+        assert resp.status_code == status.HTTP_200_OK
+        zip_bytes = base64.b64decode(resp.data['zip'])
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            assert any(n.startswith('data/') for n in zf.namelist())
+
 
 # --------------------------------------------------------------------------- #
 # Staff override API
