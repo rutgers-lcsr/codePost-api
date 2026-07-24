@@ -33,7 +33,7 @@ from core.views.rubricComment import RubricCommentViewSet
 from core.views.file import FileViewSet
 from core.views.submissionFile import SubmissionFileViewSet
 from core.views.assignmentFile import AssignmentFileViewSet
-from core.views.courseFile import CourseFileViewSet
+from core.views.courseFile import CourseFileViewSet, serve_public_course_file
 from core.views.submissionTest import SubmissionTestViewSet
 from core.views.testCase import TestCaseViewSet
 from core.views.testCategory import TestCategoryViewSet
@@ -178,6 +178,10 @@ urlpatterns = [
     # so it isn't shadowed, and is intentionally unauthenticated (browsers send no auth
     # header on <img> requests; the unguessable token is the access control).
     path('quizImages/raw/<uuid:token>/', serve_quiz_image, name='quiz_image_raw'),
+    # Public (token-gated) serving of course files marked isPublic — must precede the router
+    # so it isn't shadowed, and is intentionally unauthenticated (the unguessable token is
+    # the URL locator; isPublic is the access gate).
+    path('courseFiles/raw/<uuid:token>/', serve_public_course_file, name='course_file_raw'),
     re_path('', include(router.urls)),
 ]
 

@@ -932,7 +932,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         from core.services import quiz_grading
         for attempt in QuizAttempt.objects.filter(
                 quiz__course=course, student=student, status='in_progress').select_related('quiz'):
-            deadline = quiz_grading.compute_attempt_deadline(attempt.quiz, student, attempt.startedAt)
+            deadline = quiz_grading.compute_attempt_deadline(
+                attempt.quiz, student, attempt.startedAt, bypass_close=attempt.closeBypassed)
             if deadline != attempt.deadline:
                 attempt.deadline = deadline
                 attempt.save()

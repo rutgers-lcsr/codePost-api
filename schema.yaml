@@ -8519,8 +8519,11 @@ paths:
   /quizAttempts/:
     post:
       operationId: quizAttempts_create
-      description: Start a new attempt, or resume the student's in-progress one, for
-        ``quiz``.
+      description: |-
+        Start a new attempt, or resume the student's in-progress one, for ``quiz``.
+
+        A late student whose quiz has closed may pass ``accessCode`` to start anyway: a match on
+        the quiz's access code bypasses the close (only), and the attempt keeps its full time limit.
       tags:
       - quizAttempts
       requestBody:
@@ -10014,6 +10017,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BackfillPreviewResponse'
+          description: ''
+  /quizzes/{id}/generateAccessCode/:
+    patch:
+      operationId: quizzes_generateAccessCodePartialUpdate
+      description: 'Generate (or, with {clear: true}, remove) this quiz''s late-access
+        code — the code an instructor hands to late students so they can start the
+        quiz after it closes. Course admins only. Generating rotates any existing
+        code.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedGenerateQuizAccessCodeRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedGenerateQuizAccessCodeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedGenerateQuizAccessCodeRequest'
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizAccessCodeResponse'
           description: ''
   /quizzes/{id}/generateForStudent/:
     post:
@@ -17861,6 +17903,15 @@ components:
           description: Optional file path, delimited by slashes, to indicate a directory
             structure.
           maxLength: 500
+        isPublic:
+          type: boolean
+          description: If True, the file is downloadable without authentication via
+            its public URL (courseFiles/raw/<id>/).
+        publicUrl:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
         created:
           type: string
           format: date-time
@@ -17876,6 +17927,7 @@ components:
       - id
       - modified
       - name
+      - publicUrl
     CourseRoster:
       type: object
       properties:
@@ -20310,6 +20362,15 @@ components:
           description: Optional file path, delimited by slashes, to indicate a directory
             structure.
           maxLength: 500
+        isPublic:
+          type: boolean
+          description: If True, the file is downloadable without authentication via
+            its public URL (courseFiles/raw/<id>/).
+        publicUrl:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
         created:
           type: string
           format: date-time
@@ -20479,6 +20540,11 @@ components:
           type: string
           format: date-time
           readOnly: true
+    PatchedGenerateQuizAccessCodeRequest:
+      type: object
+      properties:
+        clear:
+          type: boolean
     PatchedGeneratedQuizQuestion:
       type: object
       description: |-
@@ -20994,6 +21060,13 @@ components:
           type: boolean
           description: If true, reaching the close time ends/auto-submits in-progress
             attempts (hard deadline); if false it only blocks new attempts.
+        accessCode:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Optional code that lets a late student start this quiz after
+            it has closed. Null/blank = no late access. Staff generate/rotate it via
+            generateAccessCode; a correct code bypasses only the close, nothing else.
         timeLimitMinutes:
           type: integer
           maximum: 9223372036854775807
@@ -22736,6 +22809,13 @@ components:
           type: boolean
           description: If true, reaching the close time ends/auto-submits in-progress
             attempts (hard deadline); if false it only blocks new attempts.
+        accessCode:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Optional code that lets a late student start this quiz after
+            it has closed. Null/blank = no late access. Staff generate/rotate it via
+            generateAccessCode; a correct code bypasses only the close, nothing else.
         timeLimitMinutes:
           type: integer
           maximum: 9223372036854775807
@@ -22862,6 +22942,7 @@ components:
           readOnly: true
           description: Staff-internal metadata (Canvas IDs, etc.).
       required:
+      - accessCode
       - course
       - createdBy
       - generatedSections
@@ -22871,6 +22952,14 @@ components:
       - quizQuestions
       - source
       - title
+    QuizAccessCodeResponse:
+      type: object
+      properties:
+        accessCode:
+          type: string
+          nullable: true
+      required:
+      - accessCode
     QuizAccommodationRow:
       type: object
       description: One per-student quiz extra-time accommodation (course-level multiplier).
@@ -23766,6 +23855,8 @@ components:
       properties:
         quiz:
           type: integer
+        accessCode:
+          type: string
       required:
       - quiz
     Status4a6Enum:
@@ -23998,6 +24089,9 @@ components:
           format: date-time
           nullable: true
           readOnly: true
+        hasAccessCode:
+          type: boolean
+          readOnly: true
         myScore:
           type: number
           format: double
@@ -24028,6 +24122,7 @@ components:
       - availability
       - closeAt
       - course
+      - hasAccessCode
       - hasOpenAttempt
       - hasSubmittedAttempt
       - id

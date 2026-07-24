@@ -238,6 +238,17 @@ class AssignmentFileFactory(factory.django.DjangoModelFactory):
 
 
 @factory.django.mute_signals(post_save)
+class CourseFileFactory(factory.django.DjangoModelFactory):
+
+  class Meta:
+    model = CourseFile
+
+  name = "syllabus.txt"
+  data = "Course syllabus contents."
+  course = factory.SubFactory('core.tests.factories.CourseFactory')
+
+
+@factory.django.mute_signals(post_save)
 class CourseFactory(factory.django.DjangoModelFactory):
 
   class Meta:

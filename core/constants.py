@@ -4,6 +4,7 @@
 MAX_FILE_SIZE = 10 * 1024 * 1024       # 10MB — upload limit for submission files
 MAX_OUTPUT_SIZE = 1024 * 1024           # 1MB  — stdout/stderr cap from container execution
 MAX_DATASET_SIZE = 1024 * 1024 * 1024   # 1GB  — upload limit for assignment datasets
+MAX_COURSE_FILE_SIZE = 25 * 1024 * 1024  # 25MB — upload limit for course files (stored as DB base64)
 
 # Anti-hardcoding variant reruns (AssignmentDataSet.autogradeAllVariants): rerun a finalized
 # submission against at most this many OTHER variants (a random sample), rather than every

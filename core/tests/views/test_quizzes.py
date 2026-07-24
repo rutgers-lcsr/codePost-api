@@ -828,3 +828,65 @@ class TestBankAssignments:
         resp = api_client.patch(f'/questionBanks/{bank.id}/', {'assignments': []}, format='json')
         assert resp.status_code == status.HTTP_200_OK
         assert bank.assignments.count() == 0
+
+
+# --------------------------------------------------------------------------- #
+# Late-access code: staff generate/rotate/clear the code late students type in.
+# --------------------------------------------------------------------------- #
+
+class TestQuizAccessCode:
+    def _quiz(self, course):
+        from core.models import Quiz
+        return Quiz.objects.create(course=course, title='Q1')
+
+    def test_admin_generates_rotates_and_clears(self, api_client, quiz_setup):
+        from core.models import Quiz, CourseAuditEvent
+        course = quiz_setup['course']
+        quiz = self._quiz(course)
+        api_client.force_authenticate(user=quiz_setup['admin'])
+
+        gen = api_client.patch(f'/quizzes/{quiz.id}/generateAccessCode/', {}, format='json')
+        assert gen.status_code == status.HTTP_200_OK
+        code = gen.data['accessCode']
+        assert code and len(code) == 6 and code.isalnum() and code.isupper()
+        assert Quiz.objects.get(pk=quiz.id).accessCode == code
+        assert CourseAuditEvent.objects.filter(
+            course=course, quiz=quiz, event_type='quiz_access_code_changed').exists()
+
+        # Rotating replaces the code.
+        rotated = api_client.patch(f'/quizzes/{quiz.id}/generateAccessCode/', {}, format='json')
+        assert rotated.data['accessCode'] != code
+
+        # Clearing disables late access.
+        cleared = api_client.patch(f'/quizzes/{quiz.id}/generateAccessCode/', {'clear': True}, format='json')
+        assert cleared.data['accessCode'] is None
+        assert Quiz.objects.get(pk=quiz.id).accessCode is None
+
+    def test_grader_and_student_cannot_change_code(self, api_client, quiz_setup):
+        quiz = self._quiz(quiz_setup['course'])
+        for user in (quiz_setup['grader'], quiz_setup['student']):
+            api_client.force_authenticate(user=user)
+            resp = api_client.patch(f'/quizzes/{quiz.id}/generateAccessCode/', {}, format='json')
+            assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_archived_course_blocks_code_change(self, api_client, quiz_setup):
+        course = quiz_setup['course']
+        quiz = self._quiz(course)
+        course.archived = True
+        course.save()
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.patch(f'/quizzes/{quiz.id}/generateAccessCode/', {}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_access_code_is_readonly_in_serializer(self, api_client, quiz_setup):
+        from core.models import Quiz
+        course = quiz_setup['course']
+        quiz = self._quiz(course)
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        code = api_client.patch(f'/quizzes/{quiz.id}/generateAccessCode/', {}, format='json').data['accessCode']
+
+        # Staff can read it, but a direct PATCH of the field is ignored (set only via the action).
+        got = api_client.get(f'/quizzes/{quiz.id}/')
+        assert got.data['accessCode'] == code
+        api_client.patch(f'/quizzes/{quiz.id}/', {'accessCode': 'HACKED'}, format='json')
+        assert Quiz.objects.get(pk=quiz.id).accessCode == code

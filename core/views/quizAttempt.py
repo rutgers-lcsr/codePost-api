@@ -4,6 +4,7 @@
 Kept separate from the staff-only QuizViewSet. Only the mixins students need are exposed
 (create + retrieve + a few actions) — no list/update/destroy.
 """
+import secrets
 from collections import defaultdict
 from datetime import timedelta
 
@@ -118,11 +119,18 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data)
 
   @extend_schema(
-      request=inline_serializer('StartQuizAttemptRequest', {'quiz': serializers.IntegerField()}),
+      request=inline_serializer('StartQuizAttemptRequest', {
+          'quiz': serializers.IntegerField(),
+          'accessCode': serializers.CharField(required=False, allow_blank=True),
+      }),
       responses=StudentQuizAttemptSerializer,
   )
   def create(self, request, *args, **kwargs):
-    """Start a new attempt, or resume the student's in-progress one, for ``quiz``."""
+    """Start a new attempt, or resume the student's in-progress one, for ``quiz``.
+
+    A late student whose quiz has closed may pass ``accessCode`` to start anyway: a match on
+    the quiz's access code bypasses the close (only), and the attempt keeps its full time limit.
+    """
     quiz_id = _require_int(request.data.get('quiz'))
     if quiz_id is None:
       return Response({'detail': 'A valid quiz id is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -142,9 +150,22 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       return Response(StudentQuizAttemptSerializer(existing, context=self._attempt_context(existing)).data)
 
     is_open, reason = quiz_grading.quiz_availability(quiz, user)
+    bypass = False
     if not is_open:
-      return Response({'detail': f'This quiz is not available ({reason}).'},
-                      status=status.HTTP_403_FORBIDDEN)
+      # A late student may start a closed quiz with the quiz's access code — but only when the
+      # quiz has actually closed (not, say, 'not_yet_open' or 'no_submission_yet'), and only if a
+      # code is set. Nothing else about availability is bypassed.
+      if reason in quiz_grading.LATE_BYPASSABLE_REASONS and quiz.accessCode:
+        submitted = (request.data.get('accessCode') or '').strip()
+        if submitted and secrets.compare_digest(submitted, quiz.accessCode):
+          bypass = True
+        else:
+          return Response({'detail': 'This quiz has closed — enter the access code to continue.',
+                           'reason': reason, 'accessCodeRequired': True},
+                          status=status.HTTP_403_FORBIDDEN)
+      else:
+        return Response({'detail': f'This quiz is not available ({reason}).'},
+                        status=status.HTTP_403_FORBIDDEN)
     used = quiz.attempts.filter(student=user).count()
     if quiz.attemptsAllowed and used >= quiz.attemptsAllowed:
       return Response({'detail': 'No attempts remaining.'}, status=status.HTTP_403_FORBIDDEN)
@@ -152,12 +173,13 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       return Response({'detail': 'This quiz has no questions yet.'}, status=status.HTTP_400_BAD_REQUEST)
 
     started = timezone.now()
-    deadline = quiz_grading.compute_attempt_deadline(quiz, user, started)
+    deadline = quiz_grading.compute_attempt_deadline(quiz, user, started, bypass_close=bypass)
     try:
       with transaction.atomic():
         attempt = QuizAttempt.objects.create(
             quiz=quiz, student=user, attemptNumber=used + 1,
             startedAt=started, deadline=deadline, status='in_progress',
+            closeBypassed=bypass,
         )
         quiz_grading.build_attempt_responses(attempt)
     except IntegrityError:
@@ -167,7 +189,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       if existing is not None:
         return Response(StudentQuizAttemptSerializer(existing, context=self._attempt_context(existing)).data)
       raise
-    _record_attempt_event(attempt, 'quiz_attempt_started')
+    _record_attempt_event(attempt, 'quiz_attempt_started_late' if bypass else 'quiz_attempt_started')
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data,
                     status=status.HTTP_201_CREATED)
 
@@ -426,10 +448,13 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       is_open, reason = quiz_grading.quiz_availability(quiz, request.user)
       availability[quiz.id] = (is_open, reason)  # computed once, reused by the serializer
       attempted = bool(attempts_by_quiz.get(quiz.id))
+      # A closed standalone quiz with a late-access code still surfaces, so a late student can
+      # see the card and enter the code (attached quizzes already surface once released).
+      code_unlockable = bool(quiz.accessCode) and reason in quiz_grading.LATE_BYPASSABLE_REASONS
       if quiz.assignment_id is not None:
         if quiz.assignment.isReleased or attempted:
           result.append(quiz)
-      elif is_open or attempted:
+      elif is_open or attempted or code_unlockable:
         result.append(quiz)
     return Response(StudentQuizSerializer(result, many=True, context={
         'request': request,

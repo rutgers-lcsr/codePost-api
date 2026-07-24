@@ -181,6 +181,7 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   hasOpenAttempt = serializers.SerializerMethodField()
   hasSubmittedAttempt = serializers.SerializerMethodField()
   closeAt = serializers.SerializerMethodField()
+  hasAccessCode = serializers.SerializerMethodField()
   myScore = serializers.SerializerMethodField()
   myMaxScore = serializers.SerializerMethodField()
   myPassed = serializers.SerializerMethodField()
@@ -191,7 +192,7 @@ class StudentQuizSerializer(serializers.ModelSerializer):
     fields = ('id', 'course', 'assignment', 'title', 'description', 'timeLimitMinutes',
               'attemptsAllowed', 'scoringPolicy', 'passingScore', 'passingScoreUnit',
               'showCorrectAnswers', 'allowSubmissionReview', 'questionCount', 'availability', 'attemptsUsed',
-              'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt',
+              'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt', 'hasAccessCode',
               'myScore', 'myMaxScore', 'myPassed', 'myScorePending')
 
   @extend_schema_field(serializers.IntegerField())
@@ -253,6 +254,11 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   @extend_schema_field(serializers.DateTimeField(allow_null=True))
   def get_closeAt(self, obj):
     return quiz_grading.quiz_close_time(obj, self._student())
+
+  @extend_schema_field(serializers.BooleanField())
+  def get_hasAccessCode(self, obj):
+    """Whether a late-access code is set — lets a closed-quiz card prompt for it. Never the code."""
+    return bool(obj.accessCode)
 
   def _official_score(self, obj):
     # Cached per (serializer, quiz) so myScore/myMaxScore don't query twice.

@@ -1,4 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+import base64
+from django.core.exceptions import ValidationError
+from django.http import HttpResponse, HttpResponseNotFound
 from core.models import CourseFile
 from core.serializers.file import CourseFileSerializer
 from core.views.template import ListProtectedViewSet
@@ -68,3 +71,40 @@ class CourseFileViewSet(ListProtectedViewSet):
         queryset = self.get_queryset().filter(course=course)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+
+def serve_public_course_file(request, token):
+    """Public, unauthenticated download of a CourseFile marked isPublic.
+
+    Plain Django view so it bypasses DRF auth (mirrors serve_quiz_image). The unguessable
+    token locates the file; isPublic is the access gate, so a non-public (or missing) file
+    returns 404 without revealing existence.
+    """
+    try:
+        cf = CourseFile.objects.get(token=token)
+    except (CourseFile.DoesNotExist, ValidationError, ValueError):
+        return HttpResponseNotFound()
+    if not cf.isPublic:
+        return HttpResponseNotFound()
+
+    data = cf.data or ""
+    if data.startswith('data:'):
+        # data URI: "data:<mime>;base64,<payload>"
+        header, _, encoded = data.partition(',')
+        mime = header[len('data:'):].split(';')[0].strip() or 'application/octet-stream'
+        try:
+            body = base64.b64decode(encoded)
+        except Exception:
+            return HttpResponseNotFound()
+    else:
+        mime = 'text/plain; charset=utf-8'
+        body = data.encode('utf-8')
+
+    resp = HttpResponse(body, content_type=mime)
+    # Force download, never inline: this is arbitrary admin-uploaded content served
+    # unauthenticated on the API origin, so rendering (e.g. HTML/SVG) inline would be a
+    # stored-XSS vector. attachment + nosniff makes the browser download rather than execute.
+    resp['Content-Disposition'] = f'attachment; filename="{cf.name}"'
+    resp['X-Content-Type-Options'] = 'nosniff'
+    resp['Cache-Control'] = 'no-cache'  # id-addressed content is mutable, unlike quiz images
+    return resp

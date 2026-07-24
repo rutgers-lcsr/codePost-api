@@ -449,10 +449,13 @@ def quiz_is_closed(quiz, student=None, now=None):
   return bool(close and now >= close)
 
 
-def compute_attempt_deadline(quiz, student, started):
+def compute_attempt_deadline(quiz, student, started, bypass_close=False):
   """The hard stop for an attempt started at ``started``: the time limit (scaled by the
   student's course extra-time accommodation), capped by the quiz close when
-  ``endAttemptsAtClose``. None when untimed with no hard close."""
+  ``endAttemptsAtClose``. None when untimed with no hard close.
+
+  ``bypass_close`` lifts the close cap — a late student who started via the quiz access code
+  keeps their full time limit (or stays untimed) even though the quiz has closed."""
   deadline = None
   if quiz.timeLimitMinutes:
     minutes = float(quiz.timeLimitMinutes)
@@ -460,11 +463,16 @@ def compute_attempt_deadline(quiz, student, started):
     if accommodation is not None:
       minutes *= float(accommodation.timeMultiplier)
     deadline = started + timedelta(minutes=minutes)
-  if quiz.endAttemptsAtClose:
+  if quiz.endAttemptsAtClose and not bypass_close:
     close = quiz_close_time(quiz, student, started)
     if close is not None:
       deadline = close if deadline is None else min(deadline, close)
   return deadline
+
+
+# The availability reasons that mean "the taking window has passed" — the only reasons a quiz
+# access code may override for a late student (see QuizAttemptViewSet.create).
+LATE_BYPASSABLE_REASONS = frozenset({'closed', 'assignment_closed'})
 
 
 def quiz_availability(quiz, student, now=None):
@@ -585,7 +593,8 @@ def sync_attempts_to_settings(quiz, changed_fields):
   if changed & DEADLINE_FIELDS:
     stale = []
     for attempt in quiz.attempts.filter(status='in_progress').select_related('student'):
-      deadline = compute_attempt_deadline(quiz, attempt.student, attempt.startedAt)
+      deadline = compute_attempt_deadline(quiz, attempt.student, attempt.startedAt,
+                                          bypass_close=attempt.closeBypassed)
       if deadline != attempt.deadline:
         attempt.deadline = deadline
         attempt.modified = now

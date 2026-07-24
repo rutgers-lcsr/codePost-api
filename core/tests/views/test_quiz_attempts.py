@@ -1929,3 +1929,108 @@ class TestAccommodations:
         api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
                          {'student': student.email, 'timeMultiplier': '1'}, format='json')
         assert api_client.get(f'/courses/{course.id}/quizAccommodations/').data == []
+
+
+# --------------------------------------------------------------------------- #
+# Late-access code: a code an instructor gives late students to start a CLOSED quiz.
+# --------------------------------------------------------------------------- #
+
+class TestAccessCode:
+    def _closed_quiz(self, course, **kwargs):
+        """A standalone quiz whose taking window has already passed."""
+        opts = {'availableUntil': timezone.now() - timedelta(minutes=1)}
+        opts.update(kwargs)
+        quiz = _quiz(course, **opts)
+        _add(quiz, _mc(course, _bank(course)))
+        return quiz
+
+    def test_late_student_blocked_without_code(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._closed_quiz(course, accessCode='ABC123')
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['accessCodeRequired'] is True
+
+    def test_wrong_code_rejected(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._closed_quiz(course, accessCode='ABC123')
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'nope'}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['accessCodeRequired'] is True
+
+    def test_correct_code_starts_and_uncaps_deadline(self, api_client, taking_setup):
+        from django.utils.dateparse import parse_datetime
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        # Hard close in the past + a 120-min timer: without a bypass the deadline would be capped
+        # to the (past) close and the attempt would auto-submit instantly.
+        quiz = self._closed_quiz(course, accessCode='ABC123',
+                                 endAttemptsAtClose=True, timeLimitMinutes=120)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        attempt = QuizAttempt.objects.get(pk=resp.data['id'])
+        assert attempt.closeBypassed is True
+        # Full timer, not the past close.
+        deadline = parse_datetime(resp.data['deadline'])
+        assert deadline > timezone.now() + timedelta(minutes=110)
+
+    def test_code_only_works_when_one_is_configured(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._closed_quiz(course)  # no accessCode set
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert 'accessCodeRequired' not in resp.data  # normal closed message, no code prompt
+
+    def test_code_does_not_bypass_not_yet_open(self, api_client, taking_setup):
+        course = taking_setup['course']
+        # Window opens in the future — a code is for late students, not early ones.
+        quiz = _quiz(course, accessCode='ABC123',
+                     availableFrom=timezone.now() + timedelta(days=1),
+                     availableUntil=timezone.now() + timedelta(days=2))
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert 'accessCodeRequired' not in resp.data
+
+    def test_code_does_not_grant_extra_attempts(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        quiz = self._closed_quiz(course, accessCode='ABC123', attemptsAllowed=1)
+        # The student already used their one attempt (before the quiz closed).
+        QuizAttempt.objects.create(quiz=quiz, student=student, attemptNumber=1, status='submitted')
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN  # No attempts remaining — code doesn't help
+
+    def test_settings_edit_does_not_recap_bypassed_attempt(self, api_client, taking_setup):
+        from django.utils.dateparse import parse_datetime
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        quiz = self._closed_quiz(course, accessCode='ABC123',
+                                 endAttemptsAtClose=True, timeLimitMinutes=60)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        assert attempt.closeBypassed is True
+
+        # Admin edits a deadline field; the bypassed attempt must NOT be re-capped to the past close.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.patch(f'/quizzes/{quiz.id}/', {'timeLimitMinutes': 90}, format='json')
+        attempt.refresh_from_db()
+        assert attempt.deadline == parse_datetime(start.data['startedAt']) + timedelta(minutes=90)
+        assert attempt.deadline > timezone.now()
+
+    def test_has_access_code_exposed_on_card(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._closed_quiz(course, accessCode='ABC123')
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.get(f'/quizAttempts/availableQuizzes/?course={course.id}')
+        q_data = next(x for x in resp.data if x['id'] == quiz.id)
+        assert q_data['hasAccessCode'] is True
+        # The raw code is never sent to students.
+        assert 'accessCode' not in q_data

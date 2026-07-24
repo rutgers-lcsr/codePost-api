@@ -1,6 +1,9 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+import base64
+from django.urls import reverse
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
+from core.constants import MAX_COURSE_FILE_SIZE
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile, SubmissionFileEdit
 from core.services.file_handlers.notebook import NotebookHandler
@@ -167,14 +170,41 @@ class CourseFileSerializer(ModelSerializerWithPOSTCheck):
     These are files that belong to courses (syllabi, resources, etc.).
     """
 
+    publicUrl = serializers.SerializerMethodField()
+
     class Meta:
         model = CourseFile
-        fields = ('name', 'data', 'extension', 'course', 'id', 'path', 'created', 'modified')
-        read_only_fields = ('created', 'modified')
+        fields = ('name', 'data', 'extension', 'course', 'id', 'path', 'isPublic', 'publicUrl', 'created', 'modified')
+        read_only_fields = ('created', 'modified', 'publicUrl')
         POST_permissions_fields = ('course',)
         extra_kwargs = {
             "data": {"trim_whitespace": False},
         }
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_publicUrl(self, obj):
+        """Absolute URL to the unauthenticated, token-based download, only when public."""
+        if not obj.isPublic:
+            return None
+        path = reverse('course_file_raw', kwargs={'token': obj.token})
+        request = self.context.get('request')
+        return request.build_absolute_uri(path) if request else path
+
+    def validate(self, data):
+        data = super().validate(data)
+        raw = data.get('data', getattr(self.instance, 'data', '') or '')
+        if raw.startswith('data:'):
+            _, _, encoded = raw.partition(',')
+            try:
+                size = len(base64.b64decode(encoded))
+            except Exception:
+                size = len(raw.encode('utf-8'))
+        else:
+            size = len(raw.encode('utf-8'))
+        if size > MAX_COURSE_FILE_SIZE:
+            raise serializers.ValidationError(
+                f"Course file too large (max {MAX_COURSE_FILE_SIZE // (1024 * 1024)} MB).")
+        return data
 
 
 class FileValidationSerializerWithoutSubmission(serializers.Serializer):

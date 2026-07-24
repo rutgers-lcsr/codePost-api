@@ -1451,6 +1451,11 @@ class CourseFile(File):
     
   course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
                              related_name="files", help_text=("The related course_id."))
+  isPublic = models.BooleanField(default=False, help_text=(
+      "If True, the file is downloadable without authentication via its public "
+      "token URL (courseFiles/raw/<token>/)."))
+  token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True,
+      help_text=("Unguessable token used in the public download URL."))
 
   def get_course(self):
     return self.course
@@ -3047,6 +3052,10 @@ class Quiz(BaseModel):
   endAttemptsAtClose = models.BooleanField(default=False,
       help_text=("If true, reaching the close time ends/auto-submits in-progress attempts "
                  "(hard deadline); if false it only blocks new attempts."))
+  accessCode = models.CharField(max_length=16, null=True, blank=True,
+      help_text=("Optional code that lets a late student start this quiz after it has closed. "
+                 "Null/blank = no late access. Staff generate/rotate it via generateAccessCode; "
+                 "a correct code bypasses only the close, nothing else."))
 
   # --- Standard options (apply to every quiz) ---
   timeLimitMinutes = models.PositiveIntegerField(null=True, blank=True,
@@ -3201,6 +3210,9 @@ class QuizAttempt(BaseModel):
   isOfficialOverride = models.BooleanField(default=False,
       help_text=("Staff-pinned: this attempt is the student's official score, overriding "
                  "the quiz's scoringPolicy. At most one per (quiz, student)."))
+  closeBypassed = models.BooleanField(default=False,
+      help_text=("Started with the quiz access code after the close; its deadline is not "
+                 "capped at the close time."))
 
   course = property(lambda self: self.quiz.course)
 

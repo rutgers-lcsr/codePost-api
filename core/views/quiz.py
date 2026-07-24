@@ -31,6 +31,13 @@ def _forbidden(detail):
   return Response({'detail': detail}, status=status.HTTP_403_FORBIDDEN)
 
 
+def _generate_access_code():
+  """A short code a late student types to start a closed quiz (mirrors generate_invite_code)."""
+  import secrets
+  import string
+  return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
+
+
 def _review_guard(user, quiz):
   """Generated-question review actions: admins always, staff per the quiz flag."""
   if canReviewGeneratedQuestions(user, quiz):
@@ -188,6 +195,33 @@ class QuizViewSet(ListProtectedViewSet):
     record_audit_event(course=quiz.course, event_type='quiz_attempts_reset', user=request.user,
                        quiz=quiz, assignment=quiz.assignment, meta={'title': quiz.title})
     return Response({'deleted': deleted}, status=status.HTTP_200_OK)
+
+  @extend_schema(
+      request=inline_serializer('GenerateQuizAccessCodeRequest',
+                                {'clear': serializers.BooleanField(required=False)}),
+      responses=inline_serializer('QuizAccessCodeResponse',
+                                  {'accessCode': serializers.CharField(allow_null=True)}),
+      description="Generate (or, with {clear: true}, remove) this quiz's late-access code — the "
+                  "code an instructor hands to late students so they can start the quiz after it "
+                  "closes. Course admins only. Generating rotates any existing code.",
+  )
+  @action(detail=True, methods=['PATCH'])
+  def generateAccessCode(self, request, pk=None):
+    quiz = self.get_object()
+    denied = _admin_guard(request.user, quiz, 'Only course admins can change the quiz access code.')
+    if denied:
+      return denied
+    if quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+    if request.data.get('clear'):
+      quiz.accessCode = None
+    else:
+      quiz.accessCode = _generate_access_code()
+    quiz.save()
+    record_audit_event(course=quiz.course, event_type='quiz_access_code_changed', user=request.user,
+                       quiz=quiz, assignment=quiz.assignment,
+                       meta={'title': quiz.title, 'cleared': quiz.accessCode is None})
+    return Response({'accessCode': quiz.accessCode})
 
   @extend_schema(responses=GeneratedQuestionSetListSerializer(many=True))
   @action(detail=True, methods=['GET'])

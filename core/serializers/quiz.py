@@ -39,7 +39,7 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         'id', 'course', 'assignment', 'title', 'description',
         # Availability
         'assignmentTrigger', 'availableFrom', 'availableUntil',
-        'closeEvent', 'closeOffsetMinutes', 'endAttemptsAtClose',
+        'closeEvent', 'closeOffsetMinutes', 'endAttemptsAtClose', 'accessCode',
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
         'oneQuestionAtATime', 'allowBacktracking',
@@ -50,8 +50,9 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         'gradersCanReviewGenerated', 'autoPublishGenerated', 'generatedSections',
         'quizQuestions', 'questionGroups', 'source', 'createdBy', 'metadata',
     )
-    read_only_fields = ('source', 'createdBy', 'metadata', 'quizQuestions', 'questionGroups',
-                        'generatedSections')
+    # accessCode is view-only here — staff set/rotate/clear it via the generateAccessCode action.
+    read_only_fields = ('source', 'createdBy', 'metadata', 'accessCode', 'quizQuestions',
+                        'questionGroups', 'generatedSections')
     POST_permissions_fields = ('course',)
 
   def validate(self, data):
