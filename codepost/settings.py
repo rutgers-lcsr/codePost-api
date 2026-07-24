@@ -191,6 +191,10 @@ SPECTACULAR_SETTINGS = {
         ],
         # Quiz record provenance — shared by QuestionBank, Question, and Quiz.
         'QuizSourceEnum': 'core.models.QUIZ_SOURCE_CHOICES',
+        # Question types — shared by Question, SuggestedQuizQuestion, and
+        # GeneratedQuizQuestion. Auto-naming currently lands on this same name; pinning it
+        # keeps the TS client stable if a differently-named field ever shares the values.
+        'QuestionTypeEnum': 'core.models.QUESTION_TYPE_CHOICES',
         # Quiz availability / answer-reveal settings.
         'QuizAssignmentTriggerEnum': [
             ('during', 'During the assignment'), ('after_assignment', 'After the assignment closes'),

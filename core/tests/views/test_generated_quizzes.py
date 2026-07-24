@@ -192,6 +192,21 @@ class TestSectionAuthoring:
         assert '{submission_files}' in tokens
         assert '{assignment_file:main.py}' in tokens
 
+    def test_prompt_templates_endpoint(self, api_client, gen_setup):
+        """Starter templates for the prompt editor: staff-only, each with the fields the
+        picker renders."""
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/promptTemplates/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(resp.data) > 0
+        for tpl in resp.data:
+            assert {'key', 'label', 'description', 'attachedOnly', 'questionTypes', 'text'} \
+                <= set(tpl.keys())
+
+        api_client.force_authenticate(user=gen_setup['students'][0])
+        assert api_client.get(f"/quizzes/{gen_setup['quiz'].id}/promptTemplates/") \
+            .status_code == status.HTTP_403_FORBIDDEN
+
     def test_prompt_variables_forbidden_for_students(self, api_client, gen_setup):
         api_client.force_authenticate(user=gen_setup['students'][0])
         resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/promptVariables/")
@@ -229,6 +244,52 @@ class TestSubmissionSignal:
     def test_skips_without_generated_sections(self, gen_setup, monkeypatch):
         gen_setup['section'].delete()
         assert self._fire(gen_setup['submission'], monkeypatch, created=True) == []
+
+    def test_skips_draft_quizzes(self, gen_setup, monkeypatch):
+        """Uploads never spend AI credits on an unpublished quiz — publishing catches
+        missing sets up instead."""
+        gen_setup['quiz'].isPublished = False
+        gen_setup['quiz'].save()
+        assert self._fire(gen_setup['submission'], monkeypatch, created=True) == []
+
+
+class TestSectionCreatedSignal:
+    def _fire(self, section, monkeypatch, created=True):
+        from core.models import QuizGeneratedSection
+        from core.signals import backfill_generated_sets_on_section_created
+        calls = []
+        monkeypatch.setattr('core.tasks.backfill_personalized_quiz_sets.delay',
+                            lambda *a, **kw: calls.append((a, kw)))
+        backfill_generated_sets_on_section_created(QuizGeneratedSection, section, created)
+        return calls
+
+    def test_published_quiz_backfills(self, gen_setup, monkeypatch):
+        assert len(self._fire(gen_setup['section'], monkeypatch)) == 1
+
+    def test_draft_quiz_skipped(self, gen_setup, monkeypatch):
+        """Cloning recreates sections on unpublished clones — a submission-free prompt
+        would otherwise fan AI generation out to every enrolled student of a draft."""
+        gen_setup['quiz'].isPublished = False
+        gen_setup['quiz'].save()
+        assert self._fire(gen_setup['section'], monkeypatch) == []
+
+    def test_publish_catchup_queues_missing_only_backfill(self, api_client, gen_setup, monkeypatch):
+        """Publishing a quiz with sections backfills students without a set — missing_only,
+        so a republish never regenerates sets a reviewer may have edited."""
+        quiz = gen_setup['quiz']
+        quiz.isPublished = False
+        quiz.save()
+        calls = []
+        monkeypatch.setattr('core.tasks.backfill_personalized_quiz_sets.delay',
+                            lambda *a, **kw: calls.append((a, kw)))
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {'isPublished': True}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(calls) == 1
+        assert calls[0][1]['missing_only'] is True
+        # A non-publish edit doesn't re-queue.
+        api_client.patch(f'/quizzes/{quiz.id}/', {'title': 'Renamed'}, format='json')
+        assert len(calls) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -272,6 +333,31 @@ class TestGenerationTask:
         gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
         assert gen_set.status == 'ready'
         assert gen_set.questions.get().referenceSolution == ''
+
+    def test_draft_quiz_not_generated_by_submission_run(self, gen_setup, monkeypatch):
+        """The signal fan-out (no quiz_id) never generates for drafts; staff actions that
+        scope to a quiz_id still can (preparing an unpublished quiz for review)."""
+        _mock_ai(monkeypatch)
+        gen_setup['quiz'].isPublished = False
+        gen_setup['quiz'].save()
+        _run_task(gen_setup['submission'])
+        assert not gen_setup['quiz'].generatedSets.exists()
+        _run_task(gen_setup['submission'], quiz_id=gen_setup['quiz'].id)
+        assert gen_setup['quiz'].generatedSets.filter(status='ready').exists()
+
+    def test_keyless_choice_question_skipped(self, gen_setup, monkeypatch):
+        """A generated auto-graded question with no correct choice would mark every student
+        wrong (worst under autoPublishGenerated, where nobody reviews it) — it is dropped."""
+        _mock_ai(monkeypatch, json.dumps([
+            {'type': 'multiple_choice', 'text': 'Keyless?',
+             'choices': [{'text': 'a', 'is_correct': False}, {'text': 'b', 'is_correct': False}]},
+            {'type': 'multiple_choice', 'text': 'Keyed?',
+             'choices': [{'text': 'a', 'is_correct': True}, {'text': 'b'}]},
+        ]))
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'ready'
+        assert [q.text for q in gen_set.questions.all()] == ['Keyed?']
 
     def test_feature_disabled_skips(self, gen_setup, monkeypatch):
         _mock_ai(monkeypatch)
@@ -324,6 +410,20 @@ class TestGenerationTask:
         assert gen_set.status == 'failed'
         assert 'model unavailable' in gen_set.errorMessage
         assert gen_set.questions.count() == 0
+
+    def test_failed_regeneration_preserves_previous_questions(self, gen_setup, monkeypatch):
+        """An AI failure during force-regen keeps the set's existing (possibly hand-edited)
+        questions and returns it to review — instead of leaving it failed and empty."""
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0],
+                            submission=gen_setup['submission'], status='approved')
+        old_ids = set(gen_set.questions.values_list('id', flat=True))
+        _mock_ai(monkeypatch, success=False)
+        _run_task(gen_setup['submission'], quiz_id=gen_setup['quiz'].id, force=True,
+                  student_id=gen_setup['students'][0].id)
+        gen_set.refresh_from_db()
+        assert gen_set.status == 'ready'    # back to review, never silently re-approved
+        assert 'model unavailable' in gen_set.errorMessage
+        assert set(gen_set.questions.values_list('id', flat=True)) == old_ids
 
     def test_stale_batch_discards_results(self, gen_setup, monkeypatch):
         from core.models import GeneratedQuestionSet
@@ -405,6 +505,20 @@ class TestGenerateForStudent:
         gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
         assert gen_set.status == 'ready'
         assert gen_set.approvedAt is None
+
+    def test_generate_blocked_after_attempt(self, api_client, gen_setup, monkeypatch):
+        """Same guard as regenerate: force-regen would delete the questions a submitted
+        attempt's grading key references."""
+        from core.models import QuizAttempt
+        _mock_ai(monkeypatch)
+        student = gen_setup['students'][0]
+        _make_set(gen_setup['quiz'], student, submission=gen_setup['submission'],
+                  status='approved')
+        QuizAttempt.objects.create(quiz=gen_setup['quiz'], student=student, attemptNumber=1,
+                                   startedAt=timezone.now())
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup, student.email, force=True)
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_requires_submission(self, api_client, gen_setup, monkeypatch):
         _mock_ai(monkeypatch)
@@ -639,6 +753,34 @@ class TestReviewAPI:
         resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/unapprove/")
         assert resp.status_code == status.HTTP_200_OK
         assert resp.data['status'] == 'ready'
+        # Logged like approve/regenerate — the activity log records both directions.
+        from core.models import CourseAuditEvent
+        assert CourseAuditEvent.objects.filter(
+            quiz=gen_setup['quiz'], event_type='quiz_generated_set_unapproved',
+            user=gen_setup['admin']).exists()
+
+    def test_stale_generating_set_can_be_reclaimed(self, api_client, gen_setup, monkeypatch):
+        """A worker that died mid-generation leaves the set 'generating' forever (tasks have
+        no retries) — after a timeout the claim is presumed dead and regenerate works again
+        (a zombie that later completes is discarded by the generationBatch protocol)."""
+        from datetime import timedelta
+        from core.models import GeneratedQuestionSet
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0],
+                            submission=gen_setup['submission'], status='generating',
+                            questions=False)
+        calls = []
+        monkeypatch.setattr('core.tasks.generate_personalized_quiz_sets.delay',
+                            lambda *a, **kw: calls.append((a, kw)))
+        api_client.force_authenticate(user=gen_setup['admin'])
+        # A fresh claim is still refused.
+        assert api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/") \
+            .status_code == status.HTTP_400_BAD_REQUEST
+        # A stale one (worker presumed dead) is reclaimed.
+        GeneratedQuestionSet.objects.filter(pk=gen_set.id).update(
+            modified=timezone.now() - timedelta(minutes=11))
+        resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/")
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert len(calls) == 1
 
     def test_regenerate_is_admin_only_even_with_review_flag(self, api_client, gen_setup):
         gen_setup['quiz'].gradersCanReviewGenerated = True
@@ -654,6 +796,20 @@ class TestReviewAPI:
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/")
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_regenerate_blocked_after_attempt(self, api_client, gen_setup):
+        """Regenerating deletes the questions a submitted attempt's grading key lives on
+        (referenceSolution) — blocked once the student attempted, like unapprove."""
+        from core.models import QuizAttempt
+        student = gen_setup['students'][0]
+        gen_set = _make_set(gen_setup['quiz'], student, submission=gen_setup['submission'],
+                            status='approved')
+        QuizAttempt.objects.create(quiz=gen_setup['quiz'], student=student, attemptNumber=1,
+                                   startedAt=timezone.now())
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert gen_set.questions.count() == 2   # untouched
 
     def test_regenerate_enqueues_forced_run(self, api_client, gen_setup, monkeypatch):
         gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0],
@@ -695,6 +851,17 @@ class TestReviewAPI:
         question.refresh_from_db()
         assert question.text == 'Improved stem'
         assert question.choicesData[0] == {'text': 'A', 'isCorrect': True, 'feedback': ''}
+
+    def test_edit_cannot_strip_answer_key(self, api_client, gen_setup):
+        """A reviewer edit that leaves an auto-graded question with no correct choice is
+        rejected — it would grade every student wrong once published."""
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0])
+        question = gen_set.questions.first()    # the multiple_choice one
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.patch(f"/generatedQuizQuestions/{question.id}/", {
+            'choicesData': [{'text': 'A', 'isCorrect': False}],
+        }, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_edit_answer_key(self, api_client, gen_setup):
         gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0])
@@ -846,8 +1013,10 @@ class TestBackfill:
         from core.models import GeneratedQuestionSet, Quiz
         _mock_ai(monkeypatch)
         self._eager_tasks(monkeypatch)
+        # Published: the section-created backfill deliberately skips drafts (publishing
+        # catches those up instead).
         late_quiz = Quiz.objects.create(course=gen_setup['course'], title='Late quiz',
-                                        assignment=gen_setup['assignment'])
+                                        assignment=gen_setup['assignment'], isPublished=True)
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.post('/quizGeneratedSections/', {
             'quiz': late_quiz.id, 'systemPrompt': 'Ask about {submission_files}.',

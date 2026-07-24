@@ -2,6 +2,7 @@
 from django.db import transaction
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.decorators import action
@@ -36,10 +37,23 @@ class QuestionViewSet(ListProtectedViewSet):
 
   def _resolve_target_bank(self, request):
     """Resolve the target bank from the request and check course-staff access."""
-    bank = get_object_or_404(QuestionBank, id=request.data.get('bankId'))
+    try:
+      bank_id = int(request.data.get('bankId'))
+    except (TypeError, ValueError):
+      return None, Response({'error': 'A valid bankId is required.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+    bank = get_object_or_404(QuestionBank, id=bank_id)
     if not (request.user.is_superuser or isCourseStaff(request.user, bank.course)):
       return None, returnForbidden()
     return bank, None
+
+  @staticmethod
+  def _parse_question_ids(request):
+    """The questionIds list as ints, or None if any entry is malformed (→ 400, not 500)."""
+    try:
+      return [int(i) for i in (request.data.get('questionIds') or [])]
+    except (TypeError, ValueError):
+      return None
 
   @extend_schema(
       request=inline_serializer('BankQuestionsRequest', fields={
@@ -54,10 +68,13 @@ class QuestionViewSet(ListProtectedViewSet):
     bank, err = self._resolve_target_bank(request)
     if err:
       return err
-    ids = [int(i) for i in (request.data.get('questionIds') or [])]
+    ids = self._parse_question_ids(request)
+    if ids is None:
+      return Response({'error': 'questionIds must be a list of integers.'},
+                      status=status.HTTP_400_BAD_REQUEST)
     qs = Question.objects.filter(id__in=ids, course=bank.course)  # same-course safety
     moved_ids = list(qs.values_list('id', flat=True))
-    qs.update(bank=bank)
+    qs.update(bank=bank, modified=timezone.now())  # queryset update bypasses BaseModel.save()
     questions = Question.objects.filter(id__in=moved_ids).prefetch_related('choices')
     return Response(QuestionSerializer(questions, many=True, context={'request': request}).data)
 
@@ -74,7 +91,10 @@ class QuestionViewSet(ListProtectedViewSet):
     bank, err = self._resolve_target_bank(request)
     if err:
       return err
-    ids = [int(i) for i in (request.data.get('questionIds') or [])]
+    ids = self._parse_question_ids(request)
+    if ids is None:
+      return Response({'error': 'questionIds must be a list of integers.'},
+                      status=status.HTTP_400_BAD_REQUEST)
     source = Question.objects.filter(id__in=ids, course=bank.course).prefetch_related('choices')
     new_questions = []
     with transaction.atomic():

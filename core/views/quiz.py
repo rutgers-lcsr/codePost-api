@@ -101,6 +101,13 @@ class QuizViewSet(ListProtectedViewSet):
       event_type = 'quiz_updated'
     record_audit_event(course=quiz.course, event_type=event_type, user=self.request.user,
                        quiz=quiz, assignment=quiz.assignment, meta={'title': quiz.title})
+    # Automatic generation (submission signal / section-created backfill) skips drafts, so
+    # publishing must catch up students who have no generated set yet. missing_only: a
+    # republish must never regenerate existing sets — a reviewer may have edited them.
+    if quiz.isPublished and not was_published and quiz.generatedSections.exists():
+      from core.tasks import backfill_personalized_quiz_sets
+      backfill_personalized_quiz_sets.delay(quiz.id, requested_by_id=self.request.user.id,
+                                            missing_only=True)
 
   def perform_destroy(self, instance):
     course, assignment, title, quiz_id = (
@@ -303,13 +310,22 @@ class QuizViewSet(ListProtectedViewSet):
 
     force = bool(request.data.get('force'))
     gen_set, _ = GeneratedQuestionSet.objects.get_or_create(quiz=quiz, student=student)
-    if gen_set.status == 'generating':
+    # A stale 'generating' (a worker that died without writing back) may be reclaimed —
+    # the generationBatch protocol discards the zombie's results if it ever completes.
+    from core.views.generatedQuestions import generating_is_stale
+    if gen_set.status == 'generating' and not generating_is_stale(gen_set):
       return Response({'error': "The student's set is already generating."},
                       status=status.HTTP_400_BAD_REQUEST)
     if gen_set.status == 'approved' and not force:
       return Response({'error': "The student's set is already approved. Pass force=true to "
                                 'regenerate it (this un-publishes the quiz for them until '
                                 're-approval).'}, status=status.HTTP_400_BAD_REQUEST)
+    # Regenerating deletes the current questions; a submitted attempt's grading key
+    # (referenceSolution) lives on them — mirrors the unapprove/regenerate guards.
+    if gen_set.questions.exists() and quiz.attempts.filter(student=student).exists():
+      return Response({'error': 'The student has already attempted this quiz — reset their '
+                                'attempts before regenerating their questions.'},
+                      status=status.HTTP_400_BAD_REQUEST)
     gen_set.status = 'pending'
     gen_set.approvedBy = None
     gen_set.approvedAt = None

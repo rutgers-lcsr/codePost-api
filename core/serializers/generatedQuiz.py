@@ -98,6 +98,19 @@ class GeneratedQuizQuestionSerializer(ModelSerializerWithPOSTCheck):
     return [{'text': c.get('text', ''), 'isCorrect': bool(c.get('isCorrect')),
              'feedback': c.get('feedback', '') or ''} for c in value]
 
+  def validate(self, data):
+    data = super().validate(data)
+    # A reviewer edit must not strip the answer key from an auto-graded question — a
+    # keyless question grades every student wrong. Only enforced when the edit touches
+    # the key (choicesData/questionType), matching QuestionSerializer.
+    if 'choicesData' in data or 'questionType' in data:
+      from core.services.quiz_grading import has_answer_key
+      proposed = self.genProposedFields(data)
+      if not has_answer_key(proposed.get('questionType'), proposed.get('choicesData')):
+        raise serializers.ValidationError(
+            {'choicesData': 'At least one choice must be marked correct for this question type.'})
+    return data
+
 
 class GeneratedQuestionSetSerializer(serializers.ModelSerializer):
   """A student's generated question set with its questions — the review payload.

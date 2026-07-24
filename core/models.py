@@ -2462,6 +2462,7 @@ class CourseAuditEvent(BaseModel):
       ('quiz_response_graded', 'Quiz Response Graded'),
       ('quiz_response_grade_reopened', 'Quiz Response Grade Reopened'),
       ('quiz_generated_set_approved', 'Generated Question Set Approved'),
+      ('quiz_generated_set_unapproved', 'Generated Question Set Unapproved'),
       ('quiz_generated_set_regenerated', 'Generated Question Set Regenerated'),
       ('quiz_generated_sets_published', 'Generated Question Sets Published'),
   ]

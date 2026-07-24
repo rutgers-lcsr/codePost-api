@@ -2,6 +2,7 @@
 from rest_framework import serializers
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Question, QuestionChoice
+from core.services import quiz_grading
 
 
 class QuestionChoiceSerializer(serializers.ModelSerializer):
@@ -42,6 +43,22 @@ class QuestionSerializer(ModelSerializerWithPOSTCheck):
     course = proposed.get('course')
     if bank is not None and course is not None and bank.course_id != course.id:
       raise serializers.ValidationError({'bank': 'Bank does not belong to this course.'})
+    tolerance = proposed.get('numericTolerance')
+    if tolerance is not None and tolerance < 0:
+      raise serializers.ValidationError(
+          {'numericTolerance': 'numericTolerance cannot be negative.'})
+    # An auto-graded question with no choice marked correct grades every student wrong
+    # (grade_response treats an empty key as never-correct) — reject it while the key is
+    # being shaped (create, or an update touching choices/questionType). Unrelated edits
+    # to pre-existing rows are left alone, mirroring the seal guard in QuizSerializer.
+    if self.instance is None or 'choices' in data or 'questionType' in data:
+      qtype = proposed.get('questionType') or 'multiple_choice'
+      choices = data.get('choices')
+      if choices is None and self.instance is not None:
+        choices = list(self.instance.choices.all())
+      if not quiz_grading.has_answer_key(qtype, choices):
+        raise serializers.ValidationError(
+            {'choices': 'At least one choice must be marked correct for this question type.'})
     return data
 
   def _sync_choices(self, question, choices_data):

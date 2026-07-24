@@ -20,6 +20,19 @@ AUTO_GRADED_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short
 MANUAL_TYPES = {'essay', 'code'}
 
 
+def has_answer_key(question_type, choices):
+  """Whether a question of this type carries a usable answer key. Manual types always do
+  (staff grade them); auto-graded types need at least one choice marked correct —
+  grade_response treats an empty key as never-correct, so a keyless question would mark
+  every student wrong. ``choices`` may be dicts (choicesData / snapshots) or
+  QuestionChoice rows."""
+  if question_type not in AUTO_GRADED_TYPES:
+    return True
+  return any(
+      bool(c.get('isCorrect')) if isinstance(c, dict) else bool(getattr(c, 'isCorrect', False))
+      for c in choices or [])
+
+
 # --------------------------------------------------------------------------- #
 # Attempt materialization
 # --------------------------------------------------------------------------- #
@@ -233,7 +246,7 @@ def grade_attempt(attempt):
   attempt.needsManualGrading = needs_manual
   attempt.passed = None if needs_manual else _compute_passed(attempt)
   attempt.status = 'submitted'
-  attempt.submittedAt = timezone.now()
+  attempt.submittedAt = graded_at
   with transaction.atomic():
     if responses:
       QuizResponse.objects.bulk_update(
@@ -527,6 +540,20 @@ def quiz_availability(quiz, student, now=None):
   if close and now >= close:
     return (False, 'closed')
   return (True, 'open')
+
+
+def quiz_never_closes(assignment, available_until, close_event):
+  """Whether this configuration has no close at all. sealResultsUntilClose would then hide
+  results forever — the seal invariant shared by QuizSerializer.validate and copy_quiz.
+  Standalone quizzes close via availableUntil; attached ones via closeEvent (fixed_date
+  reads availableUntil too)."""
+  if assignment is None:
+    return available_until is None
+  if close_event == 'none':
+    return True
+  if close_event == 'fixed_date':
+    return available_until is None
+  return False
 
 
 def answers_visible(quiz, attempt, now=None):

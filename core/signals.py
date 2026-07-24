@@ -9,7 +9,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
 
-from core.models import QuizGeneratedSection, Submission
+from core.models import Assignment, QuizGeneratedSection, Submission
 import time
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,11 @@ def auto_generate_personalized_quiz(sender, instance, created, **kwargs):
         return
 
     try:
-        if not instance.assignment.quizzes.filter(generatedSections__isnull=False).exists():
+        # Draft quizzes never generate automatically (the task applies the same filter) —
+        # publishing catches missing sets up via QuizViewSet.perform_update. Without this,
+        # every upload would spend AI credits preparing a quiz nobody may ever publish.
+        if not instance.assignment.quizzes.filter(
+                isPublished=True, generatedSections__isnull=False).exists():
             return
         # Import here to avoid circular imports.
         from core.tasks import generate_personalized_quiz_sets
@@ -146,8 +150,14 @@ def backfill_generated_sets_on_section_created(sender, instance, created, **kwar
     Also refreshes existing non-approved sets, which the new section makes incomplete.
     Submission-free sections (no submission variables in the prompt) backfill every
     enrolled student instead — the eager path, which also covers standalone quizzes
-    (the backfill itself no-ops for unattached quizzes that DO need submissions)."""
+    (the backfill itself no-ops for unattached quizzes that DO need submissions).
+
+    Draft quizzes are skipped — cloning a course recreates sections on unpublished
+    clones, and a submission-free prompt would silently fan AI generation out to every
+    enrolled student. Publishing catches missing sets up (QuizViewSet.perform_update)."""
     if not created:
+        return
+    if not instance.quiz.isPublished:
         return
     try:
         from core.tasks import backfill_personalized_quiz_sets
@@ -157,6 +167,33 @@ def backfill_generated_sets_on_section_created(sender, instance, created, **kwar
     except Exception as e:
         logger.error(
             f"Failed to queue personalized quiz backfill for quiz {instance.quiz_id}: {e}",
+            exc_info=True
+        )
+
+
+@receiver(post_save, sender=Assignment)
+def sync_quiz_attempts_on_assignment_change(sender, instance, created, **kwargs):
+    """An attached quiz's close time can derive from the assignment (closeEvent
+    'assignment_due' / 'feedback_released'), and attempt deadlines are stored at start —
+    so editing the assignment's due date or feedback release must be reflected onto
+    in-progress attempts, exactly as editing the quiz's own close fields is
+    (QuizSerializer.update → sync_attempts_to_settings). Without this, extending a due
+    date leaves stale deadlines and the expiry sweep auto-submits students early."""
+    if created:
+        return
+    # BaseModel.save() computes update_fields on every update, so this is reliable for
+    # normal saves (queryset.update() bypasses signals — same caveat as every receiver).
+    update = kwargs.get('update_fields', None)
+    if update is not None and not ({'uploadDueDate', 'feedbackReleasedAt'} & set(update)):
+        return
+    try:
+        from core.services import quiz_grading
+        quizzes = instance.quizzes.filter(attempts__status='in_progress').distinct()
+        for quiz in quizzes:
+            quiz_grading.sync_attempts_to_settings(quiz, {'closeEvent'})
+    except Exception as e:
+        logger.error(
+            f"Failed to resync quiz attempt deadlines for assignment {instance.id}: {e}",
             exc_info=True
         )
 

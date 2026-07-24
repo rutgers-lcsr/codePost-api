@@ -71,3 +71,21 @@ class TestQuizImageUpload:
         anon = type(api_client)()
         resp = anon.get('/quizImages/raw/00000000-0000-0000-0000-000000000000/')
         assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_delete_removes_storage_file(self, api_client, img_setup):
+        """QuizImage.delete() overrides Django's default (which leaves files behind) to
+        remove the stored file — otherwise deleted images accumulate in MEDIA_ROOT/S3."""
+        import os
+        from core.models import QuizImage
+        api_client.force_authenticate(user=img_setup['admin'])
+        resp = api_client.post('/quizImages/', {'course': img_setup['course'].id, 'image': _png_upload()},
+                               format='multipart')
+        assert resp.status_code == status.HTTP_201_CREATED
+        image = QuizImage.objects.get(pk=resp.data['id'])
+        path = image.image.path
+        assert os.path.exists(path)
+
+        resp = api_client.delete(f"/quizImages/{image.id}/")
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        assert not QuizImage.objects.filter(pk=image.pk).exists()
+        assert not os.path.exists(path)

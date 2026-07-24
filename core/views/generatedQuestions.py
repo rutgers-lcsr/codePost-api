@@ -1,4 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+from datetime import timedelta
+
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
@@ -23,6 +25,18 @@ logger = getLogger(__name__)
 
 # Statuses in which a set's questions exist and may be staff-edited.
 EDITABLE_SET_STATUSES = ('ready', 'approved')
+
+# How long a set may sit in 'generating' before the claim is presumed dead (a worker that
+# crashed without writing back). Tasks have no retries, so without this the set would be
+# stuck forever — every generate/regenerate action refusing with "already generating".
+# Comfortably above a real multi-section run; a superseded zombie that later completes is
+# discarded by the generationBatch protocol. (Same idea as runCode's stale-run window.)
+GENERATING_STALE_AFTER = timedelta(minutes=10)
+
+
+def generating_is_stale(gen_set, now=None):
+  """Whether a 'generating' claim is old enough to be presumed dead and reclaimable."""
+  return ((now or timezone.now()) - gen_set.modified) > GENERATING_STALE_AFTER
 
 
 class QuizGeneratedSectionViewSet(ListProtectedViewSet):
@@ -88,12 +102,17 @@ class GeneratedQuestionSetViewSet(mixins.RetrieveModelMixin, viewsets.GenericVie
     gen_set.approvedBy = None
     gen_set.approvedAt = None
     gen_set.save(update_fields=['status', 'approvedBy', 'approvedAt', 'modified'])
+    record_audit_event(course=gen_set.quiz.course, event_type='quiz_generated_set_unapproved',
+                       user=request.user, quiz=gen_set.quiz, assignment=gen_set.quiz.assignment,
+                       meta={'studentEmail': gen_set.student.email, 'setId': gen_set.id})
     return Response(self.get_serializer(gen_set).data)
 
   @extend_schema(
       request=None, responses=GeneratedQuestionSetSerializer,
       description="Discard this set's questions and generate new ones from the student's "
-                  "submission. An approved set becomes un-published until re-approved.",
+                  "submission. An approved set becomes un-published until re-approved. "
+                  "Blocked once the student has attempted the quiz — their responses "
+                  "reference these questions (the grading answer key).",
   )
   @action(detail=True, methods=['POST'])
   def regenerate(self, request, pk=None):
@@ -103,8 +122,15 @@ class GeneratedQuestionSetViewSet(mixins.RetrieveModelMixin, viewsets.GenericVie
     if gen_set.submission_id is None and generation_needs_submission(gen_set.quiz):
       return Response({'error': 'The set has no submission to regenerate from.'},
                       status=status.HTTP_400_BAD_REQUEST)
-    if gen_set.status == 'generating':
+    if gen_set.status == 'generating' and not generating_is_stale(gen_set):
       return Response({'error': 'The set is already generating.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    # Regenerating deletes the current questions; a submitted attempt's grading key
+    # (referenceSolution) lives on them, so it would be severed for graders. Mirrors the
+    # unapprove guard.
+    if gen_set.questions.exists() and gen_set.quiz.attempts.filter(student=gen_set.student).exists():
+      return Response({'error': 'The student has already attempted this quiz — reset their '
+                                'attempts before regenerating their questions.'},
                       status=status.HTTP_400_BAD_REQUEST)
     gen_set.status = 'pending'
     gen_set.approvedBy = None

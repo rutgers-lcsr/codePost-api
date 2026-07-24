@@ -21,10 +21,14 @@ def finalize_expired_quiz_attempts():
     # Snapshot the ids first so grading (which mutates status out of the filter) can't disturb
     # the iteration, and isolate each attempt so one bad attempt can't strand all the others.
     count = 0
+    # The resume path logs the same event when a student triggers the auto-submit by
+    # returning — the sweep must too, or auto-submitted attempts vanish from the activity log.
+    from core.views.quizAttempt import _record_attempt_event
     for attempt_id in list(stuck.values_list('id', flat=True)):
         try:
             attempt = QuizAttempt.objects.get(pk=attempt_id, status='in_progress')
             quiz_grading.grade_attempt(attempt)
+            _record_attempt_event(attempt, 'quiz_attempt_autosubmitted')
             count += 1
         except QuizAttempt.DoesNotExist:
             continue
@@ -441,7 +445,7 @@ def generate_quiz_question_suggestions(
                 continue
             qtype = q.get('type', 'multiple_choice')
             choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
-            if qtype in CHOICE_TYPES and not choices:
+            if qtype in CHOICE_TYPES and not any(c.get('isCorrect') for c in choices):
                 missing_choices += 1
             SuggestedQuizQuestion.objects.create(
                 assignment=assignment,
@@ -461,10 +465,12 @@ def generate_quiz_question_suggestions(
 
     logger.info(f"[QuizGen] Created {created} suggested quiz questions for course {course.id} (batch {batch})")
     if missing_choices:
-        # Diagnostic: the model returned choice-type questions without choices. Logging the
+        # Diagnostic: the model returned choice-type questions without a usable answer key
+        # (no choices, or none marked correct). The rows are still created — the instructor
+        # reviews and can fix them, and accept refuses a keyless suggestion. Logging the
         # raw output helps tell whether to adjust the active quiz_generation prompt variant.
         logger.warning(
-            f"[QuizGen] {missing_choices}/{created} choice-type questions had no choices. "
+            f"[QuizGen] {missing_choices}/{created} choice-type questions had no correct choice. "
             f"Raw model output (truncated): {(result.text or '')[:1500]}"
         )
     service.record_usage(result, user=user, request_type='quiz_generation')
@@ -531,6 +537,10 @@ def generate_personalized_quiz_sets(
         quiz_qs = assignment.quizzes.filter(generatedSections__isnull=False).distinct()
         if quiz_id is not None:
             quiz_qs = quiz_qs.filter(id=quiz_id)
+        else:
+            # Automatic (signal) fan-out never touches drafts — only staff actions, which
+            # scope to a quiz_id, may generate for an unpublished quiz they're preparing.
+            quiz_qs = quiz_qs.filter(isPublished=True)
         quizzes = list(quiz_qs.prefetch_related('generatedSections'))
     if not students or not quizzes:
         return
@@ -647,9 +657,12 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
                 continue
             qtype = q.get('type', 'multiple_choice')
             choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
-            if qtype in _CHOICE_TYPES and not choices:
+            if qtype in _CHOICE_TYPES and not any(c.get('isCorrect') for c in choices):
+                # No usable answer key: these auto-grade off the choices, so a keyless
+                # question would mark every student wrong (worse under autoPublishGenerated,
+                # where no human reviews it before students are scored).
                 logger.warning(
-                    f"[PersonalQuizGen] Skipping a '{qtype}' question with no choices "
+                    f"[PersonalQuizGen] Skipping a '{qtype}' question with no correct choice "
                     f"(quiz {quiz.id}). Raw output (truncated): {(result.text or '')[:1500]}")
                 continue
             language = q.get('language')
@@ -692,13 +705,17 @@ def _write_generation_results(quiz, claimed_ids, batch, question_rows, error,
         gen_sets = list(GeneratedQuestionSet.objects.select_for_update().filter(
             id__in=claimed_ids, generationBatch=batch))
         for gen_set in gen_sets:
-            gen_set.questions.all().delete()
             if error:
-                gen_set.status = 'failed'
+                # A failed run must not destroy what the set had before it — a reviewer may
+                # have edited (even approved) those questions. With prior content the set
+                # returns to review ('ready': recoverable with one approve click, never
+                # silently re-approved); only a set with nothing to show becomes 'failed'.
+                gen_set.status = 'ready' if gen_set.questions.exists() else 'failed'
                 gen_set.errorMessage = error
                 gen_set.generationMetadata = metadata
                 gen_set.save(update_fields=['status', 'errorMessage', 'generationMetadata', 'modified'])
                 continue
+            gen_set.questions.all().delete()
             GeneratedQuizQuestion.objects.bulk_create([
                 GeneratedQuizQuestion(
                     set=gen_set, section=section, sortKey=position,
@@ -790,15 +807,19 @@ def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
 
 
 @shared_task
-def backfill_personalized_quiz_sets(quiz_id: int, requested_by_id: int | None = None):
+def backfill_personalized_quiz_sets(quiz_id: int, requested_by_id: int | None = None,
+                                    missing_only: bool = False):
     """Async wrapper around enqueue_personalized_backfill for signal-triggered backfills
-    (a QuizGeneratedSection created after students already submitted)."""
+    (a QuizGeneratedSection created after students already submitted) and the publish
+    catch-up (``missing_only=True`` — only students with no set, so a republish never
+    regenerates sets a reviewer may have edited)."""
     from core.models import Quiz
 
     quiz = Quiz.objects.filter(id=quiz_id).select_related('assignment').first()
     if quiz is None:
         return
-    queued = enqueue_personalized_backfill(quiz, requested_by_id=requested_by_id)
+    queued = enqueue_personalized_backfill(quiz, requested_by_id=requested_by_id,
+                                           missing_only=missing_only)
     if queued:
         logger.info(f"[PersonalQuizGen] Backfill for quiz {quiz_id}: queued {queued} student(s).")
 
@@ -873,6 +894,9 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
                     questionType=q['type'],
                     text=q['text'],
                     points=Decimal(str(q.get('points', 1))),
+                    # Canvas margin/range scoring, parsed to our per-question tolerance.
+                    numericTolerance=(Decimal(str(q['tolerance'])).quantize(Decimal('0.0001'))
+                                      if q.get('tolerance') is not None else None),
                     source='imported',
                     createdBy=job.createdBy,
                     metadata=q.get('metadata', {}),

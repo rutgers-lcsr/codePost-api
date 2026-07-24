@@ -124,6 +124,49 @@ class TestAuthoringCRUD:
         assert question.createdBy == quiz_setup['admin']
         assert question.bank_id == bank_id
 
+    def test_keyed_question_requires_a_correct_choice(self, api_client, quiz_setup):
+        """An auto-graded question with no choice marked correct would grade every student
+        wrong — creation and key-stripping edits are rejected; unrelated edits still pass."""
+        from core.models import QuestionBank
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        course = quiz_setup['course']
+        bank = QuestionBank.objects.create(course=course, name='Keyed')
+
+        base = {'course': course.id, 'bank': bank.id, 'questionType': 'multiple_choice', 'text': 'Q?'}
+        # No correct choice (and no choices at all) → rejected.
+        resp = api_client.post('/questions/', {**base, 'choices': [
+            {'text': 'a', 'isCorrect': False}, {'text': 'b', 'isCorrect': False}]}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'choices' in resp.data
+        assert api_client.post('/questions/', base, format='json').status_code \
+            == status.HTTP_400_BAD_REQUEST
+        # Manual types don't carry a choice key.
+        assert api_client.post('/questions/', {**base, 'questionType': 'essay'},
+                               format='json').status_code == status.HTTP_201_CREATED
+
+        question = _mc_question(course, bank=bank)
+        # Stripping the key on an edit → rejected; an unrelated edit passes.
+        resp = api_client.patch(f'/questions/{question.id}/', {
+            'choices': [{'text': 'a', 'isCorrect': False}]}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert api_client.patch(f'/questions/{question.id}/', {'text': 'Renamed?'},
+                                format='json').status_code == status.HTTP_200_OK
+
+    def test_negative_numeric_tolerance_rejected(self, api_client, quiz_setup):
+        """abs(answer − student) <= negative is never true — the question would always
+        grade wrong, so a negative tolerance is rejected at authoring time."""
+        from core.models import QuestionBank
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        course = quiz_setup['course']
+        bank = QuestionBank.objects.create(course=course, name='Numeric')
+        resp = api_client.post('/questions/', {
+            'course': course.id, 'bank': bank.id, 'questionType': 'numerical', 'text': '2+2?',
+            'numericTolerance': '-0.5',
+            'choices': [{'text': '4', 'isCorrect': True}],
+        }, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'numericTolerance' in resp.data
+
     def test_copy_question_to_another_bank(self, api_client, quiz_setup):
         from core.models import QuestionBank
         api_client.force_authenticate(user=quiz_setup['admin'])
@@ -155,6 +198,20 @@ class TestAuthoringCRUD:
         assert resp.status_code == status.HTTP_200_OK
         assert Question.objects.get(id=q.id).bank_id == b2.id   # re-pointed, not copied
         assert b1.questions.count() == 0
+
+    def test_malformed_ids_return_400_not_500(self, api_client, quiz_setup):
+        from core.models import QuestionBank
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        bank = QuestionBank.objects.create(course=quiz_setup['course'], name='Guard')
+        resp = api_client.post('/questions/moveToBank/',
+                               {'questionIds': ['abc'], 'bankId': bank.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        resp = api_client.post('/questions/copyToBank/',
+                               {'questionIds': ['abc'], 'bankId': bank.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        resp = api_client.post('/questions/moveToBank/',
+                               {'questionIds': [1], 'bankId': 'abc'}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_delete_bank_in_use_blocks_then_force(self, api_client, quiz_setup):
         from core.models import QuestionBank, Quiz, QuizQuestion, Question
@@ -435,6 +492,24 @@ class TestCanvasImport:
         assert resp.data['status'] == 'completed'
         assert resp.data['createdQuestionCount'] == 3
 
+    def test_import_input_guards(self, api_client, quiz_setup):
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        # Malformed course id → 400, not a ValueError 500.
+        resp = api_client.post('/quizImportJobs/', {'course': 'abc'}, format='multipart')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        # An unknown targetBankId must not silently import into a brand-new bank.
+        upload = SimpleUploadedFile('export.zip', _canvas_zip_bytes(), content_type='application/zip')
+        resp = api_client.post('/quizImportJobs/', {
+            'course': quiz_setup['course'].id, 'file': upload, 'targetBankId': 999999,
+        }, format='multipart')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        # Malformed targetBankId → 400.
+        upload = SimpleUploadedFile('export.zip', _canvas_zip_bytes(), content_type='application/zip')
+        resp = api_client.post('/quizImportJobs/', {
+            'course': quiz_setup['course'].id, 'file': upload, 'targetBankId': 'abc',
+        }, format='multipart')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
     def test_import_endpoint_forbidden_for_student(self, api_client, quiz_setup):
         api_client.force_authenticate(user=quiz_setup['student'])
         upload = SimpleUploadedFile('export.zip', _canvas_zip_bytes(), content_type='application/zip')
@@ -442,6 +517,57 @@ class TestCanvasImport:
                                {'course': quiz_setup['course'].id, 'file': upload},
                                format='multipart')
         assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_numerical_margin_and_range_import_tolerance(self, quiz_setup):
+        """Canvas 'answer with margin' keeps its margin as numericTolerance (it used to
+        import as silent exact-match); 'answer in range' imports as midpoint ± half-width
+        (it used to be skipped as unparseable)."""
+        from decimal import Decimal
+        from core.models import QuizImportJob, Question
+        from core.tasks import import_quiz_qti
+
+        xml = """<?xml version="1.0"?>
+<questestinterop xmlns="http://www.imsglobal.org/xsd/ims_qtiasiv1p2">
+ <assessment ident="a1" title="Numeric Quiz"><section ident="root">
+  <item ident="q_margin" title="Margin">
+   <itemmetadata><qtimetadata>
+     <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>numerical_question</fieldentry></qtimetadatafield>
+   </qtimetadata></itemmetadata>
+   <presentation><material><mattext>Approx pi?</mattext></material>
+     <response_str ident="r1"><render_fib><response_label ident="x"/></render_fib></response_str></presentation>
+   <resprocessing><respcondition><conditionvar><or>
+       <varequal respident="r1">3.14</varequal>
+       <and><vargte respident="r1">3.04</vargte><varlte respident="r1">3.24</varlte></and>
+     </or></conditionvar>
+     <setvar action="Set" varname="SCORE">100</setvar></respcondition></resprocessing>
+  </item>
+  <item ident="q_range" title="Range">
+   <itemmetadata><qtimetadata>
+     <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>numerical_question</fieldentry></qtimetadatafield>
+   </qtimetadata></itemmetadata>
+   <presentation><material><mattext>Anything from 10 to 20.</mattext></material></presentation>
+   <resprocessing><respcondition><conditionvar>
+       <and><vargte respident="r1">10</vargte><varlte respident="r1">20</varlte></and>
+     </conditionvar>
+     <setvar action="Set" varname="SCORE">100</setvar></respcondition></resprocessing>
+  </item>
+ </section></assessment>
+</questestinterop>"""
+        job = QuizImportJob.objects.create(
+            course=quiz_setup['course'], createdBy=quiz_setup['admin'],
+            file=SimpleUploadedFile('numeric.xml', xml.encode()),
+        )
+        import_quiz_qti(job.id)
+        job.refresh_from_db()
+        assert job.status == 'completed'
+
+        margin = Question.objects.get(course=quiz_setup['course'], text='Approx pi?')
+        assert margin.numericTolerance == Decimal('0.1000')
+        assert [c.text for c in margin.choices.all()] == ['3.14']
+
+        rng = Question.objects.get(course=quiz_setup['course'], text='Anything from 10 to 20.')
+        assert rng.numericTolerance == Decimal('5.0000')
+        assert [c.text for c in rng.choices.all()] == ['15']
 
     def test_html_stems_are_cleaned(self, quiz_setup):
         """Canvas HTML stems (texttype=text/html) are stripped to readable text."""
@@ -635,6 +761,24 @@ class TestAISuggestions:
         suggestion.refresh_from_db()
         assert suggestion.status == 'accepted'
         assert suggestion.acceptedQuestion_id == question.id
+
+    def test_accept_blocked_when_no_correct_choice(self, api_client, quiz_setup):
+        """The model occasionally omits the answer key — accepting such a suggestion would
+        create a question that grades every student wrong, so accept refuses until the
+        suggestion is edited (it stays pending)."""
+        from core.models import SuggestedQuizQuestion, QuestionBank
+        bank = QuestionBank.objects.create(course=quiz_setup['course'], name='Target')
+        suggestion = SuggestedQuizQuestion.objects.create(
+            assignment=quiz_setup['assignment'], questionType='multiple_choice', text='Q?',
+            choicesData=[{'text': 'a', 'isCorrect': False}, {'text': 'b', 'isCorrect': False}],
+            status='pending')
+
+        api_client.force_authenticate(user=quiz_setup['grader'])
+        resp = api_client.post(f'/suggestedQuizQuestions/{suggestion.id}/accept/',
+                               {'bankId': bank.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        suggestion.refresh_from_db()
+        assert suggestion.status == 'pending'   # still fixable via PATCH, then re-accept
 
     def test_reject_suggestion(self, api_client, quiz_setup):
         from core.models import SuggestedQuizQuestion

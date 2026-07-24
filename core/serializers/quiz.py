@@ -77,19 +77,10 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
     # so an already-misconfigured quiz must stay editable for unrelated settings (the frontend
     # warns about the standing misconfiguration). Runtime close events (assignment-due/submission/
     # feedback) depend on assignment data and are left alone, matching the frontend warning.
-    def _never_closes(assignment, until, close_event):
-      if assignment is None:
-        return until is None
-      if close_event == 'none':
-        return True
-      if close_event == 'fixed_date':
-        return until is None
-      return False
-
-    proposed_sealed_no_close = bool(proposed.get('sealResultsUntilClose')) and _never_closes(
+    proposed_sealed_no_close = bool(proposed.get('sealResultsUntilClose')) and quiz_grading.quiz_never_closes(
         proposed.get('assignment'), available_until, proposed.get('closeEvent'))
     instance = self.instance
-    already_sealed_no_close = instance is not None and instance.sealResultsUntilClose and _never_closes(
+    already_sealed_no_close = instance is not None and instance.sealResultsUntilClose and quiz_grading.quiz_never_closes(
         instance.assignment, instance.availableUntil, instance.closeEvent)
     if proposed_sealed_no_close and not already_sealed_no_close:
       raise serializers.ValidationError(

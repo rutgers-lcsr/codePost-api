@@ -121,6 +121,66 @@ def _question_stem(item) -> str:
     return _material_text(presentation)
 
 
+def _to_float(text) -> Optional[float]:
+    try:
+        return float((text or '').strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _numeric_ranges(respcondition):
+    """Credit-awarding numeric bounds: (low, high) pairs from ``vargte``/``varlte`` — how
+    Canvas scores numerical answers "with margin" or "in a range". Bounds are paired per
+    ``<and>`` block (Canvas nests one of each), falling back to the condition as a whole;
+    bounds under ``<not>`` are exclusions, not answers."""
+    negated = {id(v) for neg in _iter(respcondition, 'not')
+               for tag in ('vargte', 'varlte') for v in _iter(neg, tag)}
+    groups = list(_iter(respcondition, 'and')) or [respcondition]
+    ranges = []
+    for group in groups:
+        lo = hi = None
+        for v in _iter(group, 'vargte'):
+            if id(v) not in negated:
+                lo = _to_float(v.text)
+        for v in _iter(group, 'varlte'):
+            if id(v) not in negated:
+                hi = _to_float(v.text)
+        if lo is not None and hi is not None and hi >= lo:
+            ranges.append((lo, hi))
+    return ranges
+
+
+def _apply_numeric_ranges(item, choices):
+    """Fold range-based scoring into ``(choices, tolerance)`` for a numerical question.
+
+    Canvas's exact-answer-with-margin exports a ``varequal`` plus a [low, high] pair —
+    the margin becomes our ``numericTolerance`` instead of being silently dropped (which
+    imported the question as exact-match). Range-only scoring imports as the midpoint
+    with a half-width tolerance rather than being skipped as unparseable. Our model has
+    one tolerance per question, so the widest wins."""
+    ranges = []
+    for rc in _iter(item, 'respcondition'):
+        if _awards_credit(rc):
+            ranges.extend(_numeric_ranges(rc))
+    if not ranges:
+        return choices, None
+    answers = [a for a in (_to_float(c.get('text')) for c in choices) if a is not None]
+    tolerance = 0.0
+    for lo, hi in ranges:
+        mid = (lo + hi) / 2
+        if answers:
+            nearest = min(answers, key=lambda a: abs(a - mid))
+            if lo <= nearest <= hi:
+                # A margin around a stated answer: keep the widest distance to a bound.
+                tolerance = max(tolerance, nearest - lo, hi - nearest)
+                continue
+        # A range with no stated answer inside it: import as midpoint ± half-width.
+        choices.append({'text': format(mid, 'g'), 'isCorrect': True, 'feedback': ''})
+        answers.append(mid)
+        tolerance = max(tolerance, (hi - lo) / 2)
+    return choices, (tolerance or None)
+
+
 def _awards_credit(respcondition) -> bool:
     """Whether a ``respcondition`` sets a positive SCORE (i.e. marks the correct answer)."""
     for sv in _iter(respcondition, 'setvar'):
@@ -209,11 +269,14 @@ def _parse_item(item):
         points = 1.0
 
     choices, _ok = _parse_choices(item, qtype)
-    # Auto-graded types need a parseable answer key. If none was extracted — e.g. a numerical
-    # question scored by a <vargte>/<varlte> range we don't support — skip it with a reason
-    # rather than importing a question that marks every student wrong.
+    tolerance = None
+    if qtype == 'numerical':
+        choices, tolerance = _apply_numeric_ranges(item, choices)
+    # Auto-graded types need a parseable answer key. If none was extracted — unsupported
+    # scoring conditions — skip it with a reason rather than importing a question that
+    # marks every student wrong.
     if qtype in _KEYED_TYPES and not any(c.get('isCorrect') for c in choices):
-        return None, f'no correct answer parsed for {qtype} (e.g. numerical range or unsupported scoring)'
+        return None, f'no correct answer parsed for {qtype} (unsupported scoring)'
     question = {
         'ident': ident,
         'type': qtype,
@@ -222,6 +285,8 @@ def _parse_item(item):
         'choices': choices,
         'metadata': {'canvas_ident': ident, 'canvas_type': raw_type},
     }
+    if tolerance is not None:
+        question['tolerance'] = tolerance
     return question, None
 
 

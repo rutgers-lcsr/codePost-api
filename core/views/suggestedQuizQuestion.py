@@ -8,6 +8,7 @@ from rest_framework.response import Response
 
 from core.models import Question, QuestionBank, SuggestedQuizQuestion
 from core.serializers.suggestedQuizQuestion import SuggestedQuizQuestionSerializer
+from core.services import quiz_grading
 from core.serializers.question import QuestionSerializer
 from core.views.template import ListProtectedViewSet
 from core.permissions.permissions import SuggestedQuizQuestionPermissions
@@ -58,6 +59,13 @@ class SuggestedQuizQuestionViewSet(ListProtectedViewSet):
 
     if suggestion.status != 'pending':
       return Response({'error': f'Suggestion is already {suggestion.status}.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    # An auto-graded question with no correct choice would grade every student wrong —
+    # the model occasionally omits the key, so require it to be fixed (PATCH) first.
+    if not quiz_grading.has_answer_key(suggestion.questionType, suggestion.choicesData):
+      return Response({'error': 'This suggestion has no choice marked correct. Edit it to mark '
+                                'the correct answer(s) before accepting.'},
                       status=status.HTTP_400_BAD_REQUEST)
 
     if suggestion.sourceQuestion_id is not None:

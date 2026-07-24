@@ -247,6 +247,9 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_generated_set_approved(self):
         self._assert_quiz_event('quiz_generated_set_approved')
 
+    def test_quiz_generated_set_unapproved(self):
+        self._assert_quiz_event('quiz_generated_set_unapproved')
+
     def test_quiz_generated_set_regenerated(self):
         self._assert_quiz_event('quiz_generated_set_regenerated')
 
@@ -265,7 +268,8 @@ class TestRecordAuditEventAllTypes(TestCase):
             'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
             'quiz_attempt_started', 'quiz_attempt_submitted', 'quiz_attempt_autosubmitted',
             'quiz_attempts_reset', 'quiz_response_graded', 'quiz_response_grade_reopened',
-            'quiz_generated_set_approved', 'quiz_generated_set_regenerated',
+            'quiz_generated_set_approved', 'quiz_generated_set_unapproved',
+            'quiz_generated_set_regenerated',
             'quiz_generated_sets_published',
         }
         self.assertEqual(defined_types, tested_types,

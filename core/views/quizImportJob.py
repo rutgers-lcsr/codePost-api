@@ -32,7 +32,12 @@ class QuizImportJobViewSet(ListProtectedViewSet):
 
   @extend_schema(responses=QuizImportJobSerializer)
   def create(self, request, *args, **kwargs):
-    course = get_object_or_404(Course, id=request.data.get('course'))
+    try:
+      course_id = int(request.data.get('course'))
+    except (TypeError, ValueError):
+      return Response({'error': 'A valid course id is required.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    course = get_object_or_404(Course, id=course_id)
     if not (request.user.is_superuser or isCourseStaff(request.user, course)):
       return returnForbidden()
 
@@ -44,7 +49,17 @@ class QuizImportJobViewSet(ListProtectedViewSet):
     target_bank = None
     bank_id = request.data.get('targetBankId') or request.data.get('targetBank')
     if bank_id:
+      try:
+        bank_id = int(bank_id)
+      except (TypeError, ValueError):
+        return Response({'error': 'targetBankId must be an integer.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+      # An unknown/cross-course bank id must not silently fall through to importing into
+      # a brand-new bank — the caller explicitly targeted one.
       target_bank = QuestionBank.objects.filter(id=bank_id, course=course).first()
+      if target_bank is None:
+        return Response({'error': 'No such question bank in this course.'},
+                        status=status.HTTP_400_BAD_REQUEST)
     elif request.data.get('bankName'):
       target_bank, _ = QuestionBank.objects.get_or_create(
           course=course, name=request.data['bankName'],

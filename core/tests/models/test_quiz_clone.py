@@ -136,15 +136,41 @@ class QuizCloneTests(TestCase):
         self.assertFalse(new_quiz.isPublished)
         self.assertIsNone(new_quiz.availableFrom)
         self.assertIsNone(new_quiz.availableUntil)
+        # The draft reset dropped the availableUntil this standalone quiz's seal relied on —
+        # keeping the seal would hide results forever, so it is dropped with the window.
+        self.assertFalse(new_quiz.sealResultsUntilClose)
         for field in ("title", "description", "assignmentTrigger", "closeEvent",
                       "closeOffsetMinutes", "endAttemptsAtClose", "timeLimitMinutes",
                       "attemptsAllowed", "shuffleQuestions", "oneQuestionAtATime",
                       "allowBacktracking", "showCorrectAnswers", "showResponses",
-                      "sealResultsUntilClose", "allowSubmissionReview", "passingScore",
+                      "allowSubmissionReview", "passingScore",
                       "passingScoreUnit", "scoringPolicy", "multiAttemptScoreMethod",
                       "gradersCanReviewGenerated", "autoPublishGenerated", "metadata",
                       "source", "createdBy_id"):
             self.assertEqual(getattr(new_quiz, field), getattr(quiz, field), field)
+
+    def test_seal_kept_when_close_survives_the_reset(self):
+        """A runtime close (assignment_due) doesn't depend on the reset availability window,
+        so the seal is copied verbatim for attached quizzes that still close."""
+        assignment = Assignment.objects.create(name="HW1", course=self.source_course, points=10)
+        dest_assignment = Assignment.objects.create(name="HW1", course=self.destination_course,
+                                                    points=10)
+        quiz = _quiz(self.source_course, title="Sealed", assignment=assignment,
+                     closeEvent="assignment_due", sealResultsUntilClose=True)
+
+        new_quiz = copy_quiz(quiz, self.destination_course, assignment=dest_assignment,
+                             question_map={}, bank_map={})
+        self.assertTrue(new_quiz.sealResultsUntilClose)
+
+        # But an attached quiz whose close was a fixed date loses that date in the reset —
+        # the seal goes with it.
+        quiz_fixed = _quiz(self.source_course, title="Sealed fixed", assignment=assignment,
+                           closeEvent="fixed_date",
+                           availableUntil=timezone.now() + timedelta(days=3),
+                           sealResultsUntilClose=True)
+        new_fixed = copy_quiz(quiz_fixed, self.destination_course, assignment=dest_assignment,
+                              question_map={}, bank_map={})
+        self.assertFalse(new_fixed.sealResultsUntilClose)
 
     def test_quiz_components_copied_with_remapping(self):
         bank = _bank(self.source_course)

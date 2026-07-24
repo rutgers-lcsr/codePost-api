@@ -6,7 +6,7 @@ Kept separate from the staff-only QuizViewSet. Only the mixins students need are
 """
 import secrets
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch
@@ -351,7 +351,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     existing = response.codeExecution or {}
     if existing.get('status') == 'running':
       requested_at = existing.get('requestedAt')
-      if requested_at and (timezone.now() - timezone.datetime.fromisoformat(requested_at)).total_seconds() < 180:
+      if requested_at and (timezone.now() - datetime.fromisoformat(requested_at)).total_seconds() < 180:
         return Response({'detail': 'This answer is already running.'},
                         status=status.HTTP_409_CONFLICT)
 
@@ -387,6 +387,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     official = bool(request.data.get('official', True))
     with transaction.atomic():
       # At most one pin per (quiz, student) — pinning moves it, unpinning restores the policy.
+      # Lock the student's attempt rows first: without this, two concurrent pins on
+      # different attempts can each clear the other's flag before the other saves, ending
+      # with two official attempts (and official_score picking one arbitrarily).
+      list(attempt.quiz.attempts.select_for_update().filter(student=attempt.student))
       attempt.quiz.attempts.filter(student=attempt.student).exclude(pk=attempt.pk).update(
           isOfficialOverride=False, modified=timezone.now())
       attempt.isOfficialOverride = official

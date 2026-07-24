@@ -5438,7 +5438,9 @@ paths:
     post:
       operationId: generatedQuestionSets_regenerateCreate
       description: Discard this set's questions and generate new ones from the student's
-        submission. An approved set becomes un-published until re-approved.
+        submission. An approved set becomes un-published until re-approved. Blocked
+        once the student has attempted the quiz — their responses reference these
+        questions (the grading answer key).
       parameters:
       - in: path
         name: id
@@ -17906,7 +17908,7 @@ components:
         isPublic:
           type: boolean
           description: If True, the file is downloadable without authentication via
-            its public URL (courseFiles/raw/<id>/).
+            its public token URL (courseFiles/raw/<token>/).
         publicUrl:
           type: string
           format: uri
@@ -20365,7 +20367,7 @@ components:
         isPublic:
           type: boolean
           description: If True, the file is downloadable without authentication via
-            its public URL (courseFiles/raw/<id>/).
+            its public token URL (courseFiles/raw/<token>/).
         publicUrl:
           type: string
           format: uri

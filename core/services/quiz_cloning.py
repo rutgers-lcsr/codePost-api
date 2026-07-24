@@ -19,6 +19,7 @@ from core.models import (
     Assignment, Course, CourseFile, Question, QuestionBank, Quiz, QuizGeneratedSection,
     QuizImage, QuizQuestion, QuizQuestionGroup,
 )
+from core.services.quiz_grading import quiz_never_closes
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,12 @@ def copy_quiz(quiz: Quiz, destination_course: Course, *,
       allowBacktracking=quiz.allowBacktracking,
       showCorrectAnswers=quiz.showCorrectAnswers,
       showResponses=quiz.showResponses,
-      sealResultsUntilClose=quiz.sealResultsUntilClose,
+      # The draft reset below drops the availability window. If the seal relied on it to
+      # ever release results (standalone quizzes, or a fixed_date close), keeping it would
+      # recreate the sealed-but-never-closes state QuizSerializer.validate blocks — results
+      # hidden forever. Drop the seal too; the instructor re-seals when setting a new close.
+      sealResultsUntilClose=quiz.sealResultsUntilClose and not quiz_never_closes(
+          assignment, None, quiz.closeEvent),
       allowSubmissionReview=quiz.allowSubmissionReview,
       passingScore=quiz.passingScore,
       passingScoreUnit=quiz.passingScoreUnit,

@@ -936,6 +936,34 @@ class TestSettingsReflection:
         attempt.refresh_from_db()
         assert attempt.deadline == new_close
 
+    def test_assignment_due_date_change_updates_in_progress_deadline(self, api_client, taking_setup):
+        """closeEvent='assignment_due' derives the close from the assignment — extending the
+        due date must move in-progress deadlines just like editing the quiz's own close
+        (otherwise the expiry sweep auto-submits students at the stale, earlier deadline)."""
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        assignment = taking_setup['assignment']
+        due = timezone.now() + timedelta(hours=1)
+        assignment.isReleased = True
+        assignment.uploadDueDate = due
+        assignment.save()
+        quiz = _quiz(course, assignment=assignment, closeEvent='assignment_due',
+                     endAttemptsAtClose=True)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        assert attempt.deadline == due
+
+        new_due = timezone.now() + timedelta(days=1)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.patch(f'/assignments/{assignment.id}/',
+                                {'uploadDueDate': new_due.isoformat()}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        attempt.refresh_from_db()
+        assert attempt.deadline == new_due
+
     def test_accommodation_change_updates_in_progress_deadline(self, api_client, taking_setup):
         from core.models import QuizAttempt
         course = taking_setup['course']
@@ -1044,6 +1072,12 @@ class TestTimedAttempts:
         assert finalize_expired_quiz_attempts() == 1
         attempt = QuizAttempt.objects.get(pk=start.data['id'])
         assert attempt.status == 'submitted'
+        # And logs the auto-submit, matching the resume path — otherwise sweep-finalized
+        # attempts would be missing from the course activity log.
+        from core.models import CourseAuditEvent
+        assert CourseAuditEvent.objects.filter(
+            course=course, quiz=quiz, event_type='quiz_attempt_autosubmitted',
+            user=taking_setup['students'][0]).exists()
         assert attempt.score == Decimal('2.00')
 
         # A second run is a no-op — nothing is still in-progress-and-expired.
@@ -1738,6 +1772,18 @@ class TestReviewFixRegressions:
         resp = api_client.post(f'/quizzes/{quiz.id}/resetAttempts/', {}, format='json')
         assert resp.status_code == status.HTTP_200_OK
         assert QuizAttempt.objects.filter(quiz=quiz).count() == 0
+
+    def test_reset_attempts_is_admin_only(self, api_client, taking_setup):
+        """Destructive: deletes every student's attempts — graders/students must not reach it."""
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        self._take(api_client, taking_setup['students'][0], quiz)
+        for user in (course.graders.first(), taking_setup['students'][0]):
+            api_client.force_authenticate(user=user)
+            resp = api_client.post(f'/quizzes/{quiz.id}/resetAttempts/', {}, format='json')
+            assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert quiz.attempts.count() == 1
 
     def test_deleting_assignment_unpublishes_attached_quiz(self, taking_setup):
         from core.models import Assignment, Quiz
