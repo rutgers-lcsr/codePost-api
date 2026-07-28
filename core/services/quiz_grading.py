@@ -284,13 +284,20 @@ def reopen_manual_grade(response):
 
 
 def recompute_attempt_totals(attempt):
-  """Re-derive score / needsManualGrading / passed from the stored responses (no regrading)."""
-  responses = list(attempt.responses.all())
-  attempt.score = sum((r.pointsEarned for r in responses if r.pointsEarned is not None), Decimal('0'))
-  attempt.maxScore = sum((r.points or Decimal('0') for r in responses), Decimal('0'))
-  attempt.needsManualGrading = any(r.needsManualGrading for r in responses)
-  attempt.passed = None if attempt.needsManualGrading else _compute_passed(attempt)
-  attempt.save()
+  """Re-derive score / needsManualGrading / passed from the stored responses (no regrading).
+
+  Serialized with select_for_update so two graders manually grading sibling responses of the
+  same attempt can't interleave read-modify-write and persist a stale total — the same hazard
+  setOfficial guards against.
+  """
+  with transaction.atomic():
+    attempt = QuizAttempt.objects.select_for_update().get(pk=attempt.pk)
+    responses = list(attempt.responses.all())
+    attempt.score = sum((r.pointsEarned for r in responses if r.pointsEarned is not None), Decimal('0'))
+    attempt.maxScore = sum((r.points or Decimal('0') for r in responses), Decimal('0'))
+    attempt.needsManualGrading = any(r.needsManualGrading for r in responses)
+    attempt.passed = None if attempt.needsManualGrading else _compute_passed(attempt)
+    attempt.save()
 
 
 def _compute_passed(attempt):

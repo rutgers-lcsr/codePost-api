@@ -187,6 +187,16 @@ class TestAutoGrading:
         # showCorrectAnswers defaults to on → revealed now.
         assert done.data['responses'][0]['isCorrect'] is True
 
+    def test_saveAnswer_malformed_response_id_returns_400(self, api_client, taking_setup):
+        course = taking_setup['course']
+        q = _mc(course, _bank(course))
+        quiz = _quiz(course)
+        _add(quiz, q)
+        attempt = self._take(api_client, taking_setup['students'][0], quiz)
+        resp = api_client.patch(f"/quizAttempts/{attempt['id']}/saveAnswer/",
+                                {'response': 'abc', 'selectedChoices': []}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST  # not a 500
+
     def test_multiple_choice_incorrect_scores_zero(self, api_client, taking_setup):
         course = taking_setup['course']
         q = _mc(course, _bank(course))

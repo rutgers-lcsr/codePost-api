@@ -5,6 +5,10 @@ MAX_FILE_SIZE = 10 * 1024 * 1024       # 10MB — upload limit for submission fi
 MAX_OUTPUT_SIZE = 1024 * 1024           # 1MB  — stdout/stderr cap from container execution
 MAX_DATASET_SIZE = 1024 * 1024 * 1024   # 1GB  — upload limit for assignment datasets
 MAX_COURSE_FILE_SIZE = 25 * 1024 * 1024  # 25MB — upload limit for course files (stored as DB base64)
+MAX_QTI_IMPORT_BYTES = 50 * 1024 * 1024  # 50MB — upload limit for a QTI / Common Cartridge export
+# Total inflated XML a QTI import will decompress across all members — a decompression-bomb
+# guard (a small zip can expand to gigabytes of XML). Only .xml members are read.
+MAX_QTI_UNCOMPRESSED_BYTES = 200 * 1024 * 1024  # 200MB
 
 # Anti-hardcoding variant reruns (AssignmentDataSet.autogradeAllVariants): rerun a finalized
 # submission against at most this many OTHER variants (a random sample), rather than every

@@ -22,4 +22,7 @@ class QuizQuestionGroupSerializer(ModelSerializerWithPOSTCheck):
       raise serializers.ValidationError("The bank must belong to the same course as the quiz.")
     if proposed.get('pickCount') is not None and proposed['pickCount'] < 1:
       raise serializers.ValidationError("pickCount must be at least 1.")
+    # Re-authorize the destination course: a PATCH could point `quiz` at another course's
+    # quiz (object permissions only checked the source quiz's course).
+    self.assert_authoring_course(quiz.course if quiz is not None else None)
     return data

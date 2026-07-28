@@ -43,6 +43,9 @@ class QuestionSerializer(ModelSerializerWithPOSTCheck):
     course = proposed.get('course')
     if bank is not None and course is not None and bank.course_id != course.id:
       raise serializers.ValidationError({'bank': 'Bank does not belong to this course.'})
+    # A PATCH may move the question (via course/bank) into a course the caller has no rights
+    # in — object permissions only checked the source course. Re-authorize the destination.
+    self.assert_authoring_course(course)
     tolerance = proposed.get('numericTolerance')
     if tolerance is not None and tolerance < 0:
       raise serializers.ValidationError(

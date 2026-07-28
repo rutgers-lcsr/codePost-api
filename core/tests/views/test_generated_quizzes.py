@@ -565,6 +565,34 @@ class TestGenerateForStudent:
         assert resp.status_code == status.HTTP_403_FORBIDDEN
 
 
+class TestGeneratedQuestionEditDelete:
+    """Per-question review edits vs delete once the student has attempted."""
+
+    def test_delete_blocked_after_attempt(self, api_client, gen_setup):
+        from core.models import QuizAttempt
+        student = gen_setup['students'][0]
+        gen_set = _make_set(gen_setup['quiz'], student, submission=gen_setup['submission'],
+                            status='approved')
+        question = gen_set.questions.first()
+        QuizAttempt.objects.create(quiz=gen_setup['quiz'], student=student, attemptNumber=1,
+                                   startedAt=timezone.now())
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.delete(f'/generatedQuizQuestions/{question.id}/')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert gen_set.questions.filter(pk=question.id).exists()  # not deleted
+
+    def test_delete_allowed_before_attempt(self, api_client, gen_setup):
+        student = gen_setup['students'][0]
+        gen_set = _make_set(gen_setup['quiz'], student, submission=gen_setup['submission'],
+                            status='ready')
+        question = gen_set.questions.first()
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.delete(f'/generatedQuizQuestions/{question.id}/')
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+
+
 # --------------------------------------------------------------------------- #
 # Eager (submission-free) generation
 # --------------------------------------------------------------------------- #

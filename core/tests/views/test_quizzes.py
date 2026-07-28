@@ -266,6 +266,73 @@ class TestAuthoringCRUD:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
 
+class TestCrossCourseAuthorization:
+    """Object permissions authorize against the source object's course. A writable
+    course/bank/quiz/assignment FK must not let staff of course A reach into course B."""
+
+    def _other_course(self):
+        from core.tests.factories import CourseFactory
+        with factory.django.mute_signals(post_save):
+            return CourseFactory(name="cs999", period="s2026", organization__name="Princeton")
+
+    def test_cannot_reassign_question_into_foreign_course(self, api_client, quiz_setup):
+        from decimal import Decimal
+        from core.models import QuestionBank, Question
+        course_b = self._other_course()
+        bank_b = QuestionBank.objects.create(course=course_b, name='B bank')
+        bank_a = QuestionBank.objects.create(course=quiz_setup['course'], name='A bank')
+        q = Question.objects.create(course=quiz_setup['course'], bank=bank_a,
+                                    questionType='essay', text='x', points=Decimal('5'))
+
+        api_client.force_authenticate(user=quiz_setup['admin'])  # admin of course A only
+        resp = api_client.patch(f'/questions/{q.id}/',
+                                {'course': course_b.id, 'bank': bank_b.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        q.refresh_from_db()
+        assert q.course_id == quiz_setup['course'].id  # not relocated
+
+    def test_same_course_question_move_between_banks_still_ok(self, api_client, quiz_setup):
+        from decimal import Decimal
+        from core.models import QuestionBank, Question
+        bank_a = QuestionBank.objects.create(course=quiz_setup['course'], name='A bank')
+        bank_a2 = QuestionBank.objects.create(course=quiz_setup['course'], name='A bank 2')
+        q = Question.objects.create(course=quiz_setup['course'], bank=bank_a,
+                                    questionType='essay', text='x', points=Decimal('5'))
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.patch(f'/questions/{q.id}/', {'bank': bank_a2.id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_cannot_reassign_bank_into_foreign_course(self, api_client, quiz_setup):
+        from core.models import QuestionBank
+        course_b = self._other_course()
+        bank_a = QuestionBank.objects.create(course=quiz_setup['course'], name='A bank')
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.patch(f'/questionBanks/{bank_a.id}/', {'course': course_b.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_cannot_attach_foreign_course_assignment_to_quiz(self, api_client, quiz_setup):
+        from core.models import Quiz
+        course_b = self._other_course()
+        assignment_b = course_b.assignments.first()
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Q')
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {'assignment': assignment_b.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        quiz.refresh_from_db()
+        assert quiz.assignment_id is None  # not attached across courses
+
+    def test_same_course_assignment_attach_still_ok(self, api_client, quiz_setup):
+        from core.models import Quiz
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Q')
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.patch(f'/quizzes/{quiz.id}/',
+                                {'assignment': quiz_setup['assignment'].id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+
+
 class TestQuizAuthoring:
     def test_create_quiz_attach_to_assignment_and_add_question(self, api_client, quiz_setup):
         from core.models import Quiz
@@ -509,6 +576,17 @@ class TestCanvasImport:
             'course': quiz_setup['course'].id, 'file': upload, 'targetBankId': 'abc',
         }, format='multipart')
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_import_rejects_oversize_upload(self, api_client, quiz_setup, monkeypatch):
+        import core.views.quizImportJob as job_view
+        monkeypatch.setattr(job_view, 'MAX_QTI_IMPORT_BYTES', 10)
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        upload = SimpleUploadedFile('export.zip', b'x' * 50, content_type='application/zip')
+        resp = api_client.post('/quizImportJobs/',
+                               {'course': quiz_setup['course'].id, 'file': upload},
+                               format='multipart')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'too large' in str(resp.data)
 
     def test_import_endpoint_forbidden_for_student(self, api_client, quiz_setup):
         api_client.force_authenticate(user=quiz_setup['student'])

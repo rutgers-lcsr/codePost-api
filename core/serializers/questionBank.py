@@ -13,6 +13,13 @@ class QuestionBankSerializer(ModelSerializerWithPOSTCheck):
     read_only_fields = ('source', 'createdBy')
     POST_permissions_fields = ('course',)
 
+  def validate(self, data):
+    data = super().validate(data)
+    # A PATCH could move the bank (course is writable) into a course the caller has no
+    # rights in — object permissions only checked the source course. Re-authorize.
+    self.assert_authoring_course(self.genProposedFields(data).get('course'))
+    return data
+
   def create(self, validated_data):
     request = self.context.get('request')
     if request is not None and validated_data.get('createdBy') is None:

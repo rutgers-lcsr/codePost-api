@@ -885,6 +885,7 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
             # quantize — quantizing e.g. 1e30 to 4dp raises InvalidOperation and would fail
             # the whole job over one absurd Canvas range.
             _MAX_TOL = Decimal('999999.9999')
+            _MAX_POINTS = Decimal('9999.99')  # Question.points is DecimalField(max_digits=6, decimal_places=2)
             for q in parsed['questions']:
                 sig = _sig_parsed(q)
                 existing = existing_by_sig.get(sig)
@@ -900,12 +901,19 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
                                        f"tolerance {q['tolerance']!r} on question {q['ident']!r}")
                         tolerance = _MAX_TOL if (not tolerance.is_finite() or tolerance > 0) else -_MAX_TOL
                     tolerance = tolerance.quantize(Decimal('0.0001'))
+                points = Decimal(str(q.get('points', 1)))
+                if not points.is_finite() or points > _MAX_POINTS:
+                    logger.warning(f"[QuizImport] Job {job_id}: clamping out-of-range points "
+                                   f"{q.get('points')!r} on question {q['ident']!r}")
+                    points = _MAX_POINTS
+                elif points < 0:
+                    points = Decimal('0')
                 question = Question.objects.create(
                     course=job.course,
                     bank=bank,
                     questionType=q['type'],
                     text=q['text'],
-                    points=Decimal(str(q.get('points', 1))),
+                    points=points,
                     # Canvas margin/range scoring, parsed to our per-question tolerance.
                     numericTolerance=tolerance,
                     source='imported',

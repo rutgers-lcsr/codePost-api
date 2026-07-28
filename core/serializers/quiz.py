@@ -25,6 +25,9 @@ class QuizQuestionSerializer(ModelSerializerWithPOSTCheck):
     # content, could be surfaced to this quiz's students.
     if quiz is not None and question is not None and question.course_id != quiz.course_id:
       raise serializers.ValidationError("The question must belong to the same course as the quiz.")
+    # Re-authorize the destination course: a PATCH could point `quiz` at another course's
+    # quiz (object permissions only checked the source quiz's course).
+    self.assert_authoring_course(quiz.course if quiz is not None else None)
     return data
 
 
@@ -58,6 +61,18 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
   def validate(self, data):
     data = super().validate(data)
     proposed = self.genProposedFields(data)
+    # A PATCH may move the quiz into a course the caller has no rights in (course is
+    # writable) — object permissions only checked the source course. Re-authorize.
+    self.assert_authoring_course(proposed.get('course'))
+    # The attached assignment must belong to the quiz's own course. Otherwise prompt
+    # variables ({assignment_file:...}) and close-event logic resolve against another
+    # course's private assignment data — a cross-course information leak.
+    proposed_assignment = proposed.get('assignment')
+    proposed_course = proposed.get('course')
+    if proposed_assignment is not None and proposed_course is not None \
+        and proposed_assignment.course_id != proposed_course.id:
+      raise serializers.ValidationError(
+          {'assignment': 'The assignment must belong to the same course as the quiz.'})
     # Standalone availability window must be ordered (the trigger governs attached quizzes,
     # but validate the window whenever both ends are set).
     available_from = proposed.get('availableFrom')

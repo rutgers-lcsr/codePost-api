@@ -6,6 +6,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.constants import MAX_QTI_IMPORT_BYTES
 from core.models import Course, QuestionBank, QuizImportJob
 from core.serializers.quizImportJob import QuizImportJobSerializer
 from core.views.template import ListProtectedViewSet
@@ -44,6 +45,9 @@ class QuizImportJobViewSet(ListProtectedViewSet):
     upload = request.FILES.get('file')
     if upload is None:
       return Response({'error': 'A QTI / Common Cartridge export file is required (multipart "file").'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    if upload.size is not None and upload.size > MAX_QTI_IMPORT_BYTES:
+      return Response({'error': f'Import file too large (max {MAX_QTI_IMPORT_BYTES // (1024 * 1024)} MB).'},
                       status=status.HTTP_400_BAD_REQUEST)
 
     target_bank = None

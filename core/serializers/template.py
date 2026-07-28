@@ -46,6 +46,24 @@ class ModelSerializerWithPOSTCheck(serializers.ModelSerializer):
 
     return toRet
 
+  def assert_authoring_course(self, course):
+    '''
+    Guard cross-course reassignment. Object permissions authorize against the *source*
+    object's course, but a writable ``course``/``quiz``/``bank`` FK can relocate a resource
+    (or point it at another course's data) into ``course``. Require the acting user to have
+    quiz-authoring rights (course staff or superuser) in that destination course too.
+    No-op when there is no request/user in context (internal, non-request writes).
+    '''
+    from core.permissions.helpers import isCourseStaff
+    request = self.context.get('request')
+    user = getattr(request, 'user', None)
+    if course is None or user is None:
+      return
+    if user.is_superuser or isCourseStaff(user, course):
+      return
+    from rest_framework.exceptions import PermissionDenied
+    raise PermissionDenied("You do not have authoring access to the destination course.")
+
   def validate(self, data):
     try:
       course = self.instance.course  # type: ignore[union-attr]  # instance always set during validate

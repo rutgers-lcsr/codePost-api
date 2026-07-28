@@ -172,5 +172,15 @@ class GeneratedQuizQuestionViewSet(mixins.RetrieveModelMixin, mixins.UpdateModel
     return blocked if blocked is not None else super().update(request, *args, **kwargs)
 
   def destroy(self, request, *args, **kwargs):
-    blocked = self._set_editable(self.get_object())
-    return blocked if blocked is not None else super().destroy(request, *args, **kwargs)
+    obj = self.get_object()
+    blocked = self._set_editable(obj)
+    if blocked is not None:
+      return blocked
+    # Deleting the question severs the grading answer key (referenceSolution) that a
+    # submitted attempt's manual grading reads off the live row. Mirrors the regenerate/
+    # unapprove guards; edits are left alone (started attempts are snapshot-isolated).
+    if obj.set.quiz.attempts.filter(student=obj.set.student).exists():
+      return Response({'error': 'The student has already attempted this quiz — reset their '
+                                'attempts before deleting their questions.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    return super().destroy(request, *args, **kwargs)

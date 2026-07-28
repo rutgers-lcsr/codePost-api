@@ -19,6 +19,8 @@ from typing import Optional
 
 from defusedxml.ElementTree import fromstring
 
+from core.constants import MAX_QTI_UNCOMPRESSED_BYTES
+
 
 # Unambiguous HTML signals used only when ``texttype`` doesn't already say "text/html".
 # Requires a closing tag, ``<br>`` or ``<img>`` so plaintext like ``a < b and c > d`` is
@@ -379,10 +381,16 @@ def parse_canvas_export(data) -> dict:
             # archive's internal member order (which varies by zip tooling / filesystem).
             xml_names = sorted(n for n in zf.namelist() if n.lower().endswith('.xml'))
             # Skip the manifest and Canvas meta files — they hold no QTI items.
+            inflated = 0
             for name in xml_names:
                 base = name.rsplit('/', 1)[-1].lower()
                 if base in ('imsmanifest.xml', 'assessment_meta.xml') or base.endswith('_meta.xml'):
                     continue
+                # Decompression-bomb guard: bound total inflated XML before reading it into
+                # memory (ZipInfo.file_size is the declared uncompressed size).
+                inflated += zf.getinfo(name).file_size
+                if inflated > MAX_QTI_UNCOMPRESSED_BYTES:
+                    raise ValueError("QTI export is too large to import (decompressed size exceeds limit).")
                 _parse_document(zf.read(name), default_title=base[:-4], result=result)
     except zipfile.BadZipFile:
         # Not a zip — treat the upload as a single QTI XML document.

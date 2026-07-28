@@ -212,7 +212,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     if attempt.deadline and timezone.now() > attempt.deadline + SAVE_DEADLINE_GRACE:
       return Response({'detail': 'Time is up for this attempt.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
+    rid = _require_int(request.data.get('response'))
+    if rid is None:
+      return Response({'detail': 'A valid response id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    response = get_object_or_404(attempt.responses, pk=rid)
 
     # Enforce no-backtracking server-side (otherwise the setting is only advisory in the UI):
     # once the student has moved past a question, its answer can't be changed via a direct call.
@@ -277,7 +280,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     """Manually grade one essay/code response (quiz graders and course admins only —
     gated by QuizAttemptPermissions). Recomputes the attempt's score and pass state."""
     attempt = self.get_object()
-    response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
+    rid = _require_int(request.data.get('response'))
+    if rid is None:
+      return Response({'detail': 'A valid response id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    response = get_object_or_404(attempt.responses, pk=rid)
     denied = self._manual_grading_guard(attempt, response)
     if denied:
       return denied
@@ -304,7 +310,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     """Send a manually graded essay/code response back to the grading queue (undo the
     grade). The feedback text is kept as a draft; the attempt's totals are refreshed."""
     attempt = self.get_object()
-    response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
+    rid = _require_int(request.data.get('response'))
+    if rid is None:
+      return Response({'detail': 'A valid response id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    response = get_object_or_404(attempt.responses, pk=rid)
     denied = self._manual_grading_guard(attempt, response)
     if denied:
       return denied
@@ -336,7 +345,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     attempt = self.get_object()
     if attempt.quiz.course.archived:
       return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
-    response = get_object_or_404(attempt.responses, pk=request.data.get('response'))
+    rid = _require_int(request.data.get('response'))
+    if rid is None:
+      return Response({'detail': 'A valid response id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    response = get_object_or_404(attempt.responses, pk=rid)
     if attempt.status != 'submitted':
       return Response({'detail': 'Only submitted attempts can be run.'},
                       status=status.HTTP_400_BAD_REQUEST)
