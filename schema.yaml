@@ -23770,9 +23770,15 @@ components:
           format: email
           title: Email address
           readOnly: true
+        closeBypassed:
+          type: boolean
+          readOnly: true
+          description: Started with the quiz access code after the close; its deadline
+            is not capped at the close time.
       required:
       - allowBacktracking
       - allowSubmissionReview
+      - closeBypassed
       - description
       - id
       - isOfficialOverride

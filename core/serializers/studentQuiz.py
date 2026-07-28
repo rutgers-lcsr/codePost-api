@@ -330,4 +330,5 @@ class StaffQuizAttemptSerializer(StudentQuizAttemptSerializer):
   responses = StaffQuizResponseSerializer(many=True, read_only=True)
 
   class Meta(StudentQuizAttemptSerializer.Meta):
-    fields = StudentQuizAttemptSerializer.Meta.fields + ('student',)
+    fields = StudentQuizAttemptSerializer.Meta.fields + ('student', 'closeBypassed')
+    read_only_fields = StudentQuizAttemptSerializer.Meta.read_only_fields + ('closeBypassed',)

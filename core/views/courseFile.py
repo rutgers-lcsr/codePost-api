@@ -2,6 +2,7 @@
 import base64
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse, HttpResponseNotFound
+from django.utils.http import content_disposition_header
 from core.models import CourseFile
 from core.serializers.file import CourseFileSerializer
 from core.views.template import ListProtectedViewSet
@@ -104,7 +105,7 @@ def serve_public_course_file(request, token):
     # Force download, never inline: this is arbitrary admin-uploaded content served
     # unauthenticated on the API origin, so rendering (e.g. HTML/SVG) inline would be a
     # stored-XSS vector. attachment + nosniff makes the browser download rather than execute.
-    resp['Content-Disposition'] = f'attachment; filename="{cf.name}"'
+    resp['Content-Disposition'] = content_disposition_header(as_attachment=True, filename=cf.name)
     resp['X-Content-Type-Options'] = 'nosniff'
     resp['Cache-Control'] = 'no-cache'  # id-addressed content is mutable, unlike quiz images
     return resp

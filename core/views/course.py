@@ -109,6 +109,9 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if user.profile.isOrgStaff:
             courses = courses | Course.objects.filter(organization=user.profile.organization)
             courses = courses.distinct()
+        # compute_course_capabilities dereferences course.organization per course (AI feature
+        # toggles); without this the list fans out into one org SELECT per course.
+        courses = courses.select_related('organization')
 
         return Response(
             CourseSerializer(

@@ -881,6 +881,10 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
             ident_to_question: dict[str, Question] = {}
             created_count = 0
             reused_count = 0
+            # numericTolerance is DecimalField(max_digits=10, decimal_places=4); clamp before
+            # quantize — quantizing e.g. 1e30 to 4dp raises InvalidOperation and would fail
+            # the whole job over one absurd Canvas range.
+            _MAX_TOL = Decimal('999999.9999')
             for q in parsed['questions']:
                 sig = _sig_parsed(q)
                 existing = existing_by_sig.get(sig)
@@ -888,6 +892,14 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
                     ident_to_question[q['ident']] = existing
                     reused_count += 1
                     continue
+                tolerance = None
+                if q.get('tolerance') is not None:
+                    tolerance = Decimal(str(q['tolerance']))
+                    if not tolerance.is_finite() or tolerance.copy_abs() > _MAX_TOL:
+                        logger.warning(f"[QuizImport] Job {job_id}: clamping out-of-range numeric "
+                                       f"tolerance {q['tolerance']!r} on question {q['ident']!r}")
+                        tolerance = _MAX_TOL if (not tolerance.is_finite() or tolerance > 0) else -_MAX_TOL
+                    tolerance = tolerance.quantize(Decimal('0.0001'))
                 question = Question.objects.create(
                     course=job.course,
                     bank=bank,
@@ -895,8 +907,7 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
                     text=q['text'],
                     points=Decimal(str(q.get('points', 1))),
                     # Canvas margin/range scoring, parsed to our per-question tolerance.
-                    numericTolerance=(Decimal(str(q['tolerance'])).quantize(Decimal('0.0001'))
-                                      if q.get('tolerance') is not None else None),
+                    numericTolerance=tolerance,
                     source='imported',
                     createdBy=job.createdBy,
                     metadata=q.get('metadata', {}),

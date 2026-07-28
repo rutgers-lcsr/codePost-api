@@ -560,6 +560,16 @@ class CourseFileCloneTests(TestCase):
         self.assertEqual(self.dest.files.get(name="a.md").data, "existing")
         self.assertEqual(self.dest.files.get(name="b.md").data, "B")
 
+    def test_clone_gets_fresh_token_and_is_private(self):
+        src = CourseFile.objects.create(course=self.source, name="pub.md", data="P",
+                                        extension=".md", isPublic=True)
+
+        clone_course_files(self.source, self.dest)
+
+        cloned = self.dest.files.get(name="pub.md")
+        self.assertNotEqual(cloned.token, src.token)
+        self.assertFalse(cloned.isPublic)
+
     def test_clone_files_limited_to_names(self):
         CourseFile.objects.create(course=self.source, name="used.md", data="U", extension=".md")
         CourseFile.objects.create(course=self.source, name="unused.md", data="X", extension=".md")

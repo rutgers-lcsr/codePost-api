@@ -1457,6 +1457,15 @@ class CourseFile(File):
   token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, db_index=True,
       help_text=("Unguessable token used in the public download URL."))
 
+  def save(self, *args, **kwargs):
+    if self.pk:
+      was_public = (CourseFile.objects.filter(pk=self.pk)
+                    .values_list('isPublic', flat=True).first())
+      if was_public and not self.isPublic:
+        # Unpublish revokes access: rotate the token so previously shared URLs 404.
+        self.token = uuid.uuid4()
+    super().save(*args, **kwargs)
+
   def get_course(self):
     return self.course
 
@@ -2455,7 +2464,9 @@ class CourseAuditEvent(BaseModel):
       ('quiz_published', 'Quiz Published'),
       ('quiz_unpublished', 'Quiz Unpublished'),
       ('quiz_deleted', 'Quiz Deleted'),
+      ('quiz_access_code_changed', 'Quiz Access Code Changed'),
       ('quiz_attempt_started', 'Quiz Attempt Started'),
+      ('quiz_attempt_started_late', 'Quiz Attempt Started Late'),
       ('quiz_attempt_submitted', 'Quiz Attempt Submitted'),
       ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
       ('quiz_attempts_reset', 'Quiz Attempts Reset'),

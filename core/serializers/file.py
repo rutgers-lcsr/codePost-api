@@ -191,7 +191,16 @@ class CourseFileSerializer(ModelSerializerWithPOSTCheck):
         return request.build_absolute_uri(path) if request else path
 
     def validate(self, data):
-        data = super().validate(data)
+        # Archived-course escape hatch: an unpublish-only PATCH (revoking public access)
+        # is the one edit still allowed after archiving.
+        archived_unpublish = (
+            self.instance is not None
+            and self.instance.course.archived
+            and set(data.keys()) == {'isPublic'}
+            and data['isPublic'] is False
+        )
+        if not archived_unpublish:
+            data = super().validate(data)
         raw = data.get('data', getattr(self.instance, 'data', '') or '')
         if raw.startswith('data:'):
             _, _, encoded = raw.partition(',')

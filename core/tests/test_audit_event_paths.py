@@ -226,8 +226,14 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_deleted(self):
         self._assert_quiz_event('quiz_deleted')
 
+    def test_quiz_access_code_changed(self):
+        self._assert_quiz_event('quiz_access_code_changed')
+
     def test_quiz_attempt_started(self):
         self._assert_quiz_event('quiz_attempt_started')
+
+    def test_quiz_attempt_started_late(self):
+        self._assert_quiz_event('quiz_attempt_started_late')
 
     def test_quiz_attempt_submitted(self):
         self._assert_quiz_event('quiz_attempt_submitted')
@@ -266,7 +272,9 @@ class TestRecordAuditEventAllTypes(TestCase):
             'autograder_triggered', 'autograder_completed', 'autograder_failed',
             'late_day_used', 'comment_feedback',
             'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
-            'quiz_attempt_started', 'quiz_attempt_submitted', 'quiz_attempt_autosubmitted',
+            'quiz_access_code_changed',
+            'quiz_attempt_started', 'quiz_attempt_started_late',
+            'quiz_attempt_submitted', 'quiz_attempt_autosubmitted',
             'quiz_attempts_reset', 'quiz_response_graded', 'quiz_response_grade_reopened',
             'quiz_generated_set_approved', 'quiz_generated_set_unapproved',
             'quiz_generated_set_regenerated',

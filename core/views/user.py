@@ -184,6 +184,9 @@ class UserViewSet(SuperUserListProtectedViewSet):
     # checks inside compute_course_capabilities become in-memory lookups.
     prefetches = ['rubricEditor_courses', 'leader_sections']
     for rel in ('student_courses', 'grader_courses', 'superGrader_courses', 'courseAdmin_courses'):
+      # select_related the org: compute_course_capabilities reads course.organization
+      # (AI feature toggles) for every staff course.
+      prefetches.append(Prefetch(rel, queryset=Course.objects.select_related('organization')))
       prefetches += [f'{rel}__assignments', f'{rel}__sections', f'{rel}__webhooks', f'{rel}__rubricEditors']
       prefetches.append(Prefetch(f'{rel}__students', queryset=User.objects.only('id')))
 

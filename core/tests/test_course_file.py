@@ -7,6 +7,8 @@ Covers:
 - publicUrl serializer output
 - Unauthenticated public serving (serve_public_course_file), text and binary
 - 404 for non-public / missing files
+- Token rotation on unpublish (revocation)
+- Archived-course edit lockdown and its unpublish-only escape hatch
 - Size cap and any-type acceptance
 """
 import base64
@@ -128,6 +130,83 @@ class TestPublicServing:
         import uuid
         resp = client.get(f"/courseFiles/raw/{uuid.uuid4()}/")
         assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestTokenRotation:
+
+    def test_unpublish_rotates_token_and_revokes_url(self, client, course, admin):
+        client.force_authenticate(user=admin)
+        created = _create(client, course, isPublic=True)
+        file_id = created.data["id"]
+        old_url = created.data["publicUrl"]
+        assert client.get(old_url).status_code == status.HTTP_200_OK
+
+        resp = client.patch(f"/courseFiles/{file_id}/", {"isPublic": False}, format="json")
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["publicUrl"] is None
+        # Unpublish revokes: the shared URL dies immediately...
+        assert client.get(old_url).status_code == status.HTTP_404_NOT_FOUND
+
+        resp = client.patch(f"/courseFiles/{file_id}/", {"isPublic": True}, format="json")
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        new_url = resp.data["publicUrl"]
+        # ...and re-publishing mints a fresh token, so the leaked URL stays dead.
+        assert new_url != old_url
+        assert client.get(new_url).status_code == status.HTTP_200_OK
+        assert client.get(old_url).status_code == status.HTTP_404_NOT_FOUND
+
+    def test_student_and_grader_cannot_patch_public_flag(self, client, course, student, grader):
+        from core.tests.factories import CourseFileFactory
+        cf = CourseFileFactory(course=course, isPublic=True)
+        for user in (student, grader):
+            client.force_authenticate(user=user)
+            resp = client.patch(f"/courseFiles/{cf.id}/", {"isPublic": False}, format="json")
+            assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_token_never_serialized(self, client, course, admin):
+        client.force_authenticate(user=admin)
+        created = _create(client, course, isPublic=True)
+        assert "token" not in created.data
+        assert "token" not in client.get(f"/courseFiles/{created.data['id']}/").data
+        listed = client.get("/courseFiles/", {"course": course.id})
+        assert all("token" not in item for item in listed.data)
+
+
+class TestArchivedCourse:
+    """Archived courses lock all edits except the unpublish-only escape hatch."""
+
+    def _archive(self, course):
+        from core.models import Course
+        Course.objects.filter(pk=course.id).update(archived=True)
+
+    def test_unpublish_only_patch_succeeds_when_archived(self, client, course, admin):
+        from core.tests.factories import CourseFileFactory
+        cf = CourseFileFactory(course=course, isPublic=True)
+        old_token = cf.token
+        self._archive(course)
+        client.force_authenticate(user=admin)
+        resp = client.patch(f"/courseFiles/{cf.id}/", {"isPublic": False}, format="json")
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        cf.refresh_from_db()
+        assert cf.isPublic is False
+        assert cf.token != old_token  # revocation still rotates on archived courses
+
+    def test_other_edits_still_blocked_when_archived(self, client, course, admin):
+        from core.tests.factories import CourseFileFactory
+        cf = CourseFileFactory(course=course, isPublic=True)
+        self._archive(course)
+        client.force_authenticate(user=admin)
+        for payload in ({"name": "x.txt"}, {"isPublic": True}, {"isPublic": False, "name": "x.txt"}):
+            resp = client.patch(f"/courseFiles/{cf.id}/", payload, format="json")
+            assert resp.status_code == status.HTTP_400_BAD_REQUEST, payload
+
+    def test_still_serves_public_file_when_archived(self, client, course):
+        from core.tests.factories import CourseFileFactory
+        cf = CourseFileFactory(course=course, name="hi.txt", data="still here", isPublic=True)
+        self._archive(course)
+        resp = client.get(f"/courseFiles/raw/{cf.token}/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.content == b"still here"
 
 
 class TestSizeAndType:

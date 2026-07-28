@@ -2006,6 +2006,35 @@ class TestAccessCode:
         assert resp.status_code == status.HTTP_403_FORBIDDEN
         assert resp.data['accessCodeRequired'] is True
 
+    def test_lowercase_code_accepted(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._closed_quiz(course, accessCode='ABC123')
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'abc123'}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
+    def test_late_start_records_started_late_audit(self, api_client, taking_setup):
+        from core.models import CourseAuditEvent
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        quiz = self._closed_quiz(course, accessCode='ABC123')
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        events = CourseAuditEvent.objects.filter(course=course, quiz=quiz, user=student)
+        assert events.filter(event_type='quiz_attempt_started_late').exists()
+        assert not events.filter(event_type='quiz_attempt_started').exists()
+
+    def test_staff_attempt_listing_shows_close_bypassed(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = self._closed_quiz(course, accessCode='ABC123')
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        api_client.post(f"/quizAttempts/{started.data['id']}/submit/", {}, format='json')
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.get(f'/quizzes/{quiz.id}/attempts/')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data[0]['closeBypassed'] is True
+
     def test_correct_code_starts_and_uncaps_deadline(self, api_client, taking_setup):
         from django.utils.dateparse import parse_datetime
         from core.models import QuizAttempt

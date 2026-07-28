@@ -156,7 +156,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       # quiz has actually closed (not, say, 'not_yet_open' or 'no_submission_yet'), and only if a
       # code is set. Nothing else about availability is bypassed.
       if reason in quiz_grading.LATE_BYPASSABLE_REASONS and quiz.accessCode:
-        submitted = (request.data.get('accessCode') or '').strip()
+        submitted = (request.data.get('accessCode') or '').strip().upper()
         if submitted and secrets.compare_digest(submitted, quiz.accessCode):
           bypass = True
         else:
