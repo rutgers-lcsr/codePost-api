@@ -19,6 +19,7 @@ from core.models import (
     CommentTag,
     Course,
     CourseFile,
+    CourseFileContent,
     Environment,
     File,
     FileTemplate,
@@ -1573,17 +1574,17 @@ class AssignmentDataSetAdmin(admin.ModelAdmin):
     
 @admin.register(CourseFile)
 class CourseFileAdmin(admin.ModelAdmin):
-    list_display = ("id", "file_name", "course", "course_period", "open_course", "created")
+    list_display = ("id", "file_name", "course", "course_period", "is_public", "open_course", "created")
     search_fields = ("name", "path", "course__name", "course__period")
     list_filter = ("course", "created")
-    readonly_fields = ("course", "created", "modified")
+    readonly_fields = ("course", "content", "created", "modified")
     autocomplete_fields = ["course"]
     search_help_text = "Search by filename/path, course name, or period."
-    list_select_related = ("course",)
+    list_select_related = ("course", "content")
     list_per_page = 100
     show_full_result_count = False
     date_hierarchy = "created"
-    
+
     def file_name(self, obj: CourseFile) -> str:
         return obj.name
     file_name.short_description = "File Name"
@@ -1594,14 +1595,40 @@ class CourseFileAdmin(admin.ModelAdmin):
     course_period.short_description = "Period"
     course_period.admin_order_field = "course__period"
 
+    def is_public(self, obj: CourseFile) -> bool:
+        return obj.content.isPublic
+    is_public.short_description = "Public"
+    is_public.boolean = True
+    is_public.admin_order_field = "content__isPublic"
+
     def open_course(self, obj: CourseFile) -> str:
         url = reverse("admin:core_course_change", args=[obj.course.id])
         return format_html('<a href="{}">Open Course</a>', url)
     open_course.short_description = "Course"
-    
+
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related("course")
+        return qs.select_related("course", "content")
+
+
+@admin.register(CourseFileContent)
+class CourseFileContentAdmin(admin.ModelAdmin):
+    """Support view of shared course-file content: which courses share it, and its
+    public token. Content is written via the copy-on-write service, not here."""
+    list_display = ("id", "isPublic", "shared_count", "token", "created")
+    readonly_fields = ("token", "created", "modified")
+    exclude = ("data",)
+    list_per_page = 100
+    show_full_result_count = False
+
+    def get_queryset(self, request: Any) -> Any:
+        qs = super().get_queryset(request)
+        return qs.annotate(_shared_count=Count("files"))
+
+    def shared_count(self, obj: CourseFileContent) -> int:
+        return obj._shared_count
+    shared_count.short_description = "Sharing files"
+    shared_count.admin_order_field = "_shared_count"
 
 
 class TestCaseInline(admin.TabularInline):

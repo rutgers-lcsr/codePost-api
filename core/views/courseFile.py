@@ -3,7 +3,7 @@ import base64
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse, HttpResponseNotFound
 from django.utils.http import content_disposition_header
-from core.models import CourseFile
+from core.models import CourseFile, CourseFileContent
 from core.serializers.file import CourseFileSerializer
 from core.views.template import ListProtectedViewSet
 from rest_framework.permissions import IsAuthenticated
@@ -42,53 +42,61 @@ class CourseFileViewSet(ListProtectedViewSet):
     def list(self, request):
         """
         List course files. Requires ?course=<id> query parameter.
-        Returns files for courses where the user is a member.
+        Staff see every file; students only see files flipped to studentVisible.
         """
-        from core.permissions.helpers import isAuthenticated, isCourseMember
+        from core.permissions.helpers import isAuthenticated, isCourseMember, isCourseStaff
         from core.views.template import returnNotAuthorized, returnForbidden
         from core.models import Course
         from rest_framework.response import Response
-        
+
         user = request.user
-        
+
         if not isAuthenticated(user):
             return returnNotAuthorized()
-        
+
         # Get course ID from query parameters
         course_id = request.query_params.get('course')
         if not course_id:
             return returnForbidden()
-        
+
         try:
             course = Course.objects.get(id=int(course_id))
         except (Course.DoesNotExist, ValueError):
             return returnForbidden()
-        
+
         # Check if user is a member of the course
         if not (user.is_superuser or isCourseMember(user, course)):
             return returnForbidden()
-        
+
         # Filter course files by course
-        queryset = self.get_queryset().filter(course=course)
+        queryset = self.get_queryset().filter(course=course).select_related('content')
+        if not (user.is_superuser or isCourseStaff(user, course)):
+            queryset = queryset.filter(studentVisible=True)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
 
 def serve_public_course_file(request, token):
-    """Public, unauthenticated download of a CourseFile marked isPublic.
+    """Public, unauthenticated download of CourseFile content marked isPublic.
 
     Plain Django view so it bypasses DRF auth (mirrors serve_quiz_image). The unguessable
-    token locates the file; isPublic is the access gate, so a non-public (or missing) file
-    returns 404 without revealing existence.
+    token locates the shared content (courses sharing a file via cloning serve the same
+    token; one course unpublishing splits off its own copy rather than 404ing the rest);
+    isPublic is the access gate, so non-public (or missing) content returns 404 without
+    revealing existence.
     """
     try:
-        cf = CourseFile.objects.get(token=token)
-    except (CourseFile.DoesNotExist, ValidationError, ValueError):
+        content = CourseFileContent.objects.get(token=token)
+    except (CourseFileContent.DoesNotExist, ValidationError, ValueError):
         return HttpResponseNotFound()
-    if not cf.isPublic:
+    if not content.isPublic:
         return HttpResponseNotFound()
+    # Deterministic download filename: the lowest-id sharing row (the original uploader).
+    cf = content.files.order_by('id').first()
+    if cf is None:
+        return HttpResponseNotFound()  # orphaned content; GC should make this unreachable
 
-    data = cf.data or ""
+    data = content.data or ""
     if data.startswith('data:'):
         # data URI: "data:<mime>;base64,<payload>"
         header, _, encoded = data.partition(',')

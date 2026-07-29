@@ -242,10 +242,18 @@ class CourseFileFactory(factory.django.DjangoModelFactory):
 
   class Meta:
     model = CourseFile
+    skip_postgeneration_save = True
 
   name = "syllabus.txt"
   data = "Course syllabus contents."
   course = factory.SubFactory('core.tests.factories.CourseFactory')
+
+  @factory.post_generation
+  def isPublic(obj, create, extracted, **kwargs):
+    # isPublic lives on the shared CourseFileContent, not the CourseFile row.
+    if extracted:
+      obj.content.isPublic = True
+      obj.content.save()
 
 
 @factory.django.mute_signals(post_save)

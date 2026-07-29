@@ -86,12 +86,17 @@ class QuizImageRewriter:
 
 def clone_course_files(source_course: Course, destination_course: Course, *,
                        names: set[str] | None = None) -> int:
-  """Copy course-level files (CourseFile) from source into destination_course. These back
+  """Share course-level files (CourseFile) from source into destination_course. These back
   the {course_file:name} prompt variable, so a cloned quiz's generated-section prompts keep
   resolving. Returns the number of files created.
 
-  ``names`` limits the copy to those file names (used by cross-course assignment cloning,
-  which only needs the files its quizzes reference); None copies every file (full course
+  The destination row points at the SAME CourseFileContent — no data copy, same token,
+  same isPublic — so public URLs embedded in cloned markdown keep working. A physical
+  copy only materializes when one course later diverges (edits data or toggles
+  isPublic); see core.services.course_file.update_course_file_content.
+
+  ``names`` limits the share to those file names (used by cross-course assignment cloning,
+  which only needs the files its quizzes reference); None shares every file (full course
   clone). Files are matched to prompts by name, so a name already present in the
   destination is left as-is — never duplicated — making repeat/overlapping clones safe.
   """
@@ -100,13 +105,16 @@ def clone_course_files(source_course: Course, destination_course: Course, *,
     source_files = source_files.filter(name__in=names)
   existing_names = set(destination_course.files.values_list('name', flat=True))
   created = 0
-  for cf in source_files:
-    if cf.name in existing_names:
+  # .values(...) so file data is never loaded — the clone shares content, never copies it.
+  for cf in source_files.values('name', 'extension', 'path', 'content_id',
+                                'description', 'studentVisible'):
+    if cf['name'] in existing_names:
       continue
     CourseFile.objects.create(
-        course=destination_course, name=cf.name, data=cf.data,
-        extension=cf.extension, path=cf.path)
-    existing_names.add(cf.name)
+        course=destination_course, name=cf['name'], extension=cf['extension'],
+        path=cf['path'], content_id=cf['content_id'],
+        description=cf['description'], studentVisible=cf['studentVisible'])
+    existing_names.add(cf['name'])
     created += 1
   return created
 

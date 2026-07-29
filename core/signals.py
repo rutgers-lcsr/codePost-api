@@ -248,3 +248,28 @@ def check_auto_improve_threshold(sender, instance, created, **kwargs):
         auto_improve_prompt_threshold.delay(instance.prompt_type)
     except Exception as e:
         logger.debug(f"Failed to dispatch auto-improve threshold check: {e}")
+
+
+from core.models import CourseFile
+
+
+@receiver(post_delete, sender=CourseFile)
+def gc_course_file_content(sender, instance, **kwargs):
+    """Delete a CourseFileContent once its last referencing CourseFile row is gone.
+
+    post_delete (not a delete() override) so course→CourseFile CASCADE deletes are
+    covered — the collector fires this per instance. When several sharing rows die in
+    one batch, each receiver runs after the batch: the first filter().delete() wins and
+    the rest no-op. The PROTECT FK turns a concurrent re-share race into ProtectedError
+    instead of breaking a live row.
+    """
+    from django.db.models.deletion import ProtectedError
+    content_id = instance.content_id
+    if content_id is None:
+        return
+    from core.models import CourseFileContent
+    if not CourseFile.objects.filter(content_id=content_id).exists():
+        try:
+            CourseFileContent.objects.filter(pk=content_id).delete()
+        except ProtectedError:
+            pass

@@ -3185,7 +3185,7 @@ paths:
       operationId: courseFiles_list
       description: |-
         List course files. Requires ?course=<id> query parameter.
-        Returns files for courses where the user is a member.
+        Staff see every file; students only see files flipped to studentVisible.
       tags:
       - courseFiles
       security:
@@ -17914,6 +17914,13 @@ components:
           format: uri
           nullable: true
           readOnly: true
+        description:
+          type: string
+          description: Optional description shown to students.
+        studentVisible:
+          type: boolean
+          description: If True, students in the course can see and download this file
+            in their course file directory. Staff always see all files.
         created:
           type: string
           format: date-time
@@ -20373,6 +20380,13 @@ components:
           format: uri
           nullable: true
           readOnly: true
+        description:
+          type: string
+          description: Optional description shown to students.
+        studentVisible:
+          type: boolean
+          description: If True, students in the course can see and download this file
+            in their course file directory. Staff always see all files.
         created:
           type: string
           format: date-time

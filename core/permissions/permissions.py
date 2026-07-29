@@ -357,7 +357,7 @@ class FilePermissions(TemplatePermission):
         try:
           course_file = obj if isinstance(obj, CourseFile) else obj.coursefile
           logger.debug(f"FilePermissions: Delegating to CourseFilePermissions for course {course_file.course.id}")
-          return CourseFilePermissions().has_object_permission(request, view, course_file.course)
+          return CourseFilePermissions().has_object_permission(request, view, course_file)
         except AttributeError as e:
           logger.warning(f"FilePermissions: Failed to access coursefile for File {obj.id}: {e}")
           return False
@@ -368,19 +368,22 @@ class FilePermissions(TemplatePermission):
 
 class CourseFilePermissions(TemplatePermission):
     """
-    Permissions for CourseFile objects.
-    
+    Permissions for CourseFile objects (receives the CourseFile, not the course).
+
     - POST/PUT/PATCH/DELETE: Course admins only
-    - GET: Superuser or course members
+    - GET: Superuser or course staff see every file; students only see files an
+      instructor has flipped to studentVisible.
     """
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
-        course = obj
+        course_file = obj
+        course = course_file.course
 
-        # GET: superuser or course member
         if request.method == "GET":
-            return user.is_superuser or isCourseMember(user, course)
+            if user.is_superuser or isCourseStaff(user, course):
+                return True
+            return isCourseMember(user, course) and course_file.studentVisible
 
         # All write operations: course admin only
         return isCourseAdmin(user, course)

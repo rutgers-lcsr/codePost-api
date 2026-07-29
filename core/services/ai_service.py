@@ -1956,10 +1956,10 @@ Provide a concise markdown summary following the guidelines in your instructions
             # Course-level material (CourseFile), bounded by the remaining budget.
             mat_parts: list[str] = []
             used = sum(len(p) for p in tpl_parts)
-            for cf in self.course.files.all():
+            for cf in self.course.files.select_related('content'):
                 if used >= CONTEXT_BUDGET:
                     break
-                content = cf.data
+                content = cf.content.data
                 budget_left = CONTEXT_BUDGET - used
                 if len(content) > budget_left:
                     content = content[:budget_left] + "\n... (truncated)"

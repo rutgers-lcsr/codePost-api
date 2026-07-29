@@ -299,10 +299,10 @@ def _validate_assignment_file_argument(ctx, argument):
 def _resolve_course_file(ctx, argument):
     if ctx.course is None:
         return None
-    cf = ctx.course.files.filter(name=argument).first()
+    cf = ctx.course.files.filter(name=argument).select_related('content').first()
     if cf is None:
         return None
-    return _format_file_block(cf.name, cf.data, COURSE_FILE_CHAR_CAP)
+    return _format_file_block(cf.name, cf.content.data, COURSE_FILE_CHAR_CAP)
 
 
 def _list_course_file_arguments(ctx):

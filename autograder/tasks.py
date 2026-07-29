@@ -12,8 +12,11 @@ logger = logging.getLogger(__name__)
 def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: bool = False, test_code: Optional[str] = None, example_code: Optional[str] = None, code_override: Optional[str] = None):
     try:
         file_obj = File.objects.get(pk=file_id)
+        # CourseFile content lives on shared CourseFileContent — hydrate in-memory so
+        # executors reading file.data see it (nothing on this path saves the object).
+        file_obj.data = file_obj.effective_data()
         user = User.objects.get(pk=user_id)
-        
+
         # Check cache if not forced
         if not force_execute:
             cached = CachedExecutionResult.get_cached_result(file_obj)
@@ -120,6 +123,9 @@ def run_file_streaming_task(
     r = _get_redis_client()
     try:
         file_obj = File.objects.get(pk=file_id)
+        # CourseFile content lives on shared CourseFileContent — hydrate in-memory so
+        # executors reading file.data see it (nothing on this path saves the object).
+        file_obj.data = file_obj.effective_data()
         user = User.objects.get(pk=user_id)
 
         _publish_sse(r, channel, "progress", {"status": "executing", "message": "Running code..."})

@@ -209,6 +209,75 @@ class TestArchivedCourse:
         assert resp.content == b"still here"
 
 
+class TestStudentVisibility:
+    """studentVisible gates what students see; staff always see everything."""
+
+    def _make_files(self, course):
+        from core.tests.factories import CourseFileFactory
+        visible = CourseFileFactory(course=course, name="handout.txt", data="for students")
+        visible.studentVisible = True
+        visible.description = "Week 1 handout"
+        visible.save()
+        hidden = CourseFileFactory(course=course, name="answers.txt", data="staff only")
+        return visible, hidden
+
+    def test_student_list_only_visible_files(self, client, course, student):
+        visible, hidden = self._make_files(course)
+        client.force_authenticate(user=student)
+        resp = client.get("/courseFiles/", {"course": course.id})
+        assert resp.status_code == status.HTTP_200_OK
+        names = {f["name"] for f in resp.data}
+        assert names == {"handout.txt"}
+        listed = resp.data[0]
+        assert listed["description"] == "Week 1 handout"
+        assert listed["data"] == "for students"
+
+    def test_staff_list_all_files(self, client, course, admin, grader):
+        self._make_files(course)
+        for user in (admin, grader):
+            client.force_authenticate(user=user)
+            resp = client.get("/courseFiles/", {"course": course.id})
+            assert resp.status_code == status.HTTP_200_OK
+            assert {f["name"] for f in resp.data} == {"handout.txt", "answers.txt"}
+
+    def test_student_retrieve_visible_ok_hidden_forbidden(self, client, course, student):
+        visible, hidden = self._make_files(course)
+        client.force_authenticate(user=student)
+        assert client.get(f"/courseFiles/{visible.id}/").status_code == status.HTTP_200_OK
+        assert client.get(f"/courseFiles/{hidden.id}/").status_code == status.HTTP_403_FORBIDDEN
+
+    def test_student_cannot_toggle_visibility(self, client, course, student):
+        visible, _hidden = self._make_files(course)
+        client.force_authenticate(user=student)
+        resp = client.patch(f"/courseFiles/{visible.id}/", {"studentVisible": False}, format="json")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_toggle_and_description_roundtrip(self, client, course, admin):
+        client.force_authenticate(user=admin)
+        created = _create(client, course, description="Syllabus for the term", studentVisible=True)
+        assert created.status_code == status.HTTP_201_CREATED, created.data
+        assert created.data["studentVisible"] is True
+        assert created.data["description"] == "Syllabus for the term"
+        file_id = created.data["id"]
+        resp = client.patch(f"/courseFiles/{file_id}/",
+                            {"studentVisible": False, "description": "updated"}, format="json")
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["studentVisible"] is False
+        assert resp.data["description"] == "updated"
+
+    def test_visibility_toggle_does_not_split_shared_content(self, client, course, admin):
+        # studentVisible/description are per-course row fields — no copy-on-write.
+        from core.tests.factories import CourseFileFactory
+        cf = CourseFileFactory(course=course, name="shared.txt", data="x")
+        old_content_id = cf.content_id
+        client.force_authenticate(user=admin)
+        resp = client.patch(f"/courseFiles/{cf.id}/",
+                            {"studentVisible": True, "description": "d"}, format="json")
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        cf.refresh_from_db()
+        assert cf.content_id == old_content_id
+
+
 class TestSizeAndType:
 
     def test_any_type_allowed_under_cap(self, client, course, admin):

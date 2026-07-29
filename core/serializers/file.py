@@ -37,6 +37,22 @@ class FileSerializer(ModelSerializerWithPOSTCheck):
             "data": {"trim_whitespace": False},
         }
 
+    def to_representation(self, instance):
+        # CourseFile rows keep the inherited data column empty; the content lives on
+        # the shared CourseFileContent (see CourseFileSerializer).
+        ret = super().to_representation(instance)
+        if hasattr(instance, 'coursefile'):
+            ret['data'] = instance.coursefile.content.data
+        return ret
+
+    def update(self, instance, validated_data):
+        # Route CourseFile data writes through the copy-on-write service so a write via
+        # /files/<id>/ can't land silently on the dead File.data column.
+        if hasattr(instance, 'coursefile') and 'data' in validated_data:
+            from core.services.course_file import update_course_file_content
+            update_course_file_content(instance.coursefile, data=validated_data.pop('data'))
+        return super().update(instance, validated_data)
+
 
 class SubmissionFileSerializer(ModelSerializerWithPOSTCheck):
     """
@@ -170,16 +186,27 @@ class CourseFileSerializer(ModelSerializerWithPOSTCheck):
     These are files that belong to courses (syllabi, resources, etc.).
     """
 
+    # data and isPublic live on the shared CourseFileContent (copy-on-write across
+    # course clones) — declared explicitly so DRF neither reads nor writes the dead
+    # inherited File.data column; writes route through create()/update() below.
+    data = serializers.CharField(required=False, allow_blank=False, trim_whitespace=False,
+        help_text="The data in a file. should be utf-8 encoded text.")
+    isPublic = serializers.BooleanField(required=False, help_text=(
+        "If True, the file is downloadable without authentication via its public "
+        "token URL (courseFiles/raw/<token>/)."))
     publicUrl = serializers.SerializerMethodField()
 
     class Meta:
         model = CourseFile
-        fields = ('name', 'data', 'extension', 'course', 'id', 'path', 'isPublic', 'publicUrl', 'created', 'modified')
+        fields = ('name', 'data', 'extension', 'course', 'id', 'path', 'isPublic', 'publicUrl',
+                  'description', 'studentVisible', 'created', 'modified')
         read_only_fields = ('created', 'modified', 'publicUrl')
         POST_permissions_fields = ('course',)
-        extra_kwargs = {
-            "data": {"trim_whitespace": False},
-        }
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret['data'] = instance.content.data
+        return ret
 
     @extend_schema_field(serializers.URLField(allow_null=True))
     def get_publicUrl(self, obj):
@@ -201,7 +228,10 @@ class CourseFileSerializer(ModelSerializerWithPOSTCheck):
         )
         if not archived_unpublish:
             data = super().validate(data)
-        raw = data.get('data', getattr(self.instance, 'data', '') or '')
+        raw = data.get('data')
+        if raw is None:
+            raw = (self.instance.content.data if self.instance is not None
+                   and self.instance.content_id else '') or ''
         if raw.startswith('data:'):
             _, _, encoded = raw.partition(',')
             try:
@@ -214,6 +244,26 @@ class CourseFileSerializer(ModelSerializerWithPOSTCheck):
             raise serializers.ValidationError(
                 f"Course file too large (max {MAX_COURSE_FILE_SIZE // (1024 * 1024)} MB).")
         return data
+
+    def create(self, validated_data):
+        from core.services.course_file import create_course_file
+        return create_course_file(
+            course=validated_data['course'], name=validated_data['name'],
+            data=validated_data.get('data', ''), extension=validated_data.get('extension', ''),
+            path=validated_data.get('path'), is_public=validated_data.get('isPublic', False),
+            description=validated_data.get('description', ''),
+            student_visible=validated_data.get('studentVisible', False))
+
+    def update(self, instance, validated_data):
+        # name/extension/path/course stay per-row (never split); data/isPublic go
+        # through the copy-on-write service.
+        new_data = validated_data.pop('data', None)
+        new_public = validated_data.pop('isPublic', None)
+        instance = super().update(instance, validated_data)
+        if new_data is not None or new_public is not None:
+            from core.services.course_file import update_course_file_content
+            instance = update_course_file_content(instance, data=new_data, is_public=new_public)
+        return instance
 
 
 class FileValidationSerializerWithoutSubmission(serializers.Serializer):

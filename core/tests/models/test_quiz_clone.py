@@ -523,9 +523,9 @@ class CourseCloneQuizTests(TestCase):
 
     def test_course_clone_copies_course_files(self):
         # Course files back {course_file:name} prompts, so a full course clone must carry
-        # them over (fresh rows in the destination, not shared).
-        CourseFile.objects.create(course=self.source_course, name="style.md",
-                                  data="Use camelCase.", extension=".md")
+        # them over (fresh rows in the destination, sharing the source's content).
+        src_style = CourseFile.objects.create(course=self.source_course, name="style.md",
+                                              data="Use camelCase.", extension=".md")
         CourseFile.objects.create(course=self.source_course, name="topics.txt",
                                   data="recursion, trees", extension=".txt")
 
@@ -533,9 +533,11 @@ class CourseCloneQuizTests(TestCase):
 
         cloned_files = {f.name: f for f in cloned_course.files.all()}
         self.assertEqual(set(cloned_files), {"style.md", "topics.txt"})
-        self.assertEqual(cloned_files["style.md"].data, "Use camelCase.")
+        self.assertEqual(cloned_files["style.md"].content.data, "Use camelCase.")
         self.assertEqual(cloned_files["style.md"].extension, ".md")
         self.assertNotEqual(cloned_files["style.md"].course_id, self.source_course.id)
+        # Content is shared, not copied — a physical copy only happens on divergence.
+        self.assertEqual(cloned_files["style.md"].content_id, src_style.content_id)
 
 
 class CourseFileCloneTests(TestCase):
@@ -557,18 +559,34 @@ class CourseFileCloneTests(TestCase):
 
         self.assertEqual(created, 1)
         self.assertEqual(self.dest.files.filter(name="a.md").count(), 1)
-        self.assertEqual(self.dest.files.get(name="a.md").data, "existing")
-        self.assertEqual(self.dest.files.get(name="b.md").data, "B")
+        self.assertEqual(self.dest.files.get(name="a.md").content.data, "existing")
+        self.assertEqual(self.dest.files.get(name="b.md").content.data, "B")
 
-    def test_clone_gets_fresh_token_and_is_private(self):
+    def test_clone_shares_content_token_and_stays_public(self):
+        # The clone points at the SAME content: same token, same public state — so URLs
+        # embedded in cloned markdown keep working. A copy only happens on divergence.
         src = CourseFile.objects.create(course=self.source, name="pub.md", data="P",
-                                        extension=".md", isPublic=True)
+                                        extension=".md")
+        src.content.isPublic = True
+        src.content.save()
 
         clone_course_files(self.source, self.dest)
 
         cloned = self.dest.files.get(name="pub.md")
-        self.assertNotEqual(cloned.token, src.token)
-        self.assertFalse(cloned.isPublic)
+        self.assertEqual(cloned.content_id, src.content_id)
+        self.assertEqual(cloned.token, src.token)
+        self.assertTrue(cloned.isPublic)
+
+    def test_clone_carries_description_and_student_visibility(self):
+        CourseFile.objects.create(course=self.source, name="syllabus.md", data="S",
+                                  extension=".md", description="Read me first",
+                                  studentVisible=True)
+
+        clone_course_files(self.source, self.dest)
+
+        cloned = self.dest.files.get(name="syllabus.md")
+        self.assertEqual(cloned.description, "Read me first")
+        self.assertTrue(cloned.studentVisible)
 
     def test_clone_files_limited_to_names(self):
         CourseFile.objects.create(course=self.source, name="used.md", data="U", extension=".md")

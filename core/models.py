@@ -738,6 +738,15 @@ class FileTemplate(BaseModel):
   pass
 
 
+def normalize_file_data(data: str) -> str:
+  """Normalize newlines for plain-text content (data URIs are binary — skipped) and
+  ensure the result is valid utf-8. Shared by File.save and CourseFileContent.save."""
+  if not data.startswith('data:'):
+    if '\\r\\n' in data:
+      data = data.replace("\\r\\n", "\\n")
+  return data.encode('utf-8').decode('utf-8')
+
+
 class File(BaseModel):
   if TYPE_CHECKING:
     id: int
@@ -934,54 +943,31 @@ class File(BaseModel):
       does not match the decoded bytes. Unknown MIME types are allowed through
       (we only reject known mismatches, not unknown types).
       """
-      try:
-          header, encoded = self.data.split(',', 1)
-      except ValueError:
-          return  # Malformed data URI — let other validation handle it
+      validate_data_uri_mime(self.name, self.data)
 
-      # Parse MIME from "data:<mime>;base64" or "data:<mime>;charset=...;base64"
-      mime = header.replace('data:', '').split(';')[0].strip().lower()
-      if not mime:
-          return
+  def effective_data(self) -> str:
+    """Content for consumers that read File.data polymorphically (execution, /files/).
 
-      signatures = self.MIME_SIGNATURES.get(mime)
-      if signatures is None:
-          return  # No known signature for this MIME — allow through
-
-      try:
-          raw = base64.b64decode(encoded)
-      except Exception:
-          raise ValidationError(
-              f"File '{self.name}': data URI claims {mime} but contains invalid base64."
-          )
-
-      for offset, magic in signatures:
-          if len(raw) >= offset + len(magic) and raw[offset:offset + len(magic)] == magic:
-              return  # Match found
-
-      raise ValidationError(
-          f"File '{self.name}': content does not match the claimed MIME type '{mime}'. "
-          "The file may be corrupted or mislabeled."
-      )
+    CourseFile rows keep their inherited data column empty — the real content lives on
+    the shared CourseFileContent; every other File subclass stores data on the row.
+    """
+    try:
+      cf = self if isinstance(self, CourseFile) else self.coursefile  # type: ignore[attr-defined]
+      return cf.content.data or ''
+    except (AttributeError, ObjectDoesNotExist):
+      return self.data or ''
 
   def save(self, *args, **kwargs):
     # Check if trying to use deprecated 'code' field
     if hasattr(self, 'code') and self.code:  # type: ignore[attr-defined]
       raise Exception("File.code is deprecated. Use File.data instead.")
- 
-    # Normalize newlines, but only for plain text files.
-    # Data URI content ("data:<mime>;base64,...") is binary — skip normalization.
-    if not self.data.startswith('data:'):
-        if '\\r\\n' in self.data:
-            self.data = self.data.replace("\\r\\n", "\\n")
-    else:
+
+    if self.data.startswith('data:'):
         # Validate that the MIME type claimed in the data URI matches the actual
         # binary content (magic bytes). Prevents uploading malicious content
         # disguised as a benign file type.
         self._validate_data_uri_mime()
-    
-    # Ensure utf-8 encoding (base64 is ascii safe)
-    self.data = self.data.encode('utf-8').decode('utf-8')
+    self.data = normalize_file_data(self.data)
     self.hash = hashlib.sha256(self.data.encode('utf-8')).hexdigest()
     
     # Infer extension from name if not provided
@@ -995,8 +981,44 @@ class File(BaseModel):
       
     
     return super(File, self).save(*args, **kwargs)
-  
 
+
+
+def validate_data_uri_mime(name: str, data: str) -> None:
+  """Validate that data-URI binary content matches its claimed MIME type (magic bytes).
+
+  Raises ValidationError on a known mismatch; unknown MIME types are allowed through.
+  Module-level so CourseFileContent writes get the same check as File.save.
+  """
+  try:
+      header, encoded = data.split(',', 1)
+  except ValueError:
+      return  # Malformed data URI — let other validation handle it
+
+  # Parse MIME from "data:<mime>;base64" or "data:<mime>;charset=...;base64"
+  mime = header.replace('data:', '').split(';')[0].strip().lower()
+  if not mime:
+      return
+
+  signatures = File.MIME_SIGNATURES.get(mime)
+  if signatures is None:
+      return  # No known signature for this MIME — allow through
+
+  try:
+      raw = base64.b64decode(encoded)
+  except Exception:
+      raise ValidationError(
+          f"File '{name}': data URI claims {mime} but contains invalid base64."
+      )
+
+  for offset, magic in signatures:
+      if len(raw) >= offset + len(magic) and raw[offset:offset + len(magic)] == magic:
+          return  # Match found
+
+  raise ValidationError(
+      f"File '{name}': content does not match the claimed MIME type '{mime}'. "
+      "The file may be corrupted or mislabeled."
+  )
 
 
 class SubmissionFile(File):
@@ -1278,8 +1300,8 @@ class CachedExecutionResult(BaseModel):
     logger = logging.getLogger(__name__)
     logger.info(f"[CachedExecutionResult.get] Checking cache for file {file.id}")
     
-    # Get file content - File subclasses use 'data'
-    file_content = getattr(file, 'data', None) or ''
+    # Get file content - CourseFiles store it on shared content, others on the row
+    file_content = file.effective_data()
     if not file_content:
       logger.warning(f"[CachedExecutionResult.get] File {file.id} has no content")
       return None
@@ -1378,8 +1400,8 @@ class CachedExecutionResult(BaseModel):
     logger = logging.getLogger(__name__)
     logger.info(f"[CachedExecutionResult.save] Attempting to save cache for file {file.id}")
     
-    # Get file content - File subclasses use 'data'
-    file_content = getattr(file, 'data', None) or ''
+    # Get file content - CourseFiles store it on shared content, others on the row
+    file_content = file.effective_data()
     if not file_content:
       logger.warning(f"[CachedExecutionResult.save] File {file.id} has no content, skipping cache")
       return None
@@ -1444,13 +1466,20 @@ class AssignmentFile(File):
     return super(AssignmentFile, self).save(*args, **kwargs)
 
 
-class CourseFile(File):
+class CourseFileContent(BaseModel):
+  """Shareable state of a CourseFile: the bytes, the public flag, and the URL token.
+
+  Course cloning links the cloned course's CourseFile row to the SAME content, so the
+  public URL (courseFiles/raw/<token>/) keeps working in cloned markdown. A physical
+  copy only happens when a sharing course diverges (edits data or toggles isPublic) —
+  see core.services.course_file.update_course_file_content.
+  """
   if TYPE_CHECKING:
     id: int
-    course: Course
-    
-  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
-                             related_name="files", help_text=("The related course_id."))
+    files: RelatedManager[CourseFile]
+
+  data = models.TextField(default="", null=False, help_text=(
+      "The data in a file. should be utf-8 encoded text."))
   isPublic = models.BooleanField(default=False, help_text=(
       "If True, the file is downloadable without authentication via its public "
       "token URL (courseFiles/raw/<token>/)."))
@@ -1459,11 +1488,49 @@ class CourseFile(File):
 
   def save(self, *args, **kwargs):
     if self.pk:
-      was_public = (CourseFile.objects.filter(pk=self.pk)
+      was_public = (CourseFileContent.objects.filter(pk=self.pk)
                     .values_list('isPublic', flat=True).first())
       if was_public and not self.isPublic:
         # Unpublish revokes access: rotate the token so previously shared URLs 404.
         self.token = uuid.uuid4()
+    self.data = normalize_file_data(self.data)
+    super().save(*args, **kwargs)
+
+
+class CourseFile(File):
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    content: CourseFileContent
+    content_id: int
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+                             related_name="files", help_text=("The related course_id."))
+  content: CourseFileContent = models.ForeignKey(CourseFileContent, on_delete=models.PROTECT,  # type: ignore[assignment]
+                              related_name="files", help_text=("Shared file content/visibility."))
+  description = models.TextField(blank=True, help_text=("Optional description shown to students."))
+  studentVisible = models.BooleanField(default=False, help_text=(
+      "If True, students in the course can see and download this file in their course "
+      "file directory. Staff always see all files."))
+
+  # Read-only conveniences: the shareable state lives on content. Writes must go
+  # through core.services.course_file.update_course_file_content (copy-on-write).
+  isPublic = property(lambda self: self.content.isPublic)
+  token = property(lambda self: self.content.token)
+
+  def save(self, *args, **kwargs):
+    if self.content_id is None:
+      # Create-time bootstrap: move inherited File.data into a fresh (private) content
+      # row so existing CourseFile.objects.create(..., data=...) call sites keep working.
+      raw = self.data or ''
+      if raw.startswith('data:'):
+        validate_data_uri_mime(self.name, raw)
+      self.content = CourseFileContent.objects.create(data=raw)
+      self.data = ''
+    elif self.data:
+      raise ValueError(
+          "CourseFile data lives on CourseFileContent; use "
+          "core.services.course_file.update_course_file_content().")
     super().save(*args, **kwargs)
 
   def get_course(self):
