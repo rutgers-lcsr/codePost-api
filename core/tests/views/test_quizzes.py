@@ -332,6 +332,51 @@ class TestCrossCourseAuthorization:
                                 {'assignment': quiz_setup['assignment'].id}, format='json')
         assert resp.status_code == status.HTTP_200_OK
 
+    def test_cannot_reassign_question_into_archived_course(self, api_client, quiz_setup):
+        """Staff of BOTH courses still can't move a resource into an archived destination —
+        the base validate() only checks the *source* course's archived flag."""
+        from decimal import Decimal
+        from core.models import QuestionBank, Question
+        course_b = self._other_course()
+        course_b.archived = True
+        course_b.save()
+        course_b.courseAdmins.add(quiz_setup['admin'])
+        bank_b = QuestionBank.objects.create(course=course_b, name='B bank')
+        bank_a = QuestionBank.objects.create(course=quiz_setup['course'], name='A bank')
+        q = Question.objects.create(course=quiz_setup['course'], bank=bank_a,
+                                    questionType='essay', text='x', points=Decimal('5'))
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.patch(f'/questions/{q.id}/',
+                                {'course': course_b.id, 'bank': bank_b.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'archived' in str(resp.data)
+        q.refresh_from_db()
+        assert q.course_id == quiz_setup['course'].id  # not relocated
+
+    def test_legacy_mismatched_quiz_stays_editable(self, api_client, quiz_setup):
+        """A quiz already stored with another course's assignment (legacy/pre-validation
+        data) must stay editable: the settings form re-sends every field each save, so the
+        mismatch check only fires when a change *introduces* the mismatch (matches the
+        sealResultsUntilClose carve-out)."""
+        from core.models import Quiz
+        course_b = self._other_course()
+        assignment_b = course_b.assignments.first()
+        # Build the bad state directly — the API blocks creating it going forward.
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Legacy',
+                                   assignment=assignment_b)
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        # Unrelated edit → allowed (proposed fields merge in the stored mismatched pair).
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {'title': 'Renamed'}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        # Settings-form-style save re-sending the stored pair → still allowed.
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'title': 'Renamed again', 'course': quiz_setup['course'].id,
+            'assignment': assignment_b.id,
+        }, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+
 
 class TestQuizAuthoring:
     def test_create_quiz_attach_to_assignment_and_add_question(self, api_client, quiz_setup):
@@ -537,6 +582,49 @@ class TestCanvasImport:
         assert job.createdQuizCount == 0
         assert Question.objects.filter(course=quiz_setup['course'], source='imported').count() == 3
         assert not Quiz.objects.filter(course=quiz_setup['course'], source='imported').exists()
+
+    def test_nonfinite_points_clamp_low_not_max(self, quiz_setup):
+        """-Infinity/NaN/negative points must clamp to 0 — only +Infinity (and finite
+        over-max) clamp to the 9999.99 cap. A bogus value must not silently max out a
+        question's worth."""
+        from decimal import Decimal
+        from core.models import QuizImportJob, Question
+        from core.tasks import import_quiz_qti
+
+        cases = [('neg_inf', '-Infinity'), ('nan', 'NaN'), ('pos_inf', 'Infinity'),
+                 ('neg', '-5'), ('over_max', '123456')]
+        items = ''.join(f"""
+   <item ident="q_{ident}" title="{ident}">
+    <itemmetadata><qtimetadata>
+      <qtimetadatafield><fieldlabel>question_type</fieldlabel><fieldentry>essay_question</fieldentry></qtimetadatafield>
+      <qtimetadatafield><fieldlabel>points_possible</fieldlabel><fieldentry>{pts}</fieldentry></qtimetadatafield>
+    </qtimetadata></itemmetadata>
+    <presentation><material><mattext>Question {ident}</mattext></material></presentation>
+   </item>""" for ident, pts in cases)
+        xml = f"""<?xml version="1.0"?>
+<questestinterop xmlns="http://www.imsglobal.org/xsd/ims_qtiasiv1p2">
+ <assessment ident="a1" title="Points Quiz"><section ident="root">{items}
+ </section></assessment>
+</questestinterop>"""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as zf:
+            zf.writestr('imsmanifest.xml', '<?xml version="1.0"?><manifest/>')
+            zf.writestr('a1/a1.xml', xml)
+        job = QuizImportJob.objects.create(
+            course=quiz_setup['course'], createdBy=quiz_setup['admin'],
+            file=SimpleUploadedFile('export.zip', buf.getvalue(), content_type='application/zip'),
+        )
+        import_quiz_qti(job.id)
+        job.refresh_from_db()
+        assert job.status == 'completed'
+
+        points_by_text = {q.text: q.points for q in
+                          Question.objects.filter(course=quiz_setup['course'], source='imported')}
+        assert points_by_text['Question neg_inf'] == Decimal('0')
+        assert points_by_text['Question nan'] == Decimal('0')
+        assert points_by_text['Question neg'] == Decimal('0')
+        assert points_by_text['Question pos_inf'] == Decimal('9999.99')
+        assert points_by_text['Question over_max'] == Decimal('9999.99')
 
     def test_import_endpoint_runs_job(self, api_client, quiz_setup, monkeypatch):
         from core.tasks import import_quiz_qti

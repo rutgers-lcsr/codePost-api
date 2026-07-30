@@ -2,6 +2,11 @@
 
 This repository contains the backend API for [codePost](https://codepost.cs.rutgers.edu), built with Django.
 
+## Documentation
+
+- See [`docs/quizzes.md`](./docs/quizzes.md) for the Quizzes subsystem (domain model, API surface, workflows).
+- Live API reference: `/api/schema/swagger-ui/` (or `/api/schema/elements/`) on a running instance.
+
 ## Changelog
 
 - See [`CHANGELOG.md`](./CHANGELOG.md) for recent API changes and release notes.

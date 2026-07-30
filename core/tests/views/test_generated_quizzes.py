@@ -148,6 +148,23 @@ class TestSectionAuthoring:
         delete = api_client.delete(f'/quizGeneratedSections/{section.id}/')
         assert delete.status_code == status.HTTP_204_NO_CONTENT
 
+    def test_cannot_reassign_section_into_foreign_course_quiz(self, api_client, gen_setup):
+        """Object permissions authorize against the source quiz's course; the writable
+        `quiz` FK must not let staff of course A re-parent a section into course B."""
+        from core.models import Quiz
+        from core.tests.factories import CourseFactory
+        with factory.django.mute_signals(post_save):
+            course_b = CourseFactory(name="cs999", period="s2026", organization__name="Princeton")
+        quiz_b = Quiz.objects.create(course=course_b, title='B quiz')
+
+        api_client.force_authenticate(user=gen_setup['admin'])  # staff of course A only
+        section = gen_setup['section']
+        resp = api_client.patch(f'/quizGeneratedSections/{section.id}/',
+                                {'quiz': quiz_b.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        section.refresh_from_db()
+        assert section.quiz_id == gen_setup['quiz'].id  # not relocated
+
     def test_unknown_variable_rejected(self, api_client, gen_setup, monkeypatch):
         _feature_on(monkeypatch)
         api_client.force_authenticate(user=gen_setup['admin'])

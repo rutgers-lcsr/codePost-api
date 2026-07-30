@@ -50,14 +50,20 @@ class ModelSerializerWithPOSTCheck(serializers.ModelSerializer):
     '''
     Guard cross-course reassignment. Object permissions authorize against the *source*
     object's course, but a writable ``course``/``quiz``/``bank`` FK can relocate a resource
-    (or point it at another course's data) into ``course``. Require the acting user to have
-    quiz-authoring rights (course staff or superuser) in that destination course too.
+    (or point it at another course's data) into ``course``. Require the destination course
+    to be unarchived (the base validate() only checks the *source* course's archived flag)
+    and the acting user to have quiz-authoring rights (course staff or superuser) there too.
     No-op when there is no request/user in context (internal, non-request writes).
     '''
     from core.permissions.helpers import isCourseStaff
+    if course is None:
+      return
+    # Mirrors the source-course check in validate(): no superuser exemption.
+    if course.archived:
+      raise serializers.ValidationError("The Course is archived and cannot be edited.")
     request = self.context.get('request')
     user = getattr(request, 'user', None)
-    if course is None or user is None:
+    if user is None:
       return
     if user.is_superuser or isCourseStaff(user, course):
       return

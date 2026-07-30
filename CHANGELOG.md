@@ -12,6 +12,70 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ---
 
+## [4.0.0] — Quizzes
+
+First release of the **Quizzes** subsystem — see [`docs/quizzes.md`](./docs/quizzes.md) for the
+full feature documentation (domain model, API surface, workflows).
+
+### Added — Quiz authoring & taking
+
+- **Question banks and questions** — course-level `QuestionBank` pools with reusable
+  `Question`s (multiple choice/answers, true/false, short answer, numerical, essay, code) and
+  per-question options (partial credit, numeric tolerance, starter code / reference solution
+  for code questions). Move/copy questions between banks.
+- **Quizzes** — optionally attached to an assignment, with availability triggers and close
+  events, time limits (+ per-student `QuizAccommodation` multipliers), attempt limits and
+  scoring policies, question shuffling, one-question-at-a-time with optional backtracking,
+  random-draw question groups, and a results reveal policy (`showCorrectAnswers`,
+  `sealResultsUntilClose`, `showResponses`).
+- **Attempts and grading** — server-enforced deadlines and navigation, immutable
+  per-response question snapshots, auto-grading for keyed types, manual grading with
+  feedback and reopen, sandboxed execution of code answers, official-score selection
+  (highest/latest/average) with staff override.
+- **Late-access codes** — staff can mint/rotate a quiz access code
+  (`PATCH /quizzes/{id}/generateAccessCode`); students supplying it may start after close
+  (tracked via `closeBypassed`, compared constant-time). Attempt lifecycle, late starts, and
+  access-code changes are recorded as course audit events.
+
+### Added — AI generation & import
+
+- **AI-suggested questions** (`quiz_generation` feature) — suggestions generated from
+  assignment context or refreshed from existing questions; instructors accept/reject
+  (accepting creates a real `Question`).
+- **Personalized quiz questions** (`personalized_quiz_generation` capability, off by
+  default) — per-student question sets generated from instructor prompt templates
+  (`QuizGeneratedSection`) over the student's own submission; staff review/edit/approve
+  before the quiz opens for that student (or auto-publish opt-in). Backfill and
+  generate-missing bulk operations included. AI output is never student-visible without
+  staff approval, and students never see AI provenance (prompts, reference solutions,
+  generation metadata are staff-only).
+- **Canvas QTI import** — `POST /quizImportJobs/` asynchronously imports IMS Common
+  Cartridge / QTI 1.2 exports into a question bank (optionally recreating quizzes), with
+  XXE-safe parsing, upload size caps, content-signature de-duplication, and point/tolerance
+  clamping.
+- **Quiz images** — instructor-uploaded Markdown images served at unguessable token URLs.
+- **Cloning** — course/assignment cloning copies instructor-authored quiz content (never
+  per-student data); cloned quizzes land unpublished.
+
+### Added — CourseFile public access
+
+- **`CourseFile.token` + `isPublic`** — course files can be served publicly at an
+  unguessable token URL for embedding in quiz/assignment content.
+
+### Security & fixes (pre-release hardening)
+
+- **Cross-course reassignment guard** — writable `course`/`quiz`/`bank` FKs are
+  re-authorized against the *destination* course (`assert_authoring_course`) across all quiz
+  serializers, including `QuizGeneratedSection`; destination courses that are archived are
+  rejected as well.
+- **Legacy-data tolerance** — the quiz assignment↔course consistency check only fires when a
+  change *introduces* the mismatch, so pre-existing records stay editable (matches the
+  `sealResultsUntilClose` carve-out).
+- **QTI points clamping** — non-finite imported point values (`NaN`, `-Infinity`) clamp to 0
+  instead of the 9999.99 maximum; only `+Infinity` and finite over-max values clamp high.
+
+---
+
 ## [3.4.0] — Testing Framework Improvements & Persisted File Edits
 
 ### Added — Testing Framework

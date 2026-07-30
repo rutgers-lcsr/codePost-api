@@ -66,11 +66,18 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
     self.assert_authoring_course(proposed.get('course'))
     # The attached assignment must belong to the quiz's own course. Otherwise prompt
     # variables ({assignment_file:...}) and close-event logic resolve against another
-    # course's private assignment data — a cross-course information leak.
+    # course's private assignment data — a cross-course information leak. Enforce only
+    # when THIS change introduces the mismatch (matches the seal check below): the
+    # settings form PATCHes every field each save, so a quiz already stored with a
+    # mismatched pair must stay editable for unrelated settings.
     proposed_assignment = proposed.get('assignment')
     proposed_course = proposed.get('course')
+    already_mismatched = (
+        self.instance is not None and self.instance.assignment_id is not None
+        and self.instance.assignment.course_id != self.instance.course_id)
     if proposed_assignment is not None and proposed_course is not None \
-        and proposed_assignment.course_id != proposed_course.id:
+        and proposed_assignment.course_id != proposed_course.id \
+        and not already_mismatched:
       raise serializers.ValidationError(
           {'assignment': 'The assignment must belong to the same course as the quiz.'})
     # Standalone availability window must be ordered (the trigger governs attached quizzes,

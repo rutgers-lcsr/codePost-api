@@ -902,7 +902,13 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
                         tolerance = _MAX_TOL if (not tolerance.is_finite() or tolerance > 0) else -_MAX_TOL
                     tolerance = tolerance.quantize(Decimal('0.0001'))
                 points = Decimal(str(q.get('points', 1)))
-                if not points.is_finite() or points > _MAX_POINTS:
+                if not points.is_finite():
+                    # Only +Infinity clamps high; NaN and -Infinity clamp to 0 like other
+                    # negatives/invalids — else a bogus value silently maxes the question.
+                    logger.warning(f"[QuizImport] Job {job_id}: clamping non-finite points "
+                                   f"{q.get('points')!r} on question {q['ident']!r}")
+                    points = _MAX_POINTS if points == Decimal('Infinity') else Decimal('0')
+                elif points > _MAX_POINTS:
                     logger.warning(f"[QuizImport] Job {job_id}: clamping out-of-range points "
                                    f"{q.get('points')!r} on question {q['ident']!r}")
                     points = _MAX_POINTS

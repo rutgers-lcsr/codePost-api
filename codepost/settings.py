@@ -282,7 +282,7 @@ print(rows[0])
 
 See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for more examples.
 """,
-    'VERSION': '3.0.0',
+    'VERSION': '4.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_SETTINGS': {
         'deepLinking': True,

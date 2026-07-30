@@ -48,6 +48,9 @@ class QuizGeneratedSectionSerializer(ModelSerializerWithPOSTCheck):
     data = super().validate(data)
     proposed = self.genProposedFields(data)
     quiz = proposed.get('quiz')
+    # Re-authorize the destination course: a PATCH could point `quiz` at another course's
+    # quiz (object permissions only checked the source quiz's course).
+    self.assert_authoring_course(quiz.course if quiz is not None else None)
     # Standalone quizzes may carry generated sections as long as the prompt doesn't draw
     # on assignment/submission data — validate_template below rejects each offending
     # {variable} with a helpful message when the quiz is unattached. Submission-free
