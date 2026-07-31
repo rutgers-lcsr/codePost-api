@@ -1986,6 +1986,113 @@ class TestAccommodations:
                          {'student': student.email, 'timeMultiplier': '1'}, format='json')
         assert api_client.get(f'/courses/{course.id}/quizAccommodations/').data == []
 
+    def test_multiplier_capped_by_hard_close(self, api_client, taking_setup):
+        from django.utils.dateparse import parse_datetime
+        from core.models import QuizAccommodation, QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('1.5'))
+        api_client.force_authenticate(user=student)
+
+        # Close in 30 min, extended timer 60 min (40 × 1.5) → the close still wins.
+        near_close = timezone.now() + timedelta(minutes=30)
+        near = _quiz(course, title='Near', timeLimitMinutes=40,
+                     availableUntil=near_close, endAttemptsAtClose=True)
+        _add(near, _mc(course, _bank(course)))
+        start = api_client.post('/quizAttempts/', {'quiz': near.id}, format='json')
+        assert parse_datetime(start.data['deadline']) == near_close
+
+        # Close in 70 min → the full extended timer applies inside the cap.
+        far = _quiz(course, title='Far', timeLimitMinutes=40,
+                    availableUntil=timezone.now() + timedelta(minutes=70),
+                    endAttemptsAtClose=True)
+        _add(far, _mc(course, _bank(course)))
+        start = api_client.post('/quizAttempts/', {'quiz': far.id}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        minutes = (attempt.deadline - attempt.startedAt).total_seconds() / 60
+        assert 59.9 < minutes < 60.1
+
+    def test_access_code_bypass_keeps_multiplied_time(self, api_client, taking_setup):
+        from core.models import QuizAccommodation, QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('1.5'))
+        quiz = _quiz(course, availableUntil=timezone.now() - timedelta(minutes=1),
+                     accessCode='ABC123', endAttemptsAtClose=True, timeLimitMinutes=40)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        attempt = QuizAttempt.objects.get(pk=resp.data['id'])
+        assert attempt.closeBypassed is True
+        # Full extended timer (40 × 1.5), not the past close.
+        minutes = (attempt.deadline - attempt.startedAt).total_seconds() / 60
+        assert 59.9 < minutes < 60.1
+
+    def test_accommodation_change_preserves_close_bypass(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        quiz = _quiz(course, availableUntil=timezone.now() - timedelta(minutes=1),
+                     accessCode='ABC123', endAttemptsAtClose=True, timeLimitMinutes=40)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        assert attempt.closeBypassed is True
+
+        # Granting extra time mid-attempt extends the bypassed attempt; it must NOT
+        # re-cap the deadline to the (past) close.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1.5'}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        attempt.refresh_from_db()
+        assert attempt.deadline == attempt.startedAt + timedelta(minutes=60)
+        assert attempt.deadline > timezone.now()
+
+    def test_expiry_honors_extended_deadline(self, api_client, taking_setup):
+        from core.models import QuizAccommodation, QuizAttempt
+        from core.tasks import finalize_expired_quiz_attempts
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('1.5'))
+        quiz = _quiz(course, timeLimitMinutes=40)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+
+        # 45 minutes elapse — past the base 40-minute limit but inside the extended 60:
+        # neither the sweep nor a resume may auto-submit.
+        now = timezone.now()
+        QuizAttempt.objects.filter(pk=start.data['id']).update(
+            startedAt=now - timedelta(minutes=45), deadline=now + timedelta(minutes=15))
+        assert finalize_expired_quiz_attempts() == 0
+        resume = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resume.status_code == status.HTTP_200_OK
+        assert resume.data['status'] == 'in_progress'
+
+        # Once the extended deadline passes too, the sweep finalizes it.
+        QuizAttempt.objects.filter(pk=start.data['id']).update(deadline=now - timedelta(minutes=1))
+        assert finalize_expired_quiz_attempts() == 1
+        assert QuizAttempt.objects.get(pk=start.data['id']).status == 'submitted'
+
+    def test_untimed_quiz_ignores_multiplier(self, api_client, taking_setup):
+        from core.models import QuizAccommodation
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('2'))
+        quiz = _quiz(course)  # untimed
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        assert start.data['deadline'] is None
+
 
 # --------------------------------------------------------------------------- #
 # Late-access code: a code an instructor gives late students to start a CLOSED quiz.
