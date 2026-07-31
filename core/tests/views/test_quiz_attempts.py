@@ -2226,3 +2226,80 @@ class TestAccessCode:
         assert q_data['hasAccessCode'] is True
         # The raw code is never sent to students.
         assert 'accessCode' not in q_data
+
+
+# --------------------------------------------------------------------------- #
+# Browser-only taking: static credentials cannot start/answer/submit
+# --------------------------------------------------------------------------- #
+
+class TestBrowserOnlyTaking:
+    """Quiz-taking is browser-only: personal API tokens, course keys, and basic
+    auth must not start, answer, or submit attempts (blocks scripting attempts
+    through the SDK). JWT/session auth — the browser flow — is unaffected."""
+
+    def _token_client(self, user):
+        from rest_framework.authtoken.models import Token
+        from rest_framework.test import APIClient
+        token, _ = Token.objects.get_or_create(user=user)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        return client
+
+    def test_api_token_cannot_start_attempt(self, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        client = self._token_client(taking_setup['students'][0])
+        resp = client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_api_token_cannot_save_or_submit(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        attempt_id = start.data['id']
+        response_id = start.data['responses'][0]['id']
+
+        client = self._token_client(student)
+        save = client.patch(f'/quizAttempts/{attempt_id}/saveAnswer/',
+                            {'response': response_id, 'answerText': 'scripted'}, format='json')
+        assert save.status_code == status.HTTP_403_FORBIDDEN
+        submit = client.post(f'/quizAttempts/{attempt_id}/submit/', {}, format='json')
+        assert submit.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_api_token_can_still_read_attempts(self, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        client = self._token_client(taking_setup['students'][0])
+        resp = client.get(f'/quizAttempts/myAttempts/?quiz={quiz.id}')
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_jwt_can_start_attempt(self, taking_setup):
+        from core.views.auth import access_token_for_user
+        from rest_framework.test import APIClient
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        student = taking_setup['students'][0]
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token_for_user(student)}")
+        resp = client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
+    def test_course_key_cannot_start_attempt(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['admin'])
+        key_resp = api_client.post(f'/courses/{course.id}/apiKeys/',
+                                   {'name': 'quiz-lockout'}, format='json')
+        assert key_resp.status_code == status.HTTP_201_CREATED
+        api_client.force_authenticate(user=None)
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {key_resp.data['key']}")
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN

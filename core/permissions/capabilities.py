@@ -337,13 +337,17 @@ def compute_platform_capabilities(user) -> dict[Capability, bool]:
 # Enforcement helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_capabilities(user, obj) -> dict[Capability, bool]:
-    """Compute capabilities for a user on the given object (Course, Assignment, or Submission)."""
+def _resolve_capabilities(user, obj, *, is_course_scoped: bool = False) -> dict[Capability, bool]:
+    """Compute capabilities for a user on the given object (Course, Assignment, or Submission).
+
+    ``is_course_scoped`` only affects Course objects — every capability in
+    ``COURSE_SCOPED_BLOCKED_CAPABILITIES`` is course-level.
+    """
     # Import models locally to avoid circular imports
     from core.models import Course, Assignment, Submission
 
     if isinstance(obj, Course):
-        return compute_course_capabilities(user, obj)
+        return compute_course_capabilities(user, obj, is_course_scoped=is_course_scoped)
     elif isinstance(obj, Assignment):
         return compute_assignment_capabilities(user, obj)
     elif isinstance(obj, Submission):
@@ -352,25 +356,29 @@ def _resolve_capabilities(user, obj) -> dict[Capability, bool]:
         raise TypeError(f"check_capability: unsupported object type {type(obj).__name__}")
 
 
-def check_capability(user, capability: Union[str, Capability], obj) -> bool:
+def check_capability(user, capability: Union[str, Capability], obj, *, is_course_scoped: bool = False) -> bool:
     """Check if a user has a specific capability on an object.
 
     Returns ``True`` if the capability is granted, ``False`` otherwise.
     Accepts either a ``Capability`` enum member or its string value.
     """
     key = capability.value if isinstance(capability, Capability) else capability
-    caps = _resolve_capabilities(user, obj)
+    caps = _resolve_capabilities(user, obj, is_course_scoped=is_course_scoped)
     return caps.get(key, False)
 
 
-def require_capability(user, capability: Union[str, Capability], obj) -> None:
+def require_capability(user, capability: Union[str, Capability], obj, *, is_course_scoped: bool = False) -> None:
     """Raise ``PermissionDenied`` if the user lacks the given capability.
 
     Use this in view action methods to replace inline ``isCourseAdmin()``
     and similar checks::
 
         require_capability(request.user, 'manage_roster', course)
+
+    Pass ``is_course_scoped=True`` for requests authenticated with a course
+    API key or course-scoped JWT so ``COURSE_SCOPED_BLOCKED_CAPABILITIES``
+    is enforced.
     """
     key = capability.value if isinstance(capability, Capability) else capability
-    if not check_capability(user, key, obj):
+    if not check_capability(user, key, obj, is_course_scoped=is_course_scoped):
         raise PermissionDenied(f"You do not have the '{key}' capability on this resource.")

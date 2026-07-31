@@ -788,12 +788,19 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         request=CourseAPIKeyCreateSerializer,
         responses={201: CourseAPIKeyCreateResponseSerializer},
     )
-    @action(detail=True, methods=["GET", "POST"], url_path="apiKeys", url_name="api-keys")
+    @action(
+        detail=True,
+        methods=["GET", "POST"],
+        url_path="apiKeys",
+        url_name="api-keys",
+        permission_classes=[IsAuthenticated],
+    )
     def apiKeys(self, request, pk=None):
         """List or create course-scoped API keys."""
         course = self.get_object()
 
-        require_capability(request.user, 'manage_course_api_keys', course)
+        is_scoped = _get_course_scope_id(request) is not None
+        require_capability(request.user, 'manage_course_api_keys', course, is_course_scoped=is_scoped)
 
         if request.method == "GET":
             keys = CourseAPIKey.objects.filter(course=course).order_by("-created")
@@ -848,7 +855,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         """Update or revoke a single course API key."""
         course = self.get_object()
 
-        require_capability(request.user, 'manage_course_api_keys', course)
+        is_scoped = _get_course_scope_id(request) is not None
+        require_capability(request.user, 'manage_course_api_keys', course, is_course_scoped=is_scoped)
 
         try:
             api_key = CourseAPIKey.objects.get(pk=key_id, course=course)

@@ -23,6 +23,7 @@ from core.permissions.helpers import (
 )
 from core.permissions.template import TemplatePermission
 from rest_framework import permissions
+from rest_framework.authentication import BasicAuthentication, TokenAuthentication
 from codepost.settings import logger
 from typing import cast
 
@@ -744,10 +745,19 @@ class QuizAttemptPermissions(TemplatePermission):
     """Students take and view their OWN attempts; course staff may read attempts; quiz
     graders (and admins) may grade manual responses. The student-entry actions
     (start/myAttempts/availableQuizzes) validate enrollment + availability in the view
-    body, so all this gates is auth + per-attempt ownership."""
+    body, so all this gates is auth + per-attempt ownership. Taking a quiz (start,
+    saveAnswer, submit) is browser-only: static credentials (personal API tokens,
+    course keys, basic auth) are rejected so attempts can't be scripted via the SDK."""
 
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated)
+        if not (request.user and request.user.is_authenticated):
+            return False
+        if getattr(view, 'action', None) in ('create', 'saveAnswer', 'submit'):
+            from core.authentication import CourseAPIKeyAuthentication
+            if isinstance(request.successful_authenticator,
+                          (CourseAPIKeyAuthentication, TokenAuthentication, BasicAuthentication)):
+                return False
+        return True
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
