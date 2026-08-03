@@ -301,13 +301,21 @@ class AIService:
         svc._last_provider_meta = None
         return svc
 
-    async def test_connection(self) -> dict:
+    # Custom test prompts are clamped to keep test-call costs bounded.
+    TEST_PROMPT_MAX_CHARS = 500
+
+    async def test_connection(self, prompt: Optional[str] = None) -> dict:
         """Fire a minimal completion through the configured provider.
 
+        ``prompt`` optionally replaces the default connectivity prompt so the
+        caller can eyeball a real generation.
         Returns a camelCase dict ready for AIProviderTestResultSerializer.
         Never raises and never records usage (record_usage is caller-driven).
         """
         import time
+
+        system_prompt = 'You are a connectivity test. Answer briefly in plain text.'
+        user_prompt = (prompt or '').strip()[:self.TEST_PROMPT_MAX_CHARS] or 'Reply with exactly: OK'
 
         result: dict = {
             'success': False,
@@ -315,6 +323,8 @@ class AIService:
             'model': self.model or '',
             'reportedModel': None,
             'latencyMs': None,
+            'requestSystemPrompt': None,
+            'requestUserPrompt': None,
             'response': None,
             'error': None,
             'errorDetail': None,
@@ -330,13 +340,12 @@ class AIService:
             return result
 
         self._last_provider_meta = None
+        result['requestSystemPrompt'] = system_prompt
+        result['requestUserPrompt'] = user_prompt
         start = time.perf_counter()
         try:
             text, *_ = await asyncio.wait_for(
-                self._dispatch_provider(
-                    'You are a connectivity test. Answer with plain text only.',
-                    'Reply with exactly: OK',
-                ),
+                self._dispatch_provider(system_prompt, user_prompt),
                 timeout=self.TEST_TIMEOUT_SECONDS,
             )
             result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)

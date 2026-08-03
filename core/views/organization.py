@@ -18,6 +18,7 @@ from core.serializers.ai_usage import (
     OrganizationAISettingsUpdateSerializer,
     AIUsageSummarySerializer,
     AIProviderModelsListSerializer,
+    AIProviderTestRequestSerializer,
     AIProviderTestResultSerializer,
 )
 from core.throttles import AIConnectionTestThrottle
@@ -443,13 +444,13 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
 
     return Response({'providers': [result]})
 
-  @extend_schema(request=None, responses={200: AIProviderTestResultSerializer})
+  @extend_schema(request=AIProviderTestRequestSerializer, responses={200: AIProviderTestResultSerializer})
   @action(detail=True, methods=['POST'], throttle_classes=[AIConnectionTestThrottle])
   def aiTest(self, request, pk=None):
     """
-    POST: Fire a minimal completion through the org's stored AI config and
-    report success, latency, and any error. Records no usage.
-    Only accessible by Org Staff or superuser.
+    POST: Fire a small completion through the org's stored AI config and
+    report success, latency, and any error. Accepts an optional custom
+    prompt. Records no usage. Only accessible by Org Staff or superuser.
     """
     import asyncio
     from core.services.ai_service import AIService
@@ -459,13 +460,16 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
         return returnForbidden()
 
+    body = AIProviderTestRequestSerializer(data=request.data)
+    body.is_valid(raise_exception=True)
+
     svc = AIService.for_config(
         provider=organization.ai_provider or '',
         api_key=organization.ai_api_key or '',
         base_url=organization.ai_base_url or '',
         model=organization.ai_model or '',
     )
-    result = asyncio.run(svc.test_connection())
+    result = asyncio.run(svc.test_connection(prompt=body.validated_data.get('prompt') or None))
     return Response(AIProviderTestResultSerializer(result).data)
 
   @extend_schema(

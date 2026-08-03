@@ -313,6 +313,11 @@ class AIProviderModelsListSerializer(serializers.Serializer):
   providers = AIProviderModelsSerializer(many=True, help_text="List of providers with their models")
 
 
+class AIProviderTestRequestSerializer(serializers.Serializer):
+  """Optional request body for the AI provider connection test."""
+  prompt = serializers.CharField(required=False, allow_blank=True, max_length=500, help_text="Optional custom prompt to send instead of the default connectivity prompt")
+
+
 class AIProviderTestResultSerializer(serializers.Serializer):
   """Result of a live AI provider connection test."""
   success = serializers.BooleanField(help_text="Whether the provider answered the test prompt")
@@ -320,6 +325,8 @@ class AIProviderTestResultSerializer(serializers.Serializer):
   model = serializers.CharField(allow_blank=True, help_text="Model the test ran against")
   reportedModel = serializers.CharField(allow_null=True, required=False, help_text="Model id the provider reported back (may differ from the requested model, e.g. a gateway-routed or versioned model)")
   latencyMs = serializers.FloatField(allow_null=True, required=False, help_text="Round-trip time of the test request in milliseconds")
+  requestSystemPrompt = serializers.CharField(allow_null=True, required=False, help_text="System prompt sent to the provider (null if no request was attempted)")
+  requestUserPrompt = serializers.CharField(allow_null=True, required=False, help_text="User prompt sent to the provider (null if no request was attempted)")
   response = serializers.CharField(allow_null=True, required=False, help_text="The model's reply (up to 2000 characters)")
   error = serializers.CharField(allow_null=True, required=False, help_text="Friendly error message")
   errorDetail = serializers.CharField(allow_null=True, required=False, help_text="Raw exception detail for debugging")

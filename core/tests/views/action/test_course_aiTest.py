@@ -55,6 +55,19 @@ class TestCourseAITest(APITestCase):
         # A connection test must not pollute usage records
         self.assertEqual(AIUsageRecord.objects.count(), 0)
 
+    @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
+    def test_custom_prompt_is_sent(self):
+        admin = Persona.ADMIN_OF_COURSE(self)
+        response = request_as('create', admin, self.endpoint, {'prompt': 'What is 2+2?'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(response.data['requestUserPrompt'], 'What is 2+2?')
+
+    def test_overlong_prompt_rejected(self):
+        admin = Persona.ADMIN_OF_COURSE(self)
+        response = request_as('create', admin, self.endpoint, {'prompt': 'x' * 501})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_fail)
     def test_admin_failure_reports_error(self):
         admin = Persona.ADMIN_OF_COURSE(self)

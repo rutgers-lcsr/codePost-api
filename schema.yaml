@@ -3868,10 +3868,10 @@ paths:
     post:
       operationId: courses_aiTestCreate
       description: |-
-        POST: Fire a minimal completion through the course's effective AI
+        POST: Fire a small completion through the course's effective AI
         config (own settings or inherited org settings) and report success,
-        latency, and any error. Records no usage.
-        Only accessible by course admins.
+        latency, and any error. Accepts an optional custom prompt.
+        Records no usage. Only accessible by course admins.
       parameters:
       - in: path
         name: id
@@ -3881,6 +3881,17 @@ paths:
         required: true
       tags:
       - courses
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIProviderTestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AIProviderTestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AIProviderTestRequest'
       security:
       - courseKeyAuth: []
       - tokenAuth: []
@@ -6453,9 +6464,9 @@ paths:
     post:
       operationId: organizations_aiTestCreate
       description: |-
-        POST: Fire a minimal completion through the org's stored AI config and
-        report success, latency, and any error. Records no usage.
-        Only accessible by Org Staff or superuser.
+        POST: Fire a small completion through the org's stored AI config and
+        report success, latency, and any error. Accepts an optional custom
+        prompt. Records no usage. Only accessible by Org Staff or superuser.
       parameters:
       - in: path
         name: id
@@ -6465,6 +6476,17 @@ paths:
         required: true
       tags:
       - organizations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIProviderTestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AIProviderTestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/AIProviderTestRequest'
       security:
       - courseKeyAuth: []
       - tokenAuth: []
@@ -15710,6 +15732,15 @@ components:
           description: List of providers with their models
       required:
       - providers
+    AIProviderTestRequest:
+      type: object
+      description: Optional request body for the AI provider connection test.
+      properties:
+        prompt:
+          type: string
+          description: Optional custom prompt to send instead of the default connectivity
+            prompt
+          maxLength: 500
     AIProviderTestResult:
       type: object
       description: Result of a live AI provider connection test.
@@ -15733,6 +15764,15 @@ components:
           format: double
           nullable: true
           description: Round-trip time of the test request in milliseconds
+        requestSystemPrompt:
+          type: string
+          nullable: true
+          description: System prompt sent to the provider (null if no request was
+            attempted)
+        requestUserPrompt:
+          type: string
+          nullable: true
+          description: User prompt sent to the provider (null if no request was attempted)
         response:
           type: string
           nullable: true

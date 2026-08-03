@@ -261,6 +261,23 @@ class TestForConfigConnectionTest(TestCase):
         self.assertEqual(result['response'], 'OK')
         self.assertIsNotNone(result['latencyMs'])
         self.assertIsNone(result['reportedModel'])
+        self.assertEqual(result['requestUserPrompt'], 'Reply with exactly: OK')
+        self.assertTrue(result['requestSystemPrompt'])
+
+    def test_custom_prompt_used_and_clamped(self):
+        captured = {}
+
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            captured['user_prompt'] = user_prompt
+            return ('4', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key')
+        long_prompt = 'y' * 600
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)(prompt=long_prompt)
+        self.assertTrue(result['success'])
+        self.assertEqual(len(captured['user_prompt']), AIService.TEST_PROMPT_MAX_CHARS)
+        self.assertEqual(result['requestUserPrompt'], captured['user_prompt'])
 
     def test_reported_model_surfaced_from_provider_meta(self):
         async def fake_dispatch(self, system_prompt, user_prompt):
@@ -278,6 +295,9 @@ class TestForConfigConnectionTest(TestCase):
         result = async_to_sync(svc.test_connection)()
         self.assertFalse(result['success'])
         self.assertIn('No AI provider', result['error'])
+        # No request was attempted, so no request prompts are reported
+        self.assertIsNone(result['requestSystemPrompt'])
+        self.assertIsNone(result['requestUserPrompt'])
 
     def test_openai_without_key_fails_without_calling_provider(self):
         svc = AIService.for_config('openai')
