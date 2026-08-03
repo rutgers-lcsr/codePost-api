@@ -3864,6 +3864,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourseAISettings'
           description: ''
+  /courses/{id}/aiTest/:
+    post:
+      operationId: courses_aiTestCreate
+      description: |-
+        POST: Fire a minimal completion through the course's effective AI
+        config (own settings or inherited org settings) and report success,
+        latency, and any error. Records no usage.
+        Only accessible by course admins.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIProviderTestResult'
+          description: ''
   /courses/{id}/aiUsage/:
     get:
       operationId: courses_aiUsageRetrieve
@@ -6419,6 +6448,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationAISettings'
+          description: ''
+  /organizations/{id}/aiTest/:
+    post:
+      operationId: organizations_aiTestCreate
+      description: |-
+        POST: Fire a minimal completion through the org's stored AI config and
+        report success, latency, and any error. Records no usage.
+        Only accessible by Org Staff or superuser.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this organization.
+        required: true
+      tags:
+      - organizations
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIProviderTestResult'
           description: ''
   /organizations/{id}/aiUsage/:
     get:
@@ -15653,6 +15710,40 @@ components:
           description: List of providers with their models
       required:
       - providers
+    AIProviderTestResult:
+      type: object
+      description: Result of a live AI provider connection test.
+      properties:
+        success:
+          type: boolean
+          description: Whether the provider answered the test prompt
+        provider:
+          type: string
+          description: Provider identifier the test ran against
+        model:
+          type: string
+          description: Model the test ran against
+        latencyMs:
+          type: number
+          format: double
+          nullable: true
+          description: Round-trip time of the test request in milliseconds
+        response:
+          type: string
+          nullable: true
+          description: First 200 characters of the model's reply
+        error:
+          type: string
+          nullable: true
+          description: Friendly error message
+        errorDetail:
+          type: string
+          nullable: true
+          description: Raw exception detail for debugging
+      required:
+      - model
+      - provider
+      - success
     AIUsageBreakdown:
       type: object
       description: Usage breakdown by a dimension (course, assignment, provider, model).

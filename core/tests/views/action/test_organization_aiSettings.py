@@ -137,6 +137,7 @@ class TestOrganizationAISettings(APITestCase):
         self.assertEqual(self.org.ai_provider, 'portkey')
         self.assertEqual(self.org.ai_api_key, 'pk-test-key')
         self.assertEqual(self.org.ai_base_url, 'https://portkey.rutgers.edu/v1')
+        self.assertEqual(self.org.ai_model, 'llama-3.1-70b')
         self.assertTrue(response.data['aiEnabled'])
         self.assertTrue(response.data['hasApiKey'])
 
@@ -154,6 +155,7 @@ class TestOrganizationAISettings(APITestCase):
         self.org.refresh_from_db()
         self.assertEqual(self.org.ai_provider, 'portkey')
         self.assertFalse(self.org.ai_api_key)
+        self.assertEqual(self.org.ai_model, 'gpt-4o')
         self.assertTrue(response.data['aiEnabled'])
         self.assertFalse(response.data['hasApiKey'])
 

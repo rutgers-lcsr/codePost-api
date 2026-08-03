@@ -18,7 +18,9 @@ from core.serializers.ai_usage import (
     OrganizationAISettingsUpdateSerializer,
     AIUsageSummarySerializer,
     AIProviderModelsListSerializer,
+    AIProviderTestResultSerializer,
 )
+from core.throttles import AIConnectionTestThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
   permission_classes = (IsAuthenticated, OrganizationPermissions)
 
   def get_permissions(self):
-    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage', 'aiModels', 'pending_admins', 'approve_admin', 'deny_admin']:
+    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage', 'aiModels', 'aiTest', 'pending_admins', 'approve_admin', 'deny_admin']:
       return [IsAuthenticated()]
     return super().get_permissions()
 
@@ -440,6 +442,31 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         result['liveError'] = str(e)
 
     return Response({'providers': [result]})
+
+  @extend_schema(request=None, responses={200: AIProviderTestResultSerializer})
+  @action(detail=True, methods=['POST'], throttle_classes=[AIConnectionTestThrottle])
+  def aiTest(self, request, pk=None):
+    """
+    POST: Fire a minimal completion through the org's stored AI config and
+    report success, latency, and any error. Records no usage.
+    Only accessible by Org Staff or superuser.
+    """
+    import asyncio
+    from core.services.ai_service import AIService
+
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    svc = AIService.for_config(
+        provider=organization.ai_provider or '',
+        api_key=organization.ai_api_key or '',
+        base_url=organization.ai_base_url or '',
+        model=organization.ai_model or '',
+    )
+    result = asyncio.run(svc.test_connection())
+    return Response(AIProviderTestResultSerializer(result).data)
 
   @extend_schema(
     responses=AIUsageSummarySerializer,

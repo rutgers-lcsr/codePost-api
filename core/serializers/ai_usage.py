@@ -311,3 +311,14 @@ class AIProviderModelsSerializer(serializers.Serializer):
 class AIProviderModelsListSerializer(serializers.Serializer):
   """Response wrapper for the AI models endpoint."""
   providers = AIProviderModelsSerializer(many=True, help_text="List of providers with their models")
+
+
+class AIProviderTestResultSerializer(serializers.Serializer):
+  """Result of a live AI provider connection test."""
+  success = serializers.BooleanField(help_text="Whether the provider answered the test prompt")
+  provider = serializers.CharField(allow_blank=True, help_text="Provider identifier the test ran against")
+  model = serializers.CharField(allow_blank=True, help_text="Model the test ran against")
+  latencyMs = serializers.FloatField(allow_null=True, required=False, help_text="Round-trip time of the test request in milliseconds")
+  response = serializers.CharField(allow_null=True, required=False, help_text="First 200 characters of the model's reply")
+  error = serializers.CharField(allow_null=True, required=False, help_text="Friendly error message")
+  errorDetail = serializers.CharField(allow_null=True, required=False, help_text="Raw exception detail for debugging")

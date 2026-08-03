@@ -244,6 +244,36 @@ class TestAIServiceConfigResolution(TestCase):
         self.assertTrue(svc.is_configured)
 
 
+class TestForConfigConnectionTest(TestCase):
+    """AIService.for_config + test_connection (course-less instances)."""
+
+    def test_for_config_portkey_blank_base_url_is_testable(self):
+        # is_configured requires base_url for portkey, but _call_portkey falls
+        # back to DEFAULT_PORTKEY_URL — test_connection must accept this config.
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key', base_url='', model='')
+        self.assertEqual(svc.model, 'default')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)()
+        self.assertTrue(result['success'])
+        self.assertEqual(result['response'], 'OK')
+        self.assertIsNotNone(result['latencyMs'])
+
+    def test_unconfigured_provider_fails_without_calling_provider(self):
+        svc = AIService.for_config('')
+        result = async_to_sync(svc.test_connection)()
+        self.assertFalse(result['success'])
+        self.assertIn('No AI provider', result['error'])
+
+    def test_openai_without_key_fails_without_calling_provider(self):
+        svc = AIService.for_config('openai')
+        result = async_to_sync(svc.test_connection)()
+        self.assertFalse(result['success'])
+        self.assertIn('No API key', result['error'])
+
+
 # ===========================================================================
 # Per-feature model resolution
 # ===========================================================================

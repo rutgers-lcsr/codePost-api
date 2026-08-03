@@ -35,7 +35,8 @@ from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isCourseAdmin, isCourseMember, isCourseStaff
 from core.permissions.helpers import isSuperGrader
 import logging
-from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
+from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer, AIProviderTestResultSerializer
+from core.throttles import AIConnectionTestThrottle
 from core.serializers.actionResponses import CapabilitiesResponseSerializer
 from core.permissions.capabilities import compute_course_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
 from core.permissions.course_scope import _get_course_scope_id
@@ -333,6 +334,30 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             result['liveError'] = str(e)
 
         return Response({'providers': [result]})
+
+    @extend_schema(request=None, responses={200: AIProviderTestResultSerializer})
+    @action(detail=True, methods=["POST"], throttle_classes=[AIConnectionTestThrottle])
+    def aiTest(self, request, pk=None):
+        """
+        POST: Fire a minimal completion through the course's effective AI
+        config (own settings or inherited org settings) and report success,
+        latency, and any error. Records no usage.
+        Only accessible by course admins.
+        """
+        import asyncio
+        from core.services.ai_service import AIService
+
+        user = request.user
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+
+        course: Course = self.get_object()
+
+        require_capability(user, 'configure_ai', course)
+
+        svc = AIService(course)
+        result = asyncio.run(svc.test_connection())
+        return Response(AIProviderTestResultSerializer(result).data)
 
     @extend_schema(responses=CourseRosterSerializer)
     @action(detail=True, methods=["GET", "PATCH"])

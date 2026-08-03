@@ -26,7 +26,7 @@ import hashlib
 import logging
 import re
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 from dataclasses import dataclass
 from core.constants import DEFAULT_OLLAMA_URL, DEFAULT_PORTKEY_URL
 from core.models import Course, Assignment, Submission, SubmissionFile, User
@@ -217,6 +217,10 @@ class AIService:
     # This is to ensure the ai response is consistently in markdown format
     GLOBAL_SYSTEM_PROMPT =""""""
 
+    # Timeout for connection tests (test_connection); shorter than the 60s
+    # generation timeouts because a human is waiting on a button.
+    TEST_TIMEOUT_SECONDS = 20
+
     def __init__(self, course: Course, assignment: Optional[Assignment] = None):
         self.course = course
         self.assignment = assignment
@@ -268,6 +272,79 @@ class AIService:
         self.request_type: Optional[str] = None
         self.request_instructions: str = ''
         self._trace_id: Optional[str] = None
+
+    @classmethod
+    def for_config(cls, provider: str, api_key: str = '', base_url: str = '', model: str = '') -> 'AIService':
+        """Build an AIService bound to an explicit config, with no course.
+
+        Used by the connection-test endpoints (e.g. org-level settings, which
+        have no course). Only the generation plumbing (_dispatch_provider /
+        _call_*) is safe on the returned instance; course-dependent helpers
+        (feature toggles, record_usage, prompt resolution) must not be called.
+        """
+        svc = cls.__new__(cls)
+        svc.course = cast(Course, None)
+        svc.assignment = None
+        svc._config_from_org = False
+        svc.provider = provider
+        svc.api_key = api_key
+        svc.base_url = base_url
+        svc.model = model or svc._get_default_model()
+        svc.base_model = svc.model
+        svc.request_user = None
+        svc.request_type = None
+        svc.request_instructions = ''
+        svc._trace_id = None
+        return svc
+
+    async def test_connection(self) -> dict:
+        """Fire a minimal completion through the configured provider.
+
+        Returns a camelCase dict ready for AIProviderTestResultSerializer.
+        Never raises and never records usage (record_usage is caller-driven).
+        """
+        import time
+
+        result: dict = {
+            'success': False,
+            'provider': self.provider or '',
+            'model': self.model or '',
+            'latencyMs': None,
+            'response': None,
+            'error': None,
+            'errorDetail': None,
+        }
+        # Deliberately not is_configured: ollama/portkey fall back to default
+        # base URLs in _call_* when base_url is blank, so provider alone is
+        # enough there; only gemini/openai strictly require an API key.
+        if not self.provider:
+            result['error'] = 'No AI provider is configured.'
+            return result
+        if self.provider in ('gemini', 'openai') and not self.api_key:
+            result['error'] = 'No API key is configured for this provider.'
+            return result
+
+        start = time.perf_counter()
+        try:
+            text, *_ = await asyncio.wait_for(
+                self._dispatch_provider(
+                    'You are a connectivity test. Answer with plain text only.',
+                    'Reply with exactly: OK',
+                ),
+                timeout=self.TEST_TIMEOUT_SECONDS,
+            )
+            result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
+            result['success'] = True
+            result['response'] = (text or '').strip()[:200]
+        except asyncio.TimeoutError:
+            result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
+            result['error'] = f'The provider did not respond within {self.TEST_TIMEOUT_SECONDS} seconds.'
+            result['errorDetail'] = 'TimeoutError'
+        except Exception as e:
+            result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
+            result['error'] = self._parse_error(e)
+            result['errorDetail'] = f'{type(e).__name__}: {str(e)[:500]}'
+        return result
 
     def set_request_context(
         self,

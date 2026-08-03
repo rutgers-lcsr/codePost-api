@@ -25,3 +25,14 @@ class AuthUserRateThrottle(UserRateThrottle):
         if settings.TESTING:
             return True
         return super().allow_request(request, view)
+
+
+class AIConnectionTestThrottle(UserRateThrottle):
+    """Rate limit for AI provider connection tests (each fires a real, paid LLM call)."""
+    scope = 'ai_connection_test'
+    rate = '10/minute'
+
+    def allow_request(self, request, view):
+        if settings.TESTING:
+            return True
+        return super().allow_request(request, view)
