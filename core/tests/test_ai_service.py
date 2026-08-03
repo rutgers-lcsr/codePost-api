@@ -260,6 +260,18 @@ class TestForConfigConnectionTest(TestCase):
         self.assertTrue(result['success'])
         self.assertEqual(result['response'], 'OK')
         self.assertIsNotNone(result['latencyMs'])
+        self.assertIsNone(result['reportedModel'])
+
+    def test_reported_model_surfaced_from_provider_meta(self):
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            self._last_provider_meta = {'model': 'gemini-3-flash-preview-001'}
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key', model='default')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)()
+        self.assertTrue(result['success'])
+        self.assertEqual(result['reportedModel'], 'gemini-3-flash-preview-001')
 
     def test_unconfigured_provider_fails_without_calling_provider(self):
         svc = AIService.for_config('')

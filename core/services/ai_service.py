@@ -272,6 +272,9 @@ class AIService:
         self.request_type: Optional[str] = None
         self.request_instructions: str = ''
         self._trace_id: Optional[str] = None
+        # Metadata from the most recent _call_* response (e.g. the model id
+        # the provider reported back). Consumed by test_connection.
+        self._last_provider_meta: Optional[dict] = None
 
     @classmethod
     def for_config(cls, provider: str, api_key: str = '', base_url: str = '', model: str = '') -> 'AIService':
@@ -295,6 +298,7 @@ class AIService:
         svc.request_type = None
         svc.request_instructions = ''
         svc._trace_id = None
+        svc._last_provider_meta = None
         return svc
 
     async def test_connection(self) -> dict:
@@ -309,6 +313,7 @@ class AIService:
             'success': False,
             'provider': self.provider or '',
             'model': self.model or '',
+            'reportedModel': None,
             'latencyMs': None,
             'response': None,
             'error': None,
@@ -324,6 +329,7 @@ class AIService:
             result['error'] = 'No API key is configured for this provider.'
             return result
 
+        self._last_provider_meta = None
         start = time.perf_counter()
         try:
             text, *_ = await asyncio.wait_for(
@@ -335,7 +341,8 @@ class AIService:
             )
             result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
             result['success'] = True
-            result['response'] = (text or '').strip()[:200]
+            result['response'] = (text or '').strip()[:2000]
+            result['reportedModel'] = (self._last_provider_meta or {}).get('model')
         except asyncio.TimeoutError:
             result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
             result['error'] = f'The provider did not respond within {self.TEST_TIMEOUT_SECONDS} seconds.'
@@ -1365,6 +1372,7 @@ end"""
         output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
         total_tokens = getattr(response.usage_metadata, 'total_token_count', 0) or (input_tokens + output_tokens)
         cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
+        self._last_provider_meta = {'model': getattr(response, 'model_version', None)}
         return response.text or "", input_tokens, output_tokens, total_tokens, cached_tokens
     
     async def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
@@ -1387,6 +1395,7 @@ end"""
         cached_tokens = 0
         if usage and hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
             cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+        self._last_provider_meta = {'model': getattr(response, 'model', None)}
         return response.choices[0].message.content or "", input_tokens, output_tokens, total_tokens, cached_tokens
     
     async def _call_ollama(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
@@ -1409,6 +1418,7 @@ end"""
             data = response.json()
             input_tokens = data.get('prompt_eval_count', 0) or 0
             output_tokens = data.get('eval_count', 0) or 0
+            self._last_provider_meta = {'model': data.get('model')}
             return data["response"], input_tokens, output_tokens, input_tokens + output_tokens, 0
     
     async def _call_portkey(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
@@ -1465,6 +1475,7 @@ end"""
             input_tokens = usage.get('prompt_tokens', 0) or 0
             output_tokens = usage.get('completion_tokens', 0) or 0
             total_tokens = usage.get('total_tokens', 0) or (input_tokens + output_tokens)
+            self._last_provider_meta = {'model': data.get('model')}
             return data["choices"][0]["message"]["content"], input_tokens, output_tokens, total_tokens, 0
 
     # ------------------------------------------------------------------
