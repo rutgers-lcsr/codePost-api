@@ -450,7 +450,8 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     """
     POST: Fire a small completion through the org's stored AI config and
     report success, latency, and any error. Accepts an optional custom
-    prompt. Records no usage. Only accessible by Org Staff or superuser.
+    prompt and a one-off model override. Records no usage.
+    Only accessible by Org Staff or superuser.
     """
     import asyncio
     from core.services.ai_service import AIService
@@ -469,7 +470,10 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         base_url=organization.ai_base_url or '',
         model=organization.ai_model or '',
     )
-    result = asyncio.run(svc.test_connection(prompt=body.validated_data.get('prompt') or None))
+    result = asyncio.run(svc.test_connection(
+        prompt=body.validated_data.get('prompt') or None,
+        model=body.validated_data.get('model') or None,
+    ))
     return Response(AIProviderTestResultSerializer(result).data)
 
   @extend_schema(

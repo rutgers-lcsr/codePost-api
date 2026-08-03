@@ -279,6 +279,40 @@ class TestForConfigConnectionTest(TestCase):
         self.assertEqual(len(captured['user_prompt']), AIService.TEST_PROMPT_MAX_CHARS)
         self.assertEqual(result['requestUserPrompt'], captured['user_prompt'])
 
+    def test_system_prompt_differs_for_custom_prompt(self):
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            default_run = async_to_sync(svc.test_connection)()
+            custom_run = async_to_sync(svc.test_connection)(prompt='What is 2+2?')
+        self.assertIn('connectivity test', default_run['requestSystemPrompt'])
+        self.assertIn('helpful assistant', custom_run['requestSystemPrompt'])
+
+    def test_whitespace_prompt_falls_back_to_default_ping(self):
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)(prompt='   ')
+        self.assertEqual(result['requestUserPrompt'], 'Reply with exactly: OK')
+        self.assertIn('connectivity test', result['requestSystemPrompt'])
+
+    def test_model_override_applies_to_request_and_result(self):
+        captured = {}
+
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            captured['model'] = self.model
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key', model='default')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)(model='gpt-4o')
+        self.assertEqual(captured['model'], 'gpt-4o')
+        self.assertEqual(result['model'], 'gpt-4o')
+
     def test_reported_model_surfaced_from_provider_meta(self):
         async def fake_dispatch(self, system_prompt, user_prompt):
             self._last_provider_meta = {'model': 'gemini-3-flash-preview-001'}

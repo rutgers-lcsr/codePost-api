@@ -68,6 +68,20 @@ class TestCourseAITest(APITestCase):
         response = request_as('create', admin, self.endpoint, {'prompt': 'x' * 501})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
+    def test_model_override_used_without_saving(self):
+        admin = Persona.ADMIN_OF_COURSE(self)
+        response = request_as('create', admin, self.endpoint, {'model': 'gpt-4o'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['model'], 'gpt-4o')
+        self.course.refresh_from_db()
+        self.assertEqual(self.course.ai_model, 'gpt-4o-mini')
+
+    def test_overlong_model_rejected(self):
+        admin = Persona.ADMIN_OF_COURSE(self)
+        response = request_as('create', admin, self.endpoint, {'model': 'x' * 65})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_fail)
     def test_admin_failure_reports_error(self):
         admin = Persona.ADMIN_OF_COURSE(self)

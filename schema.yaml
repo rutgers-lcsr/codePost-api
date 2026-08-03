@@ -3870,8 +3870,9 @@ paths:
       description: |-
         POST: Fire a small completion through the course's effective AI
         config (own settings or inherited org settings) and report success,
-        latency, and any error. Accepts an optional custom prompt.
-        Records no usage. Only accessible by course admins.
+        latency, and any error. Accepts an optional custom prompt and a
+        one-off model override. Records no usage.
+        Only accessible by course admins.
       parameters:
       - in: path
         name: id
@@ -6466,7 +6467,8 @@ paths:
       description: |-
         POST: Fire a small completion through the org's stored AI config and
         report success, latency, and any error. Accepts an optional custom
-        prompt. Records no usage. Only accessible by Org Staff or superuser.
+        prompt and a one-off model override. Records no usage.
+        Only accessible by Org Staff or superuser.
       parameters:
       - in: path
         name: id
@@ -15741,6 +15743,11 @@ components:
           description: Optional custom prompt to send instead of the default connectivity
             prompt
           maxLength: 500
+        model:
+          type: string
+          description: Optional model id to test against, overriding the saved model
+            without saving it
+          maxLength: 64
     AIProviderTestResult:
       type: object
       description: Result of a live AI provider connection test.

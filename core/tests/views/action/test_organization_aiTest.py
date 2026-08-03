@@ -69,6 +69,15 @@ class TestOrganizationAITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
 
+    @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
+    def test_model_override_used_without_saving(self):
+        staff = self._org_staff()
+        response = request_as('create', staff, self.endpoint, {'model': 'gpt-4o'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['model'], 'gpt-4o')
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.ai_model, 'gpt-4o-mini')
+
     @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_fail)
     def test_failure_reports_error(self):
         staff = self._org_staff()

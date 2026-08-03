@@ -304,18 +304,29 @@ class AIService:
     # Custom test prompts are clamped to keep test-call costs bounded.
     TEST_PROMPT_MAX_CHARS = 500
 
-    async def test_connection(self, prompt: Optional[str] = None) -> dict:
+    async def test_connection(self, prompt: Optional[str] = None, model: Optional[str] = None) -> dict:
         """Fire a minimal completion through the configured provider.
 
         ``prompt`` optionally replaces the default connectivity prompt so the
-        caller can eyeball a real generation.
+        caller can eyeball a real generation. ``model`` optionally overrides
+        ``self.model`` for this test only (nothing is saved); length is
+        enforced by AIProviderTestRequestSerializer.
         Returns a camelCase dict ready for AIProviderTestResultSerializer.
         Never raises and never records usage (record_usage is caller-driven).
         """
         import time
 
-        system_prompt = 'You are a connectivity test. Answer briefly in plain text.'
-        user_prompt = (prompt or '').strip()[:self.TEST_PROMPT_MAX_CHARS] or 'Reply with exactly: OK'
+        if model and model.strip():
+            self.model = model.strip()
+
+        user_prompt = (prompt or '').strip()[:self.TEST_PROMPT_MAX_CHARS]
+        if user_prompt:
+            # A real prompt: don't prime the model with connectivity-test
+            # framing or it answers "Connection successful." instead.
+            system_prompt = 'You are a helpful assistant. Answer briefly in plain text.'
+        else:
+            system_prompt = 'You are a connectivity test. Answer briefly in plain text.'
+            user_prompt = 'Reply with exactly: OK'
 
         result: dict = {
             'success': False,

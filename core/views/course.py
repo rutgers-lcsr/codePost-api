@@ -341,8 +341,9 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         """
         POST: Fire a small completion through the course's effective AI
         config (own settings or inherited org settings) and report success,
-        latency, and any error. Accepts an optional custom prompt.
-        Records no usage. Only accessible by course admins.
+        latency, and any error. Accepts an optional custom prompt and a
+        one-off model override. Records no usage.
+        Only accessible by course admins.
         """
         import asyncio
         from core.services.ai_service import AIService
@@ -359,7 +360,10 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         body.is_valid(raise_exception=True)
 
         svc = AIService(course)
-        result = asyncio.run(svc.test_connection(prompt=body.validated_data.get('prompt') or None))
+        result = asyncio.run(svc.test_connection(
+            prompt=body.validated_data.get('prompt') or None,
+            model=body.validated_data.get('model') or None,
+        ))
         return Response(AIProviderTestResultSerializer(result).data)
 
     @extend_schema(responses=CourseRosterSerializer)

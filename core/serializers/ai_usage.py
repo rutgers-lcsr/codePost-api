@@ -316,6 +316,7 @@ class AIProviderModelsListSerializer(serializers.Serializer):
 class AIProviderTestRequestSerializer(serializers.Serializer):
   """Optional request body for the AI provider connection test."""
   prompt = serializers.CharField(required=False, allow_blank=True, max_length=500, help_text="Optional custom prompt to send instead of the default connectivity prompt")
+  model = serializers.CharField(required=False, allow_blank=True, max_length=64, help_text="Optional model id to test against, overriding the saved model without saving it")
 
 
 class AIProviderTestResultSerializer(serializers.Serializer):
