@@ -69,6 +69,13 @@ services:
             - --innodb_page_size=16k
             - --innodb_buffer_pool_size=10G
             - --innodb_log_file_size=256M
+            - --max_connections=1000
+            - --wait_timeout=600
+            - --interactive_timeout=3600
+            # Reserved listener so the healthcheck still succeeds during connection
+            # exhaustion — otherwise autoheal restarts a full-but-healthy DB.
+            - --extra_port=3307
+            - --extra_max_connections=3
         labels:
             - "autoheal=true"
         healthcheck:
@@ -79,6 +86,7 @@ services:
                     "ping",
                     "-h",
                     "codepost-database",
+                    "--port=3307",
                     "--silent",
                     "--user=root",
                     "--password=${ROOT_DATABASE_PASSWORD}",

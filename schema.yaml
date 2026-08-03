@@ -18152,6 +18152,34 @@ components:
       - totalSections
       - totalStudents
       - totalUniqueUsers
+    DatabaseCheck:
+      type: object
+      description: Result of a single health probe.
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusDfeEnum'
+        label:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        latency_ms:
+          type: number
+          format: double
+          nullable: true
+        connections_current:
+          type: integer
+          nullable: true
+        connections_max_used:
+          type: integer
+          nullable: true
+        connections_limit:
+          type: integer
+          nullable: true
+      required:
+      - detail
+      - label
+      - status
     DiskCheck:
       type: object
       description: Result of a single health probe.
@@ -25455,7 +25483,7 @@ components:
         overall:
           $ref: '#/components/schemas/OverallEnum'
         database:
-          $ref: '#/components/schemas/HealthCheck'
+          $ref: '#/components/schemas/DatabaseCheck'
         celery:
           $ref: '#/components/schemas/CeleryCheck'
         cache:

@@ -398,8 +398,14 @@ if "DB_HOSTNAME" in os.environ:
             "PASSWORD": os.environ["DB_PASSWORD"],
             "HOST": os.environ["DB_HOSTNAME"],
             "PORT": os.environ["DB_PORT"],
-            "OPTIONS": {"charset": "utf8mb4"},
-            "CONN_MAX_AGE": 60,
+            # connect_timeout: mysqlclient's default is wait-forever; fail fast when the
+            # DB is saturated or restarting so request threads free their slot.
+            "OPTIONS": {"charset": "utf8mb4", "connect_timeout": 10},
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+            # Ping persistent connections on reuse so clients transparently reconnect
+            # after a DB restart or server-side wait_timeout reap instead of raising
+            # "MySQL server has gone away".
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 else:

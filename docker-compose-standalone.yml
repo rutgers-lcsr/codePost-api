@@ -213,6 +213,9 @@ services:
             - --innodb_page_size=16k
             - --innodb_buffer_pool_size=${INNODB_BUFFER_POOL_SIZE:-2G}
             - --innodb_log_file_size=256M
+            - --max_connections=${DB_MAX_CONNECTIONS:-500}
+            - --wait_timeout=600
+            - --interactive_timeout=3600
         healthcheck:
             test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "--silent", "--user=root", "--password=${ROOT_DATABASE_PASSWORD}"]
             interval: 10s
