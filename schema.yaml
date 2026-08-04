@@ -3871,7 +3871,7 @@ paths:
         POST: Fire a small completion through the course's effective AI
         config (own settings or inherited org settings) and report success,
         latency, and any error. Accepts an optional custom prompt and a
-        one-off model override. Records no usage.
+        one-off model override. Recorded in AI usage as 'provider_test'.
         Only accessible by course admins.
       parameters:
       - in: path
@@ -6467,8 +6467,8 @@ paths:
       description: |-
         POST: Fire a small completion through the org's stored AI config and
         report success, latency, and any error. Accepts an optional custom
-        prompt and a one-off model override. Records no usage.
-        Only accessible by Org Staff or superuser.
+        prompt and a one-off model override. Recorded in AI usage as
+        'provider_test'. Only accessible by Org Staff or superuser.
       parameters:
       - in: path
         name: id
@@ -15903,6 +15903,11 @@ components:
           items:
             $ref: '#/components/schemas/AIUsageBreakdown'
           description: Usage breakdown by AI model
+        featureBreakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/AIUsageBreakdown'
+          description: Usage breakdown by AI feature (request type)
         granularity:
           $ref: '#/components/schemas/GranularityEnum'
         startDate:

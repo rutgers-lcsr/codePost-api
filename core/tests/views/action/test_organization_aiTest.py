@@ -59,7 +59,12 @@ class TestOrganizationAITest(APITestCase):
         self.assertEqual(response.data['model'], 'gpt-4o-mini')
         self.assertEqual(response.data['response'], 'OK')
         self.assertIsNotNone(response.data['latencyMs'])
-        self.assertEqual(AIUsageRecord.objects.count(), 0)
+        # Org-level tests are recorded against the organization (no course)
+        record = AIUsageRecord.objects.get()
+        self.assertEqual(record.request_type, 'provider_test')
+        self.assertEqual(record.organization, self.org)
+        self.assertIsNone(record.course)
+        self.assertEqual(record.status, 'success')
 
     @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
     def test_org_staff_success(self):
@@ -86,7 +91,10 @@ class TestOrganizationAITest(APITestCase):
         self.assertFalse(response.data['success'])
         self.assertTrue(response.data['error'])
         self.assertIn('401', response.data['errorDetail'])
-        self.assertEqual(AIUsageRecord.objects.count(), 0)
+        record = AIUsageRecord.objects.get()
+        self.assertEqual(record.request_type, 'provider_test')
+        self.assertEqual(record.organization, self.org)
+        self.assertEqual(record.status, 'error')
 
     def test_unconfigured_returns_success_false(self):
         self.org.ai_provider = ''
@@ -96,3 +104,5 @@ class TestOrganizationAITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['success'])
         self.assertIn('No AI provider', response.data['error'])
+        # No request was attempted, so nothing is recorded
+        self.assertEqual(AIUsageRecord.objects.count(), 0)

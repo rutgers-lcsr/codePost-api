@@ -355,7 +355,7 @@ class AIService:
         result['requestUserPrompt'] = user_prompt
         start = time.perf_counter()
         try:
-            text, *_ = await asyncio.wait_for(
+            text, in_tok, out_tok, total_tok, cached_tok = await asyncio.wait_for(
                 self._dispatch_provider(system_prompt, user_prompt),
                 timeout=self.TEST_TIMEOUT_SECONDS,
             )
@@ -363,6 +363,12 @@ class AIService:
             result['success'] = True
             result['response'] = (text or '').strip()[:2000]
             result['reportedModel'] = (self._last_provider_meta or {}).get('model')
+            # Private keys for the caller's record_usage — not serialized
+            # (AIProviderTestResultSerializer only outputs declared fields).
+            result['_inputTokens'] = in_tok
+            result['_outputTokens'] = out_tok
+            result['_totalTokens'] = total_tok
+            result['_cachedTokens'] = cached_tok
         except asyncio.TimeoutError:
             result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
             result['error'] = f'The provider did not respond within {self.TEST_TIMEOUT_SECONDS} seconds.'
@@ -872,6 +878,7 @@ class AIService:
         user: User,
         request_type: str = 'comment_generation',
         experiment: 'PromptExperiment | None' = None,
+        organization=None,
     ) -> None:
         """
         Persist an AIUsageRecord for the generation that just completed.
@@ -895,7 +902,9 @@ class AIService:
                 prompt_variant = SystemPromptVariant.objects.filter(pk=result.variant_id).first()
 
             AIUsageRecord.objects.create(
-                organization=self.course.organization,
+                # Course-less instances (for_config, org-level tests) pass an
+                # explicit organization instead.
+                organization=self.course.organization if self.course else organization,
                 course=self.course,
                 assignment=self.assignment,
                 user=user,

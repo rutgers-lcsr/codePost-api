@@ -188,6 +188,34 @@ def get_usage_summary(
         for entry in model_breakdown_qs
     ]
 
+    # Feature breakdown — always computed, grouped by request type and
+    # labeled with the display name from REQUEST_TYPE_CHOICES.
+    request_type_labels = dict(AIUsageRecord.REQUEST_TYPE_CHOICES)
+    feature_breakdown_qs = (
+        queryset
+        .values('request_type')
+        .annotate(
+            totalTokens=Sum('total_tokens'),
+            inputTokens=Sum('input_tokens'),
+            outputTokens=Sum('output_tokens'),
+            estimatedCost=Sum('estimated_cost'),
+            requestCount=Count('id'),
+        )
+        .order_by('-totalTokens')
+    )
+    feature_breakdown = [
+        {
+            'id': None,
+            'name': request_type_labels.get(entry['request_type'], entry['request_type'] or 'Unknown'),
+            'totalTokens': entry['totalTokens'] or 0,
+            'inputTokens': entry['inputTokens'] or 0,
+            'outputTokens': entry['outputTokens'] or 0,
+            'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+            'requestCount': entry['requestCount'] or 0,
+        }
+        for entry in feature_breakdown_qs
+    ]
+
     return {
         'totalTokens': totals['total_tokens'] or 0,
         'inputTokens': totals['input_tokens'] or 0,
@@ -198,6 +226,7 @@ def get_usage_summary(
         'timeSeries': time_series,
         'breakdown': breakdown,
         'modelBreakdown': model_breakdown,
+        'featureBreakdown': feature_breakdown,
         'granularity': granularity,
         'startDate': start_date,
         'endDate': end_date,

@@ -386,9 +386,18 @@ class TestSystemAIUsageEndpoint(APITestCase):
         expected_keys = {
             'totalTokens', 'inputTokens', 'outputTokens', 'cachedTokens',
             'estimatedCost', 'requestCount', 'timeSeries', 'breakdown',
-            'modelBreakdown', 'granularity', 'startDate', 'endDate',
+            'modelBreakdown', 'featureBreakdown', 'granularity', 'startDate', 'endDate',
         }
         self.assertEqual(set(data.keys()), expected_keys)
+
+    def test_feature_breakdown_uses_display_labels(self):
+        su = User.objects.create_superuser('su_feat@test.edu', 'su_feat@test.edu', 'pass')
+        response = request_as('read', su, self.endpoint, {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [entry['name'] for entry in response.data['featureBreakdown']]
+        self.assertTrue(names)
+        # Labels come from REQUEST_TYPE_CHOICES, not raw keys
+        self.assertNotIn('comment_generation', names)
 
     def test_staff_user_can_access(self):
         """is_staff (non-superuser) should also be able to access."""

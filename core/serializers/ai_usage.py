@@ -69,6 +69,7 @@ class AIUsageSummarySerializer(serializers.Serializer):
   timeSeries = AIUsageBucketSerializer(many=True, help_text="Usage data bucketed by time")
   breakdown = AIUsageBreakdownSerializer(many=True, help_text="Usage breakdown by dimension")
   modelBreakdown = AIUsageBreakdownSerializer(many=True, required=False, help_text="Usage breakdown by AI model")
+  featureBreakdown = AIUsageBreakdownSerializer(many=True, required=False, help_text="Usage breakdown by AI feature (request type)")
   granularity = serializers.ChoiceField(choices=['hourly', 'daily', 'monthly'])
   startDate = serializers.DateTimeField()
   endDate = serializers.DateTimeField()

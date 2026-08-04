@@ -2291,6 +2291,7 @@ class AIUsageRecord(BaseModel):
       ('quiz_generation', 'Quiz Question Suggestions'),
       ('code_review', 'Code Review'),
       ('feedback', 'Feedback'),
+      ('provider_test', 'Provider Test'),
       ('other', 'Other'),
   ]
 

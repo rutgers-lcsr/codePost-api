@@ -52,8 +52,17 @@ class TestCourseAITest(APITestCase):
         self.assertEqual(response.data['model'], 'gpt-4o-mini')
         self.assertEqual(response.data['response'], 'OK')
         self.assertIsNotNone(response.data['latencyMs'])
-        # A connection test must not pollute usage records
-        self.assertEqual(AIUsageRecord.objects.count(), 0)
+        # Test runs are recorded as 'provider_test' usage
+        record = AIUsageRecord.objects.get()
+        self.assertEqual(record.request_type, 'provider_test')
+        self.assertEqual(record.course, self.course)
+        self.assertEqual(record.organization, self.course.organization)
+        self.assertEqual(record.provider, 'openai')
+        self.assertEqual(record.model, 'gpt-4o-mini')
+        self.assertEqual(record.status, 'success')
+        self.assertEqual(record.total_tokens, 4)
+        # Private token keys never leak into the API response
+        self.assertNotIn('_inputTokens', response.data)
 
     @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
     def test_custom_prompt_is_sent(self):
@@ -76,6 +85,8 @@ class TestCourseAITest(APITestCase):
         self.assertEqual(response.data['model'], 'gpt-4o')
         self.course.refresh_from_db()
         self.assertEqual(self.course.ai_model, 'gpt-4o-mini')
+        # The usage record reflects the model the test actually ran with
+        self.assertEqual(AIUsageRecord.objects.get().model, 'gpt-4o')
 
     def test_overlong_model_rejected(self):
         admin = Persona.ADMIN_OF_COURSE(self)
@@ -90,7 +101,10 @@ class TestCourseAITest(APITestCase):
         self.assertFalse(response.data['success'])
         self.assertTrue(response.data['error'])
         self.assertIn('401', response.data['errorDetail'])
-        self.assertEqual(AIUsageRecord.objects.count(), 0)
+        # Failed tests are recorded too, with error status
+        record = AIUsageRecord.objects.get()
+        self.assertEqual(record.request_type, 'provider_test')
+        self.assertEqual(record.status, 'error')
 
     def test_unconfigured_returns_success_false(self):
         self.course.ai_provider = ''
@@ -100,3 +114,5 @@ class TestCourseAITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['success'])
         self.assertIn('No AI provider', response.data['error'])
+        # No request was attempted, so nothing is recorded
+        self.assertEqual(AIUsageRecord.objects.count(), 0)

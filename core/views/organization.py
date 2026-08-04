@@ -450,11 +450,11 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     """
     POST: Fire a small completion through the org's stored AI config and
     report success, latency, and any error. Accepts an optional custom
-    prompt and a one-off model override. Records no usage.
-    Only accessible by Org Staff or superuser.
+    prompt and a one-off model override. Recorded in AI usage as
+    'provider_test'. Only accessible by Org Staff or superuser.
     """
     import asyncio
-    from core.services.ai_service import AIService
+    from core.services.ai_service import AIService, GenerationResult
 
     organization = self.get_object()
 
@@ -469,11 +469,30 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         api_key=organization.ai_api_key or '',
         base_url=organization.ai_base_url or '',
         model=organization.ai_model or '',
-    )
+    ).set_request_context(user=request.user, request_type='provider_test')
     result = asyncio.run(svc.test_connection(
         prompt=body.validated_data.get('prompt') or None,
         model=body.validated_data.get('model') or None,
     ))
+
+    # Record usage when a request was actually attempted (sync context —
+    # record_usage does ORM work that can't run inside asyncio.run).
+    if result.get('requestSystemPrompt') is not None:
+        svc.record_usage(
+            GenerationResult(
+                text=result.get('response') or '',
+                success=result['success'],
+                error=result.get('error'),
+                input_tokens=result.get('_inputTokens', 0),
+                output_tokens=result.get('_outputTokens', 0),
+                total_tokens=result.get('_totalTokens', 0),
+                cached_tokens=result.get('_cachedTokens', 0),
+            ),
+            request.user,
+            request_type='provider_test',
+            organization=organization,
+        )
+
     return Response(AIProviderTestResultSerializer(result).data)
 
   @extend_schema(

@@ -342,11 +342,11 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         POST: Fire a small completion through the course's effective AI
         config (own settings or inherited org settings) and report success,
         latency, and any error. Accepts an optional custom prompt and a
-        one-off model override. Records no usage.
+        one-off model override. Recorded in AI usage as 'provider_test'.
         Only accessible by course admins.
         """
         import asyncio
-        from core.services.ai_service import AIService
+        from core.services.ai_service import AIService, GenerationResult
 
         user = request.user
         if not isAuthenticated(user):
@@ -359,11 +359,29 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         body = AIProviderTestRequestSerializer(data=request.data)
         body.is_valid(raise_exception=True)
 
-        svc = AIService(course)
+        svc = AIService(course).set_request_context(user=user, request_type='provider_test')
         result = asyncio.run(svc.test_connection(
             prompt=body.validated_data.get('prompt') or None,
             model=body.validated_data.get('model') or None,
         ))
+
+        # Record usage when a request was actually attempted (sync context —
+        # record_usage does ORM work that can't run inside asyncio.run).
+        if result.get('requestSystemPrompt') is not None:
+            svc.record_usage(
+                GenerationResult(
+                    text=result.get('response') or '',
+                    success=result['success'],
+                    error=result.get('error'),
+                    input_tokens=result.get('_inputTokens', 0),
+                    output_tokens=result.get('_outputTokens', 0),
+                    total_tokens=result.get('_totalTokens', 0),
+                    cached_tokens=result.get('_cachedTokens', 0),
+                ),
+                user,
+                request_type='provider_test',
+            )
+
         return Response(AIProviderTestResultSerializer(result).data)
 
     @extend_schema(responses=CourseRosterSerializer)
