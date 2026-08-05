@@ -6,10 +6,14 @@ from core.models import QuizSuggestionJob
 class QuizSuggestionJobSerializer(serializers.ModelSerializer):
   """Read-only view of an AI quiz-suggestion generation run (for status polling)."""
 
+  # Explicit JSONField so the generated TS client types it `any` (the auto-mapped
+  # jsonfield.JSONField would come out as `string`, like QuizImportJob.summary).
+  resultData = serializers.JSONField(read_only=True)
+
   class Meta:
     model = QuizSuggestionJob
     fields = (
-        'id', 'course', 'assignment', 'sourceQuestion', 'status', 'taskId',
-        'createdCount', 'errorMessage', 'created',
+        'id', 'course', 'assignment', 'sourceQuestion', 'quiz', 'status', 'taskId',
+        'createdCount', 'errorMessage', 'resultData', 'created',
     )
     read_only_fields = fields

@@ -2112,6 +2112,9 @@ Provide a concise markdown summary following the guidelines in your instructions
                     f"Points: {source_question.points}",
                     f"Stem: {source_question.text}",
                 ]
+                if source_question.description:
+                    lines.append(f"Description (Markdown, shown to the student beneath the stem):\n"
+                                 f"{source_question.description}")
                 choices = list(source_question.choices.all())
                 if choices:
                     lines.append("Current choices:")
@@ -2160,7 +2163,9 @@ Provide a concise markdown summary following the guidelines in your instructions
             "Generate the quiz questions now as a JSON array, following the format exactly. "
             "CRITICAL: every multiple_choice, multiple_answers, true_false, short_answer, and numerical "
             'question MUST include a non-empty "choices" array (each item: {"text": ..., "is_correct": ...}). '
-            "Only essay and code questions omit choices."
+            "Only essay and code questions omit choices. Each question may include an optional "
+            '"description" — it is shown to the student beneath the stem and rendered as Markdown, '
+            "so use Markdown there for highlighting (fenced code blocks, bold, inline code)."
         )
         result = await self._generate(system_prompt, user_prompt, label='quiz question generation')
         if result.success:
@@ -2168,7 +2173,8 @@ Provide a concise markdown summary following the guidelines in your instructions
             result.variant_id = variant_id
         return result
 
-    async def generate_personalized_quiz_questions(self, section, submission) -> GenerationResult:
+    async def generate_personalized_quiz_questions(self, section, submission,
+                                                   demo_files=None) -> GenerationResult:
         """Generate per-student quiz questions for one QuizGeneratedSection from the
         student's submission.
 
@@ -2189,7 +2195,8 @@ Provide a concise markdown summary following the guidelines in your instructions
             # whatever context exists.
             assignment = submission.assignment if submission is not None else self.assignment
             ctx = VariableContext(course=self.course, assignment=assignment,
-                                  submission=submission, section=section)
+                                  submission=submission, section=section,
+                                  demo_files=demo_files)
             instructor_text, _ = substitute_variables(section.systemPrompt, ctx)
             try:
                 language = (assignment.environment.language or '') if assignment else ''

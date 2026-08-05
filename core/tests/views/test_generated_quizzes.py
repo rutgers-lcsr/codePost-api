@@ -5,6 +5,7 @@ approved, stale-batch discard, auto-publish), the review/approve/publish API and
 grader-permission gate, student availability gating, and attempt materialization."""
 import json
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 import factory
@@ -43,8 +44,11 @@ def gen_setup(db):
         submission.dateUploaded = timezone.now()
         submission.save()
 
+    # manualGeneration defaults to True; most of this suite exercises the automatic
+    # pipeline, so opt back in — the manual-mode tests flip it on explicitly.
     quiz = Quiz.objects.create(course=course, title='Personalized Quiz', assignment=assignment,
-                               isPublished=True, assignmentTrigger='after_submission')
+                               isPublished=True, assignmentTrigger='after_submission',
+                               manualGeneration=False)
     section = QuizGeneratedSection.objects.create(
         quiz=quiz, name='About your code', systemPrompt='Ask about {submission_files}.',
         numQuestions=2, pointsPerQuestion=Decimal('3'))
@@ -64,7 +68,7 @@ def _mock_ai(monkeypatch, json_text=QUESTIONS_JSON, success=True, side_effect=No
     from asgiref.sync import sync_to_async
     from core.services.ai_service import GenerationResult
 
-    async def mock_generate(self, section, submission):
+    async def mock_generate(self, section, submission, demo_files=None):
         if side_effect is not None:
             await sync_to_async(side_effect)(section, submission)
         if not success:
@@ -269,6 +273,13 @@ class TestSubmissionSignal:
         gen_setup['quiz'].save()
         assert self._fire(gen_setup['submission'], monkeypatch, created=True) == []
 
+    def test_skips_manual_generation_quiz(self, gen_setup, monkeypatch):
+        """Manual-generation quizzes never generate on upload — staff trigger generation
+        explicitly (or via the scheduled generationDate run)."""
+        gen_setup['quiz'].manualGeneration = True
+        gen_setup['quiz'].save()
+        assert self._fire(gen_setup['submission'], monkeypatch, created=True) == []
+
 
 class TestSectionCreatedSignal:
     def _fire(self, section, monkeypatch, created=True):
@@ -290,6 +301,11 @@ class TestSectionCreatedSignal:
         gen_setup['quiz'].save()
         assert self._fire(gen_setup['section'], monkeypatch) == []
 
+    def test_manual_generation_quiz_skipped(self, gen_setup, monkeypatch):
+        gen_setup['quiz'].manualGeneration = True
+        gen_setup['quiz'].save()
+        assert self._fire(gen_setup['section'], monkeypatch) == []
+
     def test_publish_catchup_queues_missing_only_backfill(self, api_client, gen_setup, monkeypatch):
         """Publishing a quiz with sections backfills students without a set — missing_only,
         so a republish never regenerates sets a reviewer may have edited."""
@@ -307,6 +323,21 @@ class TestSectionCreatedSignal:
         # A non-publish edit doesn't re-queue.
         api_client.patch(f'/quizzes/{quiz.id}/', {'title': 'Renamed'}, format='json')
         assert len(calls) == 1
+
+    def test_publish_catchup_skipped_for_manual_generation(self, api_client, gen_setup, monkeypatch):
+        """Publishing a manual-generation quiz queues nothing — staff generate explicitly
+        (a generationDate in the past fires on the next sweep tick instead)."""
+        quiz = gen_setup['quiz']
+        quiz.isPublished = False
+        quiz.manualGeneration = True
+        quiz.save()
+        calls = []
+        monkeypatch.setattr('core.tasks.backfill_personalized_quiz_sets.delay',
+                            lambda *a, **kw: calls.append((a, kw)))
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {'isPublished': True}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert calls == []
 
 
 # --------------------------------------------------------------------------- #
@@ -356,6 +387,17 @@ class TestGenerationTask:
         scope to a quiz_id still can (preparing an unpublished quiz for review)."""
         _mock_ai(monkeypatch)
         gen_setup['quiz'].isPublished = False
+        gen_setup['quiz'].save()
+        _run_task(gen_setup['submission'])
+        assert not gen_setup['quiz'].generatedSets.exists()
+        _run_task(gen_setup['submission'], quiz_id=gen_setup['quiz'].id)
+        assert gen_setup['quiz'].generatedSets.filter(status='ready').exists()
+
+    def test_manual_quiz_not_generated_by_submission_run(self, gen_setup, monkeypatch):
+        """The signal fan-out (no quiz_id) skips manual-generation quizzes; staff actions
+        and the scheduled run scope to a quiz_id and still generate."""
+        _mock_ai(monkeypatch)
+        gen_setup['quiz'].manualGeneration = True
         gen_setup['quiz'].save()
         _run_task(gen_setup['submission'])
         assert not gen_setup['quiz'].generatedSets.exists()
@@ -1058,10 +1100,11 @@ class TestBackfill:
         from core.models import GeneratedQuestionSet, Quiz
         _mock_ai(monkeypatch)
         self._eager_tasks(monkeypatch)
-        # Published: the section-created backfill deliberately skips drafts (publishing
-        # catches those up instead).
+        # Published + automatic mode: the section-created backfill deliberately skips
+        # drafts (publishing catches those up) and manual-generation quizzes.
         late_quiz = Quiz.objects.create(course=gen_setup['course'], title='Late quiz',
-                                        assignment=gen_setup['assignment'], isPublished=True)
+                                        assignment=gen_setup['assignment'], isPublished=True,
+                                        manualGeneration=False)
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.post('/quizGeneratedSections/', {
             'quiz': late_quiz.id, 'systemPrompt': 'Ask about {submission_files}.',
@@ -1152,3 +1195,267 @@ class TestBackfill:
         api_client.force_authenticate(user=gen_setup['grader'])
         assert api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/").status_code \
             == status.HTTP_403_FORBIDDEN
+
+
+# --------------------------------------------------------------------------- #
+# Scheduled generation sweep (manualGeneration + generationDate)
+# --------------------------------------------------------------------------- #
+
+
+class TestScheduledGeneration:
+    def _run(self, monkeypatch):
+        from core.tasks import run_scheduled_quiz_generation
+        calls = []
+        monkeypatch.setattr('core.tasks.backfill_personalized_quiz_sets.delay',
+                            lambda *a, **kw: calls.append((a, kw)))
+        return run_scheduled_quiz_generation(), calls
+
+    def _arm(self, quiz, minutes_ago=5):
+        quiz.manualGeneration = True
+        quiz.generationDate = timezone.now() - timedelta(minutes=minutes_ago)
+        quiz.save()
+
+    def test_runs_when_due(self, gen_setup, monkeypatch):
+        self._arm(gen_setup['quiz'])
+        count, calls = self._run(monkeypatch)
+        assert count == 1
+        assert calls == [((gen_setup['quiz'].id,), {'missing_only': True})]
+        gen_setup['quiz'].refresh_from_db()
+        assert gen_setup['quiz'].scheduledGenerationRanAt is not None
+
+    def test_one_shot(self, gen_setup, monkeypatch):
+        self._arm(gen_setup['quiz'])
+        self._run(monkeypatch)
+        count, calls = self._run(monkeypatch)
+        assert count == 0 and calls == []
+
+    def test_skips_before_date(self, gen_setup, monkeypatch):
+        self._arm(gen_setup['quiz'], minutes_ago=-60)  # an hour in the future
+        count, calls = self._run(monkeypatch)
+        assert count == 0 and calls == []
+        gen_setup['quiz'].refresh_from_db()
+        assert gen_setup['quiz'].scheduledGenerationRanAt is None
+
+    def test_rearm_when_date_moved_forward(self, gen_setup, monkeypatch):
+        """Moving generationDate past the stamp re-arms the one-shot — missing_only keeps
+        the re-run scoped to students who gained a submission since."""
+        self._arm(gen_setup['quiz'])
+        self._run(monkeypatch)
+        gen_setup['quiz'].refresh_from_db()
+        first_stamp = gen_setup['quiz'].scheduledGenerationRanAt
+        # A date at/before the stamp stays quiet; one after it fires again.
+        gen_setup['quiz'].generationDate = first_stamp
+        gen_setup['quiz'].save()
+        assert self._run(monkeypatch) == (0, [])
+        # After the stamp but not in the future — the sweep only fires once the date passes.
+        gen_setup['quiz'].generationDate = timezone.now()
+        gen_setup['quiz'].save()
+        count, calls = self._run(monkeypatch)
+        assert count == 1 and len(calls) == 1
+
+    def test_skips_draft_non_manual_archived_and_sectionless(self, gen_setup, monkeypatch):
+        quiz = gen_setup['quiz']
+        past = timezone.now() - timedelta(minutes=5)
+
+        quiz.generationDate = past  # date set but automatic mode
+        quiz.save()
+        assert self._run(monkeypatch) == (0, [])
+
+        self._arm(quiz)
+        quiz.isPublished = False
+        quiz.save()
+        assert self._run(monkeypatch) == (0, [])
+
+        quiz.isPublished = True
+        quiz.save()
+        gen_setup['course'].archived = True
+        gen_setup['course'].save()
+        assert self._run(monkeypatch) == (0, [])
+
+        gen_setup['course'].archived = False
+        gen_setup['course'].save()
+        gen_setup['section'].delete()
+        assert self._run(monkeypatch) == (0, [])
+
+    def test_failure_is_isolated(self, gen_setup, monkeypatch):
+        """One quiz whose enqueue blows up must not strand the other due quizzes."""
+        from core.models import Quiz, QuizGeneratedSection
+        from core.tasks import run_scheduled_quiz_generation
+        self._arm(gen_setup['quiz'])
+        other = Quiz.objects.create(course=gen_setup['course'], title='Zecond quiz',
+                                    assignment=gen_setup['assignment'], isPublished=True)
+        QuizGeneratedSection.objects.create(quiz=other, systemPrompt='Ask about {submission_files}.')
+        self._arm(other)
+
+        calls = []
+
+        def flaky_delay(quiz_id, **kw):
+            if quiz_id == gen_setup['quiz'].id:
+                raise RuntimeError('broker down')
+            calls.append(quiz_id)
+        monkeypatch.setattr('core.tasks.backfill_personalized_quiz_sets.delay', flaky_delay)
+        count = run_scheduled_quiz_generation()
+        assert count == 1
+        assert calls == [other.id]
+        other.refresh_from_db()
+        assert other.scheduledGenerationRanAt is not None
+
+
+# --------------------------------------------------------------------------- #
+# Prompt test previews (the section modal's Test button)
+# --------------------------------------------------------------------------- #
+
+
+class TestPreviewGeneratedSection:
+    def _run_task_inline(self, monkeypatch):
+        from core.tasks import preview_generated_section as task_fn
+
+        def run_inline(*a, **kw):
+            task_fn(*a, **kw)
+            return type('R', (), {'id': 'task-inline'})()
+        monkeypatch.setattr('core.tasks.preview_generated_section.delay', run_inline)
+
+    def _mock_ai_capture(self, monkeypatch, json_text=QUESTIONS_JSON, calls=None):
+        """Like _mock_ai, but records (section, submission, demo_files) per call."""
+        from core.services.ai_service import GenerationResult
+
+        async def mock_generate(self, section, submission, demo_files=None):
+            if calls is not None:
+                calls.append((section, submission, demo_files))
+            return GenerationResult(text=json_text, success=True, input_tokens=10,
+                                    output_tokens=20, resolved_prompt='the resolved prompt')
+
+        monkeypatch.setattr(
+            'core.services.ai_service.AIService.generate_personalized_quiz_questions',
+            mock_generate)
+        _enable_ai(monkeypatch)
+
+    def _post(self, api_client, quiz, **payload):
+        body = {'systemPrompt': 'Ask about {submission_files}.', 'numQuestions': 2}
+        body.update(payload)
+        return api_client.post(f'/quizzes/{quiz.id}/previewGeneratedSection/', body,
+                               format='json')
+
+    def test_random_seed_completes_with_example_questions(self, api_client, gen_setup, monkeypatch):
+        calls = []
+        self._mock_ai_capture(monkeypatch, calls=calls)
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'])
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert resp.data['quiz'] == gen_setup['quiz'].id
+
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.status_code == status.HTTP_200_OK
+        assert poll.data['status'] == 'completed'
+        assert poll.data['createdCount'] == 2
+        data = poll.data['resultData']
+        assert data['seed'] == 'random'
+        assert data['sampleStudent'] == gen_setup['students'][0].email
+        assert data['resolvedPrompt'] == 'the resolved prompt'
+        assert [q['questionType'] for q in data['questions']] == ['multiple_choice', 'essay']
+        assert data['questions'][0]['choicesData'][0] == {
+            'text': 'A list', 'isCorrect': True, 'feedback': ''}
+        # The generation ran against the submitter's real submission, unsaved section.
+        section, submission, demo = calls[0]
+        assert section.pk is None
+        assert submission == gen_setup['submission']
+        assert demo is None
+
+        # Students never see preview runs.
+        api_client.force_authenticate(user=gen_setup['students'][0])
+        assert api_client.get(
+            f"/quizSuggestionJobs/{resp.data['id']}/").status_code == status.HTTP_403_FORBIDDEN
+
+    def test_demo_seed_works_without_any_submission(self, api_client, gen_setup, monkeypatch):
+        gen_setup['submission'].delete()
+        calls = []
+        self._mock_ai_capture(monkeypatch, calls=calls)
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'], seed='demo',
+                          demoFiles=[{'name': 'main.py', 'content': 'print(1)'}])
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'completed'
+        assert poll.data['resultData']['seed'] == 'demo'
+        assert poll.data['resultData']['sampleStudent'] is None
+        _, submission, demo = calls[0]
+        assert submission is None
+        assert demo == ({'name': 'main.py', 'content': 'print(1)'},)
+
+    def test_nothing_is_persisted(self, api_client, gen_setup, monkeypatch):
+        from core.models import (
+            GeneratedQuestionSet, GeneratedQuizQuestion, QuizGeneratedSection,
+            SuggestedQuizQuestion,
+        )
+        self._mock_ai_capture(monkeypatch)
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'])
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert QuizGeneratedSection.objects.count() == 1  # the fixture's saved section only
+        assert GeneratedQuestionSet.objects.count() == 0
+        assert GeneratedQuizQuestion.objects.count() == 0
+        assert SuggestedQuizQuestion.objects.count() == 0
+
+    def test_grader_and_student_cannot_preview(self, api_client, gen_setup, monkeypatch):
+        self._mock_ai_capture(monkeypatch)
+        for user in (gen_setup['grader'], gen_setup['students'][0]):
+            api_client.force_authenticate(user=user)
+            assert self._post(api_client, gen_setup['quiz']).status_code == status.HTTP_403_FORBIDDEN
+
+    def test_unknown_variable_maps_to_prompt_field_error(self, api_client, gen_setup, monkeypatch):
+        self._mock_ai_capture(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'],
+                          systemPrompt='Use {submission_files:bad_arg}.')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'systemPrompt' in resp.data
+
+    def test_empty_prompt_maps_to_prompt_field_error(self, api_client, gen_setup, monkeypatch):
+        self._mock_ai_capture(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'], systemPrompt='   ')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'systemPrompt' in resp.data
+
+    def test_random_seed_requires_a_submission(self, api_client, gen_setup, monkeypatch):
+        gen_setup['submission'].delete()
+        self._mock_ai_capture(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'])
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'No student has submitted yet' in resp.data['error']
+
+    def test_demo_seed_requires_files(self, api_client, gen_setup, monkeypatch):
+        self._mock_ai_capture(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'], seed='demo', demoFiles=[])
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'demo file' in resp.data['error']
+
+    def test_blocked_when_feature_disabled(self, api_client, gen_setup):
+        # No AI provider is configured in tests, so the feature resolves to disabled.
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'])
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'not enabled' in resp.data['error']
+
+    def test_parse_failure_fails_job_but_keeps_resolved_prompt(self, api_client, gen_setup,
+                                                               monkeypatch):
+        self._mock_ai_capture(monkeypatch, json_text='this is not json')
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = self._post(api_client, gen_setup['quiz'])
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'failed'
+        assert 'parsed' in poll.data['errorMessage']
+        # The instructor can still inspect what the model was given.
+        assert poll.data['resultData']['resolvedPrompt'] == 'the resolved prompt'
+        assert poll.data['resultData']['questions'] == []

@@ -231,6 +231,9 @@ def copy_quiz(quiz: Quiz, destination_course: Course, *,
       multiAttemptScoreMethod=quiz.multiAttemptScoreMethod,
       gradersCanReviewGenerated=quiz.gradersCanReviewGenerated,
       autoPublishGenerated=quiz.autoPublishGenerated,
+      # generationDate is semester-specific (like the availability window) and is left
+      # unset; the mode itself carries over.
+      manualGeneration=quiz.manualGeneration,
       # Draft reset: nothing goes live in the destination course by accident, and the
       # availability window is semester-specific (mirrors copy_assignment's date resets).
       isPublished=False,

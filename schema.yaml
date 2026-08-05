@@ -10274,6 +10274,48 @@ paths:
                 items:
                   $ref: '#/components/schemas/GeneratedQuestionSetList'
           description: ''
+  /quizzes/{id}/previewGeneratedSection/:
+    post:
+      operationId: quizzes_previewGeneratedSectionCreate
+      description: 'Test-generate example questions from an (unsaved) AI-section prompt
+        without persisting anything to the quiz — the quiz builder''s Test button.
+        Returns a generation job to poll via quizSuggestionJobs/{id}/; the completed
+        job''s resultData holds the example questions. seed picks how per-student
+        {variables} resolve: a random submitter''s latest submission, or instructor-uploaded
+        demoFiles.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewGeneratedSectionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PreviewGeneratedSectionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PreviewGeneratedSectionRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizSuggestionJob'
+          description: ''
   /quizzes/{id}/promptTemplates/:
     get:
       operationId: quizzes_promptTemplatesList
@@ -21381,6 +21423,26 @@ components:
           type: boolean
           description: If true, per-student generated question sets are approved automatically
             on generation (no staff review gate).
+        manualGeneration:
+          type: boolean
+          description: If true (the default), per-student question sets never generate
+            automatically (no per-submission trigger, no backfill on publish or section
+            creation) — staff generate via generateForStudent/generateMissing, or
+            the one-time generationDate run.
+        generationDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Manual mode only: one-time scheduled run that generates question
+            sets for students who have a submission but no set yet, at/after this
+            time.'
+        scheduledGenerationRanAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the scheduled generationDate run last fired (one-shot
+            stamp). Moving generationDate past this re-arms the run.
         generatedSections:
           type: array
           items:
@@ -22156,6 +22218,10 @@ components:
         text:
           type: string
           description: The suggested question stem/prompt.
+        description:
+          type: string
+          description: 'Optional Markdown description shown beneath the stem (rich
+            content: code blocks, lists, formatting).'
         choicesData: {}
         points:
           type: number
@@ -22527,6 +22593,38 @@ components:
           type: string
       required:
       - status
+    PreviewDemoFile:
+      type: object
+      properties:
+        name:
+          type: string
+        content:
+          type: string
+      required:
+      - content
+      - name
+    PreviewGeneratedSectionRequest:
+      type: object
+      properties:
+        systemPrompt:
+          type: string
+        numQuestions:
+          type: integer
+          default: 3
+        questionTypes:
+          type: array
+          items:
+            type: string
+        seed:
+          allOf:
+          - $ref: '#/components/schemas/SeedEnum'
+          default: random
+        demoFiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewDemoFile'
+      required:
+      - systemPrompt
     PromptExperiment:
       type: object
       properties:
@@ -23130,6 +23228,26 @@ components:
           type: boolean
           description: If true, per-student generated question sets are approved automatically
             on generation (no staff review gate).
+        manualGeneration:
+          type: boolean
+          description: If true (the default), per-student question sets never generate
+            automatically (no per-submission trigger, no backfill on publish or section
+            creation) — staff generate via generateForStudent/generateMissing, or
+            the one-time generationDate run.
+        generationDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Manual mode only: one-time scheduled run that generates question
+            sets for students who have a submission but no set yet, at/after this
+            time.'
+        scheduledGenerationRanAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the scheduled generationDate run last fired (one-shot
+            stamp). Moving generationDate past this re-arms the run.
         generatedSections:
           type: array
           items:
@@ -23173,6 +23291,7 @@ components:
       - metadata
       - questionGroups
       - quizQuestions
+      - scheduledGenerationRanAt
       - source
       - title
     QuizAccessCodeResponse:
@@ -23618,6 +23737,12 @@ components:
           readOnly: true
           nullable: true
           description: The existing question a refresh suggestion was generated from.
+        quiz:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The quiz a section-prompt test preview was run for (preview
+            runs only).
         status:
           allOf:
           - $ref: '#/components/schemas/QuizSuggestionJobStatusEnum'
@@ -23641,6 +23766,8 @@ components:
           type: string
           readOnly: true
           description: Friendly error detail if the run failed.
+        resultData:
+          readOnly: true
         created:
           type: string
           format: date-time
@@ -23652,6 +23779,8 @@ components:
       - createdCount
       - errorMessage
       - id
+      - quiz
+      - resultData
       - sourceQuestion
       - status
       - taskId
@@ -23870,6 +23999,14 @@ components:
       - leaders
       - name
       - students
+    SeedEnum:
+      enum:
+      - random
+      - demo
+      type: string
+      description: |-
+        * `random` - random
+        * `demo` - demo
     SetCredentialsRequest:
       type: object
       properties:
@@ -25634,6 +25771,10 @@ components:
         text:
           type: string
           description: The suggested question stem/prompt.
+        description:
+          type: string
+          description: 'Optional Markdown description shown beneath the stem (rich
+            content: code blocks, lists, formatting).'
         choicesData: {}
         points:
           type: number

@@ -56,6 +56,10 @@ class VariableContext:
     assignment: 'Optional[Assignment]' = None
     submission: 'Optional[Submission]' = None
     section: 'Optional[QuizGeneratedSection]' = None
+    # Instructor-supplied stand-in for a real submission in prompt test previews: a
+    # tuple of {'name', 'content'} dicts, or None outside previews. Only consulted by
+    # the submission-dependent resolvers when ``submission`` is None.
+    demo_files: 'Optional[tuple]' = None
 
 
 @dataclass(frozen=True)
@@ -351,6 +355,9 @@ def _submission_context(ctx):
 
 def _resolve_submission_files(ctx, argument):
     if ctx.submission is None:
+        if ctx.demo_files is not None:
+            return "\n\n".join(_format_file_block(f['name'], f['content'], SUBMISSION_FILE_CHAR_CAP)
+                               for f in ctx.demo_files) or "(the submission has no files)"
         return None
     blocks = [f"### {f['name']}\n```\n{f['content']}\n```" for f in _submission_context(ctx)['files']]
     return "\n\n".join(blocks) if blocks else "(the submission has no files)"
@@ -358,6 +365,11 @@ def _resolve_submission_files(ctx, argument):
 
 def _resolve_submission_file(ctx, argument):
     if ctx.submission is None:
+        if ctx.demo_files is not None:
+            df = next((f for f in ctx.demo_files if f['name'] == argument), None)
+            if df is None:
+                return f"(no file named '{argument}' in this submission)"
+            return _format_file_block(df['name'], df['content'], SUBMISSION_FILE_CHAR_CAP)
         return None
     sf = ctx.submission.files.filter(name=argument).first()
     if sf is None:
@@ -375,6 +387,8 @@ def _list_submission_file_arguments(ctx):
 
 def _resolve_submission_test_results(ctx, argument):
     if ctx.submission is None:
+        if ctx.demo_files is not None:
+            return "(test results are not available in test previews)"
         return None
     return _submission_context(ctx)['test_results'] or "(no test results)"
 
@@ -384,10 +398,18 @@ def _resolve_student_dataset(ctx, argument):
     # student at generation time, like {submission_files}. Datasets use a real FileField
     # (binary storage), so this decodes as text rather than reusing _format_file_block's
     # File.data path.
-    if ctx.assignment is None or ctx.submission is None:
+    if ctx.assignment is None:
         return None
-    from core.services.dataset_assignment import get_or_assign_for_submission
-    dataset = get_or_assign_for_submission(ctx.assignment, ctx.submission)
+    if ctx.submission is not None:
+        from core.services.dataset_assignment import get_or_assign_for_submission
+        dataset = get_or_assign_for_submission(ctx.assignment, ctx.submission)
+    elif ctx.demo_files is not None:
+        # Test previews have no submission to key an assignment row on — pick a random
+        # variant read-only so the example still shows a realistic dataset.
+        from core.services.dataset_assignment import random_variant
+        dataset = random_variant(ctx.assignment)
+    else:
+        return None
     if dataset is None or not dataset.file:
         return None
     try:

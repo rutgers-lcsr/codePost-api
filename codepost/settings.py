@@ -662,6 +662,7 @@ CELERY_TASK_ROUTES = {
     'core.tasks.generate_quiz_question_suggestions': {'queue': 'ai-tasks'},
     'core.tasks.generate_personalized_quiz_sets': {'queue': 'ai-tasks'},
     'core.tasks.backfill_personalized_quiz_sets': {'queue': 'ai-tasks'},
+    'core.tasks.preview_generated_section': {'queue': 'ai-tasks'},
     'core.tasks.auto_improve_prompts_scheduled': {'queue': 'ai-tasks'},
     'core.tasks.auto_improve_prompt_threshold': {'queue': 'ai-tasks'},
 }
@@ -690,6 +691,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     "finalize-expired-quiz-attempts": {
         "task": "core.tasks.finalize_expired_quiz_attempts",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "run-scheduled-quiz-generation": {
+        "task": "core.tasks.run_scheduled_quiz_generation",
         "schedule": crontab(minute="*/5"),  # Every 5 minutes
     },
     "auto-improve-prompts": {

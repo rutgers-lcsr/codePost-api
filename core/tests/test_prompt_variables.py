@@ -280,3 +280,49 @@ class TestTemplateRequirements:
         # Course files require nothing → keep prompts on the eager, standalone-capable path.
         assert template_requirements('Use {course_file:style.md}.') == set()
         assert template_requires_submission('{course_file:style.md}') is False
+
+
+class TestDemoFileContext:
+    """Instructor demo files stand in for a real submission in prompt test previews."""
+
+    DEMO = ({'name': 'main.py', 'content': 'def solve():\n    return 42\n'},
+            {'name': 'notes.txt', 'content': 'my approach'},)
+
+    def _ctx(self, assignment_setup, **kwargs):
+        return VariableContext(course=assignment_setup['course'],
+                               assignment=assignment_setup['assignment'],
+                               demo_files=self.DEMO, **kwargs)
+
+    def test_submission_files_resolve_from_demo_files(self, assignment_setup):
+        text, _ = substitute_variables('{submission_files}', self._ctx(assignment_setup))
+        assert '### main.py' in text and 'return 42' in text
+        assert '### notes.txt' in text and 'my approach' in text
+
+    def test_submission_file_matches_by_name(self, assignment_setup):
+        ctx = self._ctx(assignment_setup)
+        text, _ = substitute_variables('{submission_file:main.py}', ctx)
+        assert '### main.py' in text and 'return 42' in text
+        text, _ = substitute_variables('{submission_file:absent.py}', ctx)
+        assert text == "(no file named 'absent.py' in this submission)"
+
+    def test_test_results_placeholder(self, assignment_setup):
+        text, _ = substitute_variables('{submission_test_results}', self._ctx(assignment_setup))
+        assert text == '(test results are not available in test previews)'
+
+    def test_student_dataset_picks_variant_without_persisting(self, assignment_setup):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from core.models import AssignmentDataSet, StudentDataSetAssignment
+        AssignmentDataSet.objects.create(
+            assignment=assignment_setup['assignment'], name='shopping_a.csv',
+            is_student_variant=True,
+            file=SimpleUploadedFile('shopping_a.csv', b'a,b\n1,2\n'))
+        text, _ = substitute_variables('{student_dataset}', self._ctx(assignment_setup))
+        assert 'a,b' in text
+        # The read-only invariant: previews must never assign a variant to anyone.
+        assert StudentDataSetAssignment.objects.count() == 0
+
+    def test_without_demo_files_behavior_is_unchanged(self, assignment_setup):
+        ctx = VariableContext(course=assignment_setup['course'],
+                              assignment=assignment_setup['assignment'])
+        text, _ = substitute_variables('{submission_files}', ctx)
+        assert text == '(unavailable: {submission_files})'

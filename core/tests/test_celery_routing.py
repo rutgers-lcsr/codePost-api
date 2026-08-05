@@ -18,6 +18,7 @@ AI_TASKS = [
     'core.tasks.generate_quiz_question_suggestions',
     'core.tasks.generate_personalized_quiz_sets',
     'core.tasks.backfill_personalized_quiz_sets',
+    'core.tasks.preview_generated_section',
     'core.tasks.auto_improve_prompts_scheduled',
     'core.tasks.auto_improve_prompt_threshold',
 ]

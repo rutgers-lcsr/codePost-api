@@ -16,8 +16,8 @@ class SuggestedQuizQuestionSerializer(ModelSerializerWithPOSTCheck):
   class Meta:
     model = SuggestedQuizQuestion
     fields = (
-        'id', 'assignment', 'sourceQuestion', 'questionType', 'text', 'choicesData',
-        'points', 'language', 'starterCode', 'referenceSolution', 'status',
+        'id', 'assignment', 'sourceQuestion', 'questionType', 'text', 'description',
+        'choicesData', 'points', 'language', 'starterCode', 'referenceSolution', 'status',
         'acceptedBy', 'acceptedQuestion', 'generationBatch', 'created',
     )
     read_only_fields = (

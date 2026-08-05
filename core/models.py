@@ -3185,6 +3185,17 @@ class Quiz(BaseModel):
   autoPublishGenerated = models.BooleanField(default=False,
       help_text=("If true, per-student generated question sets are approved automatically on "
                  "generation (no staff review gate)."))
+  manualGeneration = models.BooleanField(default=True,
+      help_text=("If true (the default), per-student question sets never generate "
+                 "automatically (no per-submission trigger, no backfill on publish or "
+                 "section creation) — staff generate via generateForStudent/generateMissing, "
+                 "or the one-time generationDate run."))
+  generationDate = models.DateTimeField(null=True, blank=True,
+      help_text=("Manual mode only: one-time scheduled run that generates question sets for "
+                 "students who have a submission but no set yet, at/after this time."))
+  scheduledGenerationRanAt = models.DateTimeField(null=True, blank=True,
+      help_text=("When the scheduled generationDate run last fired (one-shot stamp). "
+                 "Moving generationDate past this re-arms the run."))
 
   class Meta:
     ordering = ('title',)
@@ -3416,6 +3427,8 @@ class SuggestedQuizQuestion(BaseModel):
   questionType = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES,
       default='multiple_choice', help_text=("The suggested question type."))
   text = models.TextField(help_text=("The suggested question stem/prompt."))
+  description = models.TextField(blank=True, help_text=(
+      "Optional Markdown description shown beneath the stem (rich content: code blocks, lists, formatting)."))
   choicesData = JSONField(default=list, blank=True,
       help_text=("Proposed choices: list of {text, isCorrect, feedback}."))
   points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
@@ -3541,6 +3554,9 @@ class QuizSuggestionJob(BaseModel):
   sourceQuestion: Question | None = models.ForeignKey(Question, null=True, blank=True,  # type: ignore[assignment]
       on_delete=models.CASCADE, related_name="suggestion_jobs",
       help_text=("The existing question a refresh suggestion was generated from."))
+  quiz = models.ForeignKey('Quiz', null=True, blank=True, on_delete=models.CASCADE,
+      related_name="suggestion_jobs",
+      help_text=("The quiz a section-prompt test preview was run for (preview runs only)."))
   requestedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
       related_name="quiz_suggestion_jobs", help_text=("The staff user who requested the generation."))
   status = models.CharField(max_length=16, choices=SUGGESTION_JOB_STATUS_CHOICES, default='pending',
@@ -3552,6 +3568,8 @@ class QuizSuggestionJob(BaseModel):
       help_text=("Friendly error detail if the run failed."))
   generationBatch = models.UUIDField(null=True, blank=True,
       help_text=("Batch UUID of the suggestions this run created."))
+  resultData = JSONField(default=dict, blank=True,
+      help_text=("Section-preview output: example questions, resolved prompt, seed info."))
 
   class Meta:
     ordering = ('-created',)

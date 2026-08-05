@@ -12,6 +12,7 @@ import factory
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models.signals import post_save
+from django.utils import timezone
 from rest_framework import status
 
 
@@ -423,6 +424,8 @@ class TestQuizAuthoring:
         assert resp.data['passingScoreUnit'] == 'percent'
         assert resp.data['oneQuestionAtATime'] is False
         assert resp.data['allowBacktracking'] is True
+        assert resp.data['manualGeneration'] is True
+        assert resp.data['generationDate'] is None
         quiz_id = resp.data['id']
 
         patch = api_client.patch(f'/quizzes/{quiz_id}/', {
@@ -484,6 +487,69 @@ class TestQuizAuthoring:
         }, format='json')
         assert resp.status_code == status.HTTP_200_OK
         assert resp.data['shuffleQuestions'] is True
+
+    def test_generation_date_requires_manual_mode(self, api_client, quiz_setup):
+        # A scheduled generation time without manual mode would silently do nothing —
+        # automatic quizzes generate on submission.
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        course = quiz_setup['course']
+        bad = api_client.post('/quizzes/', {
+            'course': course.id, 'title': 'Scheduled', 'manualGeneration': False,
+            'generationDate': '2026-09-01T09:00:00Z',
+        }, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'generationDate' in bad.data
+        # An unsent flag falls back to the model default (manual), so a date alone is fine.
+        ok = api_client.post('/quizzes/', {
+            'course': course.id, 'title': 'Scheduled OK',
+            'generationDate': '2026-09-01T09:00:00Z',
+        }, format='json')
+        assert ok.status_code == status.HTTP_201_CREATED
+        assert ok.data['manualGeneration'] is True
+
+    def test_toggling_manual_off_must_clear_generation_date(self, api_client, quiz_setup):
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Manual',
+                                   manualGeneration=True,
+                                   generationDate=timezone.now())
+        # The settings form re-sends every field — turning manual off while re-sending the
+        # stored date is the change that introduces the bad pairing.
+        bad = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'manualGeneration': False, 'generationDate': quiz.generationDate.isoformat(),
+        }, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        ok = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'manualGeneration': False, 'generationDate': None,
+        }, format='json')
+        assert ok.status_code == status.HTTP_200_OK
+        quiz.refresh_from_db()
+        assert quiz.manualGeneration is False and quiz.generationDate is None
+
+    def test_generation_date_bad_state_does_not_block_unrelated_edits(self, api_client, quiz_setup):
+        # A quiz already stored with date-but-no-manual (created before the guard) must stay
+        # editable for unrelated settings — only the change that INTRODUCES the state is blocked.
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Legacy scheduled',
+                                   manualGeneration=False, generationDate=timezone.now())
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'shuffleQuestions': True,
+            'generationDate': quiz.generationDate.isoformat(),  # the form re-sends this
+        }, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['shuffleQuestions'] is True
+
+    def test_scheduled_generation_ran_at_is_read_only(self, api_client, quiz_setup):
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Stamped')
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'scheduledGenerationRanAt': '2026-09-01T09:00:00Z',
+        }, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        quiz.refresh_from_db()
+        assert quiz.scheduledGenerationRanAt is None
 
     def test_quiz_availability_window_must_be_ordered(self, api_client, quiz_setup):
         from core.models import Quiz
@@ -842,6 +908,7 @@ class TestAISuggestions:
 
         _mock_ai(monkeypatch, """[
           {"type": "multiple_choice", "text": "Q1?", "points": 2,
+           "description": "Consider:\\n```python\\nx = {}\\n```",
            "choices": [{"text": "a", "is_correct": true}, {"text": "b", "is_correct": false}]},
           {"type": "essay", "text": "Explain.", "points": 5}
         ]""")
@@ -854,6 +921,9 @@ class TestAISuggestions:
         assert pending.filter(questionType='essay').exists()
         mc = pending.get(questionType='multiple_choice')
         assert mc.choicesData[0]['isCorrect'] is True
+        assert mc.description == "Consider:\n```python\nx = {}\n```"
+        # Omitted description normalizes to '' (the model may skip the optional key).
+        assert pending.get(questionType='essay').description == ''
 
     def test_feature_flag_gates_generation(self, quiz_setup, monkeypatch):
         from core.models import SuggestedQuizQuestion
@@ -1025,6 +1095,7 @@ class TestAISuggestions:
         bank = QuestionBank.objects.create(course=quiz_setup['course'], name='Target')
         suggestion = SuggestedQuizQuestion.objects.create(
             assignment=quiz_setup['assignment'], questionType='multiple_choice', text='Q?', points=2,
+            description='Sample output:\n```\n42\n```',
             choicesData=[{'text': 'a', 'isCorrect': True}, {'text': 'b', 'isCorrect': False}], status='pending')
 
         api_client.force_authenticate(user=quiz_setup['grader'])
@@ -1036,6 +1107,7 @@ class TestAISuggestions:
         assert question.bank_id == bank.id                   # filed into the chosen bank
         assert question.createdBy == quiz_setup['grader']   # instructor is the author
         assert question.source == 'ai'                       # staff-internal provenance
+        assert question.description == 'Sample output:\n```\n42\n```'
         assert question.choices.filter(isCorrect=True).first().text == 'a'
 
         suggestion.refresh_from_db()
@@ -1132,11 +1204,12 @@ class TestRefreshLoop:
         bank = QuestionBank.objects.create(course=quiz_setup['course'], name='Pool')
         question = _mc_question(quiz_setup['course'], text="Old text", bank=bank)
         question.createdBy = quiz_setup['admin']
+        question.description = 'Stale excerpt from last semester'
         question.save()
 
         suggestion = SuggestedQuizQuestion.objects.create(
             sourceQuestion=question, questionType='multiple_choice', text='Updated text', points=3,
-            choicesData=[{'text': '5', 'isCorrect': True}], status='pending')
+            description='Fresh excerpt', choicesData=[{'text': '5', 'isCorrect': True}], status='pending')
 
         api_client.force_authenticate(user=quiz_setup['grader'])
         resp = api_client.post(f'/suggestedQuizQuestions/{suggestion.id}/accept/', format='json')
@@ -1145,6 +1218,8 @@ class TestRefreshLoop:
 
         question.refresh_from_db()
         assert question.text == 'Updated text'
+        # The old description must not survive under the new stem.
+        assert question.description == 'Fresh excerpt'
         assert question.createdBy == quiz_setup['admin']        # original author preserved
         assert question.bank_id == bank.id  # bank preserved
         assert question.choices.count() == 1

@@ -74,6 +74,7 @@ class SuggestedQuizQuestionViewSet(ListProtectedViewSet):
       question = suggestion.sourceQuestion
       question.questionType = suggestion.questionType
       question.text = suggestion.text
+      question.description = suggestion.description
       question.points = suggestion.points
       question.language = suggestion.language
       question.starterCode = suggestion.starterCode
@@ -99,6 +100,7 @@ class SuggestedQuizQuestionViewSet(ListProtectedViewSet):
           bank=bank,
           questionType=suggestion.questionType,
           text=suggestion.text,
+          description=suggestion.description,
           points=suggestion.points,
           language=suggestion.language,
           starterCode=suggestion.starterCode,

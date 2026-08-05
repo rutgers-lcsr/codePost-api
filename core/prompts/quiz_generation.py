@@ -22,6 +22,9 @@ Guidelines:
 - Prefer questions that test understanding and application, not trivia.
 - Allowed question types: {question_types}. Only use these types.
 - Assign a reasonable integer `points` value to each question.
+- Keep the `text` stem concise. Put supporting context in the optional `description` — it is shown
+  to the student beneath the stem and rendered as Markdown, so use Markdown for highlighting:
+  fenced code blocks for code excerpts or sample input/output, plus bold, inline code, and lists.
 
 CHOICES ARE REQUIRED for these types — never return them with an empty `choices` array:
 - `multiple_choice`: 3-5 plausible choices; exactly ONE has "is_correct": true.
@@ -44,6 +47,7 @@ Output format: respond with ONLY a JSON array (no markdown, no prose). Each elem
 {{
   "type": "<one of {question_types}>",
   "text": "<the question stem>",
+  "description": "<optional Markdown shown to the student beneath the stem>",
   "points": <integer>,
   "choices": [{{"text": "<choice text>", "is_correct": <true|false>, "feedback": "<optional>"}}],
   "starter_code": "<optional, code questions only>",

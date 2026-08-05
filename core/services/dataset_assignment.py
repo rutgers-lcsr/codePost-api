@@ -93,6 +93,13 @@ def get_or_assign(assignment, student):
         return existing.dataset if existing else None
 
 
+def random_variant(assignment):
+    """A random active pool variant WITHOUT persisting an assignment row — for prompt
+    test previews seeded from instructor demo files rather than a real student."""
+    return AssignmentDataSet.objects.filter(
+        assignment=assignment, is_student_variant=True, is_active=True).order_by('?').first()
+
+
 def get_or_assign_for_submission(assignment, submission):
     """Like ``get_or_assign``, resolved for a submission rather than a single student —
     for callers (the sandbox executor, prompt variables) that have a submission but not a
