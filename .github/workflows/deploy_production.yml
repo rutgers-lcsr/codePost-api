@@ -156,6 +156,9 @@ jobs:
             NFS_SHARE_PATH: ${{ vars.NFS_SHARE_PATH }}
             CELERY_CONCURRENCY: ${{ vars.CELERY_CONCURRENCY }}
             WORKER_SHELL_SHARED_SECRET: ${{ secrets.WORKER_SHELL_SHARED_SECRET }}
+            # Interpolated by compose into codepost-ai-worker ONLY — deliberately
+            # NOT written to .env, so the autograder container never sees it.
+            FIELD_ENCRYPTION_KEY: ${{ secrets.FIELD_ENCRYPTION_KEY }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v5
@@ -171,7 +174,6 @@ jobs:
                   DB_PASSWORD=${{ secrets.DB_PASSWORD }}
                   API_USER=${{ vars.API_USER }}
                   API_PASSWORD=${{ secrets.API_PASSWORD }}
-                  FIELD_ENCRYPTION_KEY=${{ secrets.FIELD_ENCRYPTION_KEY }}
                   EMAIL_HOST=${{ vars.EMAIL_HOST }}
                   DEFAULT_EMAIL_FROM=${{ vars.DEFAULT_EMAIL_FROM }}
                   NFS_SERVER_IP=${{ vars.NFS_SERVER_IP }}

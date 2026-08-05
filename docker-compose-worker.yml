@@ -39,7 +39,52 @@ services:
             - "autoheal=true"
         restart: always
         healthcheck:
-            test: ["CMD", "celery", "--app", "autograder", "status"]
+            # Per-node ping: `celery status` is broker-wide and would report
+            # healthy as long as ANY worker (e.g. the AI worker) responds.
+            test: ["CMD-SHELL", "celery --app autograder inspect ping -d celery@$$(hostname) --timeout 5"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+    # AI generation tasks (queue 'ai-tasks', see CELERY_TASK_ROUTES) decrypt
+    # course/org API keys, so this worker gets FIELD_ENCRYPTION_KEY — supplied
+    # by the deploy job's environment via compose interpolation, never written
+    # to the .env file on disk. Unprivileged: no docker socket, no student code.
+    codepost-ai-worker:
+        container_name: codepost-ai-worker
+        env_file:
+            - .env
+        environment:
+            - DEBUG=False
+            - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY:?FIELD_ENCRYPTION_KEY must be exported in the deploy environment}
+            - AI_CELERY_CONCURRENCY=${AI_CELERY_CONCURRENCY:-2}
+            - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
+            - DB_NAME=codepost
+            - DB_HOSTNAME=${DB_HOSTNAME}
+            - DB_PORT=3306
+            - DB_USERNAME=codepost_user
+            - DB_PASSWORD=${DB_PASSWORD}
+            - SECRET_KEY=${SECRET_KEY}
+            - API_USER=${API_USER}
+            - API_PASSWORD=${API_PASSWORD}
+            - EMAIL_HOST=${EMAIL_HOST}
+            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
+        build:
+            context: .
+            target: worker
+        command: ["sh", "-c", "celery --app autograder worker -n ai-worker@%h -Q ai-tasks --loglevel info --concurrency $${AI_CELERY_CONCURRENCY:-2} --task-events"]
+        labels:
+            - "autoheal=true"
+        restart: always
+        healthcheck:
+            test: ["CMD-SHELL", "celery --app autograder inspect ping -d ai-worker@$$(hostname) --timeout 5"]
             interval: 30s
             timeout: 10s
             retries: 5

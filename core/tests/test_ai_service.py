@@ -261,6 +261,27 @@ class TestAIServiceConfigResolution(TestCase):
         course.ai_feature_config = {'personalized_quiz_generation': True}
         self.assertTrue(svc.is_feature_enabled('personalized_quiz_generation'))
 
+    def test_undecrypted_api_key_produces_actionable_error(self):
+        """An EncryptedCharField read with the wrong FIELD_ENCRYPTION_KEY silently
+        yields Fernet ciphertext; the provider then rejects it as an invalid key.
+        The friendly error must name the real cause instead of blaming the key."""
+        course = _make_course(
+            ai_use_own_settings=True,
+            ai_provider='gemini',
+            ai_api_key='gAAAAABoffFakeCiphertextValue',
+        )
+        svc = AIService(cast(Course, course))
+        self.assertTrue(svc.api_key_looks_undecrypted)
+        msg = svc._parse_error(Exception('API key not valid. Please pass a valid API key.'))
+        self.assertIn('FIELD_ENCRYPTION_KEY', msg)
+
+        # A normal key keeps the standard message.
+        course.ai_api_key = 'AIzaRealLookingKey'
+        svc = AIService(cast(Course, course))
+        self.assertFalse(svc.api_key_looks_undecrypted)
+        msg = svc._parse_error(Exception('API key not valid. Please pass a valid API key.'))
+        self.assertIn('Invalid API key', msg)
+
     def test_ollama_blank_base_url_is_configured(self):
         """Ollama with a blank base URL falls back to DEFAULT_OLLAMA_URL in
         _call_ollama, so provider alone counts as configured."""

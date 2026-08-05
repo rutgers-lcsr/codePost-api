@@ -644,7 +644,7 @@ if DEBUG:
 # The reason for the PYCURL command is that MacOSX uses a different ssl backend than our linux server.
 #
 # To run the worker locally, run the following in a second terminal:
-# > celery worker -A autograder --loglevel=info -Q dev-api-celery,dev-api-celery-long-tasks
+# > celery -A autograder worker --loglevel=info -Q celery,ai-tasks
 
 
 if DEBUG:
@@ -652,12 +652,19 @@ if DEBUG:
 else:
     CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://codepost-redis:6379")
 
-CELERY_DEFAULT_QUEUE = "prod-celery"
-# CELERY_ROUTES = {
-#     "autograder.tasks.RunAll": {"queue": "prod-celery"},
-#     # "autograder.tasks.daily_assignment_check": {"queue": "prod-celery-crontasks"},
-#     # "webhooks.tasks.DeliverHook": {"queue": "prod-celery-webhooks"},
-# }
+# These tasks decrypt EncryptedCharField secrets (course/org/prompt-lab AI keys)
+# and must run on the AI worker — the only worker with FIELD_ENCRYPTION_KEY.
+# The autograder workers execute untrusted student code and never get the key;
+# everything unrouted stays on the default 'celery' queue they consume.
+# Routing applies at send time, so every enqueueing process honors this map.
+CELERY_TASK_ROUTES = {
+    'core.tasks.generate_ai_grading_assistance': {'queue': 'ai-tasks'},
+    'core.tasks.generate_quiz_question_suggestions': {'queue': 'ai-tasks'},
+    'core.tasks.generate_personalized_quiz_sets': {'queue': 'ai-tasks'},
+    'core.tasks.backfill_personalized_quiz_sets': {'queue': 'ai-tasks'},
+    'core.tasks.auto_improve_prompts_scheduled': {'queue': 'ai-tasks'},
+    'core.tasks.auto_improve_prompt_threshold': {'queue': 'ai-tasks'},
+}
 
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     "priority_steps": list(range(10)),
@@ -716,7 +723,6 @@ if DEBUG:
     print("=" * 80)
     print("Celery Configuration:")
     print(f"  Broker URL: {CELERY_BROKER_URL}")
-    print(f"  Default Queue: {CELERY_DEFAULT_QUEUE}")
     print(f"  Result Backend: {CELERY_RESULT_BACKEND}")
     print(f"  Autograder Auto Execute: {AUTOGRADER_AUTO_EXECUTE}")
     print("=" * 80)

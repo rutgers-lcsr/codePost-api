@@ -1300,12 +1300,28 @@ end"""
             logger.error(f"AI test generation failed: {e}", exc_info=True)
             return GenerationResult(text="", success=False, error=error_msg)
 
+    @property
+    def api_key_looks_undecrypted(self) -> bool:
+        """True when the resolved API key is still Fernet ciphertext.
+
+        EncryptedCharField silently returns the raw ciphertext (``gAAAA…``) when
+        this process's FIELD_ENCRYPTION_KEY doesn't match the one that saved the
+        value (classically: a worker container missing the env var) — the
+        provider then rejects it as an invalid API key.
+        """
+        return bool(self.api_key) and str(self.api_key).startswith('gAAAA')
+
     def _parse_error(self, e: Exception) -> str:
         """Parse exception into user-friendly error message."""
         error_str = str(e).lower()
-        
+
         # API key errors
         if 'api_key' in error_str or 'api key' in error_str or 'invalid' in error_str and 'key' in error_str:
+            if self.api_key_looks_undecrypted:
+                return ("The stored API key could not be decrypted in this process — its "
+                        "FIELD_ENCRYPTION_KEY does not match the one the key was saved with. "
+                        "Check that the web and worker containers share the same "
+                        "FIELD_ENCRYPTION_KEY environment variable.")
             return "Invalid API key. Please check your AI configuration in Course Settings."
         
         # Rate limiting

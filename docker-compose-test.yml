@@ -92,6 +92,9 @@ services:
       - DB_PASSWORD=password
       - DEBUG=FALSE
       - SECRET_KEY=insecure_test_key
+    # Single-worker stack: also consume the routed ai-tasks queue so AI tasks
+    # don't sit unconsumed (they fail fast here — no FIELD_ENCRYPTION_KEY).
+    command: ["sh", "-c", "celery --app autograder worker -Q celery,ai-tasks --loglevel info --concurrency $${CELERY_CONCURRENCY:-4} --task-events"]
     volumes:
       - datasets-test:/assignment_datasets
       - /var/run/docker.sock:/var/run/docker.sock
