@@ -50,6 +50,7 @@ from core.views.quiz import QuizViewSet
 from core.views.quizQuestion import QuizQuestionViewSet
 from core.views.quizQuestionGroup import QuizQuestionGroupViewSet
 from core.views.suggestedQuizQuestion import SuggestedQuizQuestionViewSet
+from core.views.quizSuggestionJob import QuizSuggestionJobViewSet
 from core.views.quizImportJob import QuizImportJobViewSet
 from core.views.quizImage import QuizImageViewSet, serve_quiz_image
 from core.views.quizAttempt import QuizAttemptViewSet
@@ -122,6 +123,7 @@ router.register(r'quizzes', QuizViewSet)
 router.register(r'quizQuestions', QuizQuestionViewSet)
 router.register(r'quizQuestionGroups', QuizQuestionGroupViewSet)
 router.register(r'suggestedQuizQuestions', SuggestedQuizQuestionViewSet)
+router.register(r'quizSuggestionJobs', QuizSuggestionJobViewSet)
 router.register(r'quizImportJobs', QuizImportJobViewSet)
 router.register(r'quizImages', QuizImageViewSet)
 router.register(r'quizAttempts', QuizAttemptViewSet)

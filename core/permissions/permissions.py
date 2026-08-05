@@ -702,6 +702,16 @@ class SuggestedQuizQuestionPermissions(TemplatePermission):
         return user.is_superuser or isCourseStaff(user, course)
 
 
+class QuizSuggestionJobPermissions(TemplatePermission):
+    """Course staff may poll AI quiz-suggestion generation runs. Jobs are created
+    by the generate endpoints (which enforce the generation capability), never
+    directly through this viewset."""
+
+    def has_object_permission(self, request, view, obj):
+        user = cast(User, request.user)
+        return user.is_superuser or isCourseStaff(user, obj.course)
+
+
 class QuizImportPermissions(TemplatePermission):
     """Course staff may start and view Canvas QTI imports. The create endpoint
     validates course staff explicitly (multipart upload)."""

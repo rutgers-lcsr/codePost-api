@@ -3510,6 +3510,56 @@ class QuizImportJob(BaseModel):
     return f"QuizImportJob [{self.status}] (course {self.course_id})"
 
 
+# Labels deliberately differ from QuizImportJob's JOB_STATUS_CHOICES so
+# ENUM_NAME_OVERRIDES can match each choices list to its own enum name.
+SUGGESTION_JOB_STATUS_CHOICES = [
+    ('pending', 'Queued'),
+    ('running', 'Generating'),
+    ('completed', 'Completed'),
+    ('failed', 'Failed'),
+]
+
+
+class QuizSuggestionJob(BaseModel):
+  """Tracks one AI quiz-suggestion generation run (status + error reporting).
+
+  The generation task runs async and previously had no way to report failures —
+  clients polled the suggestion list and inferred 'disabled?' from emptiness.
+  The generate endpoints now create one of these and return it; the task updates
+  it on every exit path so clients can poll and surface the actual outcome."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    assignment: Assignment | None
+    sourceQuestion: Question | None
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quiz_suggestion_jobs", help_text=("The related course_id."))
+  assignment: Assignment | None = models.ForeignKey(Assignment, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.CASCADE, related_name="suggestion_jobs",
+      help_text=("The assignment suggestions were generated for (fresh generation)."))
+  sourceQuestion: Question | None = models.ForeignKey(Question, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.CASCADE, related_name="suggestion_jobs",
+      help_text=("The existing question a refresh suggestion was generated from."))
+  requestedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="quiz_suggestion_jobs", help_text=("The staff user who requested the generation."))
+  status = models.CharField(max_length=16, choices=SUGGESTION_JOB_STATUS_CHOICES, default='pending',
+      help_text=("Current status of the generation run."))
+  taskId = models.CharField(max_length=191, blank=True, help_text=("Celery task id, for debugging."))
+  createdCount = models.PositiveIntegerField(default=0,
+      help_text=("Number of suggestions the run produced."))
+  errorMessage = models.TextField(blank=True,
+      help_text=("Friendly error detail if the run failed."))
+  generationBatch = models.UUIDField(null=True, blank=True,
+      help_text=("Batch UUID of the suggestions this run created."))
+
+  class Meta:
+    ordering = ('-created',)
+
+  def __str__(self):
+    return f"QuizSuggestionJob [{self.status}] (course {self.course_id})"
+
+
 # --- Auto-link assignments to question banks ---------------------------------
 # When a bank is used in a quiz that's attached to an assignment, that assignment is
 # added to the bank's `assignments` (instructors can remove it). This drives the

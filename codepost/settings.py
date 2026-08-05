@@ -226,6 +226,9 @@ SPECTACULAR_SETTINGS = {
         ],
         # Per-student generated question set lifecycle.
         'GeneratedQuestionSetStatusEnum': 'core.models.GENERATED_SET_STATUS_CHOICES',
+        # AI quiz-suggestion generation run lifecycle (labels differ from
+        # QuizImportJobStatusEnum on purpose — overrides match value+label pairs).
+        'QuizSuggestionJobStatusEnum': 'core.models.SUGGESTION_JOB_STATUS_CHOICES',
     },
     'TITLE': 'codePost API',
     'DESCRIPTION': """

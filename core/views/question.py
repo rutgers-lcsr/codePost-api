@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from core.models import Assignment, Question, QuestionBank
 from core.serializers.question import QuestionSerializer
 from core.serializers.suggestedQuizQuestion import SuggestedQuizQuestionSerializer
+from core.serializers.quizSuggestionJob import QuizSuggestionJobSerializer
 from core.views.template import ListProtectedViewSet
 from core.permissions.permissions import QuestionPermissions
 from core.permissions.helpers import isCourseStaff, returnForbidden
@@ -119,19 +120,19 @@ class QuestionViewSet(ListProtectedViewSet):
           'question_types': serializers.ListField(child=serializers.CharField(), required=False),
           'instructions': serializers.CharField(required=False),
       }),
-      responses=inline_serializer('RegenerateSuggestionResponse', fields={
-          'task_id': serializers.CharField(),
-          'status': serializers.CharField(),
-      }),
+      responses=QuizSuggestionJobSerializer,
       description="Generate a refreshed AI suggestion seeded from this existing question "
                   "(cross-semester update). The instructor reviews and accepts the suggestion. "
-                  "Returns 403 when the course has the quiz_generation AI feature turned off.",
+                  "Returns the generation job to poll via quizSuggestionJobs/{id}/ for status "
+                  "and errors. Returns 403 when the course has the quiz_generation AI feature "
+                  "turned off.",
   )
   @action(detail=True, methods=['POST'])
   def regenerateSuggestion(self, request, pk=None):
     """Enqueue an AI task to suggest an updated version of this question."""
     question = self.get_object()  # triggers object-level permission check
     require_capability(request.user, Capability.GENERATE_AI_QUIZ_QUESTIONS, question.course)
+    from core.models import QuizSuggestionJob
     from core.tasks import generate_quiz_question_suggestions
 
     # A cross-course assignment_id would resolve the task's course to that other course and
@@ -143,6 +144,9 @@ class QuestionViewSet(ListProtectedViewSet):
         return Response({'error': 'Assignment must belong to the same course as the question.'},
                         status=status.HTTP_400_BAD_REQUEST)
 
+    job = QuizSuggestionJob.objects.create(
+        course=question.course, sourceQuestion=question,
+        assignment_id=assignment_id, requestedBy=request.user)
     task = generate_quiz_question_suggestions.delay(
         requested_by_id=request.user.id,
         source_question_id=question.id,
@@ -150,8 +154,13 @@ class QuestionViewSet(ListProtectedViewSet):
         num_questions=request.data.get('num_questions', 1),
         question_types=request.data.get('question_types') or [question.questionType],
         instructions=request.data.get('instructions', '') or '',
+        job_id=job.id,
     )
-    return Response({'task_id': task.id, 'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+    # Queryset update (not job.save): under eager Celery the task may have already
+    # advanced the DB row, and BaseModel.save would clobber it from a stale instance.
+    QuizSuggestionJob.objects.filter(pk=job.pk).update(taskId=task.id)
+    job.refresh_from_db()
+    return Response(QuizSuggestionJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(responses=SuggestedQuizQuestionSerializer(many=True))
   @action(detail=True, methods=['GET'])

@@ -1231,8 +1231,9 @@ paths:
     post:
       operationId: assignments_generateQuizQuestionsCreate
       description: Enqueue AI generation of suggested quiz questions for this assignment.
-        Instructors review the suggestions and accept the good ones. Returns 403 when
-        the course has the quiz_generation AI feature turned off.
+        Instructors review the suggestions and accept the good ones. Returns the generation
+        job to poll via quizSuggestionJobs/{id}/ for status and errors. Returns 403
+        when the course has the quiz_generation AI feature turned off.
       parameters:
       - in: path
         name: id
@@ -1263,7 +1264,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenerateQuizQuestionsResponse'
+                $ref: '#/components/schemas/QuizSuggestionJob'
           description: ''
   /assignments/{id}/generateTest/:
     post:
@@ -8473,7 +8474,9 @@ paths:
       operationId: questions_regenerateSuggestionCreate
       description: Generate a refreshed AI suggestion seeded from this existing question
         (cross-semester update). The instructor reviews and accepts the suggestion.
-        Returns 403 when the course has the quiz_generation AI feature turned off.
+        Returns the generation job to poll via quizSuggestionJobs/{id}/ for status
+        and errors. Returns 403 when the course has the quiz_generation AI feature
+        turned off.
       parameters:
       - in: path
         name: id
@@ -8504,7 +8507,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RegenerateSuggestionResponse'
+                $ref: '#/components/schemas/QuizSuggestionJob'
           description: ''
   /questions/{id}/regenerationSuggestions/:
     get:
@@ -9855,6 +9858,40 @@ paths:
       responses:
         '204':
           description: No response body
+  /quizSuggestionJobs/{id}/:
+    get:
+      operationId: quizSuggestionJobs_retrieve
+      description: |-
+        Poll an AI quiz-suggestion generation run.
+
+        Jobs are created by ``assignments/{id}/generateQuizQuestions/`` and
+        ``questions/{id}/regenerateSuggestion/``; the generation task updates
+        ``status``/``errorMessage``/``createdCount`` on every exit path, so clients
+        poll here instead of inferring failure from an empty suggestion list.
+
+        retrieve:
+        Return the generation run's current status, suggestion count, and error detail.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz suggestion job.
+        required: true
+      tags:
+      - quizSuggestionJobs
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizSuggestionJob'
+          description: ''
   /quizzes/:
     get:
       operationId: quizzes_list
@@ -18809,16 +18846,6 @@ components:
             type: string
         instructions:
           type: string
-    GenerateQuizQuestionsResponse:
-      type: object
-      properties:
-        task_id:
-          type: string
-        status:
-          type: string
-      required:
-      - status
-      - task_id
     GeneratedQuestionSet:
       type: object
       description: |-
@@ -23569,6 +23596,77 @@ components:
         * `manual` - Manually authored
         * `imported` - Imported
         * `ai` - Accepted from an AI suggestion
+    QuizSuggestionJob:
+      type: object
+      description: Read-only view of an AI quiz-suggestion generation run (for status
+        polling).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        course:
+          type: integer
+          readOnly: true
+          description: The related course_id.
+        assignment:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The assignment suggestions were generated for (fresh generation).
+        sourceQuestion:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: The existing question a refresh suggestion was generated from.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/QuizSuggestionJobStatusEnum'
+          readOnly: true
+          description: |-
+            Current status of the generation run.
+
+            * `pending` - Queued
+            * `running` - Generating
+            * `completed` - Completed
+            * `failed` - Failed
+        taskId:
+          type: string
+          readOnly: true
+          description: Celery task id, for debugging.
+        createdCount:
+          type: integer
+          readOnly: true
+          description: Number of suggestions the run produced.
+        errorMessage:
+          type: string
+          readOnly: true
+          description: Friendly error detail if the run failed.
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assignment
+      - course
+      - created
+      - createdCount
+      - errorMessage
+      - id
+      - sourceQuestion
+      - status
+      - taskId
+    QuizSuggestionJobStatusEnum:
+      enum:
+      - pending
+      - running
+      - completed
+      - failed
+      type: string
+      description: |-
+        * `pending` - Queued
+        * `running` - Generating
+        * `completed` - Completed
+        * `failed` - Failed
     RegenerateSuggestionRequest:
       type: object
       properties:
@@ -23582,16 +23680,6 @@ components:
             type: string
         instructions:
           type: string
-    RegenerateSuggestionResponse:
-      type: object
-      properties:
-        task_id:
-          type: string
-        status:
-          type: string
-      required:
-      - status
-      - task_id
     RegisterAndSetPasswordRequest:
       type: object
       properties:

@@ -13,6 +13,7 @@ from core.serializers.rubricCategory import RubricCategorySerializer, RubricCate
 from core.serializers.rubricComment import RubricCommentSerializer
 from core.serializers.quiz import QuizSerializer
 from core.serializers.suggestedQuizQuestion import SuggestedQuizQuestionSerializer
+from core.serializers.quizSuggestionJob import QuizSuggestionJobSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.comment import CommentSerializer
 
@@ -393,13 +394,11 @@ class AssignmentViewSet(ListProtectedViewSet):
           'question_types': serializers.ListField(child=serializers.CharField(), required=False),
           'instructions': serializers.CharField(required=False),
       }),
-      responses=inline_serializer('GenerateQuizQuestionsResponse', fields={
-          'task_id': serializers.CharField(),
-          'status': serializers.CharField(),
-      }),
+      responses=QuizSuggestionJobSerializer,
       description="Enqueue AI generation of suggested quiz questions for this assignment. "
-                  "Instructors review the suggestions and accept the good ones. Returns 403 when the "
-                  "course has the quiz_generation AI feature turned off.",
+                  "Instructors review the suggestions and accept the good ones. Returns the "
+                  "generation job to poll via quizSuggestionJobs/{id}/ for status and errors. "
+                  "Returns 403 when the course has the quiz_generation AI feature turned off.",
   )
   @action(detail=True, methods=['POST'], permission_classes=[IsAuthenticated])
   def generateQuizQuestions(self, request, pk=None):
@@ -408,15 +407,23 @@ class AssignmentViewSet(ListProtectedViewSet):
     if not isCourseStaff(request.user, assignment.course):
       return returnForbidden()
     require_capability(request.user, Capability.GENERATE_AI_QUIZ_QUESTIONS, assignment.course)
+    from core.models import QuizSuggestionJob
     from core.tasks import generate_quiz_question_suggestions
+    job = QuizSuggestionJob.objects.create(
+        course=assignment.course, assignment=assignment, requestedBy=request.user)
     task = generate_quiz_question_suggestions.delay(
         requested_by_id=request.user.id,
         assignment_id=assignment.id,
         num_questions=request.data.get('num_questions', 5),
         question_types=request.data.get('question_types'),
         instructions=request.data.get('instructions', '') or '',
+        job_id=job.id,
     )
-    return Response({'task_id': task.id, 'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+    # Queryset update (not job.save): under eager Celery the task may have already
+    # advanced the DB row, and BaseModel.save would clobber it from a stale instance.
+    QuizSuggestionJob.objects.filter(pk=job.pk).update(taskId=task.id)
+    job.refresh_from_db()
+    return Response(QuizSuggestionJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(responses=SubmissionSerializer(many=True))
   @action(detail=True, methods=['GET'])

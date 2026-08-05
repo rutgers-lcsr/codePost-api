@@ -352,6 +352,18 @@ def _normalize_choices(raw_choices) -> list:
     return out
 
 
+def _update_suggestion_job(job_id: int | None, **fields):
+    """Persist generation-run state on the QuizSuggestionJob (no-op without a job).
+
+    Queryset update, not .save(): the enqueueing request may still hold the row.
+    """
+    if job_id is None:
+        return
+    from django.utils import timezone
+    from core.models import QuizSuggestionJob
+    QuizSuggestionJob.objects.filter(pk=job_id).update(modified=timezone.now(), **fields)
+
+
 @shared_task
 def generate_quiz_question_suggestions(
     requested_by_id: int,
@@ -360,6 +372,7 @@ def generate_quiz_question_suggestions(
     num_questions: int = 5,
     question_types: list | None = None,
     instructions: str = '',
+    job_id: int | None = None,
 ):
     """Generate AI quiz-question suggestions for an instructor to review and accept.
 
@@ -368,10 +381,16 @@ def generate_quiz_question_suggestions(
       for that assignment and proposes ``num_questions`` new questions.
     - Refresh, question-seeded (``source_question_id``): proposes one improved variant
       of an existing question (cross-semester update).
+
+    ``job_id`` names the QuizSuggestionJob the enqueueing endpoint created; every
+    exit path below records its outcome there so clients polling the job see the
+    real failure instead of inferring it from an empty suggestion list.
     """
     import uuid
     from asgiref.sync import async_to_sync
     from core.models import Assignment, Question, SuggestedQuizQuestion, User
+
+    _update_suggestion_job(job_id, status='running')
 
     user = User.objects.filter(id=requested_by_id).first()
     assignment = Assignment.objects.filter(id=assignment_id).select_related(
@@ -382,15 +401,23 @@ def generate_quiz_question_suggestions(
     course = (assignment.course if assignment else None) or (source_question.course if source_question else None)
     if course is None:
         logger.warning("[QuizGen] No course resolvable (assignment/source_question missing). Skipping.")
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The assignment or question this run was started from no longer exists.')
         return
 
     from core.services.ai_service import AIService
     service = AIService(course, assignment)
     if not service.is_configured or service.is_globally_disabled:
         logger.debug(f"[QuizGen] AI not configured/disabled for course {course.id}. Skipping.")
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='AI is not configured or is disabled for this course. '
+                                            "Check the course's AI settings.")
         return
     if not service.is_feature_enabled('quiz_generation'):
         logger.debug(f"[QuizGen] quiz_generation disabled for course {course.id}. Skipping.")
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage="The 'Quiz Question Suggestions' AI feature is turned off "
+                                            "for this course.")
         return
 
     service.set_request_context(
@@ -406,11 +433,15 @@ def generate_quiz_question_suggestions(
         )
     except Exception as e:
         logger.error(f"[QuizGen] Generation failed for course {course.id}: {e}", exc_info=True)
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage=f'The AI request failed: {str(e)[:500]}')
         return
 
     if not result.success or not result.text:
         logger.warning(f"[QuizGen] Empty/failed generation for course {course.id}: {result.error}")
         service.record_usage(result, user=user, request_type='quiz_generation')
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage=(result.error or 'The AI provider returned no output.')[:500])
         return
 
     try:
@@ -418,6 +449,10 @@ def generate_quiz_question_suggestions(
     except Exception as e:
         logger.error(f"[QuizGen] Could not parse model output as JSON: {e}", exc_info=True)
         service.record_usage(result, user=user, request_type='quiz_generation')
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The model returned output that could not be parsed as questions. '
+                                            'Try again — repeated failures usually mean the configured model is '
+                                            'unsuitable for structured output.')
         return
 
     batch = uuid.uuid4()
@@ -474,6 +509,11 @@ def generate_quiz_question_suggestions(
             f"Raw model output (truncated): {(result.text or '')[:1500]}"
         )
     service.record_usage(result, user=user, request_type='quiz_generation')
+    if created == 0:
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The model responded but produced no usable questions. Try again.')
+    else:
+        _update_suggestion_job(job_id, status='completed', createdCount=created, generationBatch=batch)
 
 
 @shared_task

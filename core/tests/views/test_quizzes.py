@@ -878,6 +878,97 @@ class TestAISuggestions:
         api_client.force_authenticate(user=quiz_setup['student'])
         assert api_client.post(url, format='json').status_code == status.HTTP_403_FORBIDDEN
 
+    @staticmethod
+    def _run_task_inline(monkeypatch):
+        """Route .delay through the real task so job rows advance like eager Celery."""
+        from core.tasks import generate_quiz_question_suggestions as task_fn
+
+        def run_inline(*a, **kw):
+            task_fn(*a, **kw)
+            return type('R', (), {'id': 'task-inline'})()
+        monkeypatch.setattr('core.tasks.generate_quiz_question_suggestions.delay', run_inline)
+
+    def test_generate_endpoint_returns_job_that_completes(self, api_client, quiz_setup, monkeypatch):
+        """The endpoint returns a pollable QuizSuggestionJob; the task records the outcome on it."""
+        _mock_ai(monkeypatch, '[{"type": "essay", "text": "Explain.", "points": 5}]')
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(
+            f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/", format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        job_id = resp.data['id']
+
+        poll = api_client.get(f'/quizSuggestionJobs/{job_id}/')
+        assert poll.status_code == status.HTTP_200_OK
+        assert poll.data['status'] == 'completed'
+        assert poll.data['createdCount'] == 1
+        assert poll.data['errorMessage'] == ''
+
+        # Students never see generation runs.
+        api_client.force_authenticate(user=quiz_setup['student'])
+        assert api_client.get(f'/quizSuggestionJobs/{job_id}/').status_code == status.HTTP_403_FORBIDDEN
+
+    def test_job_records_parse_failure(self, api_client, quiz_setup, monkeypatch):
+        """Unparseable model output surfaces as a failed job with a friendly error."""
+        _mock_ai(monkeypatch, 'this is not json')
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(
+            f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/", format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'failed'
+        assert 'parsed' in poll.data['errorMessage']
+
+    def test_job_records_empty_generation(self, api_client, quiz_setup, monkeypatch):
+        """A run that yields zero usable questions fails the job instead of completing silently."""
+        _mock_ai(monkeypatch, '[]')
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(
+            f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/", format='json')
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'failed'
+        assert 'no usable questions' in poll.data['errorMessage']
+
+    def test_job_records_feature_disabled(self, quiz_setup, monkeypatch):
+        """The task (not just the endpoint) marks the job failed when the feature is off —
+        covers races where the toggle flips between enqueue and execution."""
+        from core.models import QuizSuggestionJob
+        from core.tasks import generate_quiz_question_suggestions
+
+        _mock_ai(monkeypatch, '[]')
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: False)
+        job = QuizSuggestionJob.objects.create(
+            course=quiz_setup['course'], assignment=quiz_setup['assignment'],
+            requestedBy=quiz_setup['admin'])
+        generate_quiz_question_suggestions(
+            requested_by_id=quiz_setup['admin'].id,
+            assignment_id=quiz_setup['assignment'].id, job_id=job.id)
+        job.refresh_from_db()
+        assert job.status == 'failed'
+        assert 'turned off' in job.errorMessage
+
+    def test_regenerate_endpoint_returns_job(self, api_client, quiz_setup, monkeypatch):
+        _mock_ai(monkeypatch, """[{"type": "multiple_choice", "text": "Improved?",
+          "choices": [{"text": "a", "is_correct": true}, {"text": "b", "is_correct": false}]}]""")
+        self._run_task_inline(monkeypatch)
+        question = _mc_question(quiz_setup['course'])
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(f'/questions/{question.id}/regenerateSuggestion/', format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert resp.data['sourceQuestion'] == question.id
+
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'completed'
+        assert poll.data['createdCount'] == 1
+
     def test_generate_endpoints_403_when_feature_disabled(self, api_client, quiz_setup, monkeypatch):
         """The quiz_generation toggle is a capability, so the endpoints reject the request
         instead of queueing a task the worker silently drops."""
