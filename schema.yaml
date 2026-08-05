@@ -17104,6 +17104,8 @@ components:
                 type: boolean
               generate_ai_quiz_questions:
                 type: boolean
+              generate_personalized_quiz_questions:
+                type: boolean
               edit_assignment:
                 type: boolean
               copy_assignment:
@@ -17309,6 +17311,8 @@ components:
             grade_quiz:
               type: boolean
             generate_ai_quiz_questions:
+              type: boolean
+            generate_personalized_quiz_questions:
               type: boolean
             edit_assignment:
               type: boolean
@@ -24762,6 +24766,8 @@ components:
             grade_quiz:
               type: boolean
             generate_ai_quiz_questions:
+              type: boolean
+            generate_personalized_quiz_questions:
               type: boolean
             edit_assignment:
               type: boolean

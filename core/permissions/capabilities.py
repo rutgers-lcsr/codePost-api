@@ -30,6 +30,7 @@ class Capability(str, Enum):
     MANAGE_COURSE_API_KEYS = "manage_course_api_keys"
     GRADE_QUIZ = "grade_quiz"
     GENERATE_AI_QUIZ_QUESTIONS = "generate_ai_quiz_questions"
+    GENERATE_PERSONALIZED_QUIZ_QUESTIONS = "generate_personalized_quiz_questions"
 
     # -- Assignment-level --
     EDIT_ASSIGNMENT = "edit_assignment"
@@ -92,7 +93,8 @@ CAPABILITY_DESCRIPTIONS: dict[Capability, str] = {
     Capability.CHANGE_INVITE_CODE: "Regenerate the course join invite code.",
     Capability.MANAGE_COURSE_API_KEYS: "Create, revoke, and manage course-scoped API keys.",
     Capability.GRADE_QUIZ: "View quiz attempts and manually grade essay/code responses (course admins and quiz graders).",
-    Capability.GENERATE_AI_QUIZ_QUESTIONS: "Request AI-suggested quiz questions for a bank or an existing question (requires the course's quiz_generation AI feature to be on).",
+    Capability.GENERATE_AI_QUIZ_QUESTIONS: "Request AI-suggested quiz questions for a question bank or an existing question (requires the course's quiz_generation AI feature to be on).",
+    Capability.GENERATE_PERSONALIZED_QUIZ_QUESTIONS: "Author per-student AI-generated quiz question sections — generated from the student's submission when they submit, or right away for prompts that don't use the submission (requires the course's personalized_quiz_generation AI feature to be on).",
     # Assignment
     Capability.EDIT_ASSIGNMENT: "Modify assignment settings including name, deadlines, point values, and visibility.",
     Capability.COPY_ASSIGNMENT: "Duplicate an assignment's configuration, rubric, and test cases to another course.",
@@ -157,15 +159,18 @@ COURSE_SCOPED_BLOCKED_CAPABILITIES: set[Capability] = {
 # Compute functions
 # ---------------------------------------------------------------------------
 
-def _quiz_generation_enabled(course) -> bool:
-    """Whether the course's ``quiz_generation`` AI feature is on and AI is configured.
+def _quiz_ai_features(course) -> tuple[bool, bool]:
+    """Resolved ``(quiz_generation, personalized_quiz_generation)`` AI feature
+    flags for the course (each requires AI to be configured).
 
     Only called after a role check has passed, so students and non-staff never
     pay the extra organization lookup ``AIService`` performs.
     """
     from core.services.ai_service import AIService
 
-    return AIService(course).is_feature_enabled('quiz_generation')
+    service = AIService(course)
+    return (service.is_feature_enabled('quiz_generation'),
+            service.is_feature_enabled('personalized_quiz_generation'))
 
 def compute_course_capabilities(user, course, *, is_course_scoped: bool = False, _rc: RoleCache | None = None) -> dict[Capability, bool]:
     """Return a dict of ``{capability_key: bool}`` for the given user/course.
@@ -187,6 +192,11 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
     archived = course.archived
     org_staff = hasattr(user, 'profile') and user.profile.isOrgStaff
 
+    # One AIService lookup covers both quiz AI capabilities; skipped entirely
+    # unless the role/archived gates could grant them.
+    quiz_suggestions_on, personalized_quiz_on = (
+        _quiz_ai_features(course) if staff and not archived else (False, False))
+
     caps = {
         Capability.VIEW_COURSE: member,
         Capability.EDIT_COURSE_SETTINGS: (admin or org_staff) and not archived,
@@ -200,7 +210,8 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
         Capability.CLAIM_SUBMISSIONS: (grader or admin) and course.activateQueue and not archived,
         Capability.EDIT_RUBRIC: (admin or rubric_editor or (grader and course.allowGradersToEditRubric)) and not archived,
         Capability.GRADE_QUIZ: admin or quiz_grader,
-        Capability.GENERATE_AI_QUIZ_QUESTIONS: staff and not archived and _quiz_generation_enabled(course),
+        Capability.GENERATE_AI_QUIZ_QUESTIONS: quiz_suggestions_on,
+        Capability.GENERATE_PERSONALIZED_QUIZ_QUESTIONS: personalized_quiz_on,
         Capability.MANAGE_REGRADES: admin or super_grader,
         Capability.VIEW_AUDIT_LOG: admin,
         Capability.CHANGE_INVITE_CODE: admin,

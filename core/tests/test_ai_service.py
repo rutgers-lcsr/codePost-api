@@ -243,13 +243,44 @@ class TestAIServiceConfigResolution(TestCase):
         self.assertEqual(svc.model, 'gpt-4o')
         self.assertTrue(svc.is_configured)
 
+    def test_portkey_blank_base_url_is_configured(self):
+        """Portkey with a blank base URL (official Portkey API) is a supported
+        config — _call_portkey falls back to DEFAULT_PORTKEY_URL — so
+        is_configured and feature resolution must treat it as configured."""
+        course = _make_course(
+            ai_use_own_settings=True,
+            ai_provider='portkey',
+            ai_api_key='pk-key',
+            ai_base_url=None,
+            ai_model='@gcp/gemini-2.5-flash',
+        )
+        svc = AIService(cast(Course, course))
+        self.assertTrue(svc.is_configured)
+        self.assertTrue(svc.is_feature_enabled('quiz_generation'))
+        # default-off feature turns on once the course opts in
+        course.ai_feature_config = {'personalized_quiz_generation': True}
+        self.assertTrue(svc.is_feature_enabled('personalized_quiz_generation'))
+
+    def test_ollama_blank_base_url_is_configured(self):
+        """Ollama with a blank base URL falls back to DEFAULT_OLLAMA_URL in
+        _call_ollama, so provider alone counts as configured."""
+        course = _make_course(
+            ai_use_own_settings=True,
+            ai_provider='ollama',
+            ai_api_key=None,
+            ai_base_url=None,
+            ai_model='llama3',
+        )
+        svc = AIService(cast(Course, course))
+        self.assertTrue(svc.is_configured)
+
 
 class TestForConfigConnectionTest(TestCase):
     """AIService.for_config + test_connection (course-less instances)."""
 
     def test_for_config_portkey_blank_base_url_is_testable(self):
-        # is_configured requires base_url for portkey, but _call_portkey falls
-        # back to DEFAULT_PORTKEY_URL — test_connection must accept this config.
+        # _call_portkey falls back to DEFAULT_PORTKEY_URL when base_url is
+        # blank — test_connection must accept this config.
         async def fake_dispatch(self, system_prompt, user_prompt):
             return ('OK', 3, 1, 4, 0)
 

@@ -906,6 +906,29 @@ class TestAISuggestions:
                             lambda self, key: key != 'quiz_generation')
         assert api_client.get(url).data['capabilitiesMap']['generate_ai_quiz_questions'] is False
 
+    def test_personalized_capability_follows_its_own_feature_toggle(self, api_client, quiz_setup, monkeypatch):
+        """The two quiz AI capabilities split cleanly: bank suggestions follow
+        quiz_generation, per-student sections follow personalized_quiz_generation."""
+        _enable_ai(monkeypatch)
+        url = f"/courses/{quiz_setup['course'].id}/capabilities/"
+        api_client.force_authenticate(user=quiz_setup['admin'])
+
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: key == 'personalized_quiz_generation')
+        caps = api_client.get(url).data['capabilitiesMap']
+        assert caps['generate_personalized_quiz_questions'] is True
+        assert caps['generate_ai_quiz_questions'] is False
+
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: key == 'quiz_generation')
+        caps = api_client.get(url).data['capabilitiesMap']
+        assert caps['generate_personalized_quiz_questions'] is False
+        assert caps['generate_ai_quiz_questions'] is True
+
+        api_client.force_authenticate(user=quiz_setup['student'])
+        caps = api_client.get(url).data['capabilitiesMap']
+        assert caps['generate_personalized_quiz_questions'] is False
+
     def test_accept_creates_question_authored_by_instructor(self, api_client, quiz_setup):
         from core.models import SuggestedQuizQuestion, Question, QuestionBank
         bank = QuestionBank.objects.create(course=quiz_setup['course'], name='Target')

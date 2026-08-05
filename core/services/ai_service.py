@@ -728,8 +728,11 @@ class AIService:
     def is_configured(self) -> bool:
         """Check if AI is properly configured for this course."""
         if self.provider in ('ollama', 'portkey'):
-            # Ollama and Portkey (self-hosted) only need provider + base_url
-            return bool(self.provider and self.base_url)
+            # Ollama and Portkey work with a blank base_url — _call_ollama and
+            # _call_portkey fall back to their default URLs — so the provider
+            # alone is enough (matches test_connection and the settings
+            # serializers' _provider_is_configured).
+            return bool(self.provider)
         return bool(self.provider and self.api_key)
 
     @property
