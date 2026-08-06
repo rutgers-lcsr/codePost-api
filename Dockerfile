@@ -5,11 +5,15 @@ WORKDIR /opt/app
 COPY pyproject.toml poetry.lock* /opt/app/
 
 
-RUN pip install poetry
+# Poetry lives in its own venv, pinned: sharing site-packages with the project let
+# `poetry install` downgrade poetry's own transitive deps (e.g. cffi), and the
+# parallel installer's `pip uninstall` subprocess can crash on packages that are
+# still mid-extraction (attrs → "module 'attr.setters' has no attribute 'pipe'").
+RUN python -m venv /opt/poetry && /opt/poetry/bin/pip install "poetry==2.4.1"
 # Install from the committed poetry.lock — don't delete it, or builds float to the newest
 # releases on PyPI and can break with no change on our side.
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-root
+RUN /opt/poetry/bin/poetry config virtualenvs.create false \
+    && /opt/poetry/bin/poetry install --no-root
 
 COPY . .
 
@@ -32,9 +36,10 @@ COPY pyproject.toml poetry.lock* /opt/app/
 WORKDIR /opt/app
 
 
-RUN pip install poetry
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-root
+# Isolated + pinned poetry — see comment in the api stage.
+RUN python -m venv /opt/poetry && /opt/poetry/bin/pip install "poetry==2.4.1"
+RUN /opt/poetry/bin/poetry config virtualenvs.create false \
+    && /opt/poetry/bin/poetry install --no-root
 
 RUN pip install celery
 
@@ -52,9 +57,10 @@ COPY pyproject.toml poetry.lock* /opt/app/
 WORKDIR /opt/app
 
 
-RUN pip install poetry
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-root
+# Isolated + pinned poetry — see comment in the api stage.
+RUN python -m venv /opt/poetry && /opt/poetry/bin/pip install "poetry==2.4.1"
+RUN /opt/poetry/bin/poetry config virtualenvs.create false \
+    && /opt/poetry/bin/poetry install --no-root
 RUN pip install celery
 
 COPY . .
