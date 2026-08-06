@@ -8,7 +8,7 @@ Permissions are organized by domain area for easier navigation and maintenance.
 Reference: https://stackoverflow.com/questions/36553197/permission-checks-in-drf-viewsets-are-not-working-right
 """
 
-from core.models import Assignment, AssignmentFile, CourseFile, SubmissionFile, SubmissionTest, User
+from core.models import Assignment, AssignmentFile, CourseFile, Quiz, SubmissionFile, SubmissionTest, User
 from core.permissions.helpers import (
     hasCourseCreationPrivilege,
     isAuthenticated,
@@ -22,6 +22,7 @@ from core.permissions.helpers import (
     isStudentOfSub,
 )
 from core.permissions.template import TemplatePermission
+from core.services import seb
 from rest_framework import permissions
 from rest_framework.authentication import BasicAuthentication, TokenAuthentication
 from codepost.settings import logger
@@ -757,7 +758,18 @@ class QuizAttemptPermissions(TemplatePermission):
     (start/myAttempts/availableQuizzes) validate enrollment + availability in the view
     body, so all this gates is auth + per-attempt ownership. Taking a quiz (start,
     saveAnswer, submit) is browser-only: static credentials (personal API tokens,
-    course keys, basic auth) are rejected so attempts can't be scripted via the SDK."""
+    course keys, basic auth) are rejected so attempts can't be scripted via the SDK.
+    Quizzes with requireSebBrowser additionally demand a valid Safe Exam Browser
+    signature on every taking request (and on reading an in-progress attempt, so a
+    second, normal browser can't mine the questions mid-quiz)."""
+
+    def _check_seb(self, request, quiz):
+        """Raise a structured 403 when a SEB-required quiz's signature doesn't verify."""
+        if not quiz.requireSebBrowser:
+            return
+        reason = seb.verify_seb_request(request, quiz)
+        if reason is not None:
+            raise seb.seb_permission_denied(reason)
 
     def has_permission(self, request, view):
         if not (request.user and request.user.is_authenticated):
@@ -767,15 +779,36 @@ class QuizAttemptPermissions(TemplatePermission):
             if isinstance(request.successful_authenticator,
                           (CourseAPIKeyAuthentication, TokenAuthentication, BasicAuthentication)):
                 return False
+        if getattr(view, 'action', None) == 'create':
+            # Start is the only taking action without an attempt object; resolve the quiz
+            # from the POST body. Missing/invalid/unknown ids pass through — the view
+            # 400/404s them itself.
+            try:
+                quiz = Quiz.objects.get(pk=int(request.data.get('quiz')))
+            except (TypeError, ValueError, Quiz.DoesNotExist):
+                return True
+            if quiz.requireSebBrowser:
+                reason = seb.verify_seb_request(request, quiz)
+                if reason is not None:
+                    # Audit blocked starts only — saveAnswer fires per autosave and would spam.
+                    from core.services.audit import record_audit_event
+                    record_audit_event(
+                        course=quiz.course, event_type='quiz_attempt_seb_blocked',
+                        user=request.user, quiz=quiz, assignment=quiz.assignment,
+                        meta={'quizTitle': quiz.title, 'reason': reason})
+                    raise seb.seb_permission_denied(reason)
         return True
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
+        action = getattr(view, 'action', None)
         # Manual grading (undoing it, and pinning the official attempt) are the staff
         # writes on someone else's attempt.
-        if getattr(view, 'action', None) in ('gradeResponse', 'reopenResponse', 'setOfficial', 'runCode'):
+        if action in ('gradeResponse', 'reopenResponse', 'setOfficial', 'runCode'):
             return canGradeQuiz(user, obj.quiz.course)
         if user == obj.student:
+            if action in ('saveAnswer', 'submit') or (action == 'retrieve' and obj.status == 'in_progress'):
+                self._check_seb(request, obj.quiz)
             return True
         # Quiz graders / admins may read (never mutate) a student's attempt. Assignment-only
         # graders are excluded — reading an attempt exposes the answer key, so it matches the

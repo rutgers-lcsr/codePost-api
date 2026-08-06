@@ -28,7 +28,7 @@ from core.serializers.studentQuiz import (
     StudentQuizSerializer,
     staff_reveal_context,
 )
-from core.services import quiz_grading
+from core.services import quiz_grading, seb
 from core.services.audit import record_audit_event
 
 
@@ -180,6 +180,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
             quiz=quiz, student=user, attemptNumber=used + 1,
             startedAt=started, deadline=deadline, status='in_progress',
             closeBypassed=bypass,
+            # Reaching create on a SEB-required quiz means the permission layer verified
+            # the Safe Exam Browser signature — unless the student is SEB-exempt, whose
+            # attempts stay visibly unverified for staff.
+            lockdownVerified=quiz.requireSebBrowser and not seb.is_exempt(user, quiz),
         )
         quiz_grading.build_attempt_responses(attempt)
     except IntegrityError:
@@ -429,8 +433,66 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     # Review disabled: submitted attempts can't be reopened, so the review history is empty.
     if not quiz.allowSubmissionReview:
       attempts = attempts.exclude(status='submitted')
-    data = [StudentQuizAttemptSerializer(a, context=self._attempt_context(a)).data for a in attempts]
+    # A SEB-required quiz's in-progress questions are only readable from inside SEB —
+    # otherwise a second, normal browser could mine them mid-quiz. Submitted attempts
+    # (review) stay readable anywhere.
+    hide_in_progress = quiz.requireSebBrowser and seb.verify_seb_request(request, quiz) is not None
+    data = []
+    for a in attempts:
+      serialized = StudentQuizAttemptSerializer(a, context=self._attempt_context(a)).data
+      if hide_in_progress and a.status == 'in_progress':
+        serialized['responses'] = []
+      data.append(serialized)
     return Response(data)
+
+  @extend_schema(
+      request=inline_serializer('SebLaunchRequest', {'quiz': serializers.IntegerField()}),
+      responses=inline_serializer('SebLaunchResponse', {
+          'sebUrl': serializers.CharField(),
+          'configUrl': serializers.CharField(),
+          'expiresAt': serializers.DateTimeField(),
+      }),
+  )
+  @action(detail=False, methods=['POST'])
+  def sebLaunch(self, request):
+    """Create a one-click Safe Exam Browser launch for ``quiz``.
+
+    Called from the student's NORMAL browser (the gate screen): generates a .seb config
+    whose startURL carries a one-time token, so SEB's fresh session can authenticate and
+    land on the take route. Returns the seb(s):// URL that opens SEB directly plus the
+    plain config URL as a download fallback.
+    """
+    from datetime import timedelta as _td
+    from core.models import OneTimeToken, QuizSebLaunch
+    quiz_id = _require_int(request.data.get('quiz'))
+    if quiz_id is None:
+      return Response({'detail': 'A valid quiz id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    quiz = get_object_or_404(Quiz, pk=quiz_id)
+    if not isStudent(request.user, quiz.course):
+      return Response({'detail': 'Only enrolled students can take this quiz.'},
+                      status=status.HTTP_403_FORBIDDEN)
+    if not quiz.requireSebBrowser:
+      return Response({'detail': 'This quiz does not require Safe Exam Browser.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    # 10 minutes to get SEB installed/opened (cold starts are slow); the auth token is
+    # single-use, but the launch's Config Key stays valid for the whole quiz session.
+    ott = OneTimeToken.objects.create(
+        user=request.user, expires_at=timezone.now() + _td(minutes=10),
+        course=quiz.course)
+    config = seb.build_seb_config(seb.build_launch_start_url(quiz, ott.token))
+    launch = QuizSebLaunch.objects.create(
+        quiz=quiz, student=request.user, token=ott,
+        configKey=seb.compute_config_key(config),
+        configPlist=seb.config_to_plist(config),
+        expiresAt=timezone.now() + _td(hours=24),
+    )
+    config_url = request.build_absolute_uri(f'/quizzes/{quiz.pk}/sebConfig/?launch={ott.token}')
+    # http → seb / https → sebs: the protocol swap that makes the OS hand the URL to SEB,
+    # which fetches the config over the corresponding http(s) and starts the exam.
+    seb_url = config_url.replace('https://', 'sebs://', 1).replace('http://', 'seb://', 1)
+    return Response({'sebUrl': seb_url, 'configUrl': config_url,
+                     'expiresAt': ott.expires_at.isoformat()})
 
   @extend_schema(
       parameters=[OpenApiParameter(name='course', type=int, location=OpenApiParameter.QUERY, required=True)],

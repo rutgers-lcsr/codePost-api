@@ -241,6 +241,9 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_attempt_autosubmitted(self):
         self._assert_quiz_event('quiz_attempt_autosubmitted')
 
+    def test_quiz_attempt_seb_blocked(self):
+        self._assert_quiz_event('quiz_attempt_seb_blocked')
+
     def test_quiz_attempts_reset(self):
         self._assert_quiz_event('quiz_attempts_reset')
 
@@ -274,7 +277,7 @@ class TestRecordAuditEventAllTypes(TestCase):
             'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
             'quiz_access_code_changed',
             'quiz_attempt_started', 'quiz_attempt_started_late',
-            'quiz_attempt_submitted', 'quiz_attempt_autosubmitted',
+            'quiz_attempt_submitted', 'quiz_attempt_autosubmitted', 'quiz_attempt_seb_blocked',
             'quiz_attempts_reset', 'quiz_response_graded', 'quiz_response_grade_reopened',
             'quiz_generated_set_approved', 'quiz_generated_set_unapproved',
             'quiz_generated_set_regenerated',

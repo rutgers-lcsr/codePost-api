@@ -1,8 +1,9 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from django.utils import timezone
@@ -233,6 +234,33 @@ class QuizViewSet(ListProtectedViewSet):
                        quiz=quiz, assignment=quiz.assignment,
                        meta={'title': quiz.title, 'cleared': quiz.accessCode is None})
     return Response({'accessCode': quiz.accessCode})
+
+  @extend_schema(
+      parameters=[OpenApiParameter(name='launch', type=str, location=OpenApiParameter.QUERY,
+                                   required=True, description='The launch token from sebLaunch.')],
+      responses={200: OpenApiTypes.BINARY},
+      description="Download the generated .seb config for a one-click Safe Exam Browser "
+                  "launch. Unauthenticated by design: SEB fetches this URL (via the seb:// "
+                  "protocol handler) before any session exists — the unguessable launch "
+                  "token is the credential. The token is checked but not consumed here; "
+                  "it is spent at /ott/exchange/ inside SEB.",
+  )
+  @action(detail=True, methods=['GET'], permission_classes=[AllowAny])
+  def sebConfig(self, request, pk=None):
+    from django.http import HttpResponse
+    from django.shortcuts import get_object_or_404
+    from core.models import QuizSebLaunch
+    # No get_object(): object permissions would reject the anonymous SEB fetch.
+    quiz = get_object_or_404(Quiz, pk=pk)
+    launch = QuizSebLaunch.objects.filter(
+        quiz=quiz, token__token=request.query_params.get('launch') or '',
+        expiresAt__gt=timezone.now()).order_by('-created').first()
+    if launch is None or not launch.token.is_valid():
+      return Response({'detail': 'Unknown or expired launch token.'},
+                      status=status.HTTP_404_NOT_FOUND)
+    response = HttpResponse(launch.configPlist, content_type='application/seb')
+    response['Content-Disposition'] = 'attachment; filename="quiz.seb"'
+    return response
 
   @extend_schema(responses=GeneratedQuestionSetListSerializer(many=True))
   @action(detail=True, methods=['GET'])

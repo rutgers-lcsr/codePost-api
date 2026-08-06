@@ -2303,3 +2303,349 @@ class TestBrowserOnlyTaking:
         api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {key_resp.data['key']}")
         resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
         assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# --------------------------------------------------------------------------- #
+# Safe Exam Browser lockdown (requireSebBrowser)
+# --------------------------------------------------------------------------- #
+
+SEB_KEY = 'a' * 64
+
+
+def _seb_header(path, key=SEB_KEY):
+    """The X-SafeExamBrowser-ConfigKeyHash SEB would stamp on a request to ``path``:
+    SHA256(absolute URL + Config Key). The test client's absolute URLs are
+    http://testserver + path."""
+    import hashlib
+    return {'HTTP_X_SAFEEXAMBROWSER_CONFIGKEYHASH':
+            hashlib.sha256(('http://testserver' + path + key).encode()).hexdigest()}
+
+
+class TestSebLockdown:
+    def _seb_quiz(self, course, **kw):
+        quiz = _quiz(course, requireSebBrowser=True, sebConfigKey=SEB_KEY, **kw)
+        _add(quiz, _mc(course, _bank(course)))
+        return quiz
+
+    def test_start_without_header_blocked_with_structured_403(self, api_client, taking_setup):
+        from core.models import CourseAuditEvent, QuizAttempt
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['lockdownRequired'] is True
+        assert resp.data['lockdownReason'] == 'missing_header'
+        assert not QuizAttempt.objects.filter(quiz=quiz).exists()
+        # Blocked starts are audited (with the denial reason).
+        event = CourseAuditEvent.objects.get(event_type='quiz_attempt_seb_blocked', quiz=quiz)
+        assert event.meta['reason'] == 'missing_header'
+
+    def test_start_with_wrong_hash_blocked(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                               **_seb_header('/quizAttempts/', key='b' * 64))
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['lockdownReason'] == 'invalid_key'
+
+    def test_flag_on_without_key_blocks_as_not_configured(self, api_client, taking_setup):
+        quiz = _quiz(taking_setup['course'], requireSebBrowser=True, sebConfigKey=None)
+        _add(quiz, _mc(taking_setup['course'], _bank(taking_setup['course'])))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                               **_seb_header('/quizAttempts/'))
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['lockdownReason'] == 'not_configured'
+
+    def test_full_taking_flow_with_valid_hashes(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert started.status_code == status.HTTP_201_CREATED
+        attempt_id = started.data['id']
+        assert started.data['requireSebBrowser'] is True
+        assert QuizAttempt.objects.get(pk=attempt_id).lockdownVerified is True
+        response_id = started.data['responses'][0]['id']
+        save_path = f'/quizAttempts/{attempt_id}/saveAnswer/'
+        saved = api_client.patch(save_path, {'response': response_id, 'selectedChoices': []},
+                                 format='json', **_seb_header(save_path))
+        assert saved.status_code == status.HTTP_200_OK
+        submit_path = f'/quizAttempts/{attempt_id}/submit/'
+        done = api_client.post(submit_path, {}, format='json', **_seb_header(submit_path))
+        assert done.status_code == status.HTTP_200_OK
+
+    def test_save_and_submit_blocked_without_header(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        attempt_id = started.data['id']
+        response_id = started.data['responses'][0]['id']
+        saved = api_client.patch(f'/quizAttempts/{attempt_id}/saveAnswer/',
+                                 {'response': response_id, 'selectedChoices': []}, format='json')
+        assert saved.status_code == status.HTTP_403_FORBIDDEN
+        assert saved.data['lockdownRequired'] is True
+        done = api_client.post(f'/quizAttempts/{attempt_id}/submit/', {}, format='json')
+        assert done.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_retrieve_gated_in_progress_open_after_submit(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        attempt_id = started.data['id']
+        # A second, normal browser can't read the questions mid-quiz…
+        resp = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        # …but review after submission is open anywhere.
+        submit_path = f'/quizAttempts/{attempt_id}/submit/'
+        api_client.post(submit_path, {}, format='json', **_seb_header(submit_path))
+        resp = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_myAttempts_strips_in_progress_responses_outside_seb(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert len(started.data['responses']) == 1
+        listed = api_client.get(f'/quizAttempts/myAttempts/?quiz={quiz.id}')
+        assert listed.status_code == status.HTTP_200_OK
+        assert listed.data[0]['responses'] == []
+
+    def test_staff_reads_unaffected(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.get(f"/quizAttempts/{started.data['id']}/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['lockdownVerified'] is True
+
+    def test_toggle_off_stops_enforcement(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        quiz.requireSebBrowser = False
+        quiz.save()
+        saved = api_client.patch(f"/quizAttempts/{started.data['id']}/saveAnswer/",
+                                 {'response': started.data['responses'][0]['id'],
+                                  'selectedChoices': []}, format='json')
+        assert saved.status_code == status.HTTP_200_OK
+
+    def test_non_seb_quiz_untouched(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
+    def test_student_endpoints_never_leak_config_key(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        cards = api_client.get(f"/quizAttempts/availableQuizzes/?course={taking_setup['course'].id}")
+        card = next(c for c in cards.data if c['id'] == quiz.id)
+        assert card['requireSebBrowser'] is True
+        assert 'sebConfigKey' not in card
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert 'sebConfigKey' not in started.data
+
+    def test_staff_key_validation_and_normalization(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['admin'])
+        bad = api_client.patch(f'/quizzes/{quiz.id}/', {'sebConfigKey': 'nope'}, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        upper = api_client.patch(f'/quizzes/{quiz.id}/', {'sebConfigKey': 'B' * 64}, format='json')
+        assert upper.status_code == status.HTTP_200_OK
+        quiz.refresh_from_db()
+        assert quiz.sebConfigKey == 'b' * 64
+
+
+class TestSebLaunch:
+    """Phase 2: one-click SEB launch (generated config + OTT handoff) and exemptions."""
+
+    def _seb_quiz(self, course, **kw):
+        quiz = _quiz(course, requireSebBrowser=True, **kw)
+        _add(quiz, _mc(course, _bank(course)))
+        return quiz
+
+    def _launch(self, api_client, student, quiz):
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/sebLaunch/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        return resp.data
+
+    def test_launch_returns_seb_url_and_creates_rows(self, api_client, taking_setup):
+        from core.models import OneTimeToken, QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        student = taking_setup['students'][0]
+        data = self._launch(api_client, student, quiz)
+        assert data['sebUrl'].startswith('seb://')  # http test server → seb://
+        assert f'/quizzes/{quiz.id}/sebConfig/' in data['configUrl']
+        launch = QuizSebLaunch.objects.get(quiz=quiz, student=student)
+        assert len(launch.configKey) == 64
+        assert launch.token.is_valid()
+        assert str(launch.token.token) in launch.configPlist  # startURL embeds the OTT
+        assert OneTimeToken.objects.get(pk=launch.token_id).course_id == quiz.course_id
+
+    def test_launch_requires_seb_quiz_and_student(self, api_client, taking_setup):
+        course = taking_setup['course']
+        plain = _quiz(course)
+        _add(plain, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/sebLaunch/', {'quiz': plain.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        seb_quiz = self._seb_quiz(course)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post('/quizAttempts/sebLaunch/', {'quiz': seb_quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_seb_config_download_is_anonymous_and_token_gated(self, api_client, taking_setup):
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        data = self._launch(api_client, taking_setup['students'][0], quiz)
+        launch = QuizSebLaunch.objects.get(quiz=quiz)
+        api_client.force_authenticate(user=None)
+        good = api_client.get(f'/quizzes/{quiz.id}/sebConfig/?launch={launch.token.token}')
+        assert good.status_code == status.HTTP_200_OK
+        assert good['Content-Type'] == 'application/seb'
+        body = good.content.decode()
+        assert '<key>startURL</key>' in body and 'seb/launch' in body
+        bad = api_client.get(f'/quizzes/{quiz.id}/sebConfig/?launch=nope')
+        assert bad.status_code == status.HTTP_404_NOT_FOUND
+        assert data['configUrl']  # returned URL matches the served route
+
+    def test_ott_exchange_issues_pair_and_is_single_use(self, api_client, taking_setup):
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        self._launch(api_client, taking_setup['students'][0], quiz)
+        token = QuizSebLaunch.objects.get(quiz=quiz).token.token
+        api_client.force_authenticate(user=None)
+        first = api_client.post('/ott/exchange/', {'token': token}, format='json')
+        assert first.status_code == status.HTTP_200_OK
+        assert first.data['token'] and first.data['refresh']
+        again = api_client.post('/ott/exchange/', {'token': token}, format='json')
+        assert again.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_launch_key_verifies_taking_requests(self, api_client, taking_setup):
+        """The whole point: a launch's Config Key (no pasted key at all) hard-unblocks
+        create/save/submit when the header is hashed with it."""
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])  # NO sebConfigKey
+        student = taking_setup['students'][0]
+        self._launch(api_client, student, quiz)
+        key = QuizSebLaunch.objects.get(quiz=quiz).configKey
+        api_client.force_authenticate(user=student)
+        # Without the header the quiz stays blocked (launch alone grants nothing).
+        blocked = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert blocked.status_code == status.HTTP_403_FORBIDDEN
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/', key=key))
+        assert started.status_code == status.HTTP_201_CREATED
+        submit_path = f"/quizAttempts/{started.data['id']}/submit/"
+        done = api_client.post(submit_path, {}, format='json', **_seb_header(submit_path, key=key))
+        assert done.status_code == status.HTTP_200_OK
+
+    def test_pasted_key_still_verifies_alongside_launches(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'], sebConfigKey=SEB_KEY)
+        student = taking_setup['students'][0]
+        self._launch(api_client, student, quiz)
+        api_client.force_authenticate(user=student)
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert started.status_code == status.HTTP_201_CREATED
+
+    def test_expired_launch_key_stops_verifying(self, api_client, taking_setup):
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        student = taking_setup['students'][0]
+        self._launch(api_client, student, quiz)
+        launch = QuizSebLaunch.objects.get(quiz=quiz)
+        QuizSebLaunch.objects.filter(pk=launch.pk).update(
+            expiresAt=timezone.now() - timedelta(minutes=1))
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                               **_seb_header('/quizAttempts/', key=launch.configKey))
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_seb_exempt_student_skips_enforcement(self, api_client, taking_setup):
+        from core.models import QuizAccommodation, QuizAttempt
+        course = taking_setup['course']
+        quiz = self._seb_quiz(course, sebConfigKey=SEB_KEY)
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student, sebExempt=True)
+        api_client.force_authenticate(user=student)
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert started.status_code == status.HTTP_201_CREATED
+        # Exempt attempts are visibly unverified to staff.
+        assert QuizAttempt.objects.get(pk=started.data['id']).lockdownVerified is False
+        done = api_client.post(f"/quizAttempts/{started.data['id']}/submit/", {}, format='json')
+        assert done.status_code == status.HTTP_200_OK
+
+    def test_set_accommodation_seb_exempt_roundtrip(self, api_client, taking_setup):
+        from core.models import QuizAccommodation
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1',
+                                 'sebExempt': True}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['sebExempt'] is True
+        assert QuizAccommodation.objects.get(course=course, student=student).sebExempt is True
+        # Omitting sebExempt (the roster's time control) must not clear the exemption.
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1.5'},
+                                format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert QuizAccommodation.objects.get(course=course, student=student).sebExempt is True
+        # Multiplier back to 1 with the exemption still on keeps the row.
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1'},
+                                format='json')
+        assert QuizAccommodation.objects.filter(course=course, student=student).exists()
+        # Clearing both deletes the row.
+        api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                         {'student': student.email, 'timeMultiplier': '1',
+                          'sebExempt': False}, format='json')
+        assert not QuizAccommodation.objects.filter(course=course, student=student).exists()
+
+
+class TestSebConfigKey:
+    """The Config Key normalization (ported from Sakai's SecureDeliverySeb)."""
+
+    def test_key_is_stable_and_case_insensitively_sorted(self):
+        from core.services import seb
+        config = seb.build_seb_config('https://client.example/seb/launch?ott=x&redirect=%2Fy')
+        key = seb.compute_config_key(config)
+        assert len(key) == 64
+        # Deterministic for identical config…
+        assert key == seb.compute_config_key(dict(reversed(list(config.items()))))
+        # …and sensitive to any value change.
+        other = dict(config, startURL='https://client.example/other')
+        assert key != seb.compute_config_key(other)
+
+    def test_plist_round_trips_the_config(self):
+        import plistlib
+        from core.services import seb
+        config = seb.build_seb_config('https://client.example/seb/launch?ott=x')
+        parsed = plistlib.loads(seb.config_to_plist(config).encode())
+        assert parsed == config
+
+    def test_take_path_encodes_like_the_spa(self):
+        from core.services import seb
+
+        class _C:
+            name, period = 'cos 333/x', 'S(2026)!'
+
+        class _Q:
+            pk, course = 7, _C()
+
+        # encodeURIComponent: '/'→%2F, ' '→%20; !'()*-._~ stay literal.
+        assert seb.quiz_take_path(_Q()) == "/student/cos%20333%2Fx/S(2026)!/quizzes/7/take"

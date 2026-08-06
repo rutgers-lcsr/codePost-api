@@ -6920,6 +6920,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/JwtOttResponse'
           description: ''
+  /ott/exchange/:
+    post:
+      operationId: ott_exchangeCreate
+      description: |-
+        Consume a one-time token and issue a normal interactive access + refresh pair.
+
+        Used by the Safe Exam Browser launch flow: SEB opens a fresh browser session with no
+        stored auth, so the launch URL carries an OTT that this endpoint exchanges for the
+        same short-lived, rotating session a login would issue. Deliberately NOT
+        /ott/validate/, which issues a 365-day standalone token for long-lived Jupyter
+        servers — the wrong risk profile for a student quiz session.
+      tags:
+      - ott
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExchangeOTTRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ExchangeOTTRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ExchangeOTTRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeOTTResponse'
+          description: ''
   /ott/generate/:
     get:
       operationId: ott_generateRetrieve
@@ -8936,6 +8973,42 @@ paths:
                 items:
                   $ref: '#/components/schemas/StudentQuizAttempt'
           description: ''
+  /quizAttempts/sebLaunch/:
+    post:
+      operationId: quizAttempts_sebLaunchCreate
+      description: |-
+        Create a one-click Safe Exam Browser launch for ``quiz``.
+
+        Called from the student's NORMAL browser (the gate screen): generates a .seb config
+        whose startURL carries a one-time token, so SEB's fresh session can authenticate and
+        land on the take route. Returns the seb(s):// URL that opens SEB directly plus the
+        plain config URL as a download fallback.
+      tags:
+      - quizAttempts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SebLaunchRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SebLaunchRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SebLaunchRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SebLaunchResponse'
+          description: ''
   /quizGeneratedSections/:
     get:
       operationId: quizGeneratedSections_list
@@ -10480,6 +10553,43 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/QuizResultRow'
+          description: ''
+  /quizzes/{id}/sebConfig/:
+    get:
+      operationId: quizzes_sebConfigRetrieve
+      description: 'Download the generated .seb config for a one-click Safe Exam Browser
+        launch. Unauthenticated by design: SEB fetches this URL (via the seb:// protocol
+        handler) before any session exists — the unguessable launch token is the credential.
+        The token is checked but not consumed here; it is spent at /ott/exchange/
+        inside SEB.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      - in: query
+        name: launch
+        schema:
+          type: string
+        description: The launch token from sebLaunch.
+        required: true
+      tags:
+      - quizzes
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
           description: ''
   /registration/checkStatusNewAdminUser/:
     get:
@@ -18752,6 +18862,25 @@ components:
           type: integer
       required:
       - environment_id
+    ExchangeOTTRequest:
+      type: object
+      properties:
+        token:
+          type: string
+      required:
+      - token
+    ExchangeOTTResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Short-lived access token.
+        refresh:
+          type: string
+          description: Rotating refresh token.
+      required:
+      - refresh
+      - token
     File:
       type: object
       description: Base serializer for File objects.
@@ -21332,6 +21461,18 @@ components:
           description: Optional code that lets a late student start this quiz after
             it has closed. Null/blank = no late access. Staff generate/rotate it via
             generateAccessCode; a correct code bypasses only the close, nothing else.
+        requireSebBrowser:
+          type: boolean
+          description: 'If true, taking this quiz (starting, answering, submitting,
+            and reading an in-progress attempt) requires Safe Exam Browser: requests
+            must carry a valid X-SafeExamBrowser-ConfigKeyHash header matching sebConfigKey.'
+        sebConfigKey:
+          type: string
+          nullable: true
+          description: SEB Config Key (64 hex chars) pasted by the instructor from
+            the SEB Config Tool. Requests verify as SHA256(request URL + this key).
+            Null/blank with requireSebBrowser on blocks students until a key is set.
+          maxLength: 64
         timeLimitMinutes:
           type: integer
           maximum: 9223372036854775807
@@ -21479,7 +21620,8 @@ components:
           description: Staff-internal metadata (Canvas IDs, etc.).
     PatchedQuizAccommodationRow:
       type: object
-      description: One per-student quiz extra-time accommodation (course-level multiplier).
+      description: 'One per-student quiz accommodation: extra-time multiplier + SEB
+        exemption.'
       properties:
         student:
           type: string
@@ -21491,6 +21633,8 @@ components:
           minimum: -100
           exclusiveMaximum: true
           exclusiveMinimum: true
+        sebExempt:
+          type: boolean
     PatchedQuizGeneratedSection:
       type: object
       description: |-
@@ -23137,6 +23281,18 @@ components:
           description: Optional code that lets a late student start this quiz after
             it has closed. Null/blank = no late access. Staff generate/rotate it via
             generateAccessCode; a correct code bypasses only the close, nothing else.
+        requireSebBrowser:
+          type: boolean
+          description: 'If true, taking this quiz (starting, answering, submitting,
+            and reading an in-progress attempt) requires Safe Exam Browser: requests
+            must carry a valid X-SafeExamBrowser-ConfigKeyHash header matching sebConfigKey.'
+        sebConfigKey:
+          type: string
+          nullable: true
+          description: SEB Config Key (64 hex chars) pasted by the instructor from
+            the SEB Config Tool. Requests verify as SHA256(request URL + this key).
+            Null/blank with requireSebBrowser on blocks students until a key is set.
+          maxLength: 64
         timeLimitMinutes:
           type: integer
           maximum: 9223372036854775807
@@ -23304,7 +23460,8 @@ components:
       - accessCode
     QuizAccommodationRow:
       type: object
-      description: One per-student quiz extra-time accommodation (course-level multiplier).
+      description: 'One per-student quiz accommodation: extra-time multiplier + SEB
+        exemption.'
       properties:
         student:
           type: string
@@ -23316,6 +23473,8 @@ components:
           minimum: -100
           exclusiveMaximum: true
           exclusiveMinimum: true
+        sebExempt:
+          type: boolean
       required:
       - student
       - timeMultiplier
@@ -23966,6 +24125,27 @@ components:
           type: integer
       required:
       - response
+    SebLaunchRequest:
+      type: object
+      properties:
+        quiz:
+          type: integer
+      required:
+      - quiz
+    SebLaunchResponse:
+      type: object
+      properties:
+        sebUrl:
+          type: string
+        configUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+      - configUrl
+      - expiresAt
+      - sebUrl
     Section:
       type: object
       properties:
@@ -24175,6 +24355,9 @@ components:
         allowSubmissionReview:
           type: boolean
           readOnly: true
+        requireSebBrowser:
+          type: boolean
+          readOnly: true
         serverNow:
           type: string
           format: date-time
@@ -24194,6 +24377,12 @@ components:
           readOnly: true
           description: Started with the quiz access code after the close; its deadline
             is not capped at the close time.
+        lockdownVerified:
+          type: boolean
+          readOnly: true
+          description: Started with a verified Safe Exam Browser signature. False
+            on attempts started before requireSebBrowser was enabled (or by exempt
+            students).
       required:
       - allowBacktracking
       - allowSubmissionReview
@@ -24201,8 +24390,10 @@ components:
       - description
       - id
       - isOfficialOverride
+      - lockdownVerified
       - oneQuestionAtATime
       - quiz
+      - requireSebBrowser
       - responses
       - serverNow
       - showResponses
@@ -24495,6 +24686,11 @@ components:
             afterward. When false, submitting shows a confirmation only — the past
             attempt cannot be reopened (scores may still surface on the quiz card
             per the reveal policy).
+        requireSebBrowser:
+          type: boolean
+          description: 'If true, taking this quiz (starting, answering, submitting,
+            and reading an in-progress attempt) requires Safe Exam Browser: requests
+            must carry a valid X-SafeExamBrowser-ConfigKeyHash header matching sebConfigKey.'
         questionCount:
           type: integer
           readOnly: true
@@ -24645,6 +24841,9 @@ components:
         allowSubmissionReview:
           type: boolean
           readOnly: true
+        requireSebBrowser:
+          type: boolean
+          readOnly: true
         serverNow:
           type: string
           format: date-time
@@ -24662,6 +24861,7 @@ components:
       - isOfficialOverride
       - oneQuestionAtATime
       - quiz
+      - requireSebBrowser
       - responses
       - serverNow
       - showResponses

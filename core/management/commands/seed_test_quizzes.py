@@ -161,6 +161,11 @@ class Command(BaseCommand):
                   showCorrectAnswers=True)
         make_quiz('DRAFT — students should NOT see this', AUTO,
                   description='Unpublished draft. Only the instructor should see it.', published=False)
+        make_quiz('Safe Exam Browser required', AUTO,
+                  description='Requires **Safe Exam Browser**: starting/answering is blocked outside '
+                              'SEB. The seeded Config Key is a placeholder — replace it with the one '
+                              'from your SEB Config Tool to actually take the quiz.',
+                  requireSebBrowser=True, sebConfigKey='0' * 64)
 
         # ---- attached quizzes (assignments in known states) ----
         def make_assignment(name, due=None, feedback=False):

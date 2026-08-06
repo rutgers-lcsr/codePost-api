@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, re_path, include
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
-from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token, logout, logout_all, NON_COURSE_KEY_AUTH
+from core.views.auth import exchange_one_time_token, generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token, logout, logout_all, NON_COURSE_KEY_AUTH
 
 from rest_framework.viewsets import ViewSet
 from core.views.user import UserViewSet
@@ -158,6 +158,7 @@ urlpatterns = [
     path('logout-all/', logout_all, name='logout_all'),
     path('ott/generate/', generate_one_time_token, name='generate_one_time_token'),
     path('ott/validate/', validate_one_time_token, name='validate_one_time_token_by_query'),
+    path('ott/exchange/', exchange_one_time_token, name='exchange_one_time_token'),
     path('ott/', get_jwt_ott, name='get_jwt_ott'),
     re_path('registration/', include(('core.registration_urls', 'core'), namespace='registration')),
     path('auth/sso/', include(('core.sso_urls', 'core'), namespace='sso')),

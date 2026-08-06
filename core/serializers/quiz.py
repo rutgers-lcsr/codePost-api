@@ -43,6 +43,8 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         # Availability
         'assignmentTrigger', 'availableFrom', 'availableUntil',
         'closeEvent', 'closeOffsetMinutes', 'endAttemptsAtClose', 'accessCode',
+        # Exam security
+        'requireSebBrowser', 'sebConfigKey',
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
         'oneQuestionAtATime', 'allowBacktracking',
@@ -66,6 +68,15 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
     # A PATCH may move the quiz into a course the caller has no rights in (course is
     # writable) — object permissions only checked the source course. Re-authorize.
     self.assert_authoring_course(proposed.get('course'))
+    # The SEB Config Key is a 64-char hex hash from the SEB Config Tool; anything else can
+    # never verify and would silently lock every student out.
+    seb_key = data.get('sebConfigKey')
+    if seb_key:
+      seb_key = seb_key.strip()
+      if len(seb_key) != 64 or any(c not in '0123456789abcdefABCDEF' for c in seb_key):
+        raise serializers.ValidationError(
+            {'sebConfigKey': 'Must be the 64-character hex Config Key shown in the SEB Config Tool.'})
+      data['sebConfigKey'] = seb_key.lower()
     # The attached assignment must belong to the quiz's own course. Otherwise prompt
     # variables ({assignment_file:...}) and close-event logic resolve against another
     # course's private assignment data — a cross-course information leak. Enforce only

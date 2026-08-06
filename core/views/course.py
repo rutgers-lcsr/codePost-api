@@ -60,9 +60,11 @@ from core.utils import get_or_create_user
 from core.emails import UserAddedToCourseEmail
 
 class QuizAccommodationRowSerializer(serializers.Serializer):
-    """One per-student quiz extra-time accommodation (course-level multiplier)."""
+    """One per-student quiz accommodation: extra-time multiplier + SEB exemption."""
     student = serializers.EmailField()
     timeMultiplier = serializers.DecimalField(max_digits=4, decimal_places=2)
+    # Omitted on write = leave the student's current exemption unchanged.
+    sebExempt = serializers.BooleanField(required=False)
 
 
 def generate_invite_code():
@@ -956,7 +958,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnForbidden()
         rows = course.quizAccommodations.select_related('student').order_by('student__email')
         return Response(QuizAccommodationRowSerializer(
-            [{'student': a.student.email, 'timeMultiplier': a.timeMultiplier} for a in rows],
+            [{'student': a.student.email, 'timeMultiplier': a.timeMultiplier,
+              'sebExempt': a.sebExempt} for a in rows],
             many=True).data)
 
     @extend_schema(
@@ -983,11 +986,17 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if student is None:
             return Response({'detail': 'No such student in this course.'},
                             status=status.HTTP_400_BAD_REQUEST)
-        if multiplier == 1:
+        # An omitted sebExempt preserves the student's current exemption, so the roster's
+        # time-multiplier control can keep sending {student, timeMultiplier} alone.
+        existing = QuizAccommodation.objects.filter(course=course, student=student).first()
+        seb_exempt = ser.validated_data.get(
+            'sebExempt', existing.sebExempt if existing else False)
+        if multiplier == 1 and not seb_exempt:
             QuizAccommodation.objects.filter(course=course, student=student).delete()
         else:
             QuizAccommodation.objects.update_or_create(
-                course=course, student=student, defaults={'timeMultiplier': multiplier})
+                course=course, student=student,
+                defaults={'timeMultiplier': multiplier, 'sebExempt': seb_exempt})
         # Reflect the new multiplier onto the student's in-progress attempts — deadlines are
         # stored at start, so without this an accommodation granted mid-quiz would do nothing.
         from core.services import quiz_grading
@@ -999,7 +1008,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                 attempt.deadline = deadline
                 attempt.save()
         return Response(QuizAccommodationRowSerializer(
-            {'student': student.email, 'timeMultiplier': multiplier}).data)
+            {'student': student.email, 'timeMultiplier': multiplier,
+             'sebExempt': seb_exempt}).data)
 
     @extend_schema(responses=GradebookResponseSerializer)
     @action(detail=True, methods=["GET"])

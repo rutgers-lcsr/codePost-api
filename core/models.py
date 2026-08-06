@@ -2537,6 +2537,7 @@ class CourseAuditEvent(BaseModel):
       ('quiz_attempt_started_late', 'Quiz Attempt Started Late'),
       ('quiz_attempt_submitted', 'Quiz Attempt Submitted'),
       ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
+      ('quiz_attempt_seb_blocked', 'Quiz Attempt SEB Blocked'),
       ('quiz_attempts_reset', 'Quiz Attempts Reset'),
       ('quiz_response_graded', 'Quiz Response Graded'),
       ('quiz_response_grade_reopened', 'Quiz Response Grade Reopened'),
@@ -3137,6 +3138,16 @@ class Quiz(BaseModel):
                  "Null/blank = no late access. Staff generate/rotate it via generateAccessCode; "
                  "a correct code bypasses only the close, nothing else."))
 
+  # --- Exam security (Safe Exam Browser) ---
+  requireSebBrowser = models.BooleanField(default=False,
+      help_text=("If true, taking this quiz (starting, answering, submitting, and reading an "
+                 "in-progress attempt) requires Safe Exam Browser: requests must carry a "
+                 "valid X-SafeExamBrowser-ConfigKeyHash header matching sebConfigKey."))
+  sebConfigKey = models.CharField(max_length=64, null=True, blank=True,
+      help_text=("SEB Config Key (64 hex chars) pasted by the instructor from the SEB Config "
+                 "Tool. Requests verify as SHA256(request URL + this key). Null/blank with "
+                 "requireSebBrowser on blocks students until a key is set."))
+
   # --- Standard options (apply to every quiz) ---
   timeLimitMinutes = models.PositiveIntegerField(null=True, blank=True,
       help_text=("Time limit in minutes. Null = untimed."))
@@ -3304,6 +3315,9 @@ class QuizAttempt(BaseModel):
   closeBypassed = models.BooleanField(default=False,
       help_text=("Started with the quiz access code after the close; its deadline is not "
                  "capped at the close time."))
+  lockdownVerified = models.BooleanField(default=False,
+      help_text=("Started with a verified Safe Exam Browser signature. False on attempts "
+                 "started before requireSebBrowser was enabled (or by exempt students)."))
 
   course = property(lambda self: self.quiz.course)
 
@@ -3332,12 +3346,51 @@ class QuizAccommodation(BaseModel):
       related_name="quizAccommodations", help_text=("The accommodated student."))
   timeMultiplier = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal('1'),
       help_text=("Multiplier applied to every timed quiz's time limit for this student."))
+  sebExempt = models.BooleanField(default=False,
+      help_text=("Exempt this student from Safe Exam Browser requirements (e.g. they use a "
+                 "platform SEB doesn't run on, like Linux or ChromeOS). Their attempts show "
+                 "lockdownVerified=False to staff."))
 
   class Meta:
     unique_together = ('course', 'student')
 
   def __str__(self):
     return f"QuizAccommodation course={self.course_id} student={self.student_id} ×{self.timeMultiplier}"
+
+
+class QuizSebLaunch(BaseModel):
+  """One student's Safe Exam Browser launch of a quiz: the served .seb config (whose
+  startURL embeds a one-time token for the auth handoff into SEB's fresh session) plus
+  the Config Key computed from it. Per-launch because each config's bytes — and thus its
+  key — are unique to the embedded token; verification accepts any of the student's
+  unexpired launch keys alongside the quiz's manually pasted key."""
+  if TYPE_CHECKING:
+    id: int
+    quiz: Quiz
+    student: User
+    token: OneTimeToken
+
+  quiz: 'Quiz' = models.ForeignKey(Quiz, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name='sebLaunches', help_text=("The quiz this launch opens."))
+  student: User = models.ForeignKey(User, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name='sebLaunches', help_text=("The launching student."))
+  token: OneTimeToken = models.ForeignKey(OneTimeToken, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name='sebLaunches', help_text=("The one-time token embedded in the config's "
+                                             "startURL, exchanged for a session inside SEB."))
+  configKey = models.CharField(max_length=64,
+      help_text=("SEB Config Key computed from configPlist; request hashes verify against it."))
+  configPlist = models.TextField(
+      help_text=("The exact .seb plist served for this launch — stored verbatim so the "
+                 "served bytes always match the computed configKey."))
+  expiresAt = models.DateTimeField(
+      help_text=("When this launch's configKey stops verifying (generous — it must outlive "
+                 "the whole quiz session, unlike the embedded auth token)."))
+
+  class Meta:
+    indexes = [models.Index(fields=['quiz', 'student'])]
+
+  def __str__(self):
+    return f"QuizSebLaunch quiz={self.quiz_id} student={self.student_id}"
 
 
 class QuizResponse(BaseModel):

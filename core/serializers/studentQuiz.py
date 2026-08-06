@@ -145,6 +145,7 @@ class StudentQuizAttemptSerializer(serializers.ModelSerializer):
   allowBacktracking = serializers.BooleanField(source='quiz.allowBacktracking', read_only=True)
   showResponses = serializers.BooleanField(source='quiz.showResponses', read_only=True)
   allowSubmissionReview = serializers.BooleanField(source='quiz.allowSubmissionReview', read_only=True)
+  requireSebBrowser = serializers.BooleanField(source='quiz.requireSebBrowser', read_only=True)
   # The server's current time at response, so the client can run a skew-immune countdown
   # (it measures elapsed time locally from this anchor rather than trusting the device clock).
   serverNow = serializers.SerializerMethodField()
@@ -154,7 +155,7 @@ class StudentQuizAttemptSerializer(serializers.ModelSerializer):
     fields = ('id', 'quiz', 'title', 'description', 'attemptNumber', 'status', 'startedAt', 'deadline',
               'submittedAt', 'score', 'maxScore', 'needsManualGrading', 'passed',
               'isOfficialOverride', 'oneQuestionAtATime', 'allowBacktracking', 'showResponses',
-              'allowSubmissionReview', 'serverNow', 'responses')
+              'allowSubmissionReview', 'requireSebBrowser', 'serverNow', 'responses')
     read_only_fields = ('isOfficialOverride',)
 
   @extend_schema_field(serializers.DateTimeField())
@@ -191,7 +192,8 @@ class StudentQuizSerializer(serializers.ModelSerializer):
     model = Quiz
     fields = ('id', 'course', 'assignment', 'title', 'description', 'timeLimitMinutes',
               'attemptsAllowed', 'scoringPolicy', 'passingScore', 'passingScoreUnit',
-              'showCorrectAnswers', 'allowSubmissionReview', 'questionCount', 'availability', 'attemptsUsed',
+              'showCorrectAnswers', 'allowSubmissionReview', 'requireSebBrowser',
+              'questionCount', 'availability', 'attemptsUsed',
               'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt', 'hasAccessCode',
               'myScore', 'myMaxScore', 'myPassed', 'myScorePending')
 
@@ -330,5 +332,5 @@ class StaffQuizAttemptSerializer(StudentQuizAttemptSerializer):
   responses = StaffQuizResponseSerializer(many=True, read_only=True)
 
   class Meta(StudentQuizAttemptSerializer.Meta):
-    fields = StudentQuizAttemptSerializer.Meta.fields + ('student', 'closeBypassed')
-    read_only_fields = StudentQuizAttemptSerializer.Meta.read_only_fields + ('closeBypassed',)
+    fields = StudentQuizAttemptSerializer.Meta.fields + ('student', 'closeBypassed', 'lockdownVerified')
+    read_only_fields = StudentQuizAttemptSerializer.Meta.read_only_fields + ('closeBypassed', 'lockdownVerified')
