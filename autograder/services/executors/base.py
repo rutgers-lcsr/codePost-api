@@ -895,10 +895,12 @@ class Executor(abc.ABC):
         # Datasets priority: kwargs > assignment.active. Shared datasets (is_student_variant=
         # False) go to everyone; a variant pool contributes only the submitting student's
         # assigned variant, so different students' code sees different data at the same path.
+        # Test resources (grading fixtures/answer keys) are excluded here — they only mount
+        # via the 'resources' kwarg during a test category's runs.
         if 'datasets' in kwargs:
              self.datasets = kwargs['datasets']
         elif assignment:
-             shared = list(assignment.dataSets.filter(is_active=True, is_student_variant=False))
+             shared = list(assignment.dataSets.filter(is_active=True, is_student_variant=False, is_test_resource=False))
              variant = get_or_assign_for_submission(assignment, submission) if submission else None
              if variant is not None and variant.is_active:
                  shared.append(variant)

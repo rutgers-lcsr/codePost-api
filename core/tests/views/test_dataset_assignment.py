@@ -440,6 +440,24 @@ class TestExecutorStaging:
             datasets=[variant_setup['v1']])
         assert [d.id for d in executor.datasets] == [variant_setup['v1'].id]
 
+    def test_test_resource_dataset_never_stages_in_normal_runs(self, variant_setup):
+        """Test-resource datasets (grading fixtures/answer keys) must not mount into a
+        student's own execution — they only reach containers via the 'resources' kwarg
+        during a test category's runs."""
+        from autograder.services.executors.python import PythonExecutor
+
+        assignment = variant_setup['assignment']
+        test_resource = AssignmentDataSet.objects.create(
+            assignment=assignment, name='grading_key.csv', is_test_resource=True,
+            file=SimpleUploadedFile('grading_key.csv', b'secret,key'))
+        assert test_resource.hidden is True  # forced by save()
+
+        executor = PythonExecutor(
+            self._mock_file(variant_setup['submission'], assignment, assignment.course))
+        staged_ids = {d.id for d in executor.datasets}
+        assert test_resource.id not in staged_ids
+        assert variant_setup['shared'].id in staged_ids
+
 
 # --------------------------------------------------------------------------- #
 # Autograder variant-robustness rerun dispatch
