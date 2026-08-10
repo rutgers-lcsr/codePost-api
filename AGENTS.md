@@ -54,6 +54,7 @@ pytest autograder/tests/    # autograder tests only
 
 ## Important Gotchas
 
+- **Assignment lifecycle**: `Assignment.state` (draft/visible/preview/published/closed/archived) is the source of truth — see `docs/assignment_lifecycle.md`. The legacy `isVisible`/`isReleased` booleans are derived in `save()` (ORM writes to them re-derive `state`; API writes 400). Never `queryset.update()` these fields — the sync only runs through `save()`. New assignments default to `draft`; `AssignmentFactory` pins `state='preview'`.
 - **BaseModel extra query**: Every `save()` on an existing object fires an extra `SELECT` to compute changed fields (for `update_fields` optimization). Be aware of this cost in bulk operations.
 - **List endpoints are blocked**: `ListProtectedViewSet.list()` returns 403 for non-superusers. Users access resources via parent object actions (e.g., assignments through `courses/{id}/assignments/`), not by listing directly.
 - **Archived courses block edits**: `ModelSerializerWithPOSTCheck.validate()` raises `ValidationError` for any model attached to an archived `Course`. The `Course` model itself is exempt.

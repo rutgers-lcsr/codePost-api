@@ -12,6 +12,66 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ---
 
+## [Unreleased] — Assignment lifecycle
+
+See [`docs/assignment_lifecycle.md`](./docs/assignment_lifecycle.md) for the full
+documentation (states, derived close, scheduled publish, migration notes).
+
+### Security — students could submit to unpublished assignments
+
+- **Fixed: the `upload_submission` capability ignored assignment visibility** — a student
+  could create submissions against a hidden (`isVisible=False`) assignment as long as
+  `allowStudentUpload` was on. Cloned assignments landed in exactly that state (clones
+  reset visibility but not `allowStudentUpload`, with no due date — accepting uploads
+  forever).
+- **Fixed: `studentUpload`/`beforeStudentUpload` bypassed object permissions** by fetching
+  the assignment with a raw manager lookup instead of `get_object()`.
+- **Fixed: `hideFrom` (per-section hiding) was enforced only in the browser** — the server
+  never read it. It is now enforced in permissions, capabilities, and the course payload's
+  assignment ID list.
+- **Fixed: partner-link acceptance** (a state-mutating GET) had no visibility check and a
+  double-add race; the invitee must now be able to submit to the assignment themselves,
+  and the add is atomic.
+
+### Added — six-state lifecycle
+
+- **`Assignment.state`**: `draft → visible → preview → published → closed → archived`,
+  replacing the `isVisible`/`isReleased` booleans as the source of truth. Visible =
+  announcement only; Preview = files readable, no submitting; Published = open for work;
+  Closed = derived automatically once the submission deadline (incl. the late window)
+  passes, or set manually for an early close; Archived = retired mid-course.
+- **Scheduled publish**: `publishAt` auto-publishes a Visible/Preview assignment via a
+  one-shot, re-armable beat sweep (`run_scheduled_assignment_publish`, every 5 min).
+  A `codepost-beat` compose service now exists — exactly one instance must run.
+- Read-only `effectiveState` API field (clients render it as the badge), `publishedAt`
+  stamp, `assignment_state_changed` audit events, `AssignmentStateEnum` in the schema.
+- Admin UI: six-state status control and derived Closed badge, bulk Un-publish, a
+  "Publish at" scheduler in assignment settings, and reconciled status copy (the row
+  tooltip and bulk bar previously described "Published" contradictorily).
+- Read-only `audit_assignment_lifecycle` and `set_assignment_state` management commands
+  for pre/post-migration auditing and per-course fixes.
+
+### Changed — breaking
+
+- **`isVisible`/`isReleased` are read-only over the API** (still returned, derived from
+  `state`; writes fail with a 400 pointing at `state`). External scripts that PATCH these
+  fields must switch to `state`. ORM writers remain supported via bidirectional sync in
+  `Assignment.save()` until Phase 4 removes the columns.
+- **New assignments default to `draft`** (previously effectively visible).
+- **Visible no longer implies downloadable** — starter files require Preview or later.
+- **Clones reset `allowStudentUpload`/`allowStudentUploadWithPartners`** along with the
+  lifecycle state; re-enable upload after cloning.
+- Migration `0140` maps existing rows behavior-preservingly: hidden → draft;
+  visible+unreleased without student upload → preview; upload-open or released → published.
+
+### Fixed — unrelated but adjacent
+
+- Six email templates extended a nonexistent `emails/basic_template.html`
+  (upload receipts, feedback notifications, regrade reminders, partner-added,
+  test-complete) — rendering raised `TemplateDoesNotExist` in production since the
+  templates were written. They now extend `emails/base_template.html`.
+- Retrieving an assignment with a nonexistent ID now 404s instead of 500ing.
+
 ## [4.0.0] — Quizzes
 
 First release of the **Quizzes** subsystem — see [`docs/quizzes.md`](./docs/quizzes.md) for the
