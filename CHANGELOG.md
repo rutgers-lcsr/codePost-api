@@ -73,6 +73,24 @@ documentation (states, derived close, scheduled publish, migration notes).
 - Migration `0140` maps existing rows behavior-preservingly: hidden → draft;
   visible+unreleased without student upload → preview; upload-open or released → published.
 
+### Added — assignment description shown to students
+
+- The instructor-written assignment description (`explanation`) is now actually rendered
+  in the student console: the assignment row expands to show it (from Visible onward),
+  and it appears above the files on the submission view. Previously it was returned by
+  the API but only rendered inside the upload dialog's Instructions tab.
+
+### Fixed — student API payloads no longer include staff-only fields
+
+- After feedback release, students received the full staff serializer — including
+  `aiSystemPrompt`, `aiSummaryPrompt`, `aiDescription`, `anonymousGrading`,
+  `forcedRubricMode`, `gradersCanEditSubmissions`, and other grading internals. The
+  post-feedback student serializers are now built on an explicit student-safe field
+  list (kept: points, hideGrades, commentFeedback, additiveGrading, regrade settings,
+  testsAffectGrade, and mean/median when course statistics are enabled). Scripts
+  authenticating as students will no longer see the removed fields; the schema and
+  generated clients are unchanged.
+
 ### Fixed — unrelated but adjacent
 
 - Six email templates extended a nonexistent `emails/basic_template.html`

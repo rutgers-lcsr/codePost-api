@@ -217,9 +217,26 @@ class AssignmentSerializer(AssignmentSerializerBase):
     return obj
 
 
-class AssignmentStudentSerializerNoStats(AssignmentSerializer):
-  def get_files(self, obj):
-    return AssignmentFilePublicSerializer(obj.files.all(), many=True).data
+# Fields beyond the pre-feedback student view that a post-feedback student legitimately
+# needs — verified against the student UI (grade breakdown, comment feedback, regrade
+# UI, tests tab). Staff-only fields (ai_* prompts, anonymousGrading, forcedRubricMode,
+# gradersCanEditSubmissions, ...) must NOT appear here: the leak-guard tests in
+# core/tests/serializers/test_assignment.py enforce the exact field set.
+STUDENT_RELEASED_EXTRA_FIELDS = (
+    'points', 'hideGrades', 'commentFeedback', 'additiveGrading',
+    'allowRegradeRequests', 'regradeInstructions', 'regradeDeadline',
+    'testsAffectGrade',
+)
+
+
+class AssignmentStudentSerializerNoStats(AssignmentStudentSerializer):
+  """Post-feedback student view: the student base (public files) plus the released
+  extras — NOT the staff serializer, which leaks staff-only fields."""
+
+  class Meta(AssignmentStudentSerializer.Meta):
+    fields = AssignmentSerializerBase.Meta.fields + STUDENT_RELEASED_EXTRA_FIELDS
+    read_only_fields = AssignmentStudentSerializer.Meta.read_only_fields + STUDENT_RELEASED_EXTRA_FIELDS
+
 
 class AssignmentSerializerWithStatistics(AssignmentSerializer):
 
@@ -228,9 +245,11 @@ class AssignmentSerializerWithStatistics(AssignmentSerializer):
     read_only_fields = AssignmentSerializer.Meta.read_only_fields + ('mean', 'median')
 
 
-class AssignmentStudentSerializerWithStats(AssignmentSerializerWithStatistics):
-  def get_files(self, obj):
-    return AssignmentFilePublicSerializer(obj.files.all(), many=True).data
+class AssignmentStudentSerializerWithStats(AssignmentStudentSerializerNoStats):
+
+  class Meta(AssignmentStudentSerializerNoStats.Meta):
+    fields = AssignmentStudentSerializerNoStats.Meta.fields + ('mean', 'median')
+    read_only_fields = AssignmentStudentSerializerNoStats.Meta.read_only_fields + ('mean', 'median')
 
 
 class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStatistics):
