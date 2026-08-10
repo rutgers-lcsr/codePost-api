@@ -59,21 +59,31 @@ per-row error isolation.
 `docker-compose-worker.yml` (behind `--profile beat` — start it on exactly **one** node;
 the sweeps rely on single-scheduler semantics).
 
-## Legacy booleans (until Phase 4)
+## Legacy booleans (retired — Phase 4)
 
-`isVisible` and `isReleased` still exist because downstream gates read them (rubric
-categories, attached-quiz availability, submission-list access, full test cases).
-`Assignment.save()` keeps them in sync:
+The `isVisible`/`isReleased` columns were dropped in migration 0141. The API still
+*returns* both as read-only values derived from state (`isVisible = state in
+STUDENT_VISIBLE_STATES`, `isReleased = state in (published, closed)`) so external
+readers keep working; **writes are rejected with a 400** pointing at `state`. The
+`assignment.isVisible` / `assignment.isReleased` webhook field events were retired in
+favor of `assignment.state`.
 
-- `state` is the source of truth: changing it re-derives both booleans
-  (`isVisible = state in STUDENT_VISIBLE_STATES`, `isReleased = state in (published, closed)`).
-- Legacy ORM writers that flip only the booleans get `state` re-derived via migration
-  0140's mapping (hidden → `draft`; visible+unreleased+upload-off → `preview`;
-  upload-on or released → `published`).
-- **API writes to the booleans are rejected with a 400** pointing at `state`.
+Every internal gate now reads `state` or `feedbackReleased` directly:
 
-Retiring the booleans (and re-homing the gates that read `isReleased`) is deferred until
-production data confirms the mapping — see the Phase 4 table in the implementation plan.
+| Gate | Axis |
+|---|---|
+| Students list their own submissions | `state in (published, closed)` or `liveFeedbackMode` |
+| Attached quiz availability + student quiz list | `state in (published, closed)` — closed included so `after_assignment`/`after_feedback` triggers open once the assignment is done |
+| Rubric categories (structure) | `feedbackReleased` or `liveFeedbackMode` — unified with rubric comments |
+| Full test-case list (finalized submission) | `feedbackReleased` |
+| Opening a finalized submission's tests/results | `feedbackReleased` + `isFinalized`, or `liveFeedbackMode` |
+| Stats-bearing student assignment serializers | `feedbackReleased` or `liveFeedbackMode` |
+| Notify-students-of-feedback email | `feedbackReleased` |
+
+The last product decision here: the rubric structure and graded-work reveals key on
+**feedback release**, not publish — publishing opens *work* (files + submitting), and
+one separate switch reveals *grading* (rubric, full tests, finalized submissions,
+grades/comments).
 
 ## Operational commands
 

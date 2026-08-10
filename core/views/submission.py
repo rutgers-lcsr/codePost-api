@@ -358,7 +358,8 @@ class SubmissionViewSet(ListProtectedViewSet):
             tests = submission.tests.all()
     # If student of the submission
     elif isStudentOfSub(user, submission):
-        if (assignment.isReleased and submission.isFinalized) or assignment.liveFeedbackMode:
+        # Graded reveal: full test results unlock with feedback release (finalized subs)
+        if (assignment.feedbackReleased and submission.isFinalized) or assignment.liveFeedbackMode:
             tests = submission.tests.all()
         else:
             maxFailedTests = assignment.environment and assignment.environment.maxExposedFailedTests
@@ -413,7 +414,8 @@ class SubmissionViewSet(ListProtectedViewSet):
             logCode = retrieve_log_code(submission)
     # If student of the submission
     elif isStudentOfSub(user, submission):
-        if (assignment.isReleased and submission.isFinalized) or assignment.liveFeedbackMode:
+        # Graded reveal: full test results unlock with feedback release (finalized subs)
+        if (assignment.feedbackReleased and submission.isFinalized) or assignment.liveFeedbackMode:
             tests = submission.tests.all()
             logCode = retrieve_log_code(submission)
         else:
@@ -694,8 +696,8 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     require_capability(user, 'notify_students_feedback', submission)
 
-    if not submission.assignment.isReleased:
-        return Response('Assignment must be released', status.HTTP_406_NOT_ACCEPTABLE)
+    if not submission.assignment.feedbackReleased:
+        return Response('Feedback must be released', status.HTTP_406_NOT_ACCEPTABLE)
 
     if not submission.isFinalized:
         return Response('Submission must be finalized', status.HTTP_406_NOT_ACCEPTABLE)

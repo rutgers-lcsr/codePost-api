@@ -473,17 +473,6 @@ STUDENT_VISIBLE_STATES = ('visible', 'preview', 'published', 'closed')
 STUDENT_DOWNLOAD_STATES = ('preview', 'published', 'closed')
 
 
-def _assignment_state_from_legacy_booleans(isVisible, isReleased, allowStudentUpload):
-  """Migration 0140's bucket mapping, applied at runtime for legacy writers that still
-  set the booleans directly (ORM code, seeds, Django admin). Kept in lockstep with the
-  0140 backfill until Phase 4 removes the booleans."""
-  if not isVisible:
-    return 'draft'
-  if isReleased or allowStudentUpload:
-    return 'published'
-  return 'preview'
-
-
 class Assignment(BaseModel):
   if TYPE_CHECKING:
     id: int
@@ -510,9 +499,6 @@ class Assignment(BaseModel):
       "When the scheduled publishAt run last fired (one-shot stamp). Moving publishAt past "
       "this re-arms the run."))
 
-  isVisible = models.BooleanField(default=True, help_text=(
-      "A boolean field. 'True' if the assignment is viewable by students."))
-
   explanation = models.TextField(blank=True, help_text=("The explanation of an assignment, visible to students."))
   hideFrom = models.ManyToManyField(Section, related_name="hidden_sections", help_text=("Sections from which to hide this assignment."), blank=True)
 
@@ -520,8 +506,6 @@ class Assignment(BaseModel):
                              related_name='assignments', help_text=("The related course_id."))
   name = models.CharField(
       max_length=32, help_text=("The name of the assignment."))
-  isReleased = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if the assignment is released for students to view. 'False' otherwise."))
   points = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5,
                                decimal_places=2, help_text=("Total points for the assignment."))
   mean = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5, decimal_places=2, blank=True, null=True, help_text=(
@@ -660,24 +644,6 @@ class Assignment(BaseModel):
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''
     is_new = self.pk is None
-
-    # --- Lifecycle sync (until Phase 4 removes the legacy booleans) -----------------
-    # state is the source of truth; isVisible/isReleased stay derived because the
-    # rubric, quiz-availability, and submission-view gates still read them. Legacy
-    # writers that flip the booleans directly get state re-derived instead.
-    if not is_new:
-      old = Assignment.objects.filter(pk=self.pk).only('state', 'isVisible', 'isReleased').first()
-      # Only when state itself did not change do boolean edits win (legacy writers).
-      if (old is not None and old.state == self.state
-          and (old.isVisible != self.isVisible or old.isReleased != self.isReleased)):
-        self.state = _assignment_state_from_legacy_booleans(
-            self.isVisible, self.isReleased, self.allowStudentUpload)
-    elif self.state in ('draft', 'visible', 'preview') and self.isReleased:
-      # Legacy creator: an explicit released flag wins over an unset/default state.
-      self.state = 'published'
-    self.isVisible = self.state in STUDENT_VISIBLE_STATES
-    self.isReleased = self.state in ('published', 'closed')
-
     # Stamp the feedback-release time (before super() so it lands in update_fields).
     if self.feedbackReleased and self.feedbackReleasedAt is None:
       self.feedbackReleasedAt = now()
@@ -1545,7 +1511,7 @@ class AssignmentFile(File):
   is_test_resource = models.BooleanField(
       default=False,
       help_text="If True, this file is used as a resource for a TestCategory.")
-  isVisible = property(lambda self: self.assignment.isVisible)
+  isVisible = property(lambda self: self.assignment.state in STUDENT_DOWNLOAD_STATES)
 
   course = property(lambda self: self.assignment.course)
 

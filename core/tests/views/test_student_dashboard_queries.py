@@ -84,12 +84,12 @@ class TestStudentSubmissionsFilesQueryCount(APITestCase):
     course.students.add(student)
 
     # Assignment 1: submission has the single file created by the factory.
-    a1 = AssignmentFactory(course=course, name='One File', isReleased=True)
+    a1 = AssignmentFactory(course=course, name='One File', state='published')
     s1 = a1.submissions.first()
     s1.students.add(student)
 
     # Assignment 2: submission has five files.
-    a2 = AssignmentFactory(course=course, name='Many Files', isReleased=True)
+    a2 = AssignmentFactory(course=course, name='Many Files', state='published')
     s2 = a2.submissions.first()
     s2.students.add(student)
     for i in range(4):

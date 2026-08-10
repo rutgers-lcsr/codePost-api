@@ -31,7 +31,6 @@ class TestScheduledAssignmentPublish(TestCase):
     self.assertEqual(self.assignment.state, 'published')
     self.assertIsNotNone(self.assignment.scheduledPublishRanAt)
     self.assertIsNotNone(self.assignment.publishedAt)
-    self.assertTrue(self.assignment.isReleased)  # legacy boolean derived
     event = CourseAuditEvent.objects.filter(
         event_type='assignment_state_changed', assignment=self.assignment).last()
     self.assertIsNotNone(event)

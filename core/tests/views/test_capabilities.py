@@ -153,7 +153,7 @@ class TestAssignmentCapabilitiesEndpoint(APITestCase):
 
     def test_student_sees_visible_assignment(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.save()
         try:
             response = self._get(self.student)
@@ -163,12 +163,12 @@ class TestAssignmentCapabilitiesEndpoint(APITestCase):
             self.assertFalse(caps['edit_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_student_cannot_see_hidden_assignment(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = False
+            self.assignment.state = 'draft'
             self.assignment.save()
         response = self._get(self.student)
         # Student is denied access to a hidden assignment at the permission level
@@ -581,7 +581,7 @@ class TestAssignmentCapsExtended(APITestCase):
 
     def test_student_no_rubric_before_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.feedbackReleased = False
             self.assignment.liveFeedbackMode = False
             self.assignment.save()
@@ -590,12 +590,12 @@ class TestAssignmentCapsExtended(APITestCase):
             self.assertFalse(caps['view_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_student_sees_rubric_after_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.feedbackReleased = True
             self.assignment.save()
         try:
@@ -604,12 +604,12 @@ class TestAssignmentCapsExtended(APITestCase):
         finally:
             with factory.django.mute_signals(post_save):
                 self.assignment.feedbackReleased = False
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_student_sees_rubric_live_feedback(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.liveFeedbackMode = True
             self.assignment.save()
         try:
@@ -618,7 +618,7 @@ class TestAssignmentCapsExtended(APITestCase):
         finally:
             with factory.django.mute_signals(post_save):
                 self.assignment.liveFeedbackMode = False
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     # -- download_assignment_files --
@@ -628,14 +628,14 @@ class TestAssignmentCapsExtended(APITestCase):
 
     def test_student_can_download_visible_assignment_files(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
             self.assertTrue(caps['download_assignment_files'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     # -- manage_global_templates --
@@ -704,7 +704,7 @@ class TestAssignmentCapsExtended(APITestCase):
 
     def test_student_no_upload_when_disabled(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.allowStudentUpload = False
             self.assignment.save()
         try:
@@ -712,7 +712,7 @@ class TestAssignmentCapsExtended(APITestCase):
             self.assertFalse(caps['upload_submission'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     # -- Archived course blocks assignment edits --
@@ -1199,7 +1199,7 @@ class TestCourseSettingsCombinations(APITestCase):
     # -- archived + student upload: blocked even when allowed --
     def test_archived_blocks_student_upload(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.allowStudentUpload = True
             self.assignment.save()
             self.course.archived = True
@@ -1210,7 +1210,7 @@ class TestCourseSettingsCombinations(APITestCase):
         finally:
             with factory.django.mute_signals(post_save):
                 self.assignment.allowStudentUpload = False
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
                 self.course.archived = False
                 self.course.save()
@@ -1234,7 +1234,7 @@ class TestCourseSettingsCombinations(APITestCase):
     # -- feedbackReleased + liveFeedbackMode both off: student can't see feedback or rubric --
     def test_no_feedback_modes_blocks_student(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.feedbackReleased = False
             self.assignment.liveFeedbackMode = False
             self.assignment.save()
@@ -1245,13 +1245,13 @@ class TestCourseSettingsCombinations(APITestCase):
             self.assertFalse(sub_caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     # -- feedbackReleased + liveFeedbackMode both on: student can see both --
     def test_both_feedback_modes_on(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.feedbackReleased = True
             self.assignment.liveFeedbackMode = True
             self.assignment.save()
@@ -1264,7 +1264,7 @@ class TestCourseSettingsCombinations(APITestCase):
             with factory.django.mute_signals(post_save):
                 self.assignment.feedbackReleased = False
                 self.assignment.liveFeedbackMode = False
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
 
@@ -1610,7 +1610,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
 
     def test_download_student_allowed(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.save()
         try:
             url = f'/assignments/{self.assignment.id}/download/'
@@ -1619,7 +1619,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
             self.assertIn(resp.status_code, [status.HTTP_200_OK, status.HTTP_204_NO_CONTENT])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_download_grader_allowed(self):

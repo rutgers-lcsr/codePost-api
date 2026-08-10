@@ -52,7 +52,7 @@ class HiddenTestVisibilityTests(APITestCase):
             course=cls.course,
             name="A1",
             points=20,
-            isReleased=True,
+            state='published',
         )
 
         cls.category = TestCategory.objects.create(name="Cat", assignment=cls.assignment)

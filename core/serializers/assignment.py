@@ -3,7 +3,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
-from core.models import Assignment, ASSIGNMENT_STATE_CHOICES
+from core.models import Assignment, ASSIGNMENT_STATE_CHOICES, STUDENT_VISIBLE_STATES
 from django.contrib.auth.models import User
 
 from core.auth import type_of_auth
@@ -25,6 +25,10 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   dataSets = serializers.SerializerMethodField('get_datasets')
   fileTemplates = serializers.SerializerMethodField('get_file_templates')
   effectiveState = serializers.SerializerMethodField('get_effective_state')
+  # Legacy read-only compatibility: the DB columns are gone (Phase 4), but consumers
+  # that READ these keep working. Writes are rejected in validate() below.
+  isVisible = serializers.SerializerMethodField('get_is_visible')
+  isReleased = serializers.SerializerMethodField('get_is_released')
 
   lateDeductions = serializers.JSONField(default=[])  # type: ignore[arg-type]  # DRF accepts list as default
 
@@ -63,6 +67,14 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
     # The badge clients render: stored state, except a past-deadline published
     # assignment reads as closed. Nobody reimplements the deadline math.
     return obj.effective_state()
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_is_visible(self, obj):
+    return obj.state in STUDENT_VISIBLE_STATES
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_is_released(self, obj):
+    return obj.state in ('published', 'closed')
 
   def validate(self, data):
 
@@ -125,8 +137,9 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
               'uploadDueDate', 'maxLateDays', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions', 'studentsCanSeeGraders', 'dataSets')
     POST_permissions_fields = ('course',)
     # scheduledPublishRanAt is the one-shot stamp of the scheduled publish sweep.
+    # (isVisible/isReleased are declared SerializerMethodFields — read-only by nature.)
     read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'nudgeMode', 'dataSets',
-                        'effectiveState', 'publishedAt', 'scheduledPublishRanAt', 'isVisible', 'isReleased')
+                        'effectiveState', 'publishedAt', 'scheduledPublishRanAt')
 
 
 class AssignmentStudentSerializer(AssignmentSerializerBase):

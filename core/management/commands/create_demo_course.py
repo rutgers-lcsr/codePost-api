@@ -224,7 +224,7 @@ class Command(BaseCommand):
             "anonymousGrading": True,
             "forcedRubricMode": True,
             "hideGrades": True,
-            "isReleased": True,
+            "state": "published",
             "feedbackReleased": True,
             "commentFeedback": True,
         })
@@ -254,7 +254,7 @@ class Command(BaseCommand):
             "regradeDeadline": now + timedelta(days=14),
             "liveFeedbackMode": True,
             "collaborativeRubricMode": True,
-            "isReleased": True,
+            "state": "published",
             "feedbackReleased": True,
             "studentsCanSeeGraders": True,
         })
@@ -299,7 +299,7 @@ class Command(BaseCommand):
             "runTestsOnSubmit": True,
             "testsAffectGrade": True,
             "runFilesOnSubmit": True,
-            "isReleased": True,
+            "state": "published",
             "feedbackReleased": True,
         })
         # Environment
@@ -354,14 +354,14 @@ class Command(BaseCommand):
         # Assignment 8 — Hidden assignment (not visible to students)
         # ══════════════════════════════════════════════════════════════
         self._ensure_assignment(course, "8. Hidden", points=100, sortKey=8, extra={
-            "isVisible": False,
+            "state": "draft",
         })
 
         # ══════════════════════════════════════════════════════════════
         # Assignment 9 — Released & feedback released, grade frozen sub
         # ══════════════════════════════════════════════════════════════
         a9 = self._ensure_assignment(course, "9. Released+Frozen", points=100, sortKey=9, extra={
-            "isReleased": True,
+            "state": "published",
             "feedbackReleased": True,
             "hideGradersFromStudents": False,
         })
@@ -378,7 +378,7 @@ class Command(BaseCommand):
         # Assignment 10 — Notebook assignment
         # ══════════════════════════════════════════════════════════════
         a10 = self._ensure_assignment(course, "10. Notebook", points=50, sortKey=10, extra={
-            "isReleased": True,
+            "state": "published",
             "feedbackReleased": True,
             "allowStudentUpload": True,
             "uploadDueDate": now + timedelta(days=10),
@@ -414,7 +414,7 @@ class Command(BaseCommand):
         # Assignment 12 — Multi-file submission with colored comments
         # ══════════════════════════════════════════════════════════════
         a12 = self._ensure_assignment(course, "12. Multi-file+Colors", points=100, sortKey=12, extra={
-            "isReleased": True,
+            "state": "published",
             "feedbackReleased": True,
         })
         self._add_rubric(a12, deductive=True)

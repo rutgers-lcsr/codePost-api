@@ -208,7 +208,7 @@ def setUpCourse(self):
 
 def setUpAssignment(self, additiveGrading=False):
   course = setUpCourse(self)
-  assignment = Assignment.objects.create(course=course, points=20, isReleased=True,
+  assignment = Assignment.objects.create(course=course, points=20, state='published',
                                          name="loops", additiveGrading=additiveGrading)
   return assignment
 
@@ -216,9 +216,9 @@ def setUpAssignment(self, additiveGrading=False):
 def setUpAssignments(self):
   course = setUpCourse(self)
   assignment = [
-      Assignment.objects.create(course=course, points=20, isReleased=True, name="loops"),
-      Assignment.objects.create(course=course, points=20, isReleased=True, name="nbody"),
-      Assignment.objects.create(course=course, points=20, isReleased=True, name="sierpinski")
+      Assignment.objects.create(course=course, points=20, state='published', name="loops"),
+      Assignment.objects.create(course=course, points=20, state='published', name="nbody"),
+      Assignment.objects.create(course=course, points=20, state='published', name="sierpinski")
   ]
   return assignment
 

@@ -16,7 +16,7 @@ class GradeReleaseTestCase(TestCase):
         self.assignment = Assignment.objects.create(
             name="Test Assignment",
             course=self.course,
-            isReleased=True, # Assignment is released for submission
+            state='published',  # Assignment is open for submissions
             feedbackReleased=False, # Grades are NOT released
             points=100
         )

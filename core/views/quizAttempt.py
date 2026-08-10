@@ -530,7 +530,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       # see the card and enter the code (attached quizzes already surface once released).
       code_unlockable = bool(quiz.accessCode) and reason in quiz_grading.LATE_BYPASSABLE_REASONS
       if quiz.assignment_id is not None:
-        if quiz.assignment.isReleased or attempted:
+        if quiz.assignment.state in ('published', 'closed') or attempted:
           result.append(quiz)
       elif is_open or attempted or code_unlockable:
         result.append(quiz)

@@ -63,7 +63,7 @@ class TestAssignmentDefaults(TestCase):
 
     def test_is_released_defaults_false(self):
         a = Assignment.objects.create(name="HW1", points=20, course=self.course)
-        self.assertFalse(a.isReleased)
+        self.assertEqual(a.state, 'draft')
 
     def test_anonymous_grading_defaults_false(self):
         a = Assignment.objects.create(name="HW1", points=20, course=self.course)

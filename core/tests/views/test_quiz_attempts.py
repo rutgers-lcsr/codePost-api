@@ -556,7 +556,7 @@ class TestRevealAndAccess:
         course = taking_setup['course']
         assignment = taking_setup['assignment']
         # Assignment is visible to students, but feedback isn't released yet.
-        Assignment.objects.filter(pk=assignment.id).update(isReleased=True, feedbackReleased=False)
+        Assignment.objects.filter(pk=assignment.id).update(state='published', feedbackReleased=False)
         bank = _bank(course)
 
         # Attached quiz that unlocks only after feedback → still locked, but should be listed
@@ -623,7 +623,7 @@ class TestClosing:
         course, assignment, student = taking_setup['course'], taking_setup['assignment'], taking_setup['students'][0]
         due = timezone.now() + timedelta(days=1)
         assignment.uploadDueDate = due
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
 
         q = _quiz(course, assignment=assignment, closeEvent='assignment_due', closeOffsetMinutes=1440)
@@ -648,7 +648,7 @@ class TestClosing:
         from core.models import Quiz, Submission
         from core.services.quiz_grading import quiz_availability, quiz_close_time
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         student, other = taking_setup['students'][0], taking_setup['students'][1]
         q = _quiz(course, assignment=assignment, assignmentTrigger='after_submission',
@@ -675,7 +675,7 @@ class TestClosing:
         from core.models import Submission
         from core.services.quiz_grading import quiz_availability
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         student, other = taking_setup['students'][0], taking_setup['students'][1]
         q = _quiz(course, assignment=assignment, assignmentTrigger='after_student_feedback')
@@ -700,7 +700,7 @@ class TestClosing:
         from core.models import Submission
         from core.services.quiz_grading import quiz_availability
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.liveFeedbackMode = True
         assignment.save()
         student = taking_setup['students'][0]
@@ -720,7 +720,7 @@ class TestClosing:
     def test_end_attempts_at_close_caps_deadline(self, api_client, taking_setup):
         from django.utils.dateparse import parse_datetime
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         close = timezone.now() + timedelta(minutes=30)
         q = _quiz(course, assignment=assignment, assignmentTrigger='during',
@@ -755,7 +755,7 @@ class TestClosing:
 
     def test_start_blocked_after_fixed_close(self, api_client, taking_setup):
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         q = _quiz(course, assignment=assignment, assignmentTrigger='during',
                   closeEvent='fixed_date', availableUntil=timezone.now() - timedelta(minutes=1))
@@ -766,7 +766,7 @@ class TestClosing:
 
     def test_soft_close_does_not_cap_deadline(self, api_client, taking_setup):
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         close = timezone.now() + timedelta(minutes=30)
         # Untimed, soft close (endAttemptsAtClose=False) → the attempt has no deadline.
@@ -807,7 +807,7 @@ class TestClosing:
 
     def test_close_at_exposed_in_available_quizzes(self, api_client, taking_setup):
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         close = timezone.now() + timedelta(days=2)
         q = _quiz(course, assignment=assignment, assignmentTrigger='during',
@@ -954,7 +954,7 @@ class TestSettingsReflection:
         course = taking_setup['course']
         assignment = taking_setup['assignment']
         due = timezone.now() + timedelta(hours=1)
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.uploadDueDate = due
         assignment.save()
         quiz = _quiz(course, assignment=assignment, closeEvent='assignment_due',

@@ -154,8 +154,6 @@ def copy_assignment(assignment: Assignment, destination_course: Course,
   new_assignment.publishedAt = None
   new_assignment.publishAt = None
   new_assignment.scheduledPublishRanAt = None
-  new_assignment.isReleased = False
-  new_assignment.isVisible = False
   new_assignment.feedbackReleased = False
   new_assignment.liveFeedbackMode = False
   new_assignment.allowStudentUpload = False

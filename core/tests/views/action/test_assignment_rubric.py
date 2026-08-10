@@ -39,11 +39,11 @@ class TestPermissions_Assignment_rubric(APITestCase):
 
     ##############################################################################
     assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
-    assignment.isReleased = True
+    assignment.state = 'published'
     assignment.liveFeedbackMode = True
     assignment.allowStudentUpload = True
     assignment.save()
-    self.assertTrue(assignment.isReleased)
+    self.assertEqual(assignment.state, 'published')
     self.assertTrue(assignment.liveFeedbackMode)
     self.assertTrue(assignment.allowStudentUpload)
     ##############################################################################
@@ -91,7 +91,7 @@ class TestPermissions_Assignment_rubric(APITestCase):
 
     ##############################################################################
     assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
-    self.assertFalse(assignment.isReleased)
+    self.assertNotIn(assignment.state, ('published', 'closed'))
     self.assertFalse(assignment.liveFeedbackMode)
     self.assertFalse(assignment.allowStudentUpload)
     ##############################################################################

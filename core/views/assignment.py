@@ -171,7 +171,8 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       # user is a student only
       else:
-        if (not assignment.isReleased and not assignment.liveFeedbackMode):
+        # Graded reveal: the stats-bearing serializers unlock with feedback release
+        if (not assignment.feedbackReleased and not assignment.liveFeedbackMode):
           return AssignmentStudentSerializer
         elif (not course.showStudentsStatistics):
           return AssignmentStudentSerializerNoStats
@@ -563,7 +564,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     # If you want to use this endpoint and you are a student only, then you must wait until the assignment
     # is released, student upload is allowed, or live feedback mode is enabled
     isOnlyStudent = isThisStudent and not isThisGrader and not isCourseAdminCached
-    if isOnlyStudent and not assignment.isReleased and not assignment.allowStudentUpload and not assignment.liveFeedbackMode:
+    # Students may list their own submissions from published onward (or in live-feedback
+    # mode) — before that there is nothing of theirs to see.
+    if isOnlyStudent and assignment.state not in ('published', 'closed') and not assignment.liveFeedbackMode:
       return returnForbidden()
 
     # The student serializer renders files (StudentSubmissionSerializer.get_files) and each file's
@@ -689,7 +692,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       test_cases = TestCase.objects.filter(testCategory__assignment=assignment)
     # If assignment is has been released and this endpoint has been called, check if the student's submission is finalized
     # If so, return all test cases. Else, return only exposed test cases
-    elif assignment.isReleased:
+    elif assignment.feedbackReleased:
       filteredSubs = Submission.objects.filter(assignment=assignment, students__in=[user])
       if len(filteredSubs) > 0 and filteredSubs[0].isFinalized:
         test_cases = TestCase.objects.filter(testCategory__assignment=assignment)

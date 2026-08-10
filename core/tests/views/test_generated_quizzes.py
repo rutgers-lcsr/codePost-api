@@ -36,7 +36,7 @@ def gen_setup(db):
     with factory.django.mute_signals(post_save):
         course = CourseFactory(name="cos226", period="s2026", organization__name="Princeton")
         assignment = course.assignments.first()
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         students = list(course.students.all())
         submission = SubmissionFactory(assignment=assignment)

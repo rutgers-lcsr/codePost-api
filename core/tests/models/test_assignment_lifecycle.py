@@ -71,69 +71,34 @@ class TestEffectiveState(TestCase):
     self.assertEqual(self.assignment.effective_state(), 'closed')
 
 
-class TestLifecycleBooleanSync(TestCase):
-  """state is the source of truth; the legacy booleans stay derived — and legacy
-  writers that flip the booleans directly get state re-derived (migration 0140's
-  mapping) until Phase 4 removes them."""
+class TestLegacyBooleanApiCompat(TestCase):
+  """Phase 4 dropped the isVisible/isReleased columns; the API keeps returning them as
+  read-only values derived from state (AssignmentSerializerBase method fields)."""
 
-  def test_state_change_derives_booleans(self):
+  def _serialized(self, assignment):
+    from core.serializers.assignment import AssignmentSerializerBase
+    return AssignmentSerializerBase(assignment).data
+
+  def test_derived_values_per_state(self):
     a = AssignmentFactory(state='preview')
-    self.assertTrue(a.isVisible)
-    self.assertFalse(a.isReleased)
+    expectations = {
+        'draft': (False, False),
+        'visible': (True, False),
+        'preview': (True, False),
+        'published': (True, True),
+        'closed': (True, True),
+        'archived': (False, False),
+    }
+    for state, (visible, released) in expectations.items():
+      a.state = state
+      data = self._serialized(a)
+      self.assertEqual(data['isVisible'], visible, state)
+      self.assertEqual(data['isReleased'], released, state)
 
-    a.state = 'published'
-    a.save()
-    a.refresh_from_db()
-    self.assertTrue(a.isVisible)
-    self.assertTrue(a.isReleased)
-
-    a.state = 'draft'
-    a.save()
-    a.refresh_from_db()
-    self.assertFalse(a.isVisible)
-    self.assertFalse(a.isReleased)
-
-    a.state = 'closed'
-    a.save()
-    a.refresh_from_db()
-    self.assertTrue(a.isVisible)
-    self.assertTrue(a.isReleased)
-
-    a.state = 'archived'
-    a.save()
-    a.refresh_from_db()
-    self.assertFalse(a.isVisible)
-    self.assertFalse(a.isReleased)
-
-  def test_legacy_boolean_write_rederives_state(self):
-    a = AssignmentFactory(state='preview')
-
-    a.isReleased = True
-    a.save()
-    a.refresh_from_db()
-    self.assertEqual(a.state, 'published')
-
-    a.isVisible = False
-    a.save()
-    a.refresh_from_db()
-    self.assertEqual(a.state, 'draft')
-    self.assertFalse(a.isReleased)  # normalized: hidden wins
-
-  def test_legacy_create_with_released_flag(self):
-    a = Assignment.objects.create(
-        name='legacy', points=10, course=CourseFactory(), isReleased=True)
-    self.assertEqual(a.state, 'published')
-    self.assertTrue(a.isVisible)
-
-  def test_state_change_wins_over_stale_booleans(self):
-    a = AssignmentFactory(state='published')
-    a.state = 'draft'
-    # booleans left stale (True) — the state change must win and re-derive them
-    a.save()
-    a.refresh_from_db()
-    self.assertEqual(a.state, 'draft')
-    self.assertFalse(a.isVisible)
-    self.assertFalse(a.isReleased)
+  def test_model_has_no_legacy_columns(self):
+    field_names = {f.name for f in Assignment._meta.get_fields()}
+    self.assertNotIn('isVisible', field_names)
+    self.assertNotIn('isReleased', field_names)
 
 
 class TestPublishedAtStamp(TestCase):

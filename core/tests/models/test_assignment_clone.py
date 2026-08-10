@@ -31,7 +31,7 @@ class AssignmentCloneTests(TestCase):
             name="HW1",
             course=self.source_course,
             points=100,
-            isReleased=True,
+            state='published',
         )
 
         self.template_file = AssignmentFile.objects.create(
@@ -281,5 +281,4 @@ class AssignmentCloneLifecycleResetTests(TestCase):
         self.assertFalse(clone.allowStudentUpload)
         self.assertFalse(clone.allowStudentUploadWithPartners)
         self.assertIsNone(clone.uploadDueDate)
-        self.assertFalse(clone.isVisible)
-        self.assertFalse(clone.isReleased)
+        self.assertEqual(clone.state, 'draft')

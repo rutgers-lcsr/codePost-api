@@ -220,12 +220,13 @@ class RubricCategoryPermissions(TemplatePermission):
         assignment = obj.assignment
         course = assignment.course
 
-        # GET: superuser, staff, or students (if released/live feedback)
+        # GET: superuser, staff, or students once feedback is released (or live
+        # feedback) — same axis as RubricCommentPermissions
         if request.method == "GET":
             return (
                 user.is_superuser
                 or isCourseStaff(user, course)
-                or (isStudent(user, course) and (assignment.isReleased or assignment.liveFeedbackMode))
+                or (isStudent(user, course) and (assignment.feedbackReleased or assignment.liveFeedbackMode))
             )
 
         # Write operations: depends on collaborative mode

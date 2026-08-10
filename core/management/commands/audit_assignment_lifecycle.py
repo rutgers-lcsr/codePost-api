@@ -1,11 +1,13 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-"""Read-only audit of assignment lifecycle exposure, run before/after migration 0140.
+"""Read-only audit of assignment lifecycle exposure.
 
-Reports (1) assignments in the historically exploitable state (hidden but accepting
-student uploads) and the submissions already created against them, (2) submissions from
-students whose section was supposed to be hidden via hideFrom, (3) migration bucket
-counts by (isVisible, isReleased, allowStudentUpload), and (4) attached quizzes whose
-availability hangs off assignment release, grouped by bucket.
+Post-Phase-4 (isVisible/isReleased columns dropped) this reports on Assignment.state:
+(1) submissions attached to assignments students cannot see (draft/archived) — historical
+exposure artifacts from the pre-lifecycle bug, (2) submissions from students whose section
+is hidden via hideFrom, (3) the state distribution, and (4) attached quizzes per state.
+
+For the pre-migration legacy-boolean bucket audit, run this command from a checkout at or
+before migration 0140 (tag: pre-lifecycle) against the un-migrated database.
 """
 import csv
 
@@ -19,8 +21,8 @@ class Command(BaseCommand):
     help = (
         "STRICTLY READ-ONLY audit of assignment lifecycle exposure — never extend this "
         "command to mutate data (use set_assignment_state for fixes).\n"
-        "Sections: exposed assignments (hidden + upload-open) with submission counts; "
-        "section-hidden (hideFrom) submissions; migration bucket counts; quiz blast radius."
+        "Sections: submissions on student-invisible assignments; section-hidden (hideFrom) "
+        "submissions; state distribution; quiz counts per state."
     )
 
     def add_arguments(self, parser):
@@ -48,9 +50,9 @@ class Command(BaseCommand):
                 raise CommandError(f"Course {course_id} does not exist.")
             assignments = assignments.filter(course_id=course_id)
 
-        # ── 1. Exposed assignments: hidden but accepting student uploads ────────────
+        # ── 1. Submissions attached to assignments students cannot see ─────────────
         exposed = (
-            assignments.filter(isVisible=False, allowStudentUpload=True)
+            assignments.filter(state__in=("draft", "archived"), submissions__isnull=False)
             .select_related("course", "course__organization")
             .annotate(
                 sub_count=Count("submissions", distinct=True),
@@ -60,6 +62,7 @@ class Command(BaseCommand):
                     distinct=True,
                 ),
             )
+            .distinct()
             .order_by("course_id", "id")
         )
 
@@ -93,22 +96,20 @@ class Command(BaseCommand):
             })
 
         if output_path == "-":
-            out = self.stdout
-            self._write_csv(out, rows)
+            self._write_csv(self.stdout, rows)
         else:
             with open(output_path, "w", newline="") as f:
                 self._write_csv(f, rows)
 
         audit_hits = CourseAuditEvent.objects.filter(
             event_type="submission_attempt",
-            assignment__isVisible=False,
-            assignment__allowStudentUpload=True,
+            assignment__state__in=("draft", "archived"),
         )
         if course_id is not None:
             audit_hits = audit_hits.filter(course_id=course_id)
 
         self.stderr.write(
-            f"[1] Exposed (hidden + upload-open): {len(rows)} assignment(s), "
+            f"[1] Student-invisible assignments with submissions: {len(rows)} assignment(s), "
             f"{sum(r['submissions'] for r in rows)} submission(s), "
             f"{audit_hits.count()} submission_attempt audit event(s)."
         )
@@ -136,31 +137,27 @@ class Command(BaseCommand):
             f"{section_rows} have submissions from hidden-section students."
         )
 
-        # ── 3. Migration bucket counts (non-archived courses) ────────────────────────
+        # ── 3. State distribution (non-archived courses) ─────────────────────────────
         buckets = (
             assignments.filter(course__archived=False)
-            .values("isVisible", "isReleased", "allowStudentUpload")
+            .values("state")
             .annotate(n=Count("id"))
             .order_by("-n")
         )
-        self.stderr.write("[3] Buckets (isVisible, isReleased, allowStudentUpload) — non-archived courses:")
+        self.stderr.write("[3] State distribution — non-archived courses:")
         for b in buckets:
-            self.stderr.write(
-                f"    ({b['isVisible']}, {b['isReleased']}, {b['allowStudentUpload']}): {b['n']}"
-            )
+            self.stderr.write(f"    {b['state']}: {b['n']}")
 
-        # ── 4. Quiz blast radius: attached quizzes gated on assignment release ───────
+        # ── 4. Attached quizzes per assignment state ─────────────────────────────────
         gated = (
             assignments.filter(quizzes__isnull=False)
-            .values("isVisible", "isReleased", "allowStudentUpload")
+            .values("state")
             .annotate(n=Count("quizzes", distinct=True))
             .order_by("-n")
         )
-        self.stderr.write("[4] Attached quizzes per assignment bucket (availability reads isReleased):")
+        self.stderr.write("[4] Attached quizzes per assignment state (availability opens at published/closed):")
         for b in gated:
-            self.stderr.write(
-                f"    ({b['isVisible']}, {b['isReleased']}, {b['allowStudentUpload']}): {b['n']} quiz(zes)"
-            )
+            self.stderr.write(f"    {b['state']}: {b['n']} quiz(zes)")
 
     @staticmethod
     def _write_csv(out, rows):

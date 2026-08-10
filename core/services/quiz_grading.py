@@ -515,7 +515,7 @@ def quiz_availability(quiz, student, now=None):
     return (True, 'open')
 
   assignment = quiz.assignment
-  if not assignment.isReleased:
+  if assignment.state not in ('published', 'closed'):
     return (False, 'assignment_not_released')
   trigger = quiz.assignmentTrigger
   if trigger == 'during':

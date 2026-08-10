@@ -18,7 +18,7 @@ class TestPermissions_Assignment_ReleasedShowStatistics(BaseTestCases.TestPermis
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.isReleased = True
+      assignment.state = 'published'
       assignment.save()
       self.course.showStudentsStatistics = True
       self.course.save()
@@ -26,7 +26,7 @@ class TestPermissions_Assignment_ReleasedShowStatistics(BaseTestCases.TestPermis
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
       _assignment = submission.assignment
-      self.assertTrue(submission.assignment.isReleased)
+      self.assertEqual(submission.assignment.state, 'published')
       self.assertTrue(self.course.showStudentsStatistics)
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
@@ -41,13 +41,13 @@ class TestPermissions_Assignment_Released(BaseTestCases.TestPermissions):
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.isReleased = True
+      assignment.state = 'published'
       assignment.save()
 
     def assertModification(self, detail):
       submission = Submission.objects.get(id=detail)
       _assignment = submission.assignment
-      self.assertTrue(submission.assignment.isReleased)
+      self.assertEqual(submission.assignment.state, 'published')
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)

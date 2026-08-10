@@ -20,8 +20,9 @@ codepost_hooks = {
     'assignment.changed':       'core.Assignment.updated',
     'assignment.removed':       'core.Assignment.deleted',
     'assignment.name':          'core.Assignment.name',
-    'assignment.isVisible':     'core.Assignment.isVisible',
-    'assignment.isReleased':    'core.Assignment.isReleased',
+    # Lifecycle transitions (replaces the retired assignment.isVisible /
+    # assignment.isReleased field events — those columns no longer exist).
+    'assignment.state':         'core.Assignment.state',
     'assignment.explanation':   'core.Assignment.explanation',
     'assignment.points':        'core.Assignment.points',
 

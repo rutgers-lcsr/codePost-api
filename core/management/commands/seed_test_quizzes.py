@@ -171,7 +171,7 @@ class Command(BaseCommand):
         def make_assignment(name, due=None, feedback=False):
             a = Assignment.objects.create(course=course, name=MARK + name,
                                           explanation='Seed assignment for quiz testing.', points=100,
-                                          isReleased=True, isVisible=True, allowStudentUpload=True)
+                                          state='published', allowStudentUpload=True)
             if due is not None:
                 a.uploadDueDate = due
             if feedback:

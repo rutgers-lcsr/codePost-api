@@ -55,8 +55,17 @@ documentation (states, derived close, scheduled publish, migration notes).
 
 - **`isVisible`/`isReleased` are read-only over the API** (still returned, derived from
   `state`; writes fail with a 400 pointing at `state`). External scripts that PATCH these
-  fields must switch to `state`. ORM writers remain supported via bidirectional sync in
-  `Assignment.save()` until Phase 4 removes the columns.
+  fields must switch to `state`.
+- **Phase 4: the `isVisible`/`isReleased` database columns are dropped** and every
+  internal gate reads `state`/`feedbackReleased`. The `assignment.isVisible` /
+  `assignment.isReleased` webhook field events are retired in favor of
+  `assignment.state`.
+- **Grading reveals now key on feedback release, not publish**: rubric categories, the
+  full test-case list, and a finalized submission's tests/results become visible to
+  students when feedback is released (or in live-feedback mode) — publishing opens
+  files + submitting only. Previously all of these unlocked with the old `isReleased`
+  flag; courses that relied on students seeing the rubric while working should use
+  live-feedback mode or release feedback early.
 - **New assignments default to `draft`** (previously effectively visible).
 - **Visible no longer implies downloadable** — starter files require Preview or later.
 - **Clones reset `allowStudentUpload`/`allowStudentUploadWithPartners`** along with the

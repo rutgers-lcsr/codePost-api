@@ -630,10 +630,10 @@ class CourseAdmin(admin.ModelAdmin):
 
 @admin.register(Assignment)
 class AssignmentAdmin(admin.ModelAdmin):
-    list_display = ("name", "course", "points", "state", "is_visible", "is_released",
+    list_display = ("name", "course", "points", "state",
                     "submission_count", "test_category_count", "test_case_count", "upload_due_date", "mean_grade", "open_submissions", "open_tests", "created")
     search_fields = ("name", "course__name", "course__period")
-    list_filter = ("state", "isVisible", "isReleased", "allowStudentUpload", "anonymousGrading", AutograderEnabledFilter, AssignmentDueDateFilter,
+    list_filter = ("state", "allowStudentUpload", "anonymousGrading", AutograderEnabledFilter, AssignmentDueDateFilter,
                    "uploadDueDate", "created", "modified")
     readonly_fields = ("course", "publishedAt", "scheduledPublishRanAt", "mean", "median", "created", "modified")
     autocomplete_fields = ["course"]
@@ -650,9 +650,7 @@ class AssignmentAdmin(admin.ModelAdmin):
         }),
         ("Lifecycle", {
             "fields": ("state", "publishAt", "publishedAt", "scheduledPublishRanAt",
-                       "isVisible", "isReleased", "hideGrades", "anonymousGrading"),
-            "description": ("state is the source of truth; the legacy isVisible/isReleased "
-                            "booleans are derived from it on save."),
+                       "hideGrades", "anonymousGrading"),
         }),
         ("Student Upload Settings", {
             "fields": ("allowStudentUpload", "allowStudentUploadWithPartners", 
@@ -707,16 +705,6 @@ class AssignmentAdmin(admin.ModelAdmin):
         """Default to latest due date first, pushing null due dates to the bottom."""
         return [F("uploadDueDate").desc(nulls_last=True), "-created"]
     
-    def is_visible(self, obj: Assignment) -> bool:
-        return obj.isVisible
-    is_visible.short_description = "Visible"
-    is_visible.boolean = True
-    
-    def is_released(self, obj: Assignment) -> bool:
-        return obj.isReleased
-    is_released.short_description = "Released"
-    is_released.boolean = True
-
     def open_submissions(self, obj: Assignment) -> str:
         url = f"{reverse('admin:core_submission_changelist')}?assignment__id__exact={obj.id}"
         return format_html('<a href="{}">View Submissions</a>', url)

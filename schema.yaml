@@ -16215,8 +16215,6 @@ components:
         isReleased:
           type: boolean
           readOnly: true
-          description: A boolean field. 'True' if the assignment is released for students
-            to view. 'False' otherwise.
         feedbackReleased:
           type: boolean
           description: A boolean field. 'True' if grades/feedback are released for
@@ -16287,7 +16285,6 @@ components:
         isVisible:
           type: boolean
           readOnly: true
-          description: A boolean field. 'True' if the assignment is viewable by students.
         hideFrom:
           type: array
           items:
@@ -20230,8 +20227,6 @@ components:
         isReleased:
           type: boolean
           readOnly: true
-          description: A boolean field. 'True' if the assignment is released for students
-            to view. 'False' otherwise.
         feedbackReleased:
           type: boolean
           description: A boolean field. 'True' if grades/feedback are released for
@@ -20302,7 +20297,6 @@ components:
         isVisible:
           type: boolean
           readOnly: true
-          description: A boolean field. 'True' if the assignment is viewable by students.
         hideFrom:
           type: array
           items:

@@ -43,7 +43,7 @@ class TestPermissions_Comment_Finalized(BaseTestCases.TestPermissions):
       comment = Comment.objects.get(id=detail)
       submission = comment.file.submission
       self.assertTrue(submission.isFinalized)
-      self.assertFalse(submission.assignment.isReleased)
+      self.assertNotIn(submission.assignment.state, ('published', 'closed'))
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)
@@ -58,7 +58,7 @@ class TestPermissions_Comment_Released(BaseTestCases.TestPermissions):
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.isReleased = True
+      assignment.state = 'published'
       assignment.save()
 
     def assertModification(self, detail):
@@ -66,7 +66,7 @@ class TestPermissions_Comment_Released(BaseTestCases.TestPermissions):
       submission = comment.file.submission
       _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
-      self.assertTrue(submission.assignment.isReleased)
+      self.assertEqual(submission.assignment.state, 'published')
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)
@@ -83,7 +83,7 @@ class TestPermissions_Comment_FinalizedReleased(BaseTestCases.TestPermissions):
       submission.isFinalized = True
       submission.save()
       assignment = submission.assignment
-      assignment.isReleased = True
+      assignment.state = 'published'
       assignment.save()
 
     def assertModification(self, detail):
@@ -91,7 +91,7 @@ class TestPermissions_Comment_FinalizedReleased(BaseTestCases.TestPermissions):
       submission = comment.file.submission
       _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
-      self.assertTrue(submission.assignment.isReleased)
+      self.assertEqual(submission.assignment.state, 'published')
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)
@@ -106,7 +106,7 @@ class TestPermissions_Comment_ReleasedLiveFeedback(BaseTestCases.TestPermissions
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.isReleased = True
+      assignment.state = 'published'
       assignment.liveFeedbackMode = True
       assignment.save()
 
@@ -115,7 +115,7 @@ class TestPermissions_Comment_ReleasedLiveFeedback(BaseTestCases.TestPermissions
       submission = comment.file.submission
       _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
-      self.assertTrue(submission.assignment.isReleased)
+      self.assertEqual(submission.assignment.state, 'published')
       self.assertTrue(submission.assignment.liveFeedbackMode)
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
@@ -131,7 +131,7 @@ class TestPermissions_Comment_UnreleasedLiveFeedback(BaseTestCases.TestPermissio
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.isReleased = False
+      assignment.state = 'preview'
       assignment.liveFeedbackMode = True
       assignment.save()
 
@@ -140,7 +140,7 @@ class TestPermissions_Comment_UnreleasedLiveFeedback(BaseTestCases.TestPermissio
       submission = comment.file.submission
       _assignment = submission.assignment
       self.assertFalse(submission.isFinalized)
-      self.assertFalse(submission.assignment.isReleased)
+      self.assertNotIn(submission.assignment.state, ('published', 'closed'))
       self.assertTrue(submission.assignment.liveFeedbackMode)
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
@@ -158,7 +158,7 @@ class TestPermissions_Comment_FinalizedReleasedDontHideGraders(BaseTestCases.Tes
       submission.isFinalized = True
       submission.save()
       assignment = submission.assignment
-      assignment.isReleased = True
+      assignment.state = 'published'
       assignment.hideGradersFromStudents = False
       assignment.save()
 
@@ -166,7 +166,7 @@ class TestPermissions_Comment_FinalizedReleasedDontHideGraders(BaseTestCases.Tes
       submission = Submission.objects.get(id=detail)
       _assignment = submission.assignment
       self.assertTrue(submission.isFinalized)
-      self.assertTrue(submission.assignment.isReleased)
+      self.assertEqual(submission.assignment.state, 'published')
       self.assertFalse(submission.assignment.hideGradersFromStudents)
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
