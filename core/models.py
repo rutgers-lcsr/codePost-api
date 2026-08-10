@@ -458,6 +458,32 @@ class Section(BaseModel):
     return self.name + " | " + str(self.course)
 
 
+# Assignment lifecycle. Students see visible/preview/published/closed; they can download
+# files from preview onward and submit only while published (and before the deadline —
+# see Assignment.effective_state). draft and archived are instructor-only.
+ASSIGNMENT_STATE_CHOICES = [
+    ('draft', 'Draft'),
+    ('visible', 'Visible'),
+    ('preview', 'Preview'),
+    ('published', 'Published'),
+    ('closed', 'Closed'),
+    ('archived', 'Archived'),
+]
+STUDENT_VISIBLE_STATES = ('visible', 'preview', 'published', 'closed')
+STUDENT_DOWNLOAD_STATES = ('preview', 'published', 'closed')
+
+
+def _assignment_state_from_legacy_booleans(isVisible, isReleased, allowStudentUpload):
+  """Migration 0140's bucket mapping, applied at runtime for legacy writers that still
+  set the booleans directly (ORM code, seeds, Django admin). Kept in lockstep with the
+  0140 backfill until Phase 4 removes the booleans."""
+  if not isVisible:
+    return 'draft'
+  if isReleased or allowStudentUpload:
+    return 'published'
+  return 'preview'
+
+
 class Assignment(BaseModel):
   if TYPE_CHECKING:
     id: int
@@ -470,6 +496,19 @@ class Assignment(BaseModel):
     course: models.ForeignKey[Course, Course]
     uploadDueDate: models.DateTimeField[datetime, datetime]
     maxLateDays: models.IntegerField[int, int]
+
+  state = models.CharField(max_length=16, choices=ASSIGNMENT_STATE_CHOICES, default='draft',
+      help_text=("Lifecycle state: draft -> visible -> preview -> published -> closed -> archived. "
+                 "Students see visible through closed, download files from preview onward, and "
+                 "submit only while published."))
+  publishedAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "When the assignment last entered the published state. Cleared if it moves back to a "
+      "pre-published state (not on close/archive)."))
+  publishAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "Visible/Preview assignments auto-publish at this time (checked every few minutes)."))
+  scheduledPublishRanAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "When the scheduled publishAt run last fired (one-shot stamp). Moving publishAt past "
+      "this re-arms the run."))
 
   isVisible = models.BooleanField(default=True, help_text=(
       "A boolean field. 'True' if the assignment is viewable by students."))
@@ -583,6 +622,30 @@ class Assignment(BaseModel):
   def __str__(self):
     return str(self.name) + " | " + str(self.course)
 
+  def submission_deadline(self):
+    """Final moment uploads are accepted, or None if no deadline.
+
+    Single source of truth for the upload boundary — the studentUpload view and the
+    derived 'closed' state (effective_state) both use it, so they can never disagree.
+    """
+    if not self.uploadDueDate:
+      return None
+    if self.allowLateUploads:
+      return self.uploadDueDate + timedelta(days=self.maxLateDays)
+    return self.uploadDueDate
+
+  def effective_state(self, at=None):
+    """Stored state, except a past-deadline published assignment reads as closed.
+
+    'closed' is also storable directly (early close); the stored value wins there.
+    """
+    if self.state != 'published':
+      return self.state
+    deadline = self.submission_deadline()
+    if deadline and (at or timezone.now()) > deadline:
+      return 'closed'
+    return 'published'
+
   def calculate_average_and_median(self):
     finalizedSubmissions = self.submissions.filter(isFinalized=True)
     if (len(finalizedSubmissions) == 0):
@@ -597,13 +660,37 @@ class Assignment(BaseModel):
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''
     is_new = self.pk is None
+
+    # --- Lifecycle sync (until Phase 4 removes the legacy booleans) -----------------
+    # state is the source of truth; isVisible/isReleased stay derived because the
+    # rubric, quiz-availability, and submission-view gates still read them. Legacy
+    # writers that flip the booleans directly get state re-derived instead.
+    if not is_new:
+      old = Assignment.objects.filter(pk=self.pk).only('state', 'isVisible', 'isReleased').first()
+      # Only when state itself did not change do boolean edits win (legacy writers).
+      if (old is not None and old.state == self.state
+          and (old.isVisible != self.isVisible or old.isReleased != self.isReleased)):
+        self.state = _assignment_state_from_legacy_booleans(
+            self.isVisible, self.isReleased, self.allowStudentUpload)
+    elif self.state in ('draft', 'visible', 'preview') and self.isReleased:
+      # Legacy creator: an explicit released flag wins over an unset/default state.
+      self.state = 'published'
+    self.isVisible = self.state in STUDENT_VISIBLE_STATES
+    self.isReleased = self.state in ('published', 'closed')
+
     # Stamp the feedback-release time (before super() so it lands in update_fields).
     if self.feedbackReleased and self.feedbackReleasedAt is None:
       self.feedbackReleasedAt = now()
     elif not self.feedbackReleased and self.feedbackReleasedAt is not None:
       self.feedbackReleasedAt = None
+    # Stamp the publish time (mirrors feedbackReleasedAt). Cleared only when the
+    # assignment moves back to a pre-published state — closed/archived keep it.
+    if self.state == 'published' and self.publishedAt is None:
+      self.publishedAt = now()
+    elif self.state in ('draft', 'visible', 'preview') and self.publishedAt is not None:
+      self.publishedAt = None
     super(Assignment, self).save(*args, **kwargs)
-    
+
     if is_new:
         # Now self.pk is available
         self.mean, self.median = self.calculate_average_and_median()
@@ -613,6 +700,9 @@ class Assignment(BaseModel):
   class Meta:
     unique_together = ('name', 'course')
     ordering = ('sortKey', 'name')
+    indexes = [
+        models.Index(fields=['course', 'state']),
+    ]
     
 
 
@@ -2527,6 +2617,7 @@ class CourseAuditEvent(BaseModel):
       ('autograder_failed', 'Autograder Failed'),
       ('late_day_used', 'Late Day Used'),
       ('comment_feedback', 'Comment Feedback'),
+      ('assignment_state_changed', 'Assignment State Changed'),
       ('quiz_created', 'Quiz Created'),
       ('quiz_updated', 'Quiz Updated'),
       ('quiz_published', 'Quiz Published'),

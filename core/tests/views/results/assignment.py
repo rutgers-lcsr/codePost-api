@@ -446,3 +446,33 @@ PERMISSIONS = {
         },
     },
 }
+
+# ── Lifecycle matrices (partial: absent method/persona pairs are skipped) ──────
+# Draft: staff keep full read access; every student persona is denied.
+PERMISSIONS["PERMISSIONS_DRAFT"] = {
+    "read": {
+        Persona.ADMIN_OF_COURSE: (status.HTTP_200_OK, AssignmentSerializerWithStatistics),
+        Persona.GRADER_OF_COURSE: (status.HTTP_200_OK, AssignmentSerializer),
+        Persona.SUPERGRADER_OF_COURSE: (status.HTTP_200_OK, AssignmentSerializer),
+        Persona.GRADER_OF_SUB: (status.HTTP_200_OK, AssignmentSerializer),
+        Persona.SECTION_LEADER_OF_SUB: (status.HTTP_200_OK, AssignmentSerializer),
+        Persona.STUDENT_OF_COURSE: (status.HTTP_403_FORBIDDEN,),
+        Persona.STUDENT_OF_SUB: (status.HTTP_403_FORBIDDEN,),
+        Persona.STUDENT_OF_OTHER_SUB: (status.HTTP_403_FORBIDDEN,),
+        Persona.INACTIVE_STUDENT_OF_COURSE: (status.HTTP_403_FORBIDDEN,),
+    },
+}
+
+# Archived state behaves like draft for students.
+PERMISSIONS["PERMISSIONS_ARCHIVEDSTATE"] = PERMISSIONS["PERMISSIONS_DRAFT"]
+
+# hideFrom: the STUDENT_OF_SUB persona (course.students.last()) is placed in a section
+# the assignment hides from; other students and staff are unaffected.
+PERMISSIONS["PERMISSIONS_HIDDENFROMSECTION"] = {
+    "read": {
+        Persona.ADMIN_OF_COURSE: (status.HTTP_200_OK, AssignmentSerializerWithStatistics),
+        Persona.GRADER_OF_COURSE: (status.HTTP_200_OK, AssignmentSerializer),
+        Persona.STUDENT_OF_COURSE: (status.HTTP_200_OK, AssignmentStudentSerializer),
+        Persona.STUDENT_OF_SUB: (status.HTTP_403_FORBIDDEN,),
+    },
+}

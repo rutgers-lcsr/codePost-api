@@ -242,6 +242,12 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
     rubric_editor = rc.is_rubric_editor(course)
     archived = course.archived
 
+    # Lifecycle gates (see Assignment.state). The `student and` prefix keeps
+    # staff/admin paths at zero extra queries.
+    can_see = student and rc.student_can_see_assignment(assignment)
+    can_download = student and rc.student_can_download_assignment(assignment)
+    can_submit = student and rc.student_can_submit_to_assignment(assignment)
+
     # Rubric editing: admin always; rubric editors if explicitly flagged;
     # all graders if the course-level setting is on.
     can_edit_rubric = admin or rubric_editor or (grader and course.allowGradersToEditRubric)
@@ -256,7 +262,7 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
     caps.update({
         Capability.EDIT_ASSIGNMENT: admin and not archived,
         Capability.COPY_ASSIGNMENT: admin,
-        Capability.VIEW_ASSIGNMENT: staff or (student and assignment.isVisible),
+        Capability.VIEW_ASSIGNMENT: staff or can_see,
         Capability.EDIT_RUBRIC: can_edit_rubric and not archived,
         Capability.VIEW_RUBRIC: staff or student_can_see_rubric,
         Capability.RELEASE_GRADES: admin,
@@ -264,10 +270,10 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
         Capability.VIEW_QUEUE: staff,
         Capability.MANAGE_TEST_CASES: admin,
         Capability.VIEW_ASSIGNMENT_STATISTICS: admin,
-        Capability.UPLOAD_SUBMISSION: (student and getattr(assignment, 'allowStudentUpload', False) and not archived) or (admin and not archived),
+        Capability.UPLOAD_SUBMISSION: (can_submit and getattr(assignment, 'allowStudentUpload', False) and not archived) or (admin and not archived),
         Capability.GENERATE_AI_TEST_CASES: (admin or super_grader) and not archived,
         Capability.MANAGE_DATASETS: admin and not archived,
-        Capability.DOWNLOAD_ASSIGNMENT_FILES: staff or (student and assignment.isVisible),
+        Capability.DOWNLOAD_ASSIGNMENT_FILES: staff or can_download,
         Capability.MANAGE_GLOBAL_TEMPLATES: admin or super_grader,
     })
     return caps
@@ -314,7 +320,7 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
         Capability.VIEW_TEST_RESULTS: staff_of_sub or (student_of_sub and feedback_available),
         Capability.RUN_CODE: staff_of_sub or student_of_sub,
         Capability.GENERATE_AI_COMMENTS: staff_of_sub and not getattr(course, 'ai_disabled', False) and not getattr(course, 'ai_comments_disabled', False),
-        Capability.MANAGE_PARTNERS: student_of_sub and bool(getattr(assignment, 'allowStudentUploadWithPartners', False)) and not archived,
+        Capability.MANAGE_PARTNERS: student_of_sub and rc.student_can_submit_to_assignment(assignment) and bool(getattr(assignment, 'allowStudentUploadWithPartners', False)) and not archived,
         Capability.NOTIFY_STUDENTS_FEEDBACK: staff_of_sub,
         Capability.VIEW_AI_ASSISTANCE: staff_of_sub and not getattr(course, 'ai_disabled', False),
         Capability.TRIGGER_AI_ASSISTANCE: staff_of_sub and not getattr(course, 'ai_disabled', False),

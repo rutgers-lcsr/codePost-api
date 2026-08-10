@@ -28,7 +28,7 @@ from core.permissions.permissions import SubmissionPermissions
 
 from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, isStudentOfSub, isStaffOfSub, canViewUnanonymizedSubmissions, isSectionLeaderOfStudent, isSuperGrader
-from core.permissions.capabilities import Capability, compute_submission_capabilities, require_capability
+from core.permissions.capabilities import Capability, check_capability, compute_submission_capabilities, require_capability
 from core.services.audit import record_audit_event
 
 from core.models import SubmissionFileEdit, LearningObjective
@@ -559,7 +559,8 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["GET"])
   def generatePartnerLink(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    # get_object() runs SubmissionPermissions — the caller must already be on the submission.
+    submission = self.get_object()
     assignment = submission.assignment
 
     if not assignment.allowStudentUploadWithPartners:
@@ -602,19 +603,25 @@ class SubmissionViewSet(ListProtectedViewSet):
     if not token:
         return returnInvalid()
 
-    if not isStudent(user, course):
-        return returnInvalid()
-
-    current_submission = Submission.objects.filter(assignment=submission.assignment, students__in=[user])
-
-    if len(current_submission) > 0:
+    # The invitee must be a student who can submit to this assignment themselves:
+    # assignment published and open, not hidden from their section. (isStudent excludes
+    # the capability's admin arm — staff are not partner material.) Opaque 406 (not 403)
+    # so a hidden assignment's existence is not leaked.
+    if not isStudent(user, course) or not check_capability(user, Capability.UPLOAD_SUBMISSION, assignment):
         return returnInvalid()
 
     is_valid = submission_token_generator.check_token(submission, token)
     if is_valid:
-        submission.students.add(user)
+        # Atomic re-check: two concurrent accepts (or an accept racing studentUpload)
+        # must not attach the user to a second submission for this assignment.
+        with transaction.atomic():
+            already = Submission.objects.filter(
+                assignment=submission.assignment, students__in=[user]).exists()
+            if already:
+                return returnInvalid()
+            submission.students.add(user)
 
-        for student in submission.students.all():         
+        for student in submission.students.all():
             StudentPartnersAddedEmail(student).send_email(
                 new_partner_email=user.email,
                 submission=submission,
@@ -650,7 +657,8 @@ class SubmissionViewSet(ListProtectedViewSet):
     if not token:
         return returnInvalid()
 
-    if not isStudent(user, course):
+    # Same invitee gate as validatePartnerLink (opaque 406 — see comment there).
+    if not isStudent(user, course) or not check_capability(user, Capability.UPLOAD_SUBMISSION, assignment):
         return returnInvalid()
 
     current_submission = Submission.objects.filter(assignment=submission.assignment, students__in=[user])
@@ -669,7 +677,8 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["GET"])
   def removePartner(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    # get_object() runs SubmissionPermissions — the caller must already be on the submission.
+    submission = self.get_object()
 
     require_capability(user, 'manage_partners', submission)
 

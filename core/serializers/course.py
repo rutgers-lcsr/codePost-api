@@ -5,7 +5,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
-from core.models import Course, User
+from core.models import Course, User, STUDENT_VISIBLE_STATES
 
 from core.auth import type_of_auth
 
@@ -79,9 +79,13 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
         if (isCourseStaff(user, obj)):
             return list(map(lambda x: x.id, obj.assignments.all()))
         else:
-            # hide the IDs of invisible assignments from students. This way, a client can safely
-            # load all the assignments in course.assignments without the risk of hitting a scary 403 error
-            return list(map(lambda x: x.id, filter(lambda x: x.isVisible, obj.assignments.all())))
+            # hide the IDs of draft/archived and section-hidden assignments from students. This
+            # way, a client can safely load all the assignments in course.assignments without
+            # the risk of hitting a scary 403 error. One bounded query for the hideFrom set —
+            # iterating obj.assignments.all() keeps the caller's prefetch effective.
+            hidden_ids = set(obj.assignments.filter(hideFrom__students=user).values_list('id', flat=True))
+            return [a.id for a in obj.assignments.all()
+                    if a.state in STUDENT_VISIBLE_STATES and a.id not in hidden_ids]
     else:
         return []
 

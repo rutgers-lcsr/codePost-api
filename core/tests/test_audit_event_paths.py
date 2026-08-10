@@ -265,6 +265,16 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_generated_sets_published(self):
         self._assert_quiz_event('quiz_generated_sets_published')
 
+    def test_assignment_state_changed(self):
+        event = record_audit_event(
+            course=self.course, event_type='assignment_state_changed',
+            user=self.user, assignment=self.assignment,
+            meta={'from': 'draft', 'to': 'published'},
+        )
+        self._assert_event(event, 'assignment_state_changed', self.user)
+        self.assertEqual(event.assignment_id, self.assignment.id)
+        self.assertEqual(event.meta, {'from': 'draft', 'to': 'published'})
+
     def test_all_event_types_covered(self):
         """Ensure every EVENT_TYPE_CHOICES value has a dedicated test above."""
         defined_types = {choice[0] for choice in CourseAuditEvent.EVENT_TYPE_CHOICES}
@@ -274,6 +284,7 @@ class TestRecordAuditEventAllTypes(TestCase):
             'regrade_request', 'regrade_deleted',
             'autograder_triggered', 'autograder_completed', 'autograder_failed',
             'late_day_used', 'comment_feedback',
+            'assignment_state_changed',
             'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
             'quiz_access_code_changed',
             'quiz_attempt_started', 'quiz_attempt_started_late',
@@ -324,7 +335,7 @@ class _AuditIntegrationBase(APITestCase):
 
         resp = self.client.post('/assignments/', {
             "name": "AuditHW", "points": 100, "course": self.course_id,
-            "isReleased": True, "allowStudentUpload": True, "allowRegradeRequests": True,
+            "state": "published", "allowStudentUpload": True, "allowRegradeRequests": True,
         })
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
         self.assignment_id = resp.data['id']

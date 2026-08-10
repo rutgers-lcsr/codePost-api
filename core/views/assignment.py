@@ -194,6 +194,19 @@ class AssignmentViewSet(ListProtectedViewSet):
       )
     return queryset
 
+  def perform_update(self, serializer):
+    # Audit lifecycle transitions (mirrors QuizViewSet.perform_update's publish events).
+    old_state = serializer.instance.state
+    assignment = serializer.save()
+    if assignment.state != old_state:
+      record_audit_event(
+          course=assignment.course,
+          event_type='assignment_state_changed',
+          user=self.request.user,
+          assignment=assignment,
+          meta={'from': old_state, 'to': assignment.state},
+      )
+
   # Extra functions
   #####################################################################################
 
@@ -734,7 +747,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     }
     """
     user = self.request.user
-    assignment = Assignment.objects.get(id=pk)
+    # get_object() runs AssignmentPermissions (lifecycle state + hideFrom); the
+    # upload_submission capability below adds the published/allowStudentUpload gate.
+    assignment = self.get_object()
     course = assignment.course
 
     if not isAuthenticated(user):
@@ -838,7 +853,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     TODO: add file limits to 10mb
     """
     user = self.request.user
-    assignment = Assignment.objects.get(id=pk)
+    # get_object() runs AssignmentPermissions (lifecycle state + hideFrom); the
+    # upload_submission capability below adds the published/allowStudentUpload gate.
+    assignment = self.get_object()
     course = assignment.course
 
     if not isAuthenticated(user):
@@ -851,16 +868,15 @@ class AssignmentViewSet(ListProtectedViewSet):
         raise serializers.ValidationError("No files provided")
 
 
-      # Began late submission check
+      # Began late submission check — boundary comes from submission_deadline() so this
+      # can never disagree with the derived 'closed' state (Assignment.effective_state).
       if assignment.uploadDueDate and timezone.now() > assignment.uploadDueDate:
         if not assignment.allowLateUploads:
           raise serializers.ValidationError("Late submissions are not allowed for this assignment.")
-        
-        # Calculate maxLateDate
-        maxLateDate = assignment.uploadDueDate + timedelta(days=assignment.maxLateDays)
-        if timezone.now() > maxLateDate:
+
+        if timezone.now() > assignment.submission_deadline():
           raise serializers.ValidationError("The maximum late submission period has passed for this assignment.")
-        
+
       # Ended late submission check
       
       

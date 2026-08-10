@@ -48,7 +48,7 @@ class TestConsoleDataEndpoint(APITestCase):
         resp = self.client.post('/assignments/', {
             "name": "HW Console",
             "points": 100,
-            "isReleased": True,
+            "state": "published",
             "allowStudentUpload": True,
             "course": self.course_id,
         })

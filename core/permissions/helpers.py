@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-from core.models import Course, Section
+from core.models import Course, Section, STUDENT_DOWNLOAD_STATES, STUDENT_VISIBLE_STATES
 
 from rest_framework.response import Response
 from rest_framework import status
@@ -70,6 +70,30 @@ def isCourseStaff(user, course):
 
 def isCourseMember(user, course):
   return isStudent(user, course) or isCourseStaff(user, course)
+
+# --- Assignment lifecycle predicates -------------------------------------------------
+# The single source of truth for what a student may do with an assignment, keyed off
+# Assignment.state (+ hideFrom). Callers must have already established the user is a
+# student of the course. State is checked first so the hideFrom query only runs for
+# assignments the student could otherwise access.
+
+def isAssignmentHiddenFromStudent(user, assignment):
+  return assignment.hideFrom.filter(students=user).exists()
+
+def studentCanSeeAssignment(user, assignment):
+  """visible/preview/published/closed: the assignment appears in the student console."""
+  return (assignment.state in STUDENT_VISIBLE_STATES
+          and not isAssignmentHiddenFromStudent(user, assignment))
+
+def studentCanDownloadAssignment(user, assignment):
+  """preview/published/closed: starter files are available."""
+  return (assignment.state in STUDENT_DOWNLOAD_STATES
+          and not isAssignmentHiddenFromStudent(user, assignment))
+
+def studentCanSubmitToAssignment(user, assignment):
+  """published only — and not past the deadline (derived close)."""
+  return (assignment.effective_state() == 'published'
+          and not isAssignmentHiddenFromStudent(user, assignment))
 
 def isSectionLeader(user, section):
   return user in section.leaders.all()

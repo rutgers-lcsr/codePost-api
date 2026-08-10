@@ -51,3 +51,58 @@ class TestPermissions_Assignment_Released(BaseTestCases.TestPermissions):
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)
+
+
+class TestPermissions_Assignment_Draft(BaseTestCases.TestPermissions):
+
+  def __init__(self, *args, **kwargs):
+    initPermissionsClass(self)
+
+    def modifier(self):
+      assignment = self.DB['Assignment']
+      assignment.state = 'draft'
+      assignment.save()
+
+    def assertModification(self, detail):
+      self.assertEqual(Assignment.objects.get(id=detail).state, 'draft')
+
+    super().__init__(*args, model=self.model, permissions=self.permissions,
+                     modifier=modifier, assertModification=assertModification, **kwargs)
+
+
+class TestPermissions_Assignment_ArchivedState(BaseTestCases.TestPermissions):
+
+  def __init__(self, *args, **kwargs):
+    initPermissionsClass(self)
+
+    def modifier(self):
+      assignment = self.DB['Assignment']
+      assignment.state = 'archived'
+      assignment.save()
+
+    def assertModification(self, detail):
+      self.assertEqual(Assignment.objects.get(id=detail).state, 'archived')
+
+    super().__init__(*args, model=self.model, permissions=self.permissions,
+                     modifier=modifier, assertModification=assertModification, **kwargs)
+
+
+class TestPermissions_Assignment_HiddenFromSection(BaseTestCases.TestPermissions):
+
+  def __init__(self, *args, **kwargs):
+    initPermissionsClass(self)
+
+    def modifier(self):
+      # Hide the assignment from the section containing course.students.last() —
+      # the user behind the STUDENT_OF_SUB persona.
+      assignment = self.DB['Assignment']
+      section = Section.objects.filter(course=self.course).first()
+      section.students.add(self.course.students.last())
+      assignment.hideFrom.add(section)
+
+    def assertModification(self, detail):
+      assignment = Assignment.objects.get(id=detail)
+      self.assertTrue(assignment.hideFrom.exists())
+
+    super().__init__(*args, model=self.model, permissions=self.permissions,
+                     modifier=modifier, assertModification=assertModification, **kwargs)

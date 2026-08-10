@@ -630,12 +630,12 @@ class CourseAdmin(admin.ModelAdmin):
 
 @admin.register(Assignment)
 class AssignmentAdmin(admin.ModelAdmin):
-    list_display = ("name", "course", "points", "is_visible", "is_released", 
+    list_display = ("name", "course", "points", "state", "is_visible", "is_released",
                     "submission_count", "test_category_count", "test_case_count", "upload_due_date", "mean_grade", "open_submissions", "open_tests", "created")
     search_fields = ("name", "course__name", "course__period")
-    list_filter = ("isVisible", "isReleased", "allowStudentUpload", "anonymousGrading", AutograderEnabledFilter, AssignmentDueDateFilter,
+    list_filter = ("state", "isVisible", "isReleased", "allowStudentUpload", "anonymousGrading", AutograderEnabledFilter, AssignmentDueDateFilter,
                    "uploadDueDate", "created", "modified")
-    readonly_fields = ("course", "mean", "median", "created", "modified")
+    readonly_fields = ("course", "publishedAt", "scheduledPublishRanAt", "mean", "median", "created", "modified")
     autocomplete_fields = ["course"]
     list_select_related = ("course",)
     list_per_page = 50
@@ -648,8 +648,11 @@ class AssignmentAdmin(admin.ModelAdmin):
         ("Basic Information", {
             "fields": ("name", "course", "points", "sortKey", "explanation")
         }),
-        ("Visibility", {
-            "fields": ("isVisible", "isReleased", "hideGrades", "anonymousGrading")
+        ("Lifecycle", {
+            "fields": ("state", "publishAt", "publishedAt", "scheduledPublishRanAt",
+                       "isVisible", "isReleased", "hideGrades", "anonymousGrading"),
+            "description": ("state is the source of truth; the legacy isVisible/isReleased "
+                            "booleans are derived from it on save."),
         }),
         ("Student Upload Settings", {
             "fields": ("allowStudentUpload", "allowStudentUploadWithPartners", 
@@ -725,16 +728,25 @@ class AssignmentAdmin(admin.ModelAdmin):
     open_tests.short_description = "Tests"
     
     def release_assignments(self, request: Any, queryset: Any) -> None:
-        """Release selected assignments"""
-        updated = queryset.update(isReleased=True, isVisible=True)
-        self.message_user(request, f"{updated} assignment(s) released.")
-    release_assignments.short_description = "Release selected assignments"
-    
+        """Publish selected assignments. Loops with save() (not queryset.update) so the
+        lifecycle sync, publishedAt stamp, and quiz-deadline signals all run."""
+        updated = 0
+        for assignment in queryset:
+            assignment.state = 'published'
+            assignment.save()
+            updated += 1
+        self.message_user(request, f"{updated} assignment(s) published.")
+    release_assignments.short_description = "Publish selected assignments"
+
     def hide_assignments(self, request: Any, queryset: Any) -> None:
-        """Hide selected assignments"""
-        updated = queryset.update(isVisible=False)
-        self.message_user(request, f"{updated} assignment(s) hidden.")
-    hide_assignments.short_description = "Hide selected assignments"
+        """Move selected assignments back to draft (hidden from students)."""
+        updated = 0
+        for assignment in queryset:
+            assignment.state = 'draft'
+            assignment.save()
+            updated += 1
+        self.message_user(request, f"{updated} assignment(s) moved to draft.")
+    hide_assignments.short_description = "Hide selected assignments (draft)"
     
     def enable_student_upload(self, request: Any, queryset: Any) -> None:
         """Enable student upload for selected assignments"""

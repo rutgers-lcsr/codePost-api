@@ -73,7 +73,7 @@ def setUpBase(self):
               "course": course.id,
               "name": 'New Assignment',
               "points": 25,
-              "isReleased": False
+              "state": 'draft'
           },
           "update": {
               "points": 30

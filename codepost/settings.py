@@ -183,6 +183,9 @@ SPECTACULAR_SETTINGS = {
     # (otherwise drf-spectacular assigns hash-suffixed names that change between
     # runs and break the generated TS client's named enum imports).
     'ENUM_NAME_OVERRIDES': {
+        # Assignment lifecycle — shared by Assignment.state and the read-only
+        # effectiveState serializer field.
+        'AssignmentStateEnum': 'core.models.ASSIGNMENT_STATE_CHOICES',
         # pending/accepted/rejected — shared by SuggestedComment and SuggestedQuizQuestion.
         'SuggestedCommentStatusEnum': [
             ('pending', 'Pending'), ('accepted', 'Accepted'), ('rejected', 'Rejected'),
@@ -695,6 +698,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     "run-scheduled-quiz-generation": {
         "task": "core.tasks.run_scheduled_quiz_generation",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "run-scheduled-assignment-publish": {
+        "task": "core.tasks.run_scheduled_assignment_publish",
         "schedule": crontab(minute="*/5"),  # Every 5 minutes
     },
     "auto-improve-prompts": {

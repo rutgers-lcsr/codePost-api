@@ -56,7 +56,7 @@ class TestGoldenPath(APITestCase):
         assignment_data = {
             "name": "Homework 1",
             "points": 100,
-            "isReleased": True,
+            "state": "published",
             "allowStudentUpload": True,
             "course": course_id
         }

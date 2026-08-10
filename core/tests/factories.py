@@ -199,6 +199,10 @@ class AssignmentFactory(factory.django.DjangoModelFactory):
   name = 'Hello World'
   points = 20
   isReleased = False
+  # preview mirrors the pre-lifecycle default (isVisible=True, isReleased=False):
+  # students can see and download, not submit. Tests exercising submit/draft/etc.
+  # set state explicitly.
+  state = 'preview'
   course = factory.SubFactory('core.tests.factories.CourseFactory')
 
   submissions = factory.RelatedFactory(SubmissionFactory, 'assignment')

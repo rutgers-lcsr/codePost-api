@@ -15,14 +15,14 @@ class TestSerializer_AssignmentSerializer(APITestCase):
         self.instance_attributes = {
             "name": "Sierpinski",
             "points": 30,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course
         }
 
         self.serializer_data = {
             "name": "Nbody",
             "points": 100,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id
         }
 
@@ -58,7 +58,7 @@ class TestSerializer_AssignmentSerializer(APITestCase):
         response = request_as("create", admin, "/assignments/", {
             "name": "NewAsg",
             "points": 50,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id,
         })
         self.assertEqual(response.status_code, 201)
@@ -73,14 +73,14 @@ class TestSerializer_AssignmentSerializerWithStatistics(APITestCase):
         self.instance_attributes = {
             "name": "Sierpinski",
             "points": 30,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course
         }
 
         self.serializer_data = {
             "name": "Nbody",
             "points": 100,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id
         }
 
@@ -115,14 +115,14 @@ class TestSerializer_AssignmentStudentSerializer(APITestCase):
         self.instance_attributes = {
             "name": "Sierpinski",
             "points": 30,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course
         }
 
         self.serializer_data = {
             "name": "Nbody",
             "points": 100,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id
         }
 

@@ -147,11 +147,21 @@ def copy_assignment(assignment: Assignment, destination_course: Course,
   new_assignment.name = new_name
   new_assignment.course_id = destination_course.id  # type: ignore[attr-defined]
 
-  # Reset student-facing settings for safety when cloning to a new course
+  # Reset student-facing settings for safety when cloning to a new course. A clone must
+  # land fully inert: draft, upload disabled, no schedules. (Without the upload reset a
+  # clone with no uploadDueDate would accept student uploads forever.)
+  new_assignment.state = 'draft'
+  new_assignment.publishedAt = None
+  new_assignment.publishAt = None
+  new_assignment.scheduledPublishRanAt = None
   new_assignment.isReleased = False
   new_assignment.isVisible = False
   new_assignment.feedbackReleased = False
   new_assignment.liveFeedbackMode = False
+  new_assignment.allowStudentUpload = False
+  new_assignment.allowStudentUploadWithPartners = False
+  # Note: hideFrom (M2M) is intentionally not carried over — pk=None + save() drops it,
+  # which is the fail-safe direction for a draft clone.
 
   # Reset dates
   new_assignment.uploadDueDate = None  # type: ignore[assignment]  # Django DateTimeField accepts None

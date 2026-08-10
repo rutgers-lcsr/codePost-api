@@ -39,6 +39,54 @@ def finalize_expired_quiz_attempts():
     return count
 
 @shared_task
+def run_scheduled_assignment_publish():
+    """One-shot scheduled publish for assignments: when a visible/preview assignment's
+    publishAt arrives, transition it to published. scheduledPublishRanAt makes the run
+    one-shot; moving publishAt forward past the stamp re-arms it. Drafts and archived
+    assignments never auto-publish — the schedule only fires from a student-visible
+    pre-published state (mirrors run_scheduled_quiz_generation).
+    """
+    from django.db.models import F, Q
+    from core.models import Assignment
+    from core.services.audit import record_audit_event
+
+    now = timezone.now()
+    due = Assignment.objects.filter(
+        state__in=('visible', 'preview'), course__archived=False,
+        publishAt__isnull=False, publishAt__lte=now,
+    ).filter(
+        Q(scheduledPublishRanAt__isnull=True)
+        | Q(scheduledPublishRanAt__lt=F('publishAt'))
+    )
+    # Snapshot ids first (stamping mutates rows out of the filter), and isolate each
+    # assignment so one bad row can't strand the others.
+    count = 0
+    for assignment_id in list(due.values_list('id', flat=True)):
+        try:
+            assignment = Assignment.objects.get(pk=assignment_id)
+            old_state = assignment.state
+            # Stamp BEFORE the transition lands so a crash can't re-fire every tick.
+            assignment.scheduledPublishRanAt = now
+            assignment.state = 'published'
+            assignment.save()
+            record_audit_event(
+                course=assignment.course,
+                event_type='assignment_state_changed',
+                user=None,
+                assignment=assignment,
+                meta={'from': old_state, 'to': 'published', 'scheduled': True},
+            )
+            count += 1
+        except Assignment.DoesNotExist:
+            continue
+        except Exception:
+            logger.exception(f"Failed scheduled publish for assignment {assignment_id}")
+    if count:
+        logger.info(f"Scheduled publish fired for {count} assignment(s)")
+    return count
+
+
+@shared_task
 def delete_expired_courses():
     """
     Deletes courses whose expiration_date has passed.

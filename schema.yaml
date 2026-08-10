@@ -16176,8 +16176,45 @@ components:
           type: string
           description: The name of the assignment.
           maxLength: 32
+        state:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentStateEnum'
+          description: |-
+            Lifecycle state: draft -> visible -> preview -> published -> closed -> archived. Students see visible through closed, download files from preview onward, and submit only while published.
+
+            * `draft` - Draft
+            * `visible` - Visible
+            * `preview` - Preview
+            * `published` - Published
+            * `closed` - Closed
+            * `archived` - Archived
+        effectiveState:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentStateEnum'
+          readOnly: true
+        publishedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the assignment last entered the published state. Cleared
+            if it moves back to a pre-published state (not on close/archive).
+        publishAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Visible/Preview assignments auto-publish at this time (checked
+            every few minutes).
+        scheduledPublishRanAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the scheduled publishAt run last fired (one-shot stamp).
+            Moving publishAt past this re-arms the run.
         isReleased:
           type: boolean
+          readOnly: true
           description: A boolean field. 'True' if the assignment is released for students
             to view. 'False' otherwise.
         feedbackReleased:
@@ -16249,6 +16286,7 @@ components:
           description: The explanation of an assignment, visible to students.
         isVisible:
           type: boolean
+          readOnly: true
           description: A boolean field. 'True' if the assignment is viewable by students.
         hideFrom:
           type: array
@@ -16370,15 +16408,20 @@ components:
       required:
       - course
       - dataSets
+      - effectiveState
       - environment
       - fileTemplates
       - files
       - id
+      - isReleased
+      - isVisible
       - maxStudentTestRuns
       - name
       - nudgeMode
       - points
+      - publishedAt
       - rubricCategories
+      - scheduledPublishRanAt
       - testCategories
     AssignmentAnalyticsAttemptDistribution:
       type: object
@@ -17125,6 +17168,22 @@ components:
       - id
       - rubricCategories
       - rubricComments
+    AssignmentStateEnum:
+      enum:
+      - draft
+      - visible
+      - preview
+      - published
+      - closed
+      - archived
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `visible` - Visible
+        * `preview` - Preview
+        * `published` - Published
+        * `closed` - Closed
+        * `archived` - Archived
     AssignmentStudentTestsResponse:
       type: object
       properties:
@@ -20132,8 +20191,45 @@ components:
           type: string
           description: The name of the assignment.
           maxLength: 32
+        state:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentStateEnum'
+          description: |-
+            Lifecycle state: draft -> visible -> preview -> published -> closed -> archived. Students see visible through closed, download files from preview onward, and submit only while published.
+
+            * `draft` - Draft
+            * `visible` - Visible
+            * `preview` - Preview
+            * `published` - Published
+            * `closed` - Closed
+            * `archived` - Archived
+        effectiveState:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentStateEnum'
+          readOnly: true
+        publishedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the assignment last entered the published state. Cleared
+            if it moves back to a pre-published state (not on close/archive).
+        publishAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Visible/Preview assignments auto-publish at this time (checked
+            every few minutes).
+        scheduledPublishRanAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the scheduled publishAt run last fired (one-shot stamp).
+            Moving publishAt past this re-arms the run.
         isReleased:
           type: boolean
+          readOnly: true
           description: A boolean field. 'True' if the assignment is released for students
             to view. 'False' otherwise.
         feedbackReleased:
@@ -20205,6 +20301,7 @@ components:
           description: The explanation of an assignment, visible to students.
         isVisible:
           type: boolean
+          readOnly: true
           description: A boolean field. 'True' if the assignment is viewable by students.
         hideFrom:
           type: array

@@ -20,6 +20,7 @@ from core.permissions.helpers import (
     isStaffOfSub,
     isStudent,
     isStudentOfSub,
+    studentCanSeeAssignment,
 )
 from core.permissions.template import TemplatePermission
 from core.services import seb
@@ -171,27 +172,33 @@ class SectionPermissions(TemplatePermission):
         return isCourseAdmin(user, course)
 
 
+# Student-facing upload actions on AssignmentViewSet. Their POST/PATCH bodies must pass
+# the same read gate as GET here — the finer submit gate (published + allowStudentUpload)
+# lives in the upload_submission capability, checked in the view.
+STUDENT_UPLOAD_ACTIONS = {'studentUpload', 'beforeStudentUpload'}
+
+
 class AssignmentPermissions(TemplatePermission):
     """
     Permissions for Assignment objects.
-    
-    - POST/PUT/PATCH/DELETE: Course admins only
-    - GET: Superuser, course staff, or students (if assignment is visible)
+
+    - GET (and the student upload actions): superuser, course staff, or students the
+      assignment's lifecycle state allows to see it (see Assignment.state / hideFrom)
+    - All other write operations: course admins only
     """
 
     def has_object_permission(self, request, view, obj):
         user = cast(User, request.user)
         course = obj.course
 
-        # GET: superuser, course staff, or course members (if visible)
-        if request.method == "GET":
+        if request.method == "GET" or getattr(view, 'action', None) in STUDENT_UPLOAD_ACTIONS:
             return (
                 user.is_superuser
                 or isCourseStaff(user, course)
-                or (obj.isVisible and isCourseMember(user, course))
+                or (isStudent(user, course) and studentCanSeeAssignment(user, obj))
             )
 
-        # All write operations: course admin only
+        # All other write operations: course admin only
         return isCourseAdmin(user, course)
 
 

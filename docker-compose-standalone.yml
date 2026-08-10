@@ -143,6 +143,41 @@ services:
                 max-size: "10m"
                 max-file: "3"
 
+    # ─── Celery Beat (scheduler) ───────────────────────────────────────
+    # Fires CELERY_BEAT_SCHEDULE (scheduled assignment publish, quiz sweeps, course
+    # expiry). Single-box stack, so exactly one beat by construction — never scale this
+    # service: the sweep tasks rely on single-scheduler semantics (no row locking).
+    codepost-beat:
+        container_name: codepost-beat
+        build:
+            context: .
+            target: worker
+        env_file:
+            - .env
+        environment:
+            - DEBUG=False
+            - CELERY_BROKER_URL=redis://codepost-redis:6379
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
+            - DB_NAME=codepost
+            - DB_HOSTNAME=codepost-database
+            - DB_PORT=3306
+            - DB_USERNAME=codepost_user
+            - DB_PASSWORD=${DB_PASSWORD}
+            - SECRET_KEY=${SECRET_KEY}
+        command: ["sh", "-c", "celery --app autograder beat --loglevel info --schedule /tmp/celerybeat-schedule"]
+        depends_on:
+            codepost-database:
+                condition: service_healthy
+            codepost-redis:
+                condition: service_healthy
+        restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
     # ─── Shell Relay (interactive terminal sessions) ───────────────────
     codepost-worker-shell:
         container_name: codepost-worker-shell

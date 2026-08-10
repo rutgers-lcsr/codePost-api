@@ -116,8 +116,7 @@ class TestAssignmentLifecycle(APITestCase):
             "name": "Homework 1 — Linked Lists",
             "points": 100,
             "course": course_id,
-            "isReleased": False,
-            "isVisible": True,
+            "state": "published",            # Open for submissions (feedback held)
             "allowStudentUpload": True,      # Students can upload
             "feedbackReleased": False,        # Feedback NOT released yet
         }, format="json")

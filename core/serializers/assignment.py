@@ -3,7 +3,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
-from core.models import Assignment
+from core.models import Assignment, ASSIGNMENT_STATE_CHOICES
 from django.contrib.auth.models import User
 
 from core.auth import type_of_auth
@@ -24,6 +24,7 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   files = serializers.SerializerMethodField('get_files')
   dataSets = serializers.SerializerMethodField('get_datasets')
   fileTemplates = serializers.SerializerMethodField('get_file_templates')
+  effectiveState = serializers.SerializerMethodField('get_effective_state')
 
   lateDeductions = serializers.JSONField(default=[])  # type: ignore[arg-type]  # DRF accepts list as default
 
@@ -57,6 +58,12 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
     # FileTemplate is deprecated - return empty array for backwards compatibility
     return []
 
+  @extend_schema_field(serializers.ChoiceField(choices=ASSIGNMENT_STATE_CHOICES))
+  def get_effective_state(self, obj):
+    # The badge clients render: stored state, except a past-deadline published
+    # assignment reads as closed. Nobody reimplements the deadline math.
+    return obj.effective_state()
+
   def validate(self, data):
 
     newData = super().validate(data)
@@ -68,21 +75,65 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
         if not isinstance(deduction, int):
           raise serializers.ValidationError("lateDeductions must be numbers.")
 
+    # Deprecation shim (until Phase 4): the legacy booleans are read-only, derived from
+    # state. Reject writes loudly instead of letting them silently no-op.
+    if self.initial_data is not None:
+      for legacy in ('isVisible', 'isReleased'):
+        if legacy in self.initial_data:
+          raise serializers.ValidationError({
+              legacy: f"{legacy} is read-only — set state "
+                      "(draft/visible/preview/published/closed/archived) instead."})
+
+    # A scheduled publish time only makes sense before the assignment is published.
+    # Only enforce when this change introduces the bad pairing (legacy rows stay editable).
+    proposed_state = newData.get('state', getattr(self.instance, 'state', 'draft'))
+    proposed_publish_at = newData.get('publishAt', getattr(self.instance, 'publishAt', None))
+    already_bad = (self.instance is not None and self.instance.publishAt is not None
+                   and self.instance.state in ('published', 'closed', 'archived'))
+    if (proposed_publish_at is not None and proposed_state in ('published', 'closed', 'archived')
+        and not already_bad):
+      if newData.get('state') in ('published', 'closed', 'archived') and 'publishAt' not in newData:
+        # Publishing (or closing/archiving) an assignment that had a schedule: the
+        # schedule is moot — clear it rather than reject the transition.
+        newData['publishAt'] = None
+      else:
+        raise serializers.ValidationError({
+            'publishAt': "A scheduled publish time can only be set while the assignment "
+                         "is draft, visible, or preview."})
+
     return newData
+
+  def validate_hideFrom(self, sections):
+    # Nothing else checks this: a section from another course must not be attachable.
+    if not sections:
+      return sections
+    if self.instance is not None:
+      course_id = self.instance.course_id
+    else:
+      course_id = self.initial_data.get('course')
+    if course_id is None:
+      return sections  # create without course fails field validation elsewhere
+    for section in sections:
+      if section.course_id != int(course_id):
+        raise serializers.ValidationError(
+            "hideFrom sections must belong to the assignment's course.")
+    return sections
 
   class Meta:
     model = Assignment
-    fields = ('id', 'name', 'isReleased', 'feedbackReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
+    fields = ('id', 'name', 'state', 'effectiveState', 'publishedAt', 'publishAt', 'scheduledPublishRanAt', 'isReleased', 'feedbackReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
               'uploadDueDate', 'maxLateDays', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions', 'studentsCanSeeGraders', 'dataSets')
     POST_permissions_fields = ('course',)
-    read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'nudgeMode', 'dataSets')
+    # scheduledPublishRanAt is the one-shot stamp of the scheduled publish sweep.
+    read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'nudgeMode', 'dataSets',
+                        'effectiveState', 'publishedAt', 'scheduledPublishRanAt', 'isVisible', 'isReleased')
 
 
 class AssignmentStudentSerializer(AssignmentSerializerBase):
 
   class Meta(AssignmentSerializerBase.Meta):
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + \
-        ('course', 'isReleased', 'feedbackReleased', 'name', 'sortKey', 'lateDeductions')
+        ('course', 'state', 'publishAt', 'feedbackReleased', 'name', 'sortKey', 'lateDeductions')
 
   def get_files(self, obj):
     return AssignmentFilePublicSerializer(obj.files.all(), many=True).data
