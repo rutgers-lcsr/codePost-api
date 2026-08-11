@@ -110,7 +110,7 @@ class TestPermissions_RubricComment_LiveFeedback(BaseTestCases.TestPermissions):
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.liveFeedbackMode = True
+      assignment.feedbackStatus = 'live'
       assignment.save()
 
     def assertModification(self, detail):
@@ -118,7 +118,7 @@ class TestPermissions_RubricComment_LiveFeedback(BaseTestCases.TestPermissions):
       assignment = rubricComment.category.assignment
       submission = Submission.objects.filter(assignment__course=self.course).first()
       self.assertEqual(submission.assignment, rubricComment.category.assignment)
-      self.assertTrue(assignment.liveFeedbackMode)
+      self.assertEqual(assignment.feedbackStatus, 'live')
       self.assertFalse(assignment.collaborativeRubricMode)
       self.assertNotIn(assignment.state, ('published', 'closed'))
 

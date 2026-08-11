@@ -206,7 +206,7 @@ class TestConsoleDataEndpoint(APITestCase):
 
         from core.models import Assignment
         assignment = Assignment.objects.get(id=self.assignment_id)
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
 
         # Finalize the submission via grader

@@ -582,8 +582,7 @@ class TestAssignmentCapsExtended(APITestCase):
     def test_student_no_rubric_before_release(self):
         with factory.django.mute_signals(post_save):
             self.assignment.state = 'preview'
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
@@ -596,28 +595,28 @@ class TestAssignmentCapsExtended(APITestCase):
     def test_student_sees_rubric_after_release(self):
         with factory.django.mute_signals(post_save):
             self.assignment.state = 'preview'
-            self.assignment.feedbackReleased = True
+            self.assignment.feedbackStatus = 'released'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
             self.assertTrue(caps['view_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_student_sees_rubric_live_feedback(self):
         with factory.django.mute_signals(post_save):
             self.assignment.state = 'preview'
-            self.assignment.liveFeedbackMode = True
+            self.assignment.feedbackStatus = 'live'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
             self.assertTrue(caps['view_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.liveFeedbackMode = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.state = 'draft'
                 self.assignment.save()
 
@@ -888,34 +887,33 @@ class TestSubmissionCapsExtended(APITestCase):
     # -- view_feedback depends on release state --
     def test_student_no_feedback_before_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         caps = self._get(self.student).data['capabilities']
         self.assertFalse(caps['view_feedback'])
 
     def test_student_feedback_after_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = True
+            self.assignment.feedbackStatus = 'released'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilities']
             self.assertTrue(caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.save()
 
     def test_student_feedback_live_mode(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.liveFeedbackMode = True
+            self.assignment.feedbackStatus = 'live'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilities']
             self.assertTrue(caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.liveFeedbackMode = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.save()
 
     def test_grader_always_sees_feedback(self):
@@ -1231,12 +1229,11 @@ class TestCourseSettingsCombinations(APITestCase):
                 self.course.archived = False
                 self.course.save()
 
-    # -- feedbackReleased + liveFeedbackMode both off: student can't see feedback or rubric --
+    # -- feedback hidden: student can't see feedback or rubric --
     def test_no_feedback_modes_blocks_student(self):
         with factory.django.mute_signals(post_save):
             self.assignment.state = 'preview'
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         try:
             caps = self._get_assignment(self.student).data['capabilitiesMap']
@@ -1248,12 +1245,11 @@ class TestCourseSettingsCombinations(APITestCase):
                 self.assignment.state = 'draft'
                 self.assignment.save()
 
-    # -- feedbackReleased + liveFeedbackMode both on: student can see both --
+    # -- live feedback: student can see rubric and feedback --
     def test_both_feedback_modes_on(self):
         with factory.django.mute_signals(post_save):
             self.assignment.state = 'preview'
-            self.assignment.feedbackReleased = True
-            self.assignment.liveFeedbackMode = True
+            self.assignment.feedbackStatus = 'live'
             self.assignment.save()
         try:
             caps = self._get_assignment(self.student).data['capabilitiesMap']
@@ -1262,8 +1258,7 @@ class TestCourseSettingsCombinations(APITestCase):
             self.assertTrue(sub_caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
-                self.assignment.liveFeedbackMode = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.state = 'draft'
                 self.assignment.save()
 
@@ -1669,8 +1664,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
 
     def test_checkPermission_student_filesOnly_when_no_feedback(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         url = f'/submissions/{self.submission.id}/checkPermission/'
         resp = self._client_for(self.student).get(url)
@@ -1678,7 +1672,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
 
     def test_checkPermission_student_full_when_feedback_released(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = True
+            self.assignment.feedbackStatus = 'released'
             self.assignment.save()
         try:
             url = f'/submissions/{self.submission.id}/checkPermission/'
@@ -1686,7 +1680,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
             self.assertFalse(resp.data['filesOnly'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.save()
 
     # -- email: requires manage_roster (admin only) --

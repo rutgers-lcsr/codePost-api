@@ -95,6 +95,49 @@ def studentCanSubmitToAssignment(user, assignment):
   return (assignment.effective_state() == 'published'
           and not isAssignmentHiddenFromStudent(user, assignment))
 
+# --- Feedback-axis predicates --------------------------------------------------------
+# The single source of truth for what a student may see of grading, keyed off
+# Assignment.feedbackStatus (hidden/live/per_student/released) + the orthogonal
+# hideGrades modifier. Callers must have already established the caller is the
+# submission's student / a course student.
+
+def feedbackOpenForSubmission(submission):
+  """Comments/rubric/feedback axis open for this submission's student.
+
+  live and released open unconditionally (released content views additionally require
+  isFinalized at their gates, as before); per_student opens exactly when THIS
+  submission is finalized."""
+  status = submission.assignment.feedbackStatus
+  if status in ('live', 'released'):
+    return True
+  if status == 'per_student':
+    return submission.isFinalized
+  return False
+
+def gradesVisibleForSubmission(submission):
+  """Numeric grades: feedback open AND not masked by hideGrades."""
+  return feedbackOpenForSubmission(submission) and not submission.assignment.hideGrades
+
+def testResultsVisibleForSubmission(submission):
+  """Full test results / autograder logs: live immediately; released/per_student only
+  once the submission is finalized (the pre-existing conjunction, per_student-aware)."""
+  status = submission.assignment.feedbackStatus
+  if status == 'live':
+    return True
+  return status in ('released', 'per_student') and submission.isFinalized
+
+def assignmentFeedbackOpen(assignment, user=None):
+  """Assignment-level feedback gate (rubric visibility, serializer choice).
+
+  live/released open for every student; per_student opens for a user once they have a
+  finalized submission (one bounded query, only on the per_student path)."""
+  status = assignment.feedbackStatus
+  if status in ('live', 'released'):
+    return True
+  if status == 'per_student' and user is not None:
+    return assignment.submissions.filter(students=user, isFinalized=True).exists()
+  return False
+
 def isSectionLeader(user, section):
   return user in section.leaders.all()
 

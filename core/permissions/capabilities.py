@@ -252,10 +252,10 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
     # all graders if the course-level setting is on.
     can_edit_rubric = admin or rubric_editor or (grader and course.allowGradersToEditRubric)
 
-    # Students can view the rubric only after feedback is released or live mode is on
-    student_can_see_rubric = (
-        student and (assignment.feedbackReleased or assignment.liveFeedbackMode)
-    )
+    # Students see the rubric once the feedback axis opens for them (live/released,
+    # or per_student with a finalized submission).
+    from core.permissions.helpers import assignmentFeedbackOpen
+    student_can_see_rubric = student and assignmentFeedbackOpen(assignment, user)
 
     super_grader = rc.is_super_grader(course)
 
@@ -294,7 +294,8 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
     student_of_sub = rc.is_student_of_sub(submission)
     archived = course.archived
     super_grader = rc.is_super_grader(course)
-    feedback_available = assignment.feedbackReleased or assignment.liveFeedbackMode
+    from core.permissions.helpers import feedbackOpenForSubmission, testResultsVisibleForSubmission
+    feedback_available = feedbackOpenForSubmission(submission)
 
     _student = rc.is_student(course)
 
@@ -317,7 +318,7 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
         Capability.REQUEST_REGRADE: student_of_sub and bool(getattr(assignment, 'allowRegradeRequests', False)),
         Capability.MANAGE_REGRADES: admin or super_grader,
         Capability.RUN_AUTOGRADER: staff_of_sub,
-        Capability.VIEW_TEST_RESULTS: staff_of_sub or (student_of_sub and feedback_available),
+        Capability.VIEW_TEST_RESULTS: staff_of_sub or (student_of_sub and testResultsVisibleForSubmission(submission)),
         Capability.RUN_CODE: staff_of_sub or student_of_sub,
         Capability.GENERATE_AI_COMMENTS: staff_of_sub and not getattr(course, 'ai_disabled', False) and not getattr(course, 'ai_comments_disabled', False),
         Capability.MANAGE_PARTNERS: student_of_sub and rc.student_can_submit_to_assignment(assignment) and bool(getattr(assignment, 'allowStudentUploadWithPartners', False)) and not archived,

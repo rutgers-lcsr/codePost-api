@@ -16215,10 +16215,32 @@ components:
         isReleased:
           type: boolean
           readOnly: true
+        feedbackStatus:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentFeedbackStatusEnum'
+          description: |-
+            How grading becomes visible to students: hidden (nothing), live (as it's written), per_student (each student once their submission is finalized), released (finalized submissions, globally).
+
+            * `hidden` - Hidden
+            * `live` - Live
+            * `per_student` - Per student
+            * `released` - Released
+        releaseFeedbackAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Hidden/per-student assignments auto-release feedback at this
+            time (checked every few minutes).
+        scheduledFeedbackReleaseRanAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the scheduled releaseFeedbackAt run last fired (one-shot
+            stamp). Moving releaseFeedbackAt past this re-arms the run.
         feedbackReleased:
           type: boolean
-          description: A boolean field. 'True' if grades/feedback are released for
-            students to view. 'False' otherwise.
+          readOnly: true
         course:
           type: integer
           description: The related course_id.
@@ -16250,8 +16272,7 @@ components:
             continue to accept submissions for this assignment.
         liveFeedbackMode:
           type: boolean
-          description: A boolean field. If true, students can see their submission
-            and comments before finalization and published
+          readOnly: true
         allowLateUploads:
           type: boolean
           description: A boolean field. If True and an uploadDueDate is set, students
@@ -16315,8 +16336,8 @@ components:
           description: Total points for the assignment.
         hideGrades:
           type: boolean
-          description: A boolean field. 'True' if the students should not see their
-            grades for this assignment. 'False' otherwise.
+          description: A boolean field. If True, numeric grades are masked from students
+            in any revealing feedbackStatus — they still see comments and the rubric.
         anonymousGrading:
           type: boolean
           description: A boolean field. If 'True', graders will not have access to
@@ -16407,17 +16428,20 @@ components:
       - dataSets
       - effectiveState
       - environment
+      - feedbackReleased
       - fileTemplates
       - files
       - id
       - isReleased
       - isVisible
+      - liveFeedbackMode
       - maxStudentTestRuns
       - name
       - nudgeMode
       - points
       - publishedAt
       - rubricCategories
+      - scheduledFeedbackReleaseRanAt
       - scheduledPublishRanAt
       - testCategories
     AssignmentAnalyticsAttemptDistribution:
@@ -16992,6 +17016,18 @@ components:
       required:
       - filename
       - zip
+    AssignmentFeedbackStatusEnum:
+      enum:
+      - hidden
+      - live
+      - per_student
+      - released
+      type: string
+      description: |-
+        * `hidden` - Hidden
+        * `live` - Live
+        * `per_student` - Per student
+        * `released` - Released
     AssignmentFile:
       type: object
       description: |-
@@ -20227,10 +20263,32 @@ components:
         isReleased:
           type: boolean
           readOnly: true
+        feedbackStatus:
+          allOf:
+          - $ref: '#/components/schemas/AssignmentFeedbackStatusEnum'
+          description: |-
+            How grading becomes visible to students: hidden (nothing), live (as it's written), per_student (each student once their submission is finalized), released (finalized submissions, globally).
+
+            * `hidden` - Hidden
+            * `live` - Live
+            * `per_student` - Per student
+            * `released` - Released
+        releaseFeedbackAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Hidden/per-student assignments auto-release feedback at this
+            time (checked every few minutes).
+        scheduledFeedbackReleaseRanAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the scheduled releaseFeedbackAt run last fired (one-shot
+            stamp). Moving releaseFeedbackAt past this re-arms the run.
         feedbackReleased:
           type: boolean
-          description: A boolean field. 'True' if grades/feedback are released for
-            students to view. 'False' otherwise.
+          readOnly: true
         course:
           type: integer
           description: The related course_id.
@@ -20262,8 +20320,7 @@ components:
             continue to accept submissions for this assignment.
         liveFeedbackMode:
           type: boolean
-          description: A boolean field. If true, students can see their submission
-            and comments before finalization and published
+          readOnly: true
         allowLateUploads:
           type: boolean
           description: A boolean field. If True and an uploadDueDate is set, students
@@ -20327,8 +20384,8 @@ components:
           description: Total points for the assignment.
         hideGrades:
           type: boolean
-          description: A boolean field. 'True' if the students should not see their
-            grades for this assignment. 'False' otherwise.
+          description: A boolean field. If True, numeric grades are masked from students
+            in any revealing feedbackStatus — they still see comments and the rubric.
         anonymousGrading:
           type: boolean
           description: A boolean field. If 'True', graders will not have access to

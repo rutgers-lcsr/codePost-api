@@ -154,8 +154,10 @@ def copy_assignment(assignment: Assignment, destination_course: Course,
   new_assignment.publishedAt = None
   new_assignment.publishAt = None
   new_assignment.scheduledPublishRanAt = None
-  new_assignment.feedbackReleased = False
-  new_assignment.liveFeedbackMode = False
+  new_assignment.feedbackStatus = 'hidden'
+  new_assignment.releaseFeedbackAt = None
+  new_assignment.scheduledFeedbackReleaseRanAt = None
+  new_assignment.feedbackReleasedAt = None
   new_assignment.allowStudentUpload = False
   new_assignment.allowStudentUploadWithPartners = False
   # Note: hideFrom (M2M) is intentionally not carried over — pk=None + save() drops it,

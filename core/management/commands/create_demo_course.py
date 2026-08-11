@@ -225,7 +225,7 @@ class Command(BaseCommand):
             "forcedRubricMode": True,
             "hideGrades": True,
             "state": "published",
-            "feedbackReleased": True,
+            "feedbackStatus": "released",
             "commentFeedback": True,
         })
         self._add_rubric(a3, deductive=False)
@@ -252,10 +252,10 @@ class Command(BaseCommand):
             "allowRegradeRequests": True,
             "regradeInstructions": "Explain which rubric comment you disagree with and why.\n\n**Be specific.**",
             "regradeDeadline": now + timedelta(days=14),
-            "liveFeedbackMode": True,
+            "feedbackStatus": "live",
             "collaborativeRubricMode": True,
             "state": "published",
-            "feedbackReleased": True,
+            "feedbackStatus": "released",
             "studentsCanSeeGraders": True,
         })
         self._add_rubric(a4, deductive=True)
@@ -300,7 +300,7 @@ class Command(BaseCommand):
             "testsAffectGrade": True,
             "runFilesOnSubmit": True,
             "state": "published",
-            "feedbackReleased": True,
+            "feedbackStatus": "released",
         })
         # Environment
         Environment.objects.update_or_create(
@@ -362,7 +362,7 @@ class Command(BaseCommand):
         # ══════════════════════════════════════════════════════════════
         a9 = self._ensure_assignment(course, "9. Released+Frozen", points=100, sortKey=9, extra={
             "state": "published",
-            "feedbackReleased": True,
+            "feedbackStatus": "released",
             "hideGradersFromStudents": False,
         })
         self._add_rubric(a9, deductive=True)
@@ -379,7 +379,7 @@ class Command(BaseCommand):
         # ══════════════════════════════════════════════════════════════
         a10 = self._ensure_assignment(course, "10. Notebook", points=50, sortKey=10, extra={
             "state": "published",
-            "feedbackReleased": True,
+            "feedbackStatus": "released",
             "allowStudentUpload": True,
             "uploadDueDate": now + timedelta(days=10),
         })
@@ -415,7 +415,7 @@ class Command(BaseCommand):
         # ══════════════════════════════════════════════════════════════
         a12 = self._ensure_assignment(course, "12. Multi-file+Colors", points=100, sortKey=12, extra={
             "state": "published",
-            "feedbackReleased": True,
+            "feedbackStatus": "released",
         })
         self._add_rubric(a12, deductive=True)
         sub12 = self._add_submission(a12, student, grader, finalized=True, files=[

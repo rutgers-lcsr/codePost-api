@@ -79,7 +79,7 @@ class TestAssignmentDefaults(TestCase):
 
     def test_feedback_released_defaults_false(self):
         a = Assignment.objects.create(name="HW1", points=20, course=self.course)
-        self.assertFalse(a.feedbackReleased)
+        self.assertEqual(a.feedbackStatus, 'hidden')
 
     def test_sort_key_defaults_zero(self):
         a = Assignment.objects.create(name="HW1", points=20, course=self.course)

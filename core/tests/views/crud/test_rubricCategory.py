@@ -23,7 +23,7 @@ class TestPermissions_RubricCategory_Released(BaseTestCases.TestPermissions):
       assignment = submission.assignment
       # Students see rubric categories once feedback is released (Phase 4 gate)
       assignment.state = 'published'
-      assignment.feedbackReleased = True
+      assignment.feedbackStatus = 'released'
       assignment.save()
 
     def assertModification(self, detail):
@@ -70,7 +70,7 @@ class TestPermissions_RubricCategory_ReleasedCollaborativeRubric(BaseTestCases.T
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
       assignment.state = 'published'
-      assignment.feedbackReleased = True
+      assignment.feedbackStatus = 'released'
       assignment.collaborativeRubricMode = True
       assignment.save()
 
@@ -98,7 +98,7 @@ class TestPermissions_RubricCategory_LiveFeedback(BaseTestCases.TestPermissions)
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.liveFeedbackMode = True
+      assignment.feedbackStatus = 'live'
       assignment.save()
 
     def assertModification(self, detail):
@@ -106,7 +106,7 @@ class TestPermissions_RubricCategory_LiveFeedback(BaseTestCases.TestPermissions)
       assignment = rubricCategory.assignment
       submission = Submission.objects.filter(assignment__course=self.course).first()
       self.assertEqual(submission.assignment, rubricCategory.assignment)
-      self.assertTrue(assignment.liveFeedbackMode)
+      self.assertEqual(assignment.feedbackStatus, 'live')
       self.assertFalse(assignment.collaborativeRubricMode)
       self.assertNotIn(assignment.state, ('published', 'closed'))
 

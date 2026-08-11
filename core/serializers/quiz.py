@@ -149,6 +149,20 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
       if degenerate:
         raise serializers.ValidationError(
             "Set a duration for the close — it would otherwise close the moment the quiz opens.")
+
+    # per_student assignments have no global feedback-release moment, so quiz timing
+    # anchored on it can never fire — reject the combination up front.
+    proposed_assignment = proposed.get('assignment')
+    if proposed_assignment is not None and getattr(proposed_assignment, 'feedbackStatus', None) == 'per_student':
+      if proposed.get('assignmentTrigger') == 'after_feedback':
+        raise serializers.ValidationError(
+            {'assignmentTrigger': "This assignment releases feedback per student — use the "
+             "self-paced trigger (after each student's feedback is ready) instead of the "
+             "whole-assignment feedback trigger."})
+      if proposed.get('closeEvent') == 'feedback_released':
+        raise serializers.ValidationError(
+            {'closeEvent': "This assignment releases feedback per student, so there is no "
+             "single feedback-release moment to close at — pick a different close event."})
     # Generated sections whose prompts draw on assignment/submission data are seeded by
     # the attached assignment; detaching or re-attaching would orphan them (and any
     # per-student sets). Submission-free sections don't depend on the assignment, so the

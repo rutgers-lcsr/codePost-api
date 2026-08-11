@@ -87,6 +87,52 @@ def run_scheduled_assignment_publish():
 
 
 @shared_task
+def run_scheduled_feedback_release():
+    """One-shot scheduled feedback release: when a hidden/per_student assignment's
+    releaseFeedbackAt arrives, transition feedbackStatus to released.
+    scheduledFeedbackReleaseRanAt makes the run one-shot; moving releaseFeedbackAt
+    forward past the stamp re-arms it. live/released assignments never fire (mirrors
+    run_scheduled_assignment_publish).
+    """
+    from django.db.models import F, Q
+    from core.models import Assignment
+    from core.services.audit import record_audit_event
+
+    now = timezone.now()
+    due = Assignment.objects.filter(
+        feedbackStatus__in=('hidden', 'per_student'), course__archived=False,
+        releaseFeedbackAt__isnull=False, releaseFeedbackAt__lte=now,
+    ).filter(
+        Q(scheduledFeedbackReleaseRanAt__isnull=True)
+        | Q(scheduledFeedbackReleaseRanAt__lt=F('releaseFeedbackAt'))
+    )
+    count = 0
+    for assignment_id in list(due.values_list('id', flat=True)):
+        try:
+            assignment = Assignment.objects.get(pk=assignment_id)
+            old_status = assignment.feedbackStatus
+            # Stamp BEFORE the transition lands so a crash can't re-fire every tick.
+            assignment.scheduledFeedbackReleaseRanAt = now
+            assignment.feedbackStatus = 'released'
+            assignment.save()
+            record_audit_event(
+                course=assignment.course,
+                event_type='assignment_feedback_changed',
+                user=None,
+                assignment=assignment,
+                meta={'from': old_status, 'to': 'released', 'scheduled': True},
+            )
+            count += 1
+        except Assignment.DoesNotExist:
+            continue
+        except Exception:
+            logger.exception(f"Failed scheduled feedback release for assignment {assignment_id}")
+    if count:
+        logger.info(f"Scheduled feedback release fired for {count} assignment(s)")
+    return count
+
+
+@shared_task
 def delete_expired_courses():
     """
     Deletes courses whose expiration_date has passed.

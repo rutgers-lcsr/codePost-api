@@ -260,7 +260,9 @@ class Command(BaseCommand):
             defaults={
                 "points": Decimal(str(remote.points)),
                 "state": derived_state,
-                "feedbackReleased": remote.feedback_released or False,
+                "feedbackStatus": ("live" if (remote.live_feedback_mode or False)
+                                   else "released" if (remote.feedback_released or False)
+                                   else "hidden"),
                 "allowStudentUpload": remote.allow_student_upload or False,
                 "anonymousGrading": remote.anonymous_grading or False,
                 "additiveGrading": remote.additive_grading or False,
@@ -268,7 +270,6 @@ class Command(BaseCommand):
                 "forcedRubricMode": remote.forced_rubric_mode or False,
                 "templateMode": remote.template_mode or False,
                 "collaborativeRubricMode": remote.collaborative_rubric_mode or False,
-                "liveFeedbackMode": remote.live_feedback_mode or False,
                 "commentFeedback": remote.comment_feedback if remote.comment_feedback is not None else True,
                 "hideGrades": remote.hide_grades or False,
                 "allowRegradeRequests": remote.allow_regrade_requests or False,

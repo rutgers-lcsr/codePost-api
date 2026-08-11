@@ -175,7 +175,7 @@ class Command(BaseCommand):
             if due is not None:
                 a.uploadDueDate = due
             if feedback:
-                a.feedbackReleased = True  # save() stamps feedbackReleasedAt
+                a.feedbackStatus = 'released'  # save() stamps feedbackReleasedAt
             a.save()
             return a
 

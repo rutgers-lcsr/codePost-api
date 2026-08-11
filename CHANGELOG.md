@@ -73,6 +73,37 @@ documentation (states, derived close, scheduled publish, migration notes).
 - Migration `0140` maps existing rows behavior-preservingly: hidden → draft;
   visible+unreleased without student upload → preview; upload-open or released → published.
 
+### Added — feedback lifecycle (`feedbackStatus`)
+
+- **The feedback axis is now a four-state flow**: `hidden` (default), `live` (feedback
+  appears as it's written), **`per_student` (NEW — each student sees their grades,
+  comments, and rubric as soon as their own submission is finalized, no global
+  switch)**, and `released`. `hideGrades` remains an independent toggle masking numeric
+  grades in any revealing state — including live, which the old model couldn't express
+  losslessly.
+- **Scheduled feedback release**: `releaseFeedbackAt` auto-releases from
+  hidden/per-student via a one-shot, re-armable beat sweep
+  (`run_scheduled_feedback_release`), with audit events.
+- **Admin UI**: a Feedback column beside Status (colored tag + described state picker,
+  same accessibility treatment), per-transition confirmation dialogs, feedback flow +
+  schedule in assignment settings (Publishing tab), and a state selector in the mobile
+  console. The "Live feedback mode" switch is replaced by the flow choice; "Hide
+  grades" toggles stay.
+- **Client accuracy fix**: the student console and upload dialog previously showed
+  feedback as available whenever a submission was finalized, even while feedback was
+  hidden; they now mirror the server's gates exactly.
+
+### Changed — breaking (feedback axis)
+
+- The `feedbackReleased`/`liveFeedbackMode` columns are dropped (migration 0142,
+  lossless mapping); the API returns both as read-only values derived from
+  `feedbackStatus` — writes fail with a 400 pointing at `feedbackStatus`.
+- A new `assignment.feedbackStatus` webhook field event fires on transitions.
+- **per_student × quizzes**: quizzes anchored on the whole-assignment feedback release
+  (`after_feedback` trigger, `feedback_released` close event) are rejected on
+  per-student assignments in both directions — use the self-paced
+  `after_student_feedback` trigger instead.
+
 ### Added — assignment description shown to students
 
 - The instructor-written assignment description (`explanation`) is now actually rendered

@@ -633,9 +633,9 @@ class AssignmentAdmin(admin.ModelAdmin):
     list_display = ("name", "course", "points", "state",
                     "submission_count", "test_category_count", "test_case_count", "upload_due_date", "mean_grade", "open_submissions", "open_tests", "created")
     search_fields = ("name", "course__name", "course__period")
-    list_filter = ("state", "allowStudentUpload", "anonymousGrading", AutograderEnabledFilter, AssignmentDueDateFilter,
+    list_filter = ("state", "feedbackStatus", "allowStudentUpload", "anonymousGrading", AutograderEnabledFilter, AssignmentDueDateFilter,
                    "uploadDueDate", "created", "modified")
-    readonly_fields = ("course", "publishedAt", "scheduledPublishRanAt", "mean", "median", "created", "modified")
+    readonly_fields = ("course", "publishedAt", "scheduledPublishRanAt", "scheduledFeedbackReleaseRanAt", "mean", "median", "created", "modified")
     autocomplete_fields = ["course"]
     list_select_related = ("course",)
     list_per_page = 50
@@ -650,6 +650,7 @@ class AssignmentAdmin(admin.ModelAdmin):
         }),
         ("Lifecycle", {
             "fields": ("state", "publishAt", "publishedAt", "scheduledPublishRanAt",
+                       "feedbackStatus", "releaseFeedbackAt", "scheduledFeedbackReleaseRanAt",
                        "hideGrades", "anonymousGrading"),
         }),
         ("Student Upload Settings", {
@@ -658,7 +659,7 @@ class AssignmentAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
         ("Grading Settings", {
-            "fields": ("additiveGrading", "liveFeedbackMode", "commentFeedback"),
+            "fields": ("additiveGrading", "commentFeedback"),
             "classes": ("collapse",)
         }),
         ("Statistics", {

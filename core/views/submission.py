@@ -28,6 +28,7 @@ from core.permissions.permissions import SubmissionPermissions
 
 from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, isStudentOfSub, isStaffOfSub, canViewUnanonymizedSubmissions, isSectionLeaderOfStudent, isSuperGrader
+from core.permissions.helpers import feedbackOpenForSubmission, testResultsVisibleForSubmission
 from core.permissions.capabilities import Capability, check_capability, compute_submission_capabilities, require_capability
 from core.services.audit import record_audit_event
 
@@ -55,8 +56,8 @@ def get_student_serializer_class(submission, files_only=False):
         return StudentSubmissionFilesOnlySerializer
     
     # StudentSubmissionSerializer handles all cases:
-    # - Masks grade when feedbackReleased is False
-    # - Returns files without comments when feedbackReleased is False
+    # - Masks grade while the feedback axis is closed (or hideGrades)
+    # - Returns files without comments while the feedback axis is closed
     # - Preserves real isFinalized status so frontend can show submission correctly
     return StudentSubmissionSerializer
 
@@ -358,8 +359,8 @@ class SubmissionViewSet(ListProtectedViewSet):
             tests = submission.tests.all()
     # If student of the submission
     elif isStudentOfSub(user, submission):
-        # Graded reveal: full test results unlock with feedback release (finalized subs)
-        if (assignment.feedbackReleased and submission.isFinalized) or assignment.liveFeedbackMode:
+        # Graded reveal: full test results per the feedback axis (finalized subs)
+        if testResultsVisibleForSubmission(submission):
             tests = submission.tests.all()
         else:
             maxFailedTests = assignment.environment and assignment.environment.maxExposedFailedTests
@@ -414,8 +415,8 @@ class SubmissionViewSet(ListProtectedViewSet):
             logCode = retrieve_log_code(submission)
     # If student of the submission
     elif isStudentOfSub(user, submission):
-        # Graded reveal: full test results unlock with feedback release (finalized subs)
-        if (assignment.feedbackReleased and submission.isFinalized) or assignment.liveFeedbackMode:
+        # Graded reveal: full test results per the feedback axis (finalized subs)
+        if testResultsVisibleForSubmission(submission):
             tests = submission.tests.all()
             logCode = retrieve_log_code(submission)
         else:
@@ -696,7 +697,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
     require_capability(user, 'notify_students_feedback', submission)
 
-    if not submission.assignment.feedbackReleased:
+    if not feedbackOpenForSubmission(submission):
         return Response('Feedback must be released', status.HTTP_406_NOT_ACCEPTABLE)
 
     if not submission.isFinalized:

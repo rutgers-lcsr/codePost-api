@@ -25,10 +25,13 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   dataSets = serializers.SerializerMethodField('get_datasets')
   fileTemplates = serializers.SerializerMethodField('get_file_templates')
   effectiveState = serializers.SerializerMethodField('get_effective_state')
-  # Legacy read-only compatibility: the DB columns are gone (Phase 4), but consumers
-  # that READ these keep working. Writes are rejected in validate() below.
+  # Legacy read-only compatibility: the DB columns are gone (work axis Phase 4,
+  # feedback axis Phase 5), but consumers that READ these keep working. Writes are
+  # rejected in validate() below.
   isVisible = serializers.SerializerMethodField('get_is_visible')
   isReleased = serializers.SerializerMethodField('get_is_released')
+  feedbackReleased = serializers.SerializerMethodField('get_feedback_released')
+  liveFeedbackMode = serializers.SerializerMethodField('get_live_feedback_mode')
 
   lateDeductions = serializers.JSONField(default=[])  # type: ignore[arg-type]  # DRF accepts list as default
 
@@ -76,6 +79,14 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
   def get_is_released(self, obj):
     return obj.state in ('published', 'closed')
 
+  @extend_schema_field(serializers.BooleanField)
+  def get_feedback_released(self, obj):
+    return obj.feedbackStatus == 'released'
+
+  @extend_schema_field(serializers.BooleanField)
+  def get_live_feedback_mode(self, obj):
+    return obj.feedbackStatus == 'live'
+
   def validate(self, data):
 
     newData = super().validate(data)
@@ -95,6 +106,11 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
           raise serializers.ValidationError({
               legacy: f"{legacy} is read-only — set state "
                       "(draft/visible/preview/published/closed/archived) instead."})
+      for legacy in ('feedbackReleased', 'liveFeedbackMode'):
+        if legacy in self.initial_data:
+          raise serializers.ValidationError({
+              legacy: f"{legacy} is read-only — set feedbackStatus "
+                      "(hidden/live/per_student/released) instead."})
 
     # A scheduled publish time only makes sense before the assignment is published.
     # Only enforce when this change introduces the bad pairing (legacy rows stay editable).
@@ -112,6 +128,36 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
         raise serializers.ValidationError({
             'publishAt': "A scheduled publish time can only be set while the assignment "
                          "is draft, visible, or preview."})
+
+    # A scheduled feedback release only makes sense before feedback is out. Same
+    # only-enforce-when-introduced idiom as publishAt above.
+    proposed_fstatus = newData.get('feedbackStatus', getattr(self.instance, 'feedbackStatus', 'hidden'))
+    proposed_release_at = newData.get('releaseFeedbackAt', getattr(self.instance, 'releaseFeedbackAt', None))
+    already_bad_release = (self.instance is not None and self.instance.releaseFeedbackAt is not None
+                           and self.instance.feedbackStatus in ('released', 'live'))
+    if (proposed_release_at is not None and proposed_fstatus in ('released', 'live')
+        and not already_bad_release):
+      if newData.get('feedbackStatus') in ('released', 'live') and 'releaseFeedbackAt' not in newData:
+        # Releasing (or going live) with a schedule pending: the schedule is moot.
+        newData['releaseFeedbackAt'] = None
+      else:
+        raise serializers.ValidationError({
+            'releaseFeedbackAt': "A scheduled feedback release can only be set while "
+                                 "feedback is hidden or per-student."})
+
+    # per_student has no global feedback-release moment — attached quizzes anchored on
+    # one can never fire. Block the switch while such quizzes exist.
+    if (newData.get('feedbackStatus') == 'per_student' and self.instance is not None
+        and self.instance.feedbackStatus != 'per_student'):
+      from django.db.models import Q
+      conflicting = self.instance.quizzes.filter(
+          Q(assignmentTrigger='after_feedback') | Q(closeEvent='feedback_released')).count()
+      if conflicting:
+        raise serializers.ValidationError({
+            'feedbackStatus': f"{conflicting} attached quiz(zes) open or close on the "
+                              "whole-assignment feedback release, which per-student "
+                              "feedback does not have. Change those quizzes to the "
+                              "self-paced trigger first."})
 
     return newData
 
@@ -133,20 +179,20 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
 
   class Meta:
     model = Assignment
-    fields = ('id', 'name', 'state', 'effectiveState', 'publishedAt', 'publishAt', 'scheduledPublishRanAt', 'isReleased', 'feedbackReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
+    fields = ('id', 'name', 'state', 'effectiveState', 'publishedAt', 'publishAt', 'scheduledPublishRanAt', 'isReleased', 'feedbackStatus', 'releaseFeedbackAt', 'scheduledFeedbackReleaseRanAt', 'feedbackReleased', 'course', 'rubricCategories', 'allowStudentUpload', 'allowStudentUploadWithPartners',
               'uploadDueDate', 'maxLateDays', 'liveFeedbackMode', 'allowLateUploads', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'sortKey', 'explanation', 'isVisible', 'hideFrom', 'nudgeMode', 'lateDeductions', 'studentsCanSeeGraders', 'dataSets')
     POST_permissions_fields = ('course',)
     # scheduledPublishRanAt is the one-shot stamp of the scheduled publish sweep.
     # (isVisible/isReleased are declared SerializerMethodFields — read-only by nature.)
     read_only_fields = ('rubricCategories', 'environment', 'files', 'fileTemplates', 'maxStudentTestRuns', 'nudgeMode', 'dataSets',
-                        'effectiveState', 'publishedAt', 'scheduledPublishRanAt')
+                        'effectiveState', 'publishedAt', 'scheduledPublishRanAt', 'scheduledFeedbackReleaseRanAt')
 
 
 class AssignmentStudentSerializer(AssignmentSerializerBase):
 
   class Meta(AssignmentSerializerBase.Meta):
     read_only_fields = AssignmentSerializerBase.Meta.read_only_fields + \
-        ('course', 'state', 'publishAt', 'feedbackReleased', 'name', 'sortKey', 'lateDeductions')
+        ('course', 'state', 'publishAt', 'feedbackStatus', 'releaseFeedbackAt', 'name', 'sortKey', 'lateDeductions')
 
   def get_files(self, obj):
     return AssignmentFilePublicSerializer(obj.files.all(), many=True).data

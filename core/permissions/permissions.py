@@ -20,6 +20,8 @@ from core.permissions.helpers import (
     isStaffOfSub,
     isStudent,
     isStudentOfSub,
+    assignmentFeedbackOpen,
+    feedbackOpenForSubmission,
     studentCanSeeAssignment,
 )
 from core.permissions.template import TemplatePermission
@@ -226,7 +228,7 @@ class RubricCategoryPermissions(TemplatePermission):
             return (
                 user.is_superuser
                 or isCourseStaff(user, course)
-                or (isStudent(user, course) and (assignment.feedbackReleased or assignment.liveFeedbackMode))
+                or (isStudent(user, course) and assignmentFeedbackOpen(assignment, user))
             )
 
         # Write operations: depends on collaborative mode
@@ -266,7 +268,7 @@ class RubricCommentPermissions(TemplatePermission):
             return (
                 user.is_superuser
                 or isCourseStaff(user, course)
-                or (isStudent(user, course) and (assignment.feedbackReleased or assignment.liveFeedbackMode))
+                or (isStudent(user, course) and assignmentFeedbackOpen(assignment, user))
             )
 
         # Write operations: depends on collaborative mode
@@ -456,10 +458,9 @@ class CommentPermissions(TemplatePermission):
             if isStaffOfSub(user, submission):
                 return True
 
-            # Students can view ONLY if feedback is released or live feedback mode is on
-            assignment = submission.assignment
+            # Students can view only once the feedback axis is open for this submission
             if isStudentOfSub(user, submission):
-                return assignment.feedbackReleased or assignment.liveFeedbackMode
+                return feedbackOpenForSubmission(submission)
             
             return False
 

@@ -26,8 +26,8 @@ Two things are deliberately **not** lifecycle states:
 
 - `allowStudentUpload` is a per-assignment *setting* ("does this assignment accept
   student uploads at all"), applied on top of `published`.
-- `feedbackReleased` (with `liveFeedbackMode` as its override) is an orthogonal axis —
-  feedback can be released in any state.
+- feedback is an orthogonal axis with its own lifecycle — see "The feedback axis
+  (`feedbackStatus`)" below; feedback can open in any work-axis state.
 
 `hideFrom` (per-section hiding) is enforced server-side on top of every state: a student
 in a hidden section gets no assignment ID from `GET /courses/{id}/` and a 403 from every
@@ -96,11 +96,40 @@ grades/comments).
   instructor is surprised by the migration mapping. Uses `save()`, so sync, stamps, and
   signals all run.
 
+## The feedback axis (`feedbackStatus`)
+
+Orthogonal to the work-axis `state`: `hidden → live / per_student / released`, plus the
+independent `hideGrades` modifier (masks numeric grades in any revealing status).
+
+| feedbackStatus | Comments/rubric/tests | Notes |
+|---|---|---|
+| `hidden` (default) | ✗ | grading in progress |
+| `live` | ✓ immediately as written | office hours; re-uploads definalize |
+| `per_student` | ✓ once THAT submission is finalized | rolling release, no global switch |
+| `released` | ✓ for finalized submissions | global release; stamps `feedbackReleasedAt` |
+
+Predicates live in `core/permissions/helpers.py` (`feedbackOpenForSubmission`,
+`gradesVisibleForSubmission`, `testResultsVisibleForSubmission`,
+`assignmentFeedbackOpen`) — every gate reads them. `releaseFeedbackAt` schedules
+`hidden/per_student → released` via `run_scheduled_feedback_release` (same one-shot,
+re-armable beat pattern as publishing). The legacy `feedbackReleased`/`liveFeedbackMode`
+booleans are API-compat method fields (read-only; writes 400 → `feedbackStatus`).
+
+**per_student × quizzes:** there is no global `feedbackReleasedAt` in per_student, so
+the `after_feedback` quiz trigger and `feedback_released` close event are rejected by
+validation in both directions (quiz serializer, and the assignment serializer blocks the
+switch to per_student while such quizzes exist). The self-paced
+`after_student_feedback` trigger is the per_student-compatible option. Course
+`noUnfinalize` doubles as "graders can't revoke a student's reveal" under per_student.
+
 ## Timestamps
 
 - `publishedAt` — stamped on entry to `published`; kept through `closed`/`archived`;
   cleared if the assignment moves back to a pre-published state.
-- `scheduledPublishRanAt` — one-shot stamp of the publish sweep; read-only over the API.
+- `feedbackReleasedAt` — stamped on entry to `released`; cleared on leaving it (anchors
+  quiz close events).
+- `scheduledPublishRanAt` / `scheduledFeedbackReleaseRanAt` — one-shot sweep stamps;
+  read-only over the API.
 
 ## Audit trail
 

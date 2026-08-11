@@ -556,7 +556,7 @@ class TestRevealAndAccess:
         course = taking_setup['course']
         assignment = taking_setup['assignment']
         # Assignment is visible to students, but feedback isn't released yet.
-        Assignment.objects.filter(pk=assignment.id).update(state='published', feedbackReleased=False)
+        Assignment.objects.filter(pk=assignment.id).update(state='published', feedbackStatus='hidden')
         bank = _bank(course)
 
         # Attached quiz that unlocks only after feedback → still locked, but should be listed
@@ -608,11 +608,11 @@ class TestClosing:
     def test_feedback_released_at_stamped_and_cleared(self, taking_setup):
         assignment = taking_setup['assignment']
         assert assignment.feedbackReleasedAt is None
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
         assignment.refresh_from_db()
         assert assignment.feedbackReleasedAt is not None
-        assignment.feedbackReleased = False
+        assignment.feedbackStatus = 'hidden'
         assignment.save()
         assignment.refresh_from_db()
         assert assignment.feedbackReleasedAt is None
@@ -636,7 +636,7 @@ class TestClosing:
         # feedback_released: None until released, then feedbackReleasedAt + offset.
         Quiz.objects.filter(pk=q.id).update(closeEvent='feedback_released', closeOffsetMinutes=10080)
         assert quiz_close_time(Quiz.objects.get(pk=q.id), student) is None
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
         assignment.refresh_from_db()
         assert quiz_close_time(Quiz.objects.get(pk=q.id), student) == assignment.feedbackReleasedAt + timedelta(minutes=10080)
@@ -691,7 +691,7 @@ class TestClosing:
         assert quiz_availability(q, student) == (False, 'student_feedback_not_ready')
 
         # Whole-assignment feedback released → opens for the submitter only.
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
         assert quiz_availability(q, student) == (True, 'open')
         assert quiz_availability(q, other) == (False, 'student_feedback_not_ready')
@@ -701,7 +701,7 @@ class TestClosing:
         from core.services.quiz_grading import quiz_availability
         course, assignment = taking_setup['course'], taking_setup['assignment']
         assignment.state = 'published'
-        assignment.liveFeedbackMode = True
+        assignment.feedbackStatus = 'live'
         assignment.save()
         student = taking_setup['students'][0]
         q = _quiz(course, assignment=assignment, assignmentTrigger='after_student_feedback')

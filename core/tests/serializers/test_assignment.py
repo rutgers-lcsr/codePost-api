@@ -162,7 +162,7 @@ class TestStudentReleasedSerializersLeakGuard(APITestCase):
         setUpBase(self)
         self.assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
         self.assignment.state = 'published'
-        self.assignment.feedbackReleased = True
+        self.assignment.feedbackStatus = 'released'
         self.assignment.save()
 
     def test_no_stats_field_set_is_exactly_base_plus_extras(self):

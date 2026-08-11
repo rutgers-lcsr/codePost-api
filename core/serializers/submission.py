@@ -5,6 +5,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Submission, User
+from core.permissions.helpers import feedbackOpenForSubmission, gradesVisibleForSubmission
 from core.serializers.file import SubmissionFileSerializer, SubmissionFileWithoutCommentsSerializer, SubmissionFileWithNestedCommentsSerializer
 from core.serializers.submissionTest import SubmissionTestSerializer
 from core.permissions.helpers import isStudent, isGrader, should_use_student_captions
@@ -175,8 +176,8 @@ class AnonymousSubmissionSerializer(serializers.ModelSerializer):
 # NOTE: SubmissionStatusSerializer and SubmissionStatusUnreleasedSerializer have been removed.
 # StudentSubmissionSerializer now handles all student cases:
 # - Shows real isFinalized status so students can see their submission
-# - Masks grade to None when feedbackReleased is False
-# - Returns files without comments when feedbackReleased is False
+# - Masks grade to None while the feedback axis is closed (or hideGrades)
+# - Returns files without comments while the feedback axis is closed
 
 class StudentSubmissionSerializer(serializers.ModelSerializer):
   # Explicitly use SubmissionFileSerializer for the files relationship
@@ -216,9 +217,8 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
     else:
       ret['grader'] = None
     
-    # Grade masking logic
-    # Only show grade if feedback is released or live feedback mode is on, AND grades are not hidden
-    can_view_feedback = (assignment.feedbackReleased or assignment.liveFeedbackMode) and not assignment.hideGrades
+    # Grade masking logic — feedback axis open for THIS submission and grades not hidden
+    can_view_feedback = gradesVisibleForSubmission(obj)
     if not can_view_feedback:
        ret['grade'] = None
 
@@ -231,9 +231,8 @@ class StudentSubmissionSerializer(serializers.ModelSerializer):
 
   @extend_schema_field(SubmissionFileSerializer(many=True))
   def get_files(self, obj):
-    assignment = obj.assignment
-    # If feedback is released or live feedback mode is on, return files with comments
-    if assignment.feedbackReleased or assignment.liveFeedbackMode:
+    # Comments-bearing files only once the feedback axis is open for this submission
+    if feedbackOpenForSubmission(obj):
       return SubmissionFileSerializer(obj.files.all(), many=True).data
     else:
       # Otherwise, return files WITHOUT comments to prevent 403 errors on frontend
@@ -334,8 +333,7 @@ class StudentConsoleDataSerializer(serializers.ModelSerializer):
 
   @extend_schema_field(SubmissionFileWithNestedCommentsSerializer(many=True))
   def get_files(self, obj):
-    assignment = obj.assignment
-    if assignment.feedbackReleased or assignment.liveFeedbackMode:
+    if feedbackOpenForSubmission(obj):
       return SubmissionFileWithNestedCommentsSerializer(obj.files.all(), many=True).data
     else:
       return SubmissionFileWithoutCommentsSerializer(obj.files.all(), many=True).data
@@ -343,8 +341,8 @@ class StudentConsoleDataSerializer(serializers.ModelSerializer):
   def to_representation(self, obj):
     ret = super().to_representation(obj)
     assignment = obj.assignment
-    # Only show grade if feedback is released or live feedback mode is on, AND grades are not hidden
-    can_view_feedback = (assignment.feedbackReleased or assignment.liveFeedbackMode) and not assignment.hideGrades
+    # Feedback axis open for THIS submission and grades not hidden
+    can_view_feedback = gradesVisibleForSubmission(obj)
     if not can_view_feedback:
       ret['grade'] = None
     # Hide draft responses

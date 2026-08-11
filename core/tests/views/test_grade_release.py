@@ -17,7 +17,7 @@ class GradeReleaseTestCase(TestCase):
             name="Test Assignment",
             course=self.course,
             state='published',  # Assignment is open for submissions
-            feedbackReleased=False, # Grades are NOT released
+            feedbackStatus='hidden', # Grades are NOT released
             points=100
         )
         
@@ -51,7 +51,7 @@ class GradeReleaseTestCase(TestCase):
         """
         Verify that isFinalized is True and grade is visible when feedbackReleased is True.
         """
-        self.assignment.feedbackReleased = True
+        self.assignment.feedbackStatus = 'released'
         self.assignment.save()
         
         url = f'/submissions/{self.submission.id}/'
@@ -65,8 +65,7 @@ class GradeReleaseTestCase(TestCase):
         """
         Verify that details are visible if liveFeedbackMode is True, even if feedbackReleased is False.
         """
-        self.assignment.liveFeedbackMode = True
-        self.assignment.feedbackReleased = False
+        self.assignment.feedbackStatus = 'live'
         self.assignment.save()
         
         url = f'/submissions/{self.submission.id}/'

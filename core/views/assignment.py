@@ -67,6 +67,7 @@ from core.permissions.permissions import AssignmentPermissions, RubricCommentPer
 from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff, isSuperGrader, canViewUnanonymizedSubmissions
+from core.permissions.helpers import assignmentFeedbackOpen
 from core.permissions.capabilities import compute_assignment_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability
 from core.serializers.actionResponses import CapabilitiesResponseSerializer
 
@@ -171,8 +172,9 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       # user is a student only
       else:
-        # Graded reveal: the stats-bearing serializers unlock with feedback release
-        if (not assignment.feedbackReleased and not assignment.liveFeedbackMode):
+        # Graded reveal: the stats-bearing serializers unlock once the feedback axis
+        # opens for this student (live/released, or per_student with a finalized sub)
+        if not assignmentFeedbackOpen(assignment, user):
           return AssignmentStudentSerializer
         elif (not course.showStudentsStatistics):
           return AssignmentStudentSerializerNoStats
@@ -198,6 +200,7 @@ class AssignmentViewSet(ListProtectedViewSet):
   def perform_update(self, serializer):
     # Audit lifecycle transitions (mirrors QuizViewSet.perform_update's publish events).
     old_state = serializer.instance.state
+    old_feedback = serializer.instance.feedbackStatus
     assignment = serializer.save()
     if assignment.state != old_state:
       record_audit_event(
@@ -206,6 +209,14 @@ class AssignmentViewSet(ListProtectedViewSet):
           user=self.request.user,
           assignment=assignment,
           meta={'from': old_state, 'to': assignment.state},
+      )
+    if assignment.feedbackStatus != old_feedback:
+      record_audit_event(
+          course=assignment.course,
+          event_type='assignment_feedback_changed',
+          user=self.request.user,
+          assignment=assignment,
+          meta={'from': old_feedback, 'to': assignment.feedbackStatus},
       )
 
   # Extra functions
@@ -566,7 +577,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     isOnlyStudent = isThisStudent and not isThisGrader and not isCourseAdminCached
     # Students may list their own submissions from published onward (or in live-feedback
     # mode) — before that there is nothing of theirs to see.
-    if isOnlyStudent and assignment.state not in ('published', 'closed') and not assignment.liveFeedbackMode:
+    if isOnlyStudent and assignment.state not in ('published', 'closed') and assignment.feedbackStatus != 'live':
       return returnForbidden()
 
     # The student serializer renders files (StudentSubmissionSerializer.get_files) and each file's
@@ -629,8 +640,8 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 
       # StudentSubmissionSerializer handles all cases:
-      # - Masks grade when feedbackReleased is False
-      # - Returns files without comments when feedbackReleased is False
+      # - Masks grade while the feedback axis is closed (or hideGrades)
+      # - Returns files without comments while the feedback axis is closed
       # - Preserves real isFinalized status so frontend can show submission correctly
       serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
 
@@ -688,11 +699,11 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     # If user is the course admin or the assignment is in live feedback mode return all test cases
     # We need to return all tests for users that are course admin for the "See as student" view
-    if isCourseAdmin(user, assignment.course) or assignment.liveFeedbackMode:
+    if isCourseAdmin(user, assignment.course) or assignment.feedbackStatus == 'live':
       test_cases = TestCase.objects.filter(testCategory__assignment=assignment)
     # If assignment is has been released and this endpoint has been called, check if the student's submission is finalized
     # If so, return all test cases. Else, return only exposed test cases
-    elif assignment.feedbackReleased:
+    elif assignment.feedbackStatus in ('released', 'per_student'):
       filteredSubs = Submission.objects.filter(assignment=assignment, students__in=[user])
       if len(filteredSubs) > 0 and filteredSubs[0].isFinalized:
         test_cases = TestCase.objects.filter(testCategory__assignment=assignment)
@@ -935,8 +946,8 @@ class AssignmentViewSet(ListProtectedViewSet):
         submission.students.add(cast(User, user))
         submission.save()
         
-      # Don't allow submission if the submission is finalized, unless we are in LiveFeedbackMode
-      if submission.isFinalized and not assignment.liveFeedbackMode:
+      # Don't allow submission if the submission is finalized, unless feedback is live
+      if submission.isFinalized and assignment.feedbackStatus != 'live':
         raise serializers.ValidationError("Cannot edit this submission, grading has started.")
 
       oldFiles = submission.files.all()
@@ -956,7 +967,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       # Update submission date once files have been uploaded, triggers auto-execution celery task
       submission.dateUploaded = timezone.now()
 
-      if assignment.liveFeedbackMode:
+      if assignment.feedbackStatus == 'live':
         submission.isFinalized = False
 
       submission.save()

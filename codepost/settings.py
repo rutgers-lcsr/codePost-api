@@ -186,6 +186,8 @@ SPECTACULAR_SETTINGS = {
         # Assignment lifecycle — shared by Assignment.state and the read-only
         # effectiveState serializer field.
         'AssignmentStateEnum': 'core.models.ASSIGNMENT_STATE_CHOICES',
+        # Feedback axis (hidden/live/per_student/released).
+        'AssignmentFeedbackStatusEnum': 'core.models.FEEDBACK_STATUS_CHOICES',
         # pending/accepted/rejected — shared by SuggestedComment and SuggestedQuizQuestion.
         'SuggestedCommentStatusEnum': [
             ('pending', 'Pending'), ('accepted', 'Accepted'), ('rejected', 'Rejected'),
@@ -702,6 +704,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     "run-scheduled-assignment-publish": {
         "task": "core.tasks.run_scheduled_assignment_publish",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "run-scheduled-feedback-release": {
+        "task": "core.tasks.run_scheduled_feedback_release",
         "schedule": crontab(minute="*/5"),  # Every 5 minutes
     },
     "auto-improve-prompts": {

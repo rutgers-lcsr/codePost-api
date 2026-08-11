@@ -265,6 +265,15 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_generated_sets_published(self):
         self._assert_quiz_event('quiz_generated_sets_published')
 
+    def test_assignment_feedback_changed(self):
+        event = record_audit_event(
+            course=self.course, event_type='assignment_feedback_changed',
+            user=self.user, assignment=self.assignment,
+            meta={'from': 'hidden', 'to': 'released'},
+        )
+        self._assert_event(event, 'assignment_feedback_changed', self.user)
+        self.assertEqual(event.assignment_id, self.assignment.id)
+
     def test_assignment_state_changed(self):
         event = record_audit_event(
             course=self.course, event_type='assignment_state_changed',
@@ -284,7 +293,7 @@ class TestRecordAuditEventAllTypes(TestCase):
             'regrade_request', 'regrade_deleted',
             'autograder_triggered', 'autograder_completed', 'autograder_failed',
             'late_day_used', 'comment_feedback',
-            'assignment_state_changed',
+            'assignment_state_changed', 'assignment_feedback_changed',
             'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
             'quiz_access_code_changed',
             'quiz_attempt_started', 'quiz_attempt_started_late',
@@ -378,7 +387,7 @@ class TestCheckPermissionAudit(_AuditIntegrationBase):
     def test_records_feedback_view_for_finalized(self):
         sub_id = self._upload_submission()
         # Set feedbackReleased so student gets feedback_view instead of file_view
-        Assignment.objects.filter(id=self.assignment_id).update(feedbackReleased=True)
+        Assignment.objects.filter(id=self.assignment_id).update(feedbackStatus='released')
         # Finalize directly in DB to avoid email template rendering (staticfiles)
         Submission.objects.filter(id=sub_id).update(isFinalized=True)
 

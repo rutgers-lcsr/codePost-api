@@ -56,11 +56,11 @@ class TestPermissions_Assignment_drawUnassigned(APITestCase):
     ##############################################################################
     assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
     assignment.state = 'published'
-    assignment.liveFeedbackMode = True
+    assignment.feedbackStatus = 'live'
     assignment.allowStudentUpload = True
     assignment.save()
     self.assertEqual(assignment.state, 'published')
-    self.assertTrue(assignment.liveFeedbackMode)
+    self.assertEqual(assignment.feedbackStatus, 'live')
     self.assertTrue(assignment.allowStudentUpload)
     ##############################################################################
 

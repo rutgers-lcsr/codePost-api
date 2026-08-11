@@ -472,6 +472,15 @@ ASSIGNMENT_STATE_CHOICES = [
 STUDENT_VISIBLE_STATES = ('visible', 'preview', 'published', 'closed')
 STUDENT_DOWNLOAD_STATES = ('preview', 'published', 'closed')
 
+# Feedback axis: how grading becomes visible to students. Orthogonal to the work-axis
+# `state` above, and to `hideGrades` (which masks numeric grades in ANY revealing state).
+FEEDBACK_STATUS_CHOICES = [
+    ('hidden', 'Hidden'),
+    ('live', 'Live'),
+    ('per_student', 'Per student'),
+    ('released', 'Released'),
+]
+
 
 class Assignment(BaseModel):
   if TYPE_CHECKING:
@@ -517,12 +526,22 @@ class Assignment(BaseModel):
 
   # Settings
   hideGrades = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if the students should not see their grades for this assignment. 'False' otherwise."))
+      "A boolean field. If True, numeric grades are masked from students in any revealing "
+      "feedbackStatus — they still see comments and the rubric."))
 
-  feedbackReleased = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if grades/feedback are released for students to view. 'False' otherwise."))
+  feedbackStatus = models.CharField(max_length=16, choices=FEEDBACK_STATUS_CHOICES, default='hidden',
+      help_text=("How grading becomes visible to students: hidden (nothing), live (as it's "
+                 "written), per_student (each student once their submission is finalized), "
+                 "released (finalized submissions, globally)."))
+  releaseFeedbackAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "Hidden/per-student assignments auto-release feedback at this time (checked every few "
+      "minutes)."))
+  scheduledFeedbackReleaseRanAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "When the scheduled releaseFeedbackAt run last fired (one-shot stamp). Moving "
+      "releaseFeedbackAt past this re-arms the run."))
   feedbackReleasedAt = models.DateTimeField(null=True, blank=True, help_text=(
-      "When feedbackReleased was last set true. Anchors quiz close times relative to feedback release."))
+      "When feedbackStatus last entered 'released'. Anchors quiz close times relative to "
+      "feedback release."))
 
   anonymousGrading = models.BooleanField(default=False, help_text=(
       "A boolean field. If 'True', graders will not have access to the students field of submission objects, unless they have elevated privileges."))
@@ -536,8 +555,6 @@ class Assignment(BaseModel):
   maxLateDays = models.IntegerField(default=2, help_text=(
       "An integer representing the maximum number of late days to continue to accept submissions for this assignment."))
   
-  liveFeedbackMode = models.BooleanField(default=False, help_text=(
-      "A boolean field. If true, students can see their submission and comments before finalization and published"))
   additiveGrading = models.BooleanField(default=False, help_text=(
       "A boolean field. If true, grades begin at 0 (instead of assignment.points)"))
   hideGradersFromStudents = models.BooleanField(default=True, help_text=(
@@ -644,10 +661,11 @@ class Assignment(BaseModel):
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''
     is_new = self.pk is None
-    # Stamp the feedback-release time (before super() so it lands in update_fields).
-    if self.feedbackReleased and self.feedbackReleasedAt is None:
+    # Stamp the feedback-release time (before super() so it lands in update_fields —
+    # the quiz-deadline resync signal watches for feedbackReleasedAt changes).
+    if self.feedbackStatus == 'released' and self.feedbackReleasedAt is None:
       self.feedbackReleasedAt = now()
-    elif not self.feedbackReleased and self.feedbackReleasedAt is not None:
+    elif self.feedbackStatus != 'released' and self.feedbackReleasedAt is not None:
       self.feedbackReleasedAt = None
     # Stamp the publish time (mirrors feedbackReleasedAt). Cleared only when the
     # assignment moves back to a pre-published state — closed/archived keep it.
@@ -2584,6 +2602,7 @@ class CourseAuditEvent(BaseModel):
       ('late_day_used', 'Late Day Used'),
       ('comment_feedback', 'Comment Feedback'),
       ('assignment_state_changed', 'Assignment State Changed'),
+      ('assignment_feedback_changed', 'Assignment Feedback Changed'),
       ('quiz_created', 'Quiz Created'),
       ('quiz_updated', 'Quiz Updated'),
       ('quiz_published', 'Quiz Published'),

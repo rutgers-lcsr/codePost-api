@@ -118,7 +118,7 @@ class TestAssignmentLifecycle(APITestCase):
             "course": course_id,
             "state": "published",            # Open for submissions (feedback held)
             "allowStudentUpload": True,      # Students can upload
-            "feedbackReleased": False,        # Feedback NOT released yet
+            "feedbackStatus": "hidden",        # Feedback NOT released yet
         }, format="json")
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
         assignment_id = resp.data["id"]
@@ -275,7 +275,7 @@ class TestAssignmentLifecycle(APITestCase):
         self.client.force_authenticate(user=self.admin)
 
         resp = self.client.patch(f"/assignments/{assignment_id}/", {
-            "feedbackReleased": True,
+            "feedbackStatus": "released",
         })
         self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
         info(f"  feedbackReleased={resp.data.get('feedbackReleased')}")
@@ -352,7 +352,7 @@ class TestAssignmentLifecycle(APITestCase):
         print("    2. Admin created assignment (upload-only, no release)")
         print("    3. Student uploaded submission")
         print("    4. Grader claimed, commented (-10pts), finalized")
-        print("    5. Grade masked for student (feedbackReleased=False)")
+        print("    5. Grade masked for student (feedbackStatus='hidden')")
         print("    6. Admin released feedback")
         print("    7. Student saw grade (90/100) and comments")
         print("    8. Student marked as viewed")

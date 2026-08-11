@@ -410,9 +410,11 @@ def _student_feedback_visible(student, assignment):
   subs = student.student_submissions.filter(assignment=assignment)
   if not subs.exists():
     return False
-  if assignment.feedbackReleased:
+  status = assignment.feedbackStatus
+  if status == 'released':
     return True
-  if assignment.liveFeedbackMode:
+  if status in ('live', 'per_student'):
+    # Self-paced: their feedback exists once their submission is finalized
     return subs.filter(isFinalized=True).exists()
   return False
 
@@ -528,7 +530,7 @@ def quiz_availability(quiz, student, now=None):
     if not (student is not None and student.student_submissions.filter(assignment=assignment).exists()):
       return (False, 'no_submission_yet')
   elif trigger == 'after_feedback':
-    if not assignment.feedbackReleased:
+    if assignment.feedbackStatus != 'released':
       return (False, 'feedback_not_released')
   elif trigger == 'after_student_feedback':
     if not _student_feedback_visible(student, assignment):

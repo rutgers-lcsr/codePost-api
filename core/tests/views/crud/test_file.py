@@ -114,7 +114,7 @@ class TestPermissions_File_ReleasedLiveFeedback(BaseTestCases.TestPermissions):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
       assignment.state = 'published'
-      assignment.liveFeedbackMode = True
+      assignment.feedbackStatus = 'live'
       assignment.save()
 
     def assertModification(self, detail):
@@ -122,7 +122,7 @@ class TestPermissions_File_ReleasedLiveFeedback(BaseTestCases.TestPermissions):
       submission = _submission_for_file(file)
       self.assertFalse(submission.isFinalized)
       self.assertEqual(submission.assignment.state, 'published')
-      self.assertTrue(submission.assignment.liveFeedbackMode)
+      self.assertEqual(submission.assignment.feedbackStatus, 'live')
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)
@@ -143,7 +143,7 @@ class TestPermissions_File_UnreleasedLiveFeedback(BaseTestCases.TestPermissions)
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
       assignment.state = 'preview'
-      assignment.liveFeedbackMode = True
+      assignment.feedbackStatus = 'live'
       assignment.save()
 
     def assertModification(self, detail):
@@ -151,7 +151,7 @@ class TestPermissions_File_UnreleasedLiveFeedback(BaseTestCases.TestPermissions)
       submission = _submission_for_file(file)
       self.assertFalse(submission.isFinalized)
       self.assertNotIn(submission.assignment.state, ('published', 'closed'))
-      self.assertTrue(submission.assignment.liveFeedbackMode)
+      self.assertEqual(submission.assignment.feedbackStatus, 'live')
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)
