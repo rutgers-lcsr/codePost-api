@@ -151,6 +151,21 @@ def delete_expired_courses():
 
 
 @shared_task
+def flush_expired_tokens():
+    """Delete OutstandingToken rows whose refresh token has expired.
+
+    BlacklistedToken rows cascade-delete with their OutstandingToken.
+    Equivalent to SimpleJWT's `manage.py flushexpiredtokens`.
+    """
+    from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+
+    count, _ = OutstandingToken.objects.filter(expires_at__lte=timezone.now()).delete()
+    if count:
+        logger.info(f"flush_expired_tokens: deleted {count} expired token row(s)")
+    return count
+
+
+@shared_task
 def generate_ai_grading_assistance(submission_id: int):
     """
     Generate AI-suggested comments and submission summary for a submission.

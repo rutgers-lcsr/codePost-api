@@ -129,6 +129,9 @@ documentation (states, derived close, scheduled publish, migration notes).
   test-complete) — rendering raised `TemplateDoesNotExist` in production since the
   templates were written. They now extend `emails/base_template.html`.
 - Retrieving an assignment with a nonexistent ID now 404s instead of 500ing.
+- New daily beat task `flush_expired_tokens` deletes expired JWT refresh-token rows
+  from the SimpleJWT outstanding/blacklist tables (equivalent to
+  `manage.py flushexpiredtokens`) — previously nothing ever pruned them.
 
 ## [4.0.0] — Quizzes
 
