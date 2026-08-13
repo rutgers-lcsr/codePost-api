@@ -229,34 +229,53 @@ jobs:
 
             - name: Create and push version tag
               run: |
-                  git tag "v${VERSION}"
-                  git push origin "v${VERSION}"
+                  if git rev-parse -q --verify "refs/tags/v${VERSION}" > /dev/null; then
+                      echo "Tag v${VERSION} already exists locally; skipping."
+                  else
+                      git tag "v${VERSION}"
+                  fi
+                  git push origin "v${VERSION}" || echo "Tag v${VERSION} already on origin; continuing."
 
+            # The `gh` CLI is not installed on the testing-codepost runner, so this
+            # talks to the REST API directly. `generate_release_notes` reproduces
+            # `gh release create --generate-notes`.
             - name: Create GitHub Release
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  gh release create "v${VERSION}" \
-                    --target "${{ needs.prepare.outputs.branch }}" \
-                    --title "v${VERSION}" \
-                    --generate-notes
+                  code=$(curl -sS -o /tmp/release.json -w '%{http_code}' -X POST \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    "https://api.github.com/repos/${{ github.repository }}/releases" \
+                    -d "$(printf '{"tag_name":"v%s","target_commitish":"%s","name":"v%s","generate_release_notes":true}' \
+                          "${VERSION}" "${{ needs.prepare.outputs.branch }}" "${VERSION}")")
+                  cat /tmp/release.json
+                  if [ "$code" = "201" ]; then
+                      echo "Release v${VERSION} created."
+                  elif [ "$code" = "422" ]; then
+                      echo "::warning::Release v${VERSION} already exists; leaving it as is."
+                  else
+                      echo "::error::GitHub Release creation failed with HTTP ${code}."
+                      exit 1
+                  fi
 
+            # curl rather than `gh api` — the testing-codepost runner has no gh CLI.
             - name: Trigger TypeScript client update
               continue-on-error: true
-              env:
-                  GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
               run: |
-                  gh api "repos/${{ github.repository_owner }}/codePost-ui/dispatches" \
-                    -f event_type=api-release \
-                    -f "client_payload[version]=v${VERSION}" \
-                    -f 'client_payload[schema_url]=https://codepost-api.cs.rutgers.edu/api/schema/'
+                  curl -sS --fail-with-body -X POST \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "Authorization: Bearer ${{ secrets.CROSS_REPO_TOKEN }}" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    "https://api.github.com/repos/${{ github.repository_owner }}/codePost-ui/dispatches" \
+                    -d "$(printf '{"event_type":"api-release","client_payload":{"version":"v%s","schema_url":"https://codepost-api.cs.rutgers.edu/api/schema/"}}' "${VERSION}")"
 
+            # curl rather than `gh api` — the testing-codepost runner has no gh CLI.
             - name: Trigger Python SDK update
               continue-on-error: true
-              env:
-                  GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
               run: |
-                  gh api "repos/${{ github.repository_owner }}/codepost-python/dispatches" \
-                    -f event_type=api-release \
-                    -f "client_payload[version]=v${VERSION}" \
-                    -f 'client_payload[schema_url]=https://codepost-api.cs.rutgers.edu/api/schema/'
+                  curl -sS --fail-with-body -X POST \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "Authorization: Bearer ${{ secrets.CROSS_REPO_TOKEN }}" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    "https://api.github.com/repos/${{ github.repository_owner }}/codepost-python/dispatches" \
+                    -d "$(printf '{"event_type":"api-release","client_payload":{"version":"v%s","schema_url":"https://codepost-api.cs.rutgers.edu/api/schema/"}}' "${VERSION}")"
