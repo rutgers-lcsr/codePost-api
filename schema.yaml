@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: codePost API
-  version: 4.0.0
+  version: 4.2.0
   description: |2
 
     An API for administrators to mine course data and automate common tasks.

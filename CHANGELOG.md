@@ -12,7 +12,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ---
 
-## [Unreleased] — Assignment lifecycle
+## [4.2.0] — Assignment & Feedback Lifecycle, Exam Lockdown
 
 See [`docs/assignment_lifecycle.md`](./docs/assignment_lifecycle.md) for the full
 documentation (states, derived close, scheduled publish, migration notes).
@@ -104,6 +104,26 @@ documentation (states, derived close, scheduled publish, migration notes).
   per-student assignments in both directions — use the self-paced
   `after_student_feedback` trigger instead.
 
+### Added — Safe Exam Browser lockdown for quizzes
+
+- **`Quiz.requireSebBrowser`** gates a quiz behind [Safe Exam Browser](https://safeexambrowser.org):
+  starting, reading an in-progress attempt, answering, and submitting all require a valid
+  `X-SafeExamBrowser-ConfigKeyHash` header. Blocked requests return a structured 403
+  (`lockdownRequired`, `lockdownReason`) instead of a bare error, and are recorded as
+  `quiz_seb_blocked` audit events.
+- **One-click launch** — `POST /quizAttempts/sebLaunch/` mints a per-student `.seb`
+  config whose `startURL` carries a short-lived one-time token; `POST /ott/exchange/`
+  trades that token for a normal session inside SEB's fresh browser profile. The Config
+  Key is derived from the generated config, so instructors do not have to distribute
+  anything. `Quiz.sebConfigKey` remains available for institutions shipping their own
+  `.seb` file; requests verify against the pasted key *or* any of the student's unexpired
+  launch keys.
+- **`QuizAccommodation.sebExempt`** exempts individual students (Linux/ChromeOS, assistive
+  tech) from the requirement; their attempts are flagged `lockdownVerified=False` so staff
+  can see which attempts were not verified.
+- Config-key verification hashes both the URL Django reconstructs and `API_URL + path`,
+  so it works behind the standard nginx deployment and on multi-host setups.
+
 ### Added — assignment description shown to students
 
 - The instructor-written assignment description (`explanation`) is now actually rendered
@@ -132,6 +152,53 @@ documentation (states, derived close, scheduled publish, migration notes).
 - New daily beat task `flush_expired_tokens` deletes expired JWT refresh-token rows
   from the SimpleJWT outstanding/blacklist tables (equivalent to
   `manage.py flushexpiredtokens`) — previously nothing ever pruned them.
+- **Test resource datasets are no longer staged into normal execution runs** — the
+  executor only stages a dataset when the run actually targets it, so an assignment's
+  test-resource datasets stop leaking into ordinary student runs. Dataset visibility
+  and selection in the assignment form were reworked to match.
+- Production deploys take an explicit `branch` input (`release/<version>`) instead of
+  inheriting the dispatching ref, which previously made it easy to silently re-deploy an
+  older release branch.
+
+---
+
+## [4.1.0] — AI Provider Testing & Personalized Quizzes
+
+Shipped to production 2026-08-06. This release completed the AI-authoring half of the
+Quizzes work that [4.0.0] describes, and fixed the flaky production image build.
+
+### Added
+
+- **AI provider connection tests** — `POST /courses/{id}/testAIConnection/` and the
+  organization equivalent verify a configured provider end to end, with an optional
+  model override and custom prompt. The result reports the model the provider actually
+  answered as (`reportedModel`), so a silently substituted model is visible. Usage is
+  recorded under a new `provider_test` request type and broken out in the AI usage
+  summary.
+- **AI quiz-suggestion jobs** — suggestion generation runs as a tracked job with polling
+  and status, replacing the fire-and-forget request; the UI reports progress and failures.
+- **Personalized quiz questions** — the `personalized_quiz_generation` capability, the
+  `QuizGeneratedSection` model, per-student generation over a student's own submission,
+  and staff review/approve before anything becomes student-visible. **Default off** —
+  enable "AI-Generated Quiz Questions" per course or organization after upgrading.
+- **Manual generation and preview** for generated sections, so instructors can generate
+  on demand and inspect the output before the quiz opens.
+- **Dedicated AI worker container** (`codepost-ai-worker`) — AI tasks route to their own
+  unprivileged queue and are the only workers given `FIELD_ENCRYPTION_KEY` (interpolated
+  by compose, never written to `.env`), so the autograder sandbox never sees it.
+- Database health-check metrics on the system health endpoint.
+
+### Fixed
+
+- **Flaky production image builds** — Poetry is now pinned (2.4.1) in its own virtualenv
+  at `/opt/poetry` across all three Dockerfile stages. Installing Poetry unpinned into
+  the system interpreter let its transitive dependencies conflict with `poetry.lock`
+  pins, and the resulting parallel uninstall could crash mid-extraction
+  (`module 'attr.setters' has no attribute 'pipe'`) — timing-dependent, so a plain
+  re-run would sometimes pass.
+- Course API key management permissions, and quiz taking is restricted to the browser.
+
+---
 
 ## [4.0.0] — Quizzes
 
