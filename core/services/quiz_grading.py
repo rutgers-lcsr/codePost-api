@@ -45,7 +45,10 @@ def _question_snapshot(question):
       'type': question.questionType,
       'text': question.text,
       'description': question.description,
-      'starterCode': question.starterCode,
+      # Only code questions have starter code. A question that was once a code question keeps
+      # its starterCode when the type changes, so guard on the type — otherwise the stale code
+      # gets seeded as the student's answer (below) and rendered in the essay/short-answer box.
+      'starterCode': question.starterCode if question.questionType == 'code' else None,
       'language': question.language,
       'generalFeedback': question.generalFeedback,
       'partialCredit': question.partialCredit,
@@ -67,7 +70,7 @@ def _generated_question_snapshot(gq):
       'type': gq.questionType,
       'text': gq.text,
       'description': gq.description,
-      'starterCode': gq.starterCode,
+      'starterCode': gq.starterCode if gq.questionType == 'code' else None,
       'language': gq.language,
       'generalFeedback': '',
       # The generation contract doesn't produce grading settings — defaults apply.

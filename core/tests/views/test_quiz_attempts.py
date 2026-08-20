@@ -429,6 +429,23 @@ class TestRevealAndAccess:
         start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
         assert start.data['responses'][0]['answerText'] == '# write your code here'
 
+    def test_non_code_question_does_not_inherit_stale_starter_code(self, api_client, taking_setup):
+        # starterCode survives a question's type changing away from 'code', so an essay can carry
+        # leftover code. It must not be snapshotted (it would seed the answer, making the question
+        # look answered before the student starts, and render as their essay text).
+        from core.models import Question
+        course = taking_setup['course']
+        essay_q = Question.objects.create(
+            course=course, bank=_bank(course), questionType='essay', text='Compare stacks and queues.',
+            points=_dec('5'), language='r', starterCode='# left over from when this was a code question')
+        quiz = _quiz(course)
+        _add(quiz, essay_q)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        response = start.data['responses'][0]
+        assert response['answerText'] == ''
+        assert response['question']['starterCode'] is None
+
     def test_student_cannot_read_another_students_attempt(self, api_client, taking_setup):
         course = taking_setup['course']
         quiz = _quiz(course)
