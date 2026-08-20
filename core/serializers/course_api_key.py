@@ -1,7 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from rest_framework import serializers
 
-from core.models import CourseAPIKey
+from core.models import COURSE_API_KEY_SCOPE_CHOICES, CourseAPIKey
 
 
 class CourseAPIKeyReadSerializer(serializers.ModelSerializer):
@@ -16,6 +16,7 @@ class CourseAPIKeyReadSerializer(serializers.ModelSerializer):
             "name",
             "keyPrefix",
             "isActive",
+            "scope",
             "lastUsedAt",
             "createdBy",
             "created",
@@ -33,6 +34,10 @@ class CourseAPIKeyCreateSerializer(serializers.Serializer):
     """Input serializer for creating a new course API key."""
 
     name = serializers.CharField(max_length=128)
+    # Defaults to the safest option: a key that can only read. Agent tools above
+    # a key's scope are never advertised to it, so this is the real guardrail.
+    scope = serializers.ChoiceField(
+        choices=COURSE_API_KEY_SCOPE_CHOICES, default="read", required=False)
 
 
 class CourseAPIKeyCreateResponseSerializer(serializers.Serializer):
@@ -42,5 +47,6 @@ class CourseAPIKeyCreateResponseSerializer(serializers.Serializer):
     name = serializers.CharField()
     key = serializers.CharField(help_text="The full API key. This is only shown once.")
     keyPrefix = serializers.CharField()
+    scope = serializers.CharField()
     createdBy = serializers.CharField()
     created = serializers.DateTimeField()

@@ -2965,6 +2965,16 @@ class PromptLabSettings(models.Model):
     return f"PromptLabSettings [{status}]"
 
 
+# How much a CourseAPIKey may do. Ordered weakest to strongest; an agent tool
+# declares the minimum scope that may call it, and tools above a key's scope are
+# never advertised to it at all.
+COURSE_API_KEY_SCOPE_CHOICES = [
+    ('read', 'Read only'),
+    ('write', 'Read and write (no deletes, no student email)'),
+    ('admin', 'Full course admin (deletes, resets, student email)'),
+]
+
+
 class CourseAPIKey(BaseModel):
   """A named, course-scoped API key.
 
@@ -2985,6 +2995,10 @@ class CourseAPIKey(BaseModel):
       related_name="created_course_api_keys", help_text="The admin who created this key.")
   is_active = models.BooleanField(default=True, help_text="If False, the key is revoked.")
   last_used_at = models.DateTimeField(null=True, blank=True, help_text="Last time this key was used to authenticate.")
+  scope = models.CharField(
+      max_length=8, choices=COURSE_API_KEY_SCOPE_CHOICES, default='read',
+      help_text=("How much this key may do. Agent tools are filtered by it: a key never "
+                 "even sees the tools above its scope. 'read' is the safe default."))
 
   class Meta:
     unique_together = ('course', 'name')

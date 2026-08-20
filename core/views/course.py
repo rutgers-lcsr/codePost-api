@@ -863,6 +863,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         ser = CourseAPIKeyCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         name = ser.validated_data["name"]
+        scope = ser.validated_data.get("scope", "read")
 
         if CourseAPIKey.objects.filter(course=course, name=name).exists():
             return Response(
@@ -879,6 +880,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             key_prefix=prefix,
             hashed_key=CourseAPIKey.hash_key(raw_key),
             created_by=request.user,
+            scope=scope,
         )
 
         return Response(
@@ -887,6 +889,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                 "name": api_key.name,
                 "key": raw_key,
                 "keyPrefix": api_key.key_prefix,
+                "scope": api_key.scope,
                 "createdBy": request.user.username,
                 "created": api_key.created,
             },

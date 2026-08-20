@@ -198,6 +198,10 @@ SPECTACULAR_SETTINGS = {
         ],
         # Quiz record provenance — shared by QuestionBank, Question, and Quiz.
         'QuizSourceEnum': 'core.models.QUIZ_SOURCE_CHOICES',
+        # How much a course API key may do. Auto-naming lands on the far too
+        # generic 'ScopeEnum'; pinning it now avoids a collision the first time
+        # any other model grows a 'scope' field.
+        'CourseAPIKeyScopeEnum': 'core.models.COURSE_API_KEY_SCOPE_CHOICES',
         # Question types — shared by Question, SuggestedQuizQuestion, and
         # GeneratedQuizQuestion. Auto-naming currently lands on this same name; pinning it
         # keeps the TS client stable if a differently-named field ever shares the values.

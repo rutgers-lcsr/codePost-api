@@ -52,7 +52,13 @@ class CourseAPIKeyAuthentication(BaseAuthentication):
         CourseAPIKey.objects.filter(pk=api_key.pk).update(last_used_at=timezone.now())
 
         service_user = get_or_create_course_service_user(api_key.course)
-        auth_info = {"course_scope_id": api_key.course_id}
+        # api_key_id/scope let the agent layer resolve how much this key may do
+        # without a second lookup; ordinary views only ever read course_scope_id.
+        auth_info = {
+            "course_scope_id": api_key.course_id,
+            "api_key_id": api_key.pk,
+            "scope": api_key.scope,
+        }
         return (service_user, auth_info)
 
     def authenticate_header(self, request):

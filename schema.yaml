@@ -18177,6 +18177,10 @@ components:
         name:
           type: string
           maxLength: 128
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/CourseAPIKeyScopeEnum'
+          default: read
       required:
       - name
     CourseAPIKeyCreateResponse:
@@ -18192,6 +18196,8 @@ components:
           description: The full API key. This is only shown once.
         keyPrefix:
           type: string
+        scope:
+          type: string
         createdBy:
           type: string
         created:
@@ -18204,6 +18210,7 @@ components:
       - key
       - keyPrefix
       - name
+      - scope
     CourseAPIKeyRead:
       type: object
       description: Read-only representation of a course API key (never exposes the
@@ -18223,6 +18230,15 @@ components:
         isActive:
           type: boolean
           description: If False, the key is revoked.
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/CourseAPIKeyScopeEnum'
+          description: |-
+            How much this key may do. Agent tools are filtered by it: a key never even sees the tools above its scope. 'read' is the safe default.
+
+            * `read` - Read only
+            * `write` - Read and write (no deletes, no student email)
+            * `admin` - Full course admin (deletes, resets, student email)
         lastUsedAt:
           type: string
           format: date-time
@@ -18245,6 +18261,16 @@ components:
       - id
       - keyPrefix
       - name
+    CourseAPIKeyScopeEnum:
+      enum:
+      - read
+      - write
+      - admin
+      type: string
+      description: |-
+        * `read` - Read only
+        * `write` - Read and write (no deletes, no student email)
+        * `admin` - Full course admin (deletes, resets, student email)
     CourseAuditEvent:
       type: object
       description: Read-only serializer for course audit events.
