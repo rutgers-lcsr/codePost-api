@@ -309,7 +309,7 @@ class Course(BaseModel):
   rubricEditors = models.ManyToManyField(User, related_name="rubricEditor_courses", help_text=(
       "A list of usernames of graders for the course who are allowed to edit the rubric."))
   quizGraders = models.ManyToManyField(User, related_name="quizGrader_courses", blank=True, help_text=(
-      "A list of usernames of graders for the course who are allowed to grade quizzes. "
+      "Graders explicitly allowed to grade quizzes when gradersCanGradeQuizzes is off. "
       "Course admins can always grade quizzes."))
   courseAdmins = models.ManyToManyField(User, related_name="courseAdmin_courses", help_text=(
       "A list of usernames for admins for the course."))
@@ -327,6 +327,9 @@ class Course(BaseModel):
 
   allowGradersToEditRubric = models.BooleanField(default=False, help_text=(
       "A boolean field. If True, graders will be allowed to add and update unlinked rubric comments."))
+  gradersCanGradeQuizzes = models.BooleanField(default=True, help_text=(
+      "A boolean field. If True (default), all course graders may view and grade quiz attempts. "
+      "If False, quiz grading is restricted to course admins and the designated quizGraders."))
   minComments = models.IntegerField(default=0, help_text=(
       "An integer representing the minimum number of comments that graders are asked to make prior to finalizing. 0 indicates no minimum."))
   noUnfinalize = models.BooleanField(default=False, help_text=(
@@ -3598,6 +3601,9 @@ class QuizResponse(BaseModel):
       help_text=("Optional feedback from the grader on a manually graded response."))
   gradedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
       related_name="+", help_text=("The staff user who manually graded this response."))
+  gradedAt = models.DateTimeField(null=True, blank=True,
+      help_text=("When the manual grade was recorded. Null until manually graded; cleared "
+                 "when the response is reopened."))
   codeExecution = models.JSONField(null=True, blank=True,
       help_text=("Staff-triggered sandbox run of a code answer: {status: running|success|"
                  "error, stdout, stderr, images, error, executionTime, requestedBy, "

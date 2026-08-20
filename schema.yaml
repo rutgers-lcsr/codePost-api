@@ -4576,6 +4576,33 @@ paths:
                 items:
                   $ref: '#/components/schemas/QuizAccommodationRow'
           description: ''
+  /courses/{id}/quizGradingProgress/:
+    get:
+      operationId: courses_quizGradingProgressRetrieve
+      description: Per-grader manual quiz-grading progress across the course's published
+        quizzes (submitted attempts only). perQuiz keys are quiz ids; graders who
+        left the course keep their rows (accountability, not a roster).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizGradingProgress'
+          description: ''
   /courses/{id}/quizzes/:
     get:
       operationId: courses_quizzesList
@@ -18127,6 +18154,11 @@ components:
           type: boolean
           description: A boolean field. If True, graders will be allowed to add and
             update unlinked rubric comments.
+        gradersCanGradeQuizzes:
+          type: boolean
+          description: A boolean field. If True (default), all course graders may
+            view and grade quiz attempts. If False, quiz grading is restricted to
+            course admins and the designated quizGraders.
         minComments:
           type: integer
           maximum: 9223372036854775807
@@ -18654,6 +18686,11 @@ components:
           type: boolean
           description: A boolean field. If True, graders will be allowed to add and
             update unlinked rubric comments.
+        gradersCanGradeQuizzes:
+          type: boolean
+          description: A boolean field. If True (default), all course graders may
+            view and grade quiz attempts. If False, quiz grading is restricted to
+            course admins and the designated quizGraders.
         archived:
           type: boolean
           description: If True, the course will not be editable.
@@ -20872,6 +20909,11 @@ components:
           type: boolean
           description: A boolean field. If True, graders will be allowed to add and
             update unlinked rubric comments.
+        gradersCanGradeQuizzes:
+          type: boolean
+          description: A boolean field. If True (default), all course graders may
+            view and grade quiz attempts. If False, quiz grading is restricted to
+            course admins and the designated quizGraders.
         minComments:
           type: integer
           maximum: 9223372036854775807
@@ -23883,6 +23925,63 @@ components:
       - id
       - quiz
       - systemPrompt
+    QuizGradingProgress:
+      type: object
+      properties:
+        quizzes:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizGradingProgressQuiz'
+        graders:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuizGradingProgressGrader'
+        pendingUngraded:
+          type: integer
+      required:
+      - graders
+      - pendingUngraded
+      - quizzes
+    QuizGradingProgressGrader:
+      type: object
+      properties:
+        grader:
+          type: string
+          format: email
+        totalGraded:
+          type: integer
+        lastGradedAt:
+          type: string
+          format: date-time
+          nullable: true
+        perQuiz:
+          type: object
+          additionalProperties:
+            type: integer
+      required:
+      - grader
+      - lastGradedAt
+      - perQuiz
+      - totalGraded
+    QuizGradingProgressQuiz:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        totalManual:
+          type: integer
+        graded:
+          type: integer
+        pending:
+          type: integer
+      required:
+      - graded
+      - id
+      - pending
+      - title
+      - totalManual
     QuizImage:
       type: object
       description: |-
@@ -24702,10 +24801,10 @@ components:
     StaffQuizResponse:
       type: object
       description: |-
-        A response as staff (grading/review) sees it: adds the grader-only answer key and the
-        sandbox code-execution result. NEVER used for student-facing payloads — neither field is
-        in the student's Meta.fields, so StudentQuizResponseSerializer is structurally incapable
-        of exposing them.
+        A response as staff (grading/review) sees it: adds the grader-only answer key, the
+        sandbox code-execution result, and the grading provenance (gradedBy/gradedAt). NEVER used
+        for student-facing payloads — none of these fields are in the student's Meta.fields, so
+        StudentQuizResponseSerializer is structurally incapable of exposing them.
       properties:
         id:
           type: integer
@@ -24762,8 +24861,20 @@ components:
           readOnly: true
         codeExecution:
           readOnly: true
+        gradedBy:
+          type: string
+          format: email
+          title: Email address
+          readOnly: true
+        gradedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
       required:
       - codeExecution
+      - gradedAt
+      - gradedBy
       - id
       - question
       - referenceSolution

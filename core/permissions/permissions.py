@@ -15,6 +15,7 @@ from core.permissions.helpers import (
     isCourseAdmin,
     isCourseMember,
     isCourseStaff,
+    isGrader,
     isOrganizationMember,
     isQuizGrader,
     isStaffOfSub,
@@ -756,9 +757,11 @@ class QuizImagePermissions(TemplatePermission):
 # =============================================================================
 
 def canGradeQuiz(user, course):
-    """Quiz grading: course admins always; graders only with the per-course quizGraders role
-    (assignment graders do NOT grade quizzes by default)."""
-    return user.is_superuser or isCourseAdmin(user, course) or isQuizGrader(user, course)
+    """Quiz grading: superusers and course admins always; every course grader while the
+    course's gradersCanGradeQuizzes flag (default on) is set; otherwise only the explicit
+    per-course quizGraders role. Grading access includes reading attempts (answer keys)."""
+    return (user.is_superuser or isCourseAdmin(user, course) or isQuizGrader(user, course)
+            or (course.gradersCanGradeQuizzes and isGrader(user, course)))
 
 
 class QuizAttemptPermissions(TemplatePermission):

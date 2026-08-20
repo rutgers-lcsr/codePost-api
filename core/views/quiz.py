@@ -153,7 +153,8 @@ class QuizViewSet(ListProtectedViewSet):
     # Prefetch each response's question/generatedQuestion — StaffQuizResponseSerializer reads
     # referenceSolution off them, which would otherwise be an N+1 per response.
     attempts = quiz.attempts.filter(status='submitted').select_related('student', 'quiz').prefetch_related(
-        Prefetch('responses', queryset=QuizResponse.objects.select_related('question', 'generatedQuestion'))
+        Prefetch('responses', queryset=QuizResponse.objects.select_related(
+            'question', 'generatedQuestion', 'gradedBy'))
     ).order_by('student__email', 'attemptNumber')
     if request.query_params.get('needsGrading') in ('true', 'True', '1'):
       attempts = attempts.filter(needsManualGrading=True)

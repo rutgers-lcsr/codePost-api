@@ -305,15 +305,18 @@ class StudentQuizSerializer(serializers.ModelSerializer):
 
 
 class StaffQuizResponseSerializer(StudentQuizResponseSerializer):
-  """A response as staff (grading/review) sees it: adds the grader-only answer key and the
-  sandbox code-execution result. NEVER used for student-facing payloads — neither field is
-  in the student's Meta.fields, so StudentQuizResponseSerializer is structurally incapable
-  of exposing them."""
+  """A response as staff (grading/review) sees it: adds the grader-only answer key, the
+  sandbox code-execution result, and the grading provenance (gradedBy/gradedAt). NEVER used
+  for student-facing payloads — none of these fields are in the student's Meta.fields, so
+  StudentQuizResponseSerializer is structurally incapable of exposing them."""
   referenceSolution = serializers.SerializerMethodField()
   codeExecution = serializers.JSONField(read_only=True)
+  gradedBy = serializers.SlugRelatedField(slug_field='email', read_only=True)
+  gradedAt = serializers.DateTimeField(read_only=True, allow_null=True)
 
   class Meta(StudentQuizResponseSerializer.Meta):
-    fields = StudentQuizResponseSerializer.Meta.fields + ('referenceSolution', 'codeExecution')
+    fields = StudentQuizResponseSerializer.Meta.fields + (
+        'referenceSolution', 'codeExecution', 'gradedBy', 'gradedAt')
 
   @extend_schema_field(serializers.CharField(allow_null=True))
   def get_referenceSolution(self, obj):

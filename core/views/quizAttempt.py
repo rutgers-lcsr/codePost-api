@@ -89,7 +89,8 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     qs = super().get_queryset()
     if getattr(self, 'action', None) == 'retrieve':
       qs = qs.prefetch_related(
-          Prefetch('responses', queryset=QuizResponse.objects.select_related('question', 'generatedQuestion')))
+          Prefetch('responses', queryset=QuizResponse.objects.select_related(
+              'question', 'generatedQuestion', 'gradedBy')))
     return qs
 
   def _attempt_context(self, attempt):
@@ -106,8 +107,9 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     attempt = self.get_object()
     # Quiz graders / admins reading someone else's attempt get the grading projection
     # (student identity, answers, scores, and the answer key revealed); the owner keeps the
-    # policy-gated student view. Assignment-only graders are NOT quiz graders — the answer
-    # key must not leak to them (mirrors the attempts/results list gate).
+    # policy-gated student view. canGradeQuiz decides who that is: all graders by default,
+    # or only the quizGraders role when the course turns gradersCanGradeQuizzes off
+    # (mirrors the attempts/results list gate).
     if request.user != attempt.student and canGradeQuiz(request.user, attempt.quiz.course):
       return Response(StaffQuizAttemptSerializer(
           attempt, context=staff_reveal_context(request)).data)

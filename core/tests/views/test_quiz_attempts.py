@@ -392,10 +392,10 @@ class TestRevealAndAccess:
         api_client.force_authenticate(user=taking_setup['admin'])
         assert api_client.get(f"/quizAttempts/{start.data['id']}/").status_code == status.HTTP_200_OK
 
-    def test_only_quiz_graders_and_admins_can_read_an_attempt(self, api_client, taking_setup):
+    def test_attempt_read_follows_quiz_grading_gate(self, api_client, taking_setup):
         # Reading an attempt exposes the answer key (correct choices, referenceSolution), so it
-        # must match the quiz-grading gate — NOT the broader course-staff one. An assignment
-        # grader who is not a quiz grader must be denied.
+        # follows canGradeQuiz: every grader by default; only the quizGraders role once the
+        # course turns gradersCanGradeQuizzes off.
         course = taking_setup['course']
         quiz = _quiz(course)
         _add(quiz, _mc(course, _bank(course)))
@@ -403,10 +403,14 @@ class TestRevealAndAccess:
         api_client.force_authenticate(user=student)
         attempt_id = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json').data['id']
 
-        grader = course.graders.first()  # assignment grader, without the quiz-grader role
+        grader = course.graders.first()  # plain assignment grader
         api_client.force_authenticate(user=grader)
+        assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_200_OK
+        # Restrictive course: the flag off locks plain graders out...
+        course.gradersCanGradeQuizzes = False
+        course.save()
         assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_403_FORBIDDEN
-        # Granting the quiz-grader role unlocks it.
+        # ...and the explicit quiz-grader role unlocks it again.
         course.quizGraders.add(grader)
         assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_200_OK
         # Course admins can always read; the owner keeps their own view.
@@ -1192,31 +1196,36 @@ class TestManualGrading:
         _add(quiz, _essay(course, bank), sortKey=1)        # 5 pts manual
         return quiz
 
-    def test_only_quiz_graders_and_admins_can_grade(self, api_client, taking_setup):
+    def test_graders_grade_by_default_and_flag_restricts(self, api_client, taking_setup):
         course = taking_setup['course']
         grader = course.graders.first()
         quiz = self._essay_quiz(taking_setup)
         attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
 
-        # A plain (assignment) grader is NOT a quiz grader → blocked from grading + the queue.
+        # gradersCanGradeQuizzes defaults on: a plain grader sees the queue and grades.
+        assert course.gradersCanGradeQuizzes is True
+        api_client.force_authenticate(user=grader)
+        listing = api_client.get(f'/quizzes/{quiz.id}/attempts/?needsGrading=true')
+        assert listing.status_code == status.HTTP_200_OK
+        assert [a['id'] for a in listing.data] == [attempt_id]
+
+        # The student can't grade their own attempt.
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        own = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                              {'response': essay_id, 'pointsEarned': '5'}, format='json')
+        assert own.status_code == status.HTTP_403_FORBIDDEN
+
+        # Restrictive course: flag off blocks plain graders from grading + the queue.
+        course.gradersCanGradeQuizzes = False
+        course.save()
         api_client.force_authenticate(user=grader)
         denied = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
                                  {'response': essay_id, 'pointsEarned': '4'}, format='json')
         assert denied.status_code == status.HTTP_403_FORBIDDEN
         assert api_client.get(f'/quizzes/{quiz.id}/attempts/').status_code == status.HTTP_403_FORBIDDEN
 
-        # The student can't grade their own attempt either.
-        api_client.force_authenticate(user=taking_setup['students'][0])
-        own = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
-                              {'response': essay_id, 'pointsEarned': '5'}, format='json')
-        assert own.status_code == status.HTTP_403_FORBIDDEN
-
-        # Granting the quizGraders role unlocks both.
+        # The explicit quizGraders role is the flag-off opt-in.
         course.quizGraders.add(grader)
-        api_client.force_authenticate(user=grader)
-        listing = api_client.get(f'/quizzes/{quiz.id}/attempts/?needsGrading=true')
-        assert listing.status_code == status.HTTP_200_OK
-        assert [a['id'] for a in listing.data] == [attempt_id]
         graded = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
                                  {'response': essay_id, 'pointsEarned': '4'}, format='json')
         assert graded.status_code == status.HTTP_200_OK
@@ -1242,6 +1251,7 @@ class TestManualGrading:
 
         graded = QuizResponse.objects.get(pk=essay_id)
         assert graded.gradedBy == taking_setup['admin']
+        assert graded.gradedAt is not None
         assert graded.graderFeedback == 'Good, but expand on queues.'
         # The auto-graded MC's score was preserved (no regrade).
         assert QuizAttempt.objects.get(pk=attempt_id).score == Decimal('6.50')
@@ -1268,6 +1278,24 @@ class TestManualGrading:
         assert _dec(essay['pointsEarned']) == _dec('3.00')
         assert essay['graderFeedback'] == 'Solid.'
         assert _dec(mine.data['score']) == _dec('5.00')
+
+    def test_graded_by_and_at_staff_only(self, api_client, taking_setup):
+        # Grading provenance shows in the staff projection but never in the student's own view.
+        quiz = self._essay_quiz(taking_setup, showCorrectAnswers=True)
+        attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                        {'response': essay_id, 'pointsEarned': '3'}, format='json')
+
+        staff_view = api_client.get(f'/quizAttempts/{attempt_id}/')
+        essay = next(r for r in staff_view.data['responses'] if r['id'] == essay_id)
+        assert essay['gradedBy'] == taking_setup['admin'].email
+        assert essay['gradedAt'] is not None
+
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        mine = api_client.get(f'/quizAttempts/{attempt_id}/')
+        student_essay = next(r for r in mine.data['responses'] if r['id'] == essay_id)
+        assert 'gradedBy' not in student_essay and 'gradedAt' not in student_essay
 
     def test_roster_grants_and_revokes_quiz_grader_role(self, api_client, taking_setup):
         course, grader = taking_setup['course'], taking_setup['course'].graders.first()
@@ -1300,6 +1328,7 @@ class TestManualGrading:
         assert resp.data['passed'] is None
         reopened = QuizResponse.objects.get(pk=essay_id)
         assert reopened.pointsEarned is None and reopened.gradedBy is None
+        assert reopened.gradedAt is None
         assert reopened.graderFeedback == 'Nice.'  # kept as a draft for the next grader
 
     def test_reopen_requires_grading_role_and_graded_state(self, api_client, taking_setup):
@@ -1316,7 +1345,10 @@ class TestManualGrading:
         api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
                         {'response': essay_id, 'pointsEarned': '3'}, format='json')
 
-        # Plain graders and students can't reopen.
+        # With the course's graders-grade-quizzes default off, plain graders can't reopen;
+        # students never can.
+        course.gradersCanGradeQuizzes = False
+        course.save()
         api_client.force_authenticate(user=course.graders.first())
         assert api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
                                {'response': essay_id},
@@ -1380,9 +1412,16 @@ class TestManualGrading:
         attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
         student = taking_setup['students'][0]
 
-        # Plain graders can't view results.
-        api_client.force_authenticate(user=taking_setup['course'].graders.first())
+        # Results follow the quiz-grading gate: graders see them by default, and are locked
+        # out once the course restricts quiz grading to the explicit role.
+        course = taking_setup['course']
+        api_client.force_authenticate(user=course.graders.first())
+        assert api_client.get(f'/quizzes/{quiz.id}/results/').status_code == status.HTTP_200_OK
+        course.gradersCanGradeQuizzes = False
+        course.save()
         assert api_client.get(f'/quizzes/{quiz.id}/results/').status_code == status.HTTP_403_FORBIDDEN
+        course.gradersCanGradeQuizzes = True
+        course.save()
 
         # While the essay is ungraded: the row exists but carries no official score yet.
         api_client.force_authenticate(user=taking_setup['admin'])
@@ -1421,18 +1460,42 @@ class TestManualGrading:
                                  {'response': essay_id}, format='json')
         assert reopen.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_grade_quiz_capability_follows_role(self, api_client, taking_setup):
+    def test_grade_quiz_capability_follows_flag_and_role(self, api_client, taking_setup):
         course = taking_setup['course']
         grader = course.graders.first()
         api_client.force_authenticate(user=grader)
-        before = api_client.get(f'/courses/{course.id}/capabilities/')
-        assert before.data['capabilitiesMap']['grade_quiz'] is False
+        # Default: every grader has the capability.
+        default = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert default.data['capabilitiesMap']['grade_quiz'] is True
+        # Flag off: only the explicit role grants it.
+        course.gradersCanGradeQuizzes = False
+        course.save()
+        restricted = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert restricted.data['capabilitiesMap']['grade_quiz'] is False
         course.quizGraders.add(grader)
-        after = api_client.get(f'/courses/{course.id}/capabilities/')
-        assert after.data['capabilitiesMap']['grade_quiz'] is True
+        with_role = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert with_role.data['capabilitiesMap']['grade_quiz'] is True
         api_client.force_authenticate(user=taking_setup['admin'])
         admin_caps = api_client.get(f'/courses/{course.id}/capabilities/')
         assert admin_caps.data['capabilitiesMap']['grade_quiz'] is True
+
+    def test_flag_default_and_settings_roundtrip(self, api_client, taking_setup):
+        course = taking_setup['course']
+        api_client.force_authenticate(user=taking_setup['admin'])
+        detail = api_client.get(f'/courses/{course.id}/')
+        assert detail.data['gradersCanGradeQuizzes'] is True
+        settings_view = api_client.get(f'/courses/{course.id}/courseSettings/')
+        assert settings_view.data['gradersCanGradeQuizzes'] is True
+        flipped = api_client.patch(f'/courses/{course.id}/courseSettings/',
+                                   {'gradersCanGradeQuizzes': False}, format='json')
+        assert flipped.status_code == status.HTTP_200_OK
+        course.refresh_from_db()
+        assert course.gradersCanGradeQuizzes is False
+        # Non-admins can't flip it.
+        api_client.force_authenticate(user=course.graders.first())
+        denied = api_client.patch(f'/courses/{course.id}/courseSettings/',
+                                  {'gradersCanGradeQuizzes': True}, format='json')
+        assert denied.status_code == status.HTTP_403_FORBIDDEN
 
 
 class TestRunCode:
@@ -1490,11 +1553,19 @@ class TestRunCode:
                                {'response': code_id}, format='json')
         assert resp.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_plain_grader_without_role_cannot_run_code(self, api_client, taking_setup, monkeypatch):
+    def test_plain_grader_run_code_follows_flag(self, api_client, taking_setup, monkeypatch):
         self._mock_dispatch(monkeypatch)
+        course = taking_setup['course']
         quiz = self._code_quiz(taking_setup)
         attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
-        api_client.force_authenticate(user=taking_setup['course'].graders.first())
+        # Default: plain graders may run code (they can grade).
+        api_client.force_authenticate(user=course.graders.first())
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        # Flag off without the role: blocked.
+        course.gradersCanGradeQuizzes = False
+        course.save()
         resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
                                {'response': code_id}, format='json')
         assert resp.status_code == status.HTTP_403_FORBIDDEN

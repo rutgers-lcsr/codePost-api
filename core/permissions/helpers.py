@@ -50,9 +50,10 @@ def isRubricEditor(user, course):
 
 def isQuizGrader(user, course):
   """
-  Check if the user has the quiz-grader role in the course. Assignment graders do NOT
-  grade quizzes by default — instructors grant this role explicitly. (Course admins can
-  always grade quizzes; check isCourseAdmin separately.)
+  Check if the user has the explicit quiz-grader role in the course — the opt-in list
+  used when the course's gradersCanGradeQuizzes flag is off (by default the flag is on
+  and every grader can grade quizzes; see canGradeQuiz). (Course admins can always grade
+  quizzes; check isCourseAdmin separately.)
   """
   return course in user.quizGrader_courses.all()
 

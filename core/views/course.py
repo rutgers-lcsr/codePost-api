@@ -19,7 +19,7 @@ from core.views.template import SuperUserListProtectedViewSet
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import serializers
@@ -728,6 +728,35 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         serializer = SectionSerializer(sections, many=True)
         return Response(serializer.data)
+
+    @extend_schema(
+        responses=inline_serializer('QuizGradingProgress', {
+            'quizzes': inline_serializer('QuizGradingProgressQuiz', {
+                'id': serializers.IntegerField(),
+                'title': serializers.CharField(),
+                'totalManual': serializers.IntegerField(),
+                'graded': serializers.IntegerField(),
+                'pending': serializers.IntegerField(),
+            }, many=True),
+            'graders': inline_serializer('QuizGradingProgressGrader', {
+                'grader': serializers.EmailField(),
+                'totalGraded': serializers.IntegerField(),
+                'lastGradedAt': serializers.DateTimeField(allow_null=True),
+                'perQuiz': serializers.DictField(child=serializers.IntegerField()),
+            }, many=True),
+            'pendingUngraded': serializers.IntegerField(),
+        }),
+        description="Per-grader manual quiz-grading progress across the course's published "
+                    "quizzes (submitted attempts only). perQuiz keys are quiz ids; graders "
+                    "who left the course keep their rows (accountability, not a roster).",
+    )
+    @action(detail=True, methods=["GET"])
+    def quizGradingProgress(self, request, pk=None):
+        """Per-grader manual quiz-grading progress for the course's published quizzes."""
+        course = self.get_object()
+        require_capability(request.user, 'view_analytics', course)
+        from core.services.quiz_analytics import get_quiz_grading_progress
+        return Response(get_quiz_grading_progress(course))
 
     @extend_schema(
         responses=CourseAuditEventSerializer(many=True),

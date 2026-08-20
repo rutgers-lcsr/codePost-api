@@ -269,6 +269,7 @@ def apply_manual_grade(response, points_earned, grader, feedback=''):
   response.needsManualGrading = False
   response.graderFeedback = feedback or ''
   response.gradedBy = grader
+  response.gradedAt = timezone.now()
   response.save()
   recompute_attempt_totals(response.attempt)
 
@@ -282,6 +283,7 @@ def reopen_manual_grade(response):
   response.isCorrect = None
   response.needsManualGrading = True
   response.gradedBy = None
+  response.gradedAt = None
   response.save()
   recompute_attempt_totals(response.attempt)
 

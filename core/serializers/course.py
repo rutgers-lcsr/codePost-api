@@ -27,7 +27,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
   class Meta:
     model = Course
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
-              'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
+              'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 'gradersCanGradeQuizzes',
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
               'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expirationDate', 'organization', 'studentsCanSeeGraders', 'studentCount', 'isRubricEditor', 'capabilities', 'cloneFrom')
     read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount', 'isRubricEditor', 'capabilities')
@@ -166,6 +166,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
                 obj.emailNewUsers = source_course.emailNewUsers
                 obj.anonymousGradingDefault = source_course.anonymousGradingDefault
                 obj.allowGradersToEditRubric = source_course.allowGradersToEditRubric
+                obj.gradersCanGradeQuizzes = source_course.gradersCanGradeQuizzes
                 obj.minComments = source_course.minComments
                 obj.noUnfinalize = source_course.noUnfinalize
                 obj.lateDayCreditsAllowable = source_course.lateDayCreditsAllowable
@@ -218,7 +219,8 @@ class CourseSettingsSerializer(ModelSerializerWithPOSTCheck):
   class Meta:
     model = Course
     fields = ('id', 'sendReleasedSubmissionsToBack', 'showStudentsStatistics', 'timezone',
-              'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 'archived', 'lateDayCreditsAllowable')
+              'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric',
+              'gradersCanGradeQuizzes', 'archived', 'lateDayCreditsAllowable')
 
 
 class CourseAISettingsSerializer(serializers.ModelSerializer):
