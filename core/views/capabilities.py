@@ -16,7 +16,7 @@ from core.permissions.capabilities import (
     CAPABILITY_DESCRIPTIONS,
 )
 from core.permissions.role_cache import RoleCache
-from core.permissions.course_scope import _get_course_scope_id
+from core.permissions.course_scope import get_course_scope_id
 from core.serializers.actionResponses import (
     CapabilitiesResponseSerializer,
     BatchCapabilitiesRequestSerializer,
@@ -92,7 +92,7 @@ class BatchCapabilitiesView(APIView):
 
         user = request.user
         rc = RoleCache(user)
-        is_scoped = _get_course_scope_id(request) is not None
+        is_scoped = get_course_scope_id(request) is not None
         results: dict[str, dict] = {}
 
         for key in keys:

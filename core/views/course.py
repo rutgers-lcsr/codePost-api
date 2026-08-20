@@ -39,7 +39,7 @@ from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModels
 from core.throttles import AIConnectionTestThrottle
 from core.serializers.actionResponses import CapabilitiesResponseSerializer
 from core.permissions.capabilities import compute_course_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
-from core.permissions.course_scope import _get_course_scope_id
+from core.permissions.course_scope import get_course_scope_id
 from core.serializers.course_audit_event import CourseAuditEventSerializer
 from core.models import CourseAuditEvent, CourseAPIKey
 from core.serializers.course_api_key import (
@@ -144,7 +144,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not isCourseMember(user, course):
             return returnForbidden()
 
-        is_scoped = _get_course_scope_id(request) is not None
+        is_scoped = get_course_scope_id(request) is not None
         caps = compute_course_capabilities(user, course, is_course_scoped=is_scoped)
 
         include_descriptions = request.query_params.get('descriptions', '').lower() in ('true', '1')
@@ -851,7 +851,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         """List or create course-scoped API keys."""
         course = self.get_object()
 
-        is_scoped = _get_course_scope_id(request) is not None
+        is_scoped = get_course_scope_id(request) is not None
         require_capability(request.user, 'manage_course_api_keys', course, is_course_scoped=is_scoped)
 
         if request.method == "GET":
@@ -907,7 +907,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         """Update or revoke a single course API key."""
         course = self.get_object()
 
-        is_scoped = _get_course_scope_id(request) is not None
+        is_scoped = get_course_scope_id(request) is not None
         require_capability(request.user, 'manage_course_api_keys', course, is_course_scoped=is_scoped)
 
         try:

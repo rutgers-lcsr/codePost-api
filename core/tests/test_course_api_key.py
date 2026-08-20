@@ -6,7 +6,9 @@ Covers:
 - Key CRUD (create / list / update / revoke)
 - CourseAPIKeyAuthentication backend
 - CourseScopedJWTAuthentication backend
-- CourseScopePermission enforcement
+- Cross-course isolation (enforced by each viewset's TemplatePermission subclass:
+  the service account is a courseAdmin of exactly one course, so membership
+  checks fail for any other course)
 - OTT → course-scoped JWT propagation
 - Impersonate → course-scoped JWT propagation
 """
