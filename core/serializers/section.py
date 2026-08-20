@@ -36,9 +36,11 @@ class SectionSerializer(ModelSerializerWithPOSTCheck):
         if not isStudent(student, newFields['course']): # can't add student who is not in the course.
           raise serializers.ValidationError("The following student is not a member of the specified course: " + student.email)
 
-    # remove students from all other sections of this course
-    for student in newData['students']:
-        other_sections = newData['course'].sections.filter(students__in=[student])
+      # A student belongs to at most one section per course: joining this one leaves the
+      # others. (Inside the 'students' guard — a leaders- or name-only PATCH must not touch
+      # memberships, and newFields backfills course from the instance on PATCH.)
+      for student in newData['students']:
+        other_sections = newFields['course'].sections.filter(students__in=[student])
         for section in other_sections:
             section.students.remove(student)
 
