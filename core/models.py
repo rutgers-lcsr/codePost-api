@@ -3348,6 +3348,10 @@ class Quiz(BaseModel):
   gradersCanReviewGenerated = models.BooleanField(default=False,
       help_text=("If true, graders may review/edit/approve per-student generated question sets "
                  "on this quiz; if false, only course admins may."))
+  gradersCanGenerate = models.BooleanField(default=False,
+      help_text=("If true, graders may trigger the Generate-missing backfill on this quiz "
+                 "(generation spends AI credits), letting them generate, review, and release "
+                 "sets for their section; if false, only course admins may generate."))
   autoPublishGenerated = models.BooleanField(default=False,
       help_text=("If true, per-student generated question sets are approved automatically on "
                  "generation (no staff review gate)."))

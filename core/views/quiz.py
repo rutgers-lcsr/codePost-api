@@ -23,7 +23,7 @@ from core.services.audit import record_audit_event
 from core.views.template import ListProtectedViewSet
 from core.permissions.helpers import isCourseAdmin, isCourseStaff, isStudent
 from core.permissions.permissions import (
-    QuizPermissions, canGradeQuiz, canReviewGeneratedQuestions,
+    QuizPermissions, canGenerateQuizQuestions, canGradeQuiz, canReviewGeneratedQuestions,
 )
 
 
@@ -45,6 +45,14 @@ def _review_guard(user, quiz):
   if canReviewGeneratedQuestions(user, quiz):
     return None
   return _forbidden('You do not have permission to review generated questions on this quiz.')
+
+
+def _generate_guard(user, quiz):
+  """The Generate-missing backfill: admins always, staff per the quiz's gradersCanGenerate
+  flag (the instructor's opt-in for a grader-run generate → review → release workflow)."""
+  if canGenerateQuizQuestions(user, quiz):
+    return None
+  return _forbidden('You do not have permission to generate questions on this quiz.')
 
 
 def _grading_guard(user, quiz, detail):
@@ -531,10 +539,10 @@ class QuizViewSet(ListProtectedViewSet):
     assignment but no question set yet — e.g. they submitted before the AI section
     existed, or the feature was off / generation failed at the time."""
     quiz = self.get_object()
-    # Generation spends AI credits, so it is admin-only — graders review/edit/approve.
-    denied = (_admin_guard(request.user, quiz,
-                           'Only course admins can queue question generation.')
-              or _generation_ready_guard(quiz))
+    # Generation spends AI credits: admins always; graders only when the instructor turned
+    # on gradersCanGenerate (missing_only never touches existing sets, so the blast radius
+    # is bounded). Per-student generate/regenerate stays admin-only.
+    denied = _generate_guard(request.user, quiz) or _generation_ready_guard(quiz)
     if denied:
       return denied
 

@@ -841,6 +841,17 @@ def canReviewGeneratedQuestions(user, quiz):
     return quiz.gradersCanReviewGenerated and isCourseStaff(user, course)
 
 
+def canGenerateQuizQuestions(user, quiz):
+    """Triggering the Generate-missing backfill (spends AI credits): course admins always;
+    other course staff only when the quiz's gradersCanGenerate flag is on — the instructor's
+    opt-in for a grader-run generate → review → release workflow (mirrors
+    canReviewGeneratedQuestions)."""
+    course = quiz.course
+    if user.is_superuser or isCourseAdmin(user, course):
+        return True
+    return quiz.gradersCanGenerate and isCourseStaff(user, course)
+
+
 def canViewSubmissionForGeneratedReview(user, submission):
     """Read-only submission access for reviewing AI-generated quiz questions: per-student
     questions are generated FROM the submission, so a reviewer needs to read it for

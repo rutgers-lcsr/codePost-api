@@ -52,7 +52,7 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         'passingScore', 'passingScoreUnit', 'scoringPolicy',
         'multiAttemptScoreMethod', 'isPublished',
         # Per-student generated questions
-        'gradersCanReviewGenerated', 'autoPublishGenerated', 'manualGeneration',
+        'gradersCanReviewGenerated', 'gradersCanGenerate', 'autoPublishGenerated', 'manualGeneration',
         'generationDate', 'scheduledGenerationRanAt', 'generatedSections',
         'quizQuestions', 'questionGroups', 'source', 'createdBy', 'metadata',
     )

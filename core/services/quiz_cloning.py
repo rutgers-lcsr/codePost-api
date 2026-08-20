@@ -232,6 +232,7 @@ def copy_quiz(quiz: Quiz, destination_course: Course, *,
       scoringPolicy=quiz.scoringPolicy,
       multiAttemptScoreMethod=quiz.multiAttemptScoreMethod,
       gradersCanReviewGenerated=quiz.gradersCanReviewGenerated,
+      gradersCanGenerate=quiz.gradersCanGenerate,
       autoPublishGenerated=quiz.autoPublishGenerated,
       # generationDate is semester-specific (like the availability window) and is left
       # unset; the mode itself carries over.

@@ -604,7 +604,8 @@ class TestGenerateForStudent:
 
     def test_generation_is_admin_only_even_with_review_flag(self, api_client, gen_setup, monkeypatch):
         # The review flag grants graders review/edit/approve — generation spends AI credits
-        # and stays admin-only.
+        # and needs the separate gradersCanGenerate opt-in (and even that grants only the
+        # bounded Generate-missing backfill, tested in TestBackfill).
         _mock_ai(monkeypatch)
         self._eager_task(monkeypatch)
         api_client.force_authenticate(user=gen_setup['grader'])
@@ -1151,8 +1152,30 @@ class TestBackfill:
         assert again.status_code == status.HTTP_202_ACCEPTED
         assert again.data['queued'] == 0
 
+    def test_graders_can_generate_flag(self, api_client, gen_setup, monkeypatch):
+        """gradersCanGenerate is the instructor's opt-in for a grader-run generate → review →
+        release workflow: it grants Generate missing only — per-student generate/regenerate
+        (which can force-regenerate an approved set) stays admin-only, and students never
+        generate regardless of the flag."""
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        quiz = gen_setup['quiz']
+        quiz.gradersCanGenerate = True
+        quiz.gradersCanReviewGenerated = True
+        quiz.save()
+        api_client.force_authenticate(user=gen_setup['grader'])
+        resp = api_client.post(f"/quizzes/{quiz.id}/generateMissing/", {}, format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert resp.data['queued'] == 1
+        denied = api_client.post(f"/quizzes/{quiz.id}/generateForStudent/",
+                                 {'student': gen_setup['students'][0].email}, format='json')
+        assert denied.status_code == status.HTTP_403_FORBIDDEN
+        api_client.force_authenticate(user=gen_setup['students'][0])
+        assert api_client.post(f"/quizzes/{quiz.id}/generateMissing/", {},
+                               format='json').status_code == status.HTTP_403_FORBIDDEN
+
     def test_generate_missing_permissions_and_feature_gate(self, api_client, gen_setup, monkeypatch):
-        # Plain graders (without the review flag) and students are blocked.
+        # Plain graders (without the gradersCanGenerate flag) and students are blocked.
         api_client.force_authenticate(user=gen_setup['grader'])
         assert api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {},
                                format='json').status_code == status.HTTP_403_FORBIDDEN
