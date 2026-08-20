@@ -25,9 +25,14 @@ def get_or_create_course_service_user(course: Course) -> User:
 
     # Ensure profile is flagged as service account (signal auto-creates Profile)
     profile = user.profile
-    if not profile.isServiceAccount:
+    if not profile.isServiceAccount or not profile.canModifyRosters:
         profile.isServiceAccount = True
         profile.organization = course.organization
+        # Human course admins get canModifyRosters via add_admin_privileges();
+        # the service account is a courseAdmin created outside that path, and
+        # roster endpoints check the flag on top of the role — without it a
+        # course key can never modify rosters.
+        profile.canModifyRosters = True
         profile.save()
 
     # Ensure the user is a courseAdmin

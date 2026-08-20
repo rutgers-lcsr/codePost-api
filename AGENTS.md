@@ -64,6 +64,16 @@ pytest autograder/tests/    # autograder tests only
 - **Signal side-effects**: `auto_execute_submission` includes a 1-second `time.sleep()`. `auto_detect_on_file_change` fires on `AssignmentFile` save/delete. Always mute signals in test factories.
 - **`copy_assignment` uses `update_or_create`** for Environment because the `AssignmentFile` `post_save` signal may have already auto-created one via the `Autodetector`.
 
+## MCP Agent Endpoint
+
+`POST /mcp` — a stateless MCP (Model Context Protocol) Streamable HTTP endpoint so instructors can manage their course from Claude Code / Claude Desktop. Hand-rolled JSON-RPC in `core/mcp/` (no SDK: Django's Channels ASGI stack can't deliver lifespan events to a mounted sub-app, and stateless JSON mode needs none of it). Excluded from the OpenAPI schema.
+
+- **Tool layer**: `core/agent/` — protocol-agnostic registry (`@tool` decorator, `ToolSpec`), in-process dispatch that replays the caller's `Authorization` header through the real viewsets (never the ORM — permission classes are the enforcement), response shaping with a hard size budget. Tool names are prefixed `codepost_`.
+- **Credentials**: a course API key (`Authorization: CourseKey cpk_…`) connects *pinned* — the course is implied, no tool takes a courseId. A personal instructor token (`Authorization: Token …`, the SDK credential) connects *unpinned*: `tools/list` adds `codepost_list_courses`, injects a required `courseId` into every course-bound schema, and each call checks `isCourseStaff`. The optional `?scope=read|write` query param on the connect URL narrows any credential.
+- **Key scopes**: `CourseAPIKey.scope` ∈ `read`/`write`/`admin` (default `read`). `tools/list` is filtered by scope, so a key never even sees tools above its tier. Enum name pinned as `CourseAPIKeyScopeEnum` in `ENUM_NAME_OVERRIDES`.
+- **Capability gates on tools must be course-level** (`compute_course_capabilities` keys) — assignment/submission-level capabilities would silently hide the tool; the registry raises at import time if you try. Per-object permissions come from the dispatched viewset.
+- **Tests**: `core/tests/test_mcp_protocol.py` (wire-format conformance — we own the protocol, these are the regression net), `core/tests/test_agent_dispatch.py` (header allowlist + scope postcondition).
+
 ## Integration Points
 
 - **Frontend (codePost-ui)**: Consumes this API. Schema changes require regenerating the TS client via `./scripts/generate_ts_client.sh` which outputs to `../codePost-ui/src/api-client/`.

@@ -2621,6 +2621,11 @@ class CourseAuditEvent(BaseModel):
       ('quiz_generated_set_unapproved', 'Generated Question Set Unapproved'),
       ('quiz_generated_set_regenerated', 'Generated Question Set Regenerated'),
       ('quiz_generated_sets_published', 'Generated Question Sets Published'),
+      # MCP agent layer: one event per agent-initiated write (alongside the
+      # domain event the viewset itself records), and one per denied write —
+      # repeated denials are the signal that a key leaked or a model is probing.
+      ('agent_write', 'Agent Write'),
+      ('agent_write_denied', 'Agent Write Denied'),
   ]
 
   course = models.ForeignKey(

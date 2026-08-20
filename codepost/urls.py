@@ -70,6 +70,7 @@ from webhooks.view import WebhookViewSet
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
 from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView
+from core.mcp.views import MCPEndpointView
 from core.views.capabilities import PlatformCapabilitiesView, BatchCapabilitiesView
 
 
@@ -173,6 +174,9 @@ urlpatterns = [
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
+    # MCP endpoint for instructor agents. Must precede the router catch-all.
+    path('mcp', MCPEndpointView.as_view(), name='mcp'),
+    path('mcp/', MCPEndpointView.as_view(), name='mcp_slash'),
     path('capabilities/platform/', PlatformCapabilitiesView.as_view(), name='platform_capabilities'),
     path('capabilities/batch/', BatchCapabilitiesView.as_view(), name='batch_capabilities'),
     path('promptTypes/', PromptTypeListView.as_view(), name='prompt_types'),

@@ -284,6 +284,26 @@ class TestRecordAuditEventAllTypes(TestCase):
         self.assertEqual(event.assignment_id, self.assignment.id)
         self.assertEqual(event.meta, {'from': 'draft', 'to': 'published'})
 
+    def test_agent_write(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_write',
+            user=self.user,
+            meta={'tool': 'codepost_create_assignment', 'origin': 'mcp',
+                  'args': {'name': 'HW9'}, 'applied': True},
+        )
+        self._assert_event(event, 'agent_write', self.user)
+        self.assertEqual(event.meta['tool'], 'codepost_create_assignment')
+
+    def test_agent_write_denied(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_write_denied',
+            user=self.user,
+            meta={'tool': 'codepost_set_assignment_stage', 'origin': 'mcp',
+                  'args': {}, 'applied': False, 'deniedCode': 'COURSE_ARCHIVED'},
+        )
+        self._assert_event(event, 'agent_write_denied', self.user)
+        self.assertEqual(event.meta['deniedCode'], 'COURSE_ARCHIVED')
+
     def test_all_event_types_covered(self):
         """Ensure every EVENT_TYPE_CHOICES value has a dedicated test above."""
         defined_types = {choice[0] for choice in CourseAuditEvent.EVENT_TYPE_CHOICES}
@@ -302,6 +322,7 @@ class TestRecordAuditEventAllTypes(TestCase):
             'quiz_generated_set_approved', 'quiz_generated_set_unapproved',
             'quiz_generated_set_regenerated',
             'quiz_generated_sets_published',
+            'agent_write', 'agent_write_denied',
         }
         self.assertEqual(defined_types, tested_types,
                          f"Untested event types: {defined_types - tested_types}")

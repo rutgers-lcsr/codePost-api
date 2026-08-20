@@ -36,3 +36,28 @@ class AIConnectionTestThrottle(UserRateThrottle):
         if settings.TESTING:
             return True
         return super().allow_request(request, view)
+
+
+class AgentToolThrottle(UserRateThrottle):
+    """Rate limit for MCP agent tool calls.
+
+    Keyed on ``request.user.pk``, which for a course API key is that course's
+    service account — so this is a per-course budget and one runaway agent
+    loop cannot starve another course.
+
+    Both ``scope`` and ``rate`` are set: there is no ``DEFAULT_THROTTLE_RATES``
+    in settings, so a scope-only throttle would raise at init.
+    """
+    scope = 'agent_tool'
+    rate = '120/minute'
+
+    def allow_request(self, request, view):
+        if settings.TESTING:
+            return True
+        return super().allow_request(request, view)
+
+
+class AgentWriteThrottle(AgentToolThrottle):
+    """Tighter budget for agent-initiated writes, same per-course keying."""
+    scope = 'agent_write'
+    rate = '20/minute'
