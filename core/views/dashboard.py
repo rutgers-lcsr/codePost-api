@@ -8,14 +8,15 @@ from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from core.models import User
 from django.db.models import Count, Q
 from django.utils import timezone
-from datetime import timedelta
+from django.utils.dateparse import parse_datetime, parse_date
+from datetime import datetime, time, timedelta
 
 from core.models import Organization, Course, Assignment, Section
-from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer
+from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer, AutogradingStatsSerializer
 from core.serializers.user import UserSerializer
 
 
@@ -86,6 +87,43 @@ class DashboardViewSet(viewsets.ViewSet):
             'totalInactiveUsers': inactive_users,
             'activeUsers30d': active_users,
         })
+
+    @extend_schema(
+        responses={200: AutogradingStatsSerializer},
+        parameters=[
+            OpenApiParameter(name='dateFrom', required=False, type=str,
+                             description="Start of range (ISO 8601 datetime or date). Defaults to 30 days ago."),
+            OpenApiParameter(name='dateTo', required=False, type=str,
+                             description="End of range (ISO 8601 datetime or date, exclusive). Defaults to now."),
+        ],
+    )
+    @action(detail=False, methods=['GET'])
+    def autograding_stats(self, request):
+        """
+        Returns platform-wide autograder execution statistics: cache-hit rate,
+        failure counts, language usage, failures per language, and top errors.
+        """
+        from core.services.autograder_stats import get_autograding_stats
+
+        def parse_param(value):
+            if not value:
+                return None
+            parsed = parse_datetime(value)
+            if parsed is None:
+                as_date = parse_date(value)
+                if as_date is not None:
+                    parsed = datetime.combine(as_date, time.min)
+            if parsed is not None and timezone.is_naive(parsed):
+                parsed = timezone.make_aware(parsed)
+            return parsed
+
+        date_to = parse_param(request.query_params.get('dateTo')) or timezone.now()
+        date_from = parse_param(request.query_params.get('dateFrom')) or (date_to - timedelta(days=30))
+        if date_from >= date_to:
+            return Response({'error': 'dateFrom must be before dateTo'}, status=status.HTTP_400_BAD_REQUEST)
+
+        stats = get_autograding_stats(date_from, date_to)
+        return Response(AutogradingStatsSerializer(stats).data)
 
     @extend_schema(responses={200: AssignmentDeadlineSerializer(many=True)})
     @action(detail=False, methods=['GET'])

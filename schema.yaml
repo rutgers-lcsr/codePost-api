@@ -5013,6 +5013,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/PendingAdminActionResponse'
           description: ''
+  /dashboard/autograding_stats/:
+    get:
+      operationId: dashboard_autogradingStatsRetrieve
+      description: |-
+        Returns platform-wide autograder execution statistics: cache-hit rate,
+        failure counts, language usage, failures per language, and top errors.
+      parameters:
+      - in: query
+        name: dateFrom
+        schema:
+          type: string
+        description: Start of range (ISO 8601 datetime or date). Defaults to 30 days
+          ago.
+      - in: query
+        name: dateTo
+        schema:
+          type: string
+        description: End of range (ISO 8601 datetime or date, exclusive). Defaults
+          to now.
+      tags:
+      - dashboard
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutogradingStats'
+          description: ''
   /dashboard/deadlines/:
     get:
       operationId: dashboard_deadlinesList
@@ -17288,6 +17321,89 @@ components:
       required:
       - status
       - task_id
+    AutogradingLanguageFailure:
+      type: object
+      properties:
+        language:
+          type: string
+        executions:
+          type: integer
+        failures:
+          type: integer
+        failureRate:
+          type: number
+          format: double
+      required:
+      - executions
+      - failureRate
+      - failures
+      - language
+    AutogradingLanguageUsage:
+      type: object
+      properties:
+        language:
+          type: string
+        count:
+          type: integer
+      required:
+      - count
+      - language
+    AutogradingStats:
+      type: object
+      properties:
+        dateFrom:
+          type: string
+          format: date-time
+        dateTo:
+          type: string
+          format: date-time
+        totalRequests:
+          type: integer
+        cacheHits:
+          type: integer
+        actualExecutions:
+          type: integer
+        cacheHitRate:
+          type: number
+          format: double
+        failedExecutions:
+          type: integer
+        languageUsage:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutogradingLanguageUsage'
+        failuresPerLanguage:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutogradingLanguageFailure'
+        topErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutogradingTopError'
+      required:
+      - actualExecutions
+      - cacheHitRate
+      - cacheHits
+      - dateFrom
+      - dateTo
+      - failedExecutions
+      - failuresPerLanguage
+      - languageUsage
+      - topErrors
+      - totalRequests
+    AutogradingTopError:
+      type: object
+      properties:
+        category:
+          type: string
+        count:
+          type: integer
+        sampleMessage:
+          type: string
+      required:
+      - category
+      - count
+      - sampleMessage
     BackfillPreviewResponse:
       type: object
       properties:

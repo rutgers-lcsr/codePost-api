@@ -1929,6 +1929,65 @@ class Environment(BaseModel):
   course = property(lambda self: self.assignment.course)
 
 
+class AutograderExecutionEvent(BaseModel):
+  """One row per autograder cache consultation or execution, powering the
+  superadmin autograding stats dashboard. Insert-only; never updated."""
+  if TYPE_CHECKING:
+    id: int
+
+  ERROR_CATEGORY_CHOICES = [
+      ('timeout', 'Timeout'),
+      ('missing_dependency', 'Missing Dependency'),
+      ('compile_error', 'Compile Error'),
+      ('runtime_error', 'Runtime Error'),
+      ('marker_extraction', 'Marker Extraction'),
+      ('infra', 'Infrastructure'),
+      ('unknown', 'Unknown'),
+  ]
+
+  TRIGGER_CHOICES = [
+      ('file_run', 'File Run'),
+      ('submission_run', 'Submission Run'),
+      ('test_run', 'Test Run'),
+  ]
+
+  # SET_NULL, not CASCADE: expired courses are hard-deleted hourly and platform
+  # stats must survive them.
+  course = models.ForeignKey(
+      Course, on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='autograder_execution_events',
+      help_text="The course this execution belonged to",
+  )
+  assignment = models.ForeignKey(
+      'Assignment', on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='autograder_execution_events',
+      help_text="The assignment this execution belonged to",
+  )
+  cached = models.BooleanField(help_text="True if served from cache, False if actually executed")
+  success = models.BooleanField(help_text="Whether the execution (or cached result) succeeded")
+  # Snapshot of Environment.language at record time — no choices on purpose:
+  # the environment's choice list evolves and '' is a real auto-detect state.
+  language = models.CharField(max_length=25, blank=True, default='',
+                              help_text="Environment language at execution time")
+  trigger = models.CharField(max_length=20, choices=TRIGGER_CHOICES,
+                             help_text="Which execution path produced this event")
+  error_category = models.CharField(max_length=32, choices=ERROR_CATEGORY_CHOICES,
+                                    blank=True, default='',
+                                    help_text="Classified error category for failed executions")
+  error_message = models.CharField(max_length=500, blank=True, default='',
+                                   help_text="Truncated sample of the error output")
+
+  class Meta:
+    indexes = [
+        models.Index(fields=['created']),
+        models.Index(fields=['course', 'created']),
+    ]
+
+  def __str__(self):
+    return (f"AutograderExecutionEvent [{self.trigger}] cached={self.cached} "
+            f"success={self.success} course={self.course_id}")
 
 
 #### Data
@@ -2267,6 +2326,7 @@ __all__ = [
     "SubmissionHistory",
     "AssignmentDataSet",
     "CachedExecutionResult",
+    "AutograderExecutionEvent",
     "CommentTemplate",
     "MaintenanceBanner",
 ]

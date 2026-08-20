@@ -606,6 +606,16 @@ def RunSubmission(self, submissionID: int):
         logger.debug(f"[RunSubmission] runTestsOnSubmit disabled for assignment {submission.assignment.id}. Skipping tests.")
     # -----------------------------------------------
     
+    # Record one execution event per file for the autograding stats dashboard.
+    # RunSubmission never consults the cache, so these are always cached=False.
+    from autograder.services.execution_events import record_execution_event
+    for r in results:
+        record_execution_event(
+            trigger='submission_run', cached=False, success=r['success'],
+            assignment=submission.assignment, language=environment.language,
+            error_text=r.get('error'),
+        )
+
     summary = {
         "success": True,
         "submission_id": submissionID,

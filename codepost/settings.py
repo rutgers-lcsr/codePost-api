@@ -721,6 +721,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.tasks.flush_expired_tokens",
         "schedule": crontab(minute=30, hour=4),  # Daily, off-peak
     },
+    "prune-autograder-execution-events": {
+        "task": "core.tasks.prune_autograder_execution_events",
+        "schedule": crontab(minute=45, hour=4),  # Daily, off-peak
+    },
 }
 CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "FALSE").upper() == "TRUE"
 CELERY_TASK_STORE_EAGER_RESULT = True

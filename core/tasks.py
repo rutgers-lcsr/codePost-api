@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from celery import shared_task
 from core.models import Course
+from datetime import timedelta
 from django.utils import timezone
 import logging
 
@@ -163,6 +164,32 @@ def flush_expired_tokens():
     if count:
         logger.info(f"flush_expired_tokens: deleted {count} expired token row(s)")
     return count
+
+
+@shared_task
+def prune_autograder_execution_events(retention_days: int = 400, batch_size: int = 5000):
+    """Delete AutograderExecutionEvent rows older than the retention window.
+
+    400 days preserves year-over-year semester comparison. Deletes in pk
+    batches to avoid long-running locks on MySQL.
+    """
+    from core.models import AutograderExecutionEvent
+
+    cutoff = timezone.now() - timedelta(days=retention_days)
+    total = 0
+    while True:
+        pks = list(
+            AutograderExecutionEvent.objects
+            .filter(created__lt=cutoff)
+            .values_list('pk', flat=True)[:batch_size]
+        )
+        if not pks:
+            break
+        deleted, _ = AutograderExecutionEvent.objects.filter(pk__in=pks).delete()
+        total += deleted
+    if total:
+        logger.info(f"prune_autograder_execution_events: deleted {total} event row(s)")
+    return total
 
 
 @shared_task

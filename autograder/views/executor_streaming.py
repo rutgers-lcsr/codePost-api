@@ -157,8 +157,10 @@ class ExecuteFileStreaming(GenericAPIView):
                 if cached_result:
                     # Return cached result
                     logger.info(f"[ExecuteFileStreaming] Cache HIT for file {file_obj.id}, returning cached result")
+                    from autograder.services.execution_events import record_execution_event
+                    record_execution_event(trigger='file_run', cached=True, success=True, file=file_obj)
                     yield self._sse_message("progress", {"status": "cached", "message": "Using cached execution result"})
-                    
+
                     response_data = cached_result.get_cached_formated_response(file_obj)
                     yield self._sse_message("complete", response_data)
                     return
