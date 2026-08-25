@@ -507,6 +507,23 @@ class TestEstimateCost(TestCase):
         expected = (100_000 / 1_000_000) * 0.15 + (50_000 / 1_000_000) * 0.60
         self.assertAlmostEqual(cost, expected, places=6)
 
+    def test_gateway_model_falls_back_to_basename_default(self):
+        # Portkey-style slash-prefixed id should match the bare TOKEN_RATES entry
+        cost = AIService.estimate_cost('portkey', 'some-gateway/gemini-2.5-flash', 1_000_000, 1_000_000)
+        self.assertAlmostEqual(cost, 0.15 + 0.60, places=4)
+
+    def test_gateway_model_exact_custom_rate_wins_over_basename(self):
+        custom = {'some-gateway/gemini-2.5-flash': {'input': 1.0, 'output': 2.0}}
+        cost = AIService.estimate_cost(
+            'portkey', 'some-gateway/gemini-2.5-flash', 1_000_000, 1_000_000, custom_rates=custom)
+        self.assertAlmostEqual(cost, 3.0, places=4)
+
+    def test_gateway_model_basename_custom_rate_matches(self):
+        custom = {'gemini-2.5-flash': {'input': 1.0, 'output': 2.0}}
+        cost = AIService.estimate_cost(
+            'portkey', 'some-gateway/gemini-2.5-flash', 1_000_000, 1_000_000, custom_rates=custom)
+        self.assertAlmostEqual(cost, 3.0, places=4)
+
 
 # ===========================================================================
 # Usage recording (requires DB)
@@ -575,6 +592,55 @@ class TestRecordUsage(TestCase):
         self.assertEqual(record.status, 'error')
         self.assertEqual(record.error_message, 'API rate limit exceeded')
         self.assertEqual(record.request_type, 'test_generation')
+
+    def test_org_token_rates_produce_nonzero_course_cost(self):
+        self.org.ai_token_rates = {'my-custom-model': {'input': 1.0, 'output': 2.0}}
+        self.org.save()
+        self.course.ai_model = 'my-custom-model'
+        self.course.save()
+
+        svc = AIService(self.course)
+        result = GenerationResult(
+            text='x', success=True,
+            input_tokens=1_000_000, output_tokens=1_000_000, total_tokens=2_000_000,
+        )
+        svc.record_usage(result, self.user)
+
+        record = AIUsageRecord.objects.filter(course=self.course).first()
+        self.assertEqual(record.estimated_cost, Decimal('3.000000'))
+
+    def test_course_token_rates_override_org(self):
+        self.org.ai_token_rates = {'my-custom-model': {'input': 1.0, 'output': 2.0}}
+        self.org.save()
+        self.course.ai_model = 'my-custom-model'
+        self.course.ai_token_rates = {'my-custom-model': {'input': 2.0, 'output': 4.0}}
+        self.course.save()
+
+        svc = AIService(self.course)
+        result = GenerationResult(
+            text='x', success=True,
+            input_tokens=1_000_000, output_tokens=1_000_000, total_tokens=2_000_000,
+        )
+        svc.record_usage(result, self.user)
+
+        record = AIUsageRecord.objects.filter(course=self.course).first()
+        self.assertEqual(record.estimated_cost, Decimal('6.000000'))
+
+    def test_for_config_uses_explicit_organization_rates(self):
+        # Regression: org-scoped (course-less) usage must see the org's rates.
+        self.org.ai_token_rates = {'org-only-model': {'input': 1.0, 'output': 2.0}}
+        self.org.save()
+
+        svc = AIService.for_config('openai', api_key='k', model='org-only-model')
+        result = GenerationResult(
+            text='x', success=True,
+            input_tokens=1_000_000, output_tokens=1_000_000, total_tokens=2_000_000,
+        )
+        svc.record_usage(result, self.user, organization=self.org)
+
+        record = AIUsageRecord.objects.filter(organization=self.org, course=None).first()
+        self.assertIsNotNone(record)
+        self.assertEqual(record.estimated_cost, Decimal('3.000000'))
 
     def test_record_usage_multiple_creates_multiple_records(self):
         svc = AIService(self.course)

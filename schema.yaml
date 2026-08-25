@@ -16069,6 +16069,15 @@ components:
           minimum: -1000000
           exclusiveMaximum: true
           exclusiveMinimum: true
+        projectedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Cost of this item's usage at the currently configured token
+            rates
         requestCount:
           type: integer
       required:
@@ -16077,6 +16086,7 @@ components:
       - inputTokens
       - name
       - outputTokens
+      - projectedCost
       - requestCount
       - totalTokens
     AIUsageBucket:
@@ -16104,6 +16114,15 @@ components:
           exclusiveMaximum: true
           exclusiveMinimum: true
           description: Total estimated cost in USD
+        projectedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Cost of this bucket's usage at the currently configured token
+            rates
         requestCount:
           type: integer
           description: Number of API calls in this bucket
@@ -16112,6 +16131,7 @@ components:
       - inputTokens
       - outputTokens
       - period
+      - projectedCost
       - requestCount
       - totalTokens
     AIUsageSummary:
@@ -16127,6 +16147,9 @@ components:
         outputTokens:
           type: integer
           description: Grand total output tokens
+        cachedTokens:
+          type: integer
+          description: Grand total cached input tokens
         estimatedCost:
           type: number
           format: double
@@ -16134,6 +16157,15 @@ components:
           minimum: -1000000
           exclusiveMaximum: true
           exclusiveMinimum: true
+        projectedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Total cost of the range's usage at the currently configured
+            token rates
         requestCount:
           type: integer
           description: Total number of requests
@@ -16167,11 +16199,13 @@ components:
           format: date-time
       required:
       - breakdown
+      - cachedTokens
       - endDate
       - estimatedCost
       - granularity
       - inputTokens
       - outputTokens
+      - projectedCost
       - requestCount
       - startDate
       - timeSeries
@@ -18308,6 +18342,12 @@ components:
             type: object
             additionalProperties: {}
           readOnly: true
+        orgTokenRates:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+          readOnly: true
       required:
       - aiCommentsEnabled
       - aiEnabled
@@ -18318,6 +18358,7 @@ components:
       - hasApiKey
       - id
       - orgAiAvailable
+      - orgTokenRates
     CourseAPIKeyCreate:
       type: object
       description: Input serializer for creating a new course API key.
@@ -21047,6 +21088,12 @@ components:
           nullable: true
           readOnly: true
         defaultTokenRates:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+        orgTokenRates:
           type: object
           additionalProperties:
             type: object

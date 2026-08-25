@@ -73,6 +73,7 @@ class TestPermissions_Course_aiSettings(APITestCase):
       'hasApiKey',
       'apiKeyHint',
       'defaultTokenRates',
+      'orgTokenRates',
     }
     self.assertEqual(set(patch_response.data.keys()), expected_keys)
     self.assertEqual(patch_response.data['aiProvider'], 'openai')
@@ -148,3 +149,26 @@ class TestPermissions_Course_aiSettings(APITestCase):
       'aiFeatureModels': ['quiz_generation'],
     })
     self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+  def test_org_token_rates_appear_in_course_defaults(self):
+    org = self.DB['Organization']
+    org.ai_token_rates = {
+      'GCP-public/gemini-3-flash-preview': {'input': 0.01, 'output': 0.03},
+    }
+    org.save()
+
+    admin = Persona.ADMIN_OF_COURSE(self)
+    response = request_as('read', admin, self.endpoint, {})
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    # Org rate is merged into the inherited defaults and exposed separately
+    self.assertEqual(
+      response.data['defaultTokenRates']['GCP-public/gemini-3-flash-preview'],
+      {'input': 0.01, 'output': 0.03},
+    )
+    self.assertEqual(
+      response.data['orgTokenRates'],
+      {'GCP-public/gemini-3-flash-preview': {'input': 0.01, 'output': 0.03}},
+    )
+    # Hardcoded defaults are still present
+    self.assertIn('gpt-4o-mini', response.data['defaultTokenRates'])

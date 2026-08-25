@@ -45,6 +45,7 @@ class AIUsageBucketSerializer(serializers.Serializer):
   inputTokens = serializers.IntegerField(help_text="Total input tokens in this bucket")
   outputTokens = serializers.IntegerField(help_text="Total output tokens in this bucket")
   estimatedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Total estimated cost in USD")
+  projectedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Cost of this bucket's usage at the currently configured token rates")
   requestCount = serializers.IntegerField(help_text="Number of API calls in this bucket")
 
 
@@ -56,6 +57,7 @@ class AIUsageBreakdownSerializer(serializers.Serializer):
   inputTokens = serializers.IntegerField()
   outputTokens = serializers.IntegerField()
   estimatedCost = serializers.DecimalField(max_digits=12, decimal_places=6)
+  projectedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Cost of this item's usage at the currently configured token rates")
   requestCount = serializers.IntegerField()
 
 
@@ -64,7 +66,9 @@ class AIUsageSummarySerializer(serializers.Serializer):
   totalTokens = serializers.IntegerField(help_text="Grand total tokens in the range")
   inputTokens = serializers.IntegerField(help_text="Grand total input tokens")
   outputTokens = serializers.IntegerField(help_text="Grand total output tokens")
+  cachedTokens = serializers.IntegerField(help_text="Grand total cached input tokens")
   estimatedCost = serializers.DecimalField(max_digits=12, decimal_places=6)
+  projectedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Total cost of the range's usage at the currently configured token rates")
   requestCount = serializers.IntegerField(help_text="Total number of requests")
   timeSeries = AIUsageBucketSerializer(many=True, help_text="Usage data bucketed by time")
   breakdown = AIUsageBreakdownSerializer(many=True, help_text="Usage breakdown by dimension")

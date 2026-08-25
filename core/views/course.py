@@ -258,6 +258,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         require_capability(user, 'view_ai_usage', course)
 
         from core.services.ai_usage_analytics import get_usage_summary
+        from core.services.ai_service import AIService
         from core.models import AIUsageRecord
         from django.utils.dateparse import parse_datetime
 
@@ -283,6 +284,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             end_date=end_date,
             breakdown_field='assignment',
             breakdown_name_field='assignment__name',
+            projection_rates=AIService.merged_token_rates(course=course),
         )
 
         return Response(summary)
