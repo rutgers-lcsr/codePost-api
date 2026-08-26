@@ -91,10 +91,17 @@ def course_todo(ctx, horizonDays: int = 7):
         CourseViewSet, {'get': 'quizzes'},
         method='GET', path=f'/courses/{ctx.course.id}/quizzes/', pk=ctx.course.id)
     if quiz_result.ok:
+        from core.agent.tools.quizzes import needs_grading_count
         for quiz in (quiz_result.data or []):
-            if quiz.get('needsGrading'):
+            # needsGrading is not a serializer field — it must be computed
+            # from the quiz's results (one dispatch per published quiz).
+            if not quiz.get('isPublished'):
+                continue
+            pending = needs_grading_count(ctx, quiz.get('id'))
+            if pending:
                 quizzes_needing_grading.append({
                     'quizId': quiz.get('id'), 'title': quiz.get('title'),
+                    'needsGrading': pending,
                     'hint': f'codepost_get_quiz_status(view="results", '
                             f'quizId={quiz.get("id")})'})
 

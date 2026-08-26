@@ -429,6 +429,11 @@ def get_late_submission_stats(assignment: Assignment) -> dict | None:
         assignment=assignment,
         dateUploaded__isnull=False,
     ).values_list('dateUploaded', flat=True)
+    # Submissions without an upload date (created via the API/SDK, or grader-
+    # uploaded) can't be bucketed — count them rather than silently making the
+    # totals not add up.
+    unknown = Submission.objects.filter(
+        assignment=assignment, dateUploaded__isnull=True).count()
 
     on_time = 0
     late = 0
@@ -451,6 +456,7 @@ def get_late_submission_stats(assignment: Assignment) -> dict | None:
         'dueDate': due_date.isoformat(),
         'onTime': on_time,
         'late': late,
+        'unknown': unknown,
         'lateByDay': late_by_day_list,
     }
 

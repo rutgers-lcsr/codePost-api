@@ -154,6 +154,18 @@ def update_assignment(ctx, assignmentId: int, **changes):
             f"The submission deadline moved; the assignment now reads as "
             f"'{effective}' to students (derived close follows the deadline).")
 
+    # Inert-combination checks: the API accepts these silently, but the
+    # setting does nothing until its counterpart exists.
+    if changes.get('testsAffectGrade') and not data.get('testCategories'):
+        warnings.append(
+            'testsAffectGrade is on but this assignment has no test '
+            'categories — it has no effect until tests exist '
+            '(codepost_manage_test_cases).')
+    if (changes.get('maxLateDays') or 0) > 0 and not data.get('allowLateUploads'):
+        warnings.append(
+            'maxLateDays is set but allowLateUploads is false — students '
+            'cannot submit late, so late-day credits are never consumed.')
+
     return shaping.enforce_budget(shaping.envelope(
         {'course': course_header(ctx.course),
          'assignment': shaping.project(data, ASSIGNMENT_SUMMARY_FIELDS),

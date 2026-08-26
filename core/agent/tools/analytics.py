@@ -184,12 +184,25 @@ def get_assignment_analytics(ctx, assignmentId: int, blocks=None, buckets: int =
         what=f'reading analytics for assignment {assignmentId}')
 
     wanted = blocks or ['gradeDistribution', 'lateSubmissions']
+
+    # The service returns [] both when the assignment is worth 0 points and
+    # when nothing is finalized — indistinguishable to the caller, so say why.
+    warnings = None
+    if 'gradeDistribution' in wanted and not data.get('gradeDistribution'):
+        if (assignment.get('points') or 0) <= 0:
+            warnings = ['gradeDistribution is empty: the assignment is worth 0 '
+                        'points, so grades cannot be bucketed.']
+        elif not assignment.get('submissionsFinalizedCount'):
+            warnings = ['gradeDistribution is empty: no submissions are '
+                        'finalized yet, so there are no grades to bucket.']
+
     return shaping.enforce_budget(shaping.envelope(
         {'course': course_header(ctx.course),
          'assignment': {'id': assignment.get('id'), 'name': assignment.get('name')},
          'analytics': {k: data.get(k) for k in wanted}},
         meta={'included': wanted,
-              'available': list(_ANALYTICS_BLOCKS)}))
+              'available': list(_ANALYTICS_BLOCKS)},
+        warnings=warnings))
 
 
 @tool(

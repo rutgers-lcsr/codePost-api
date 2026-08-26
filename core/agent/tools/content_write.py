@@ -29,7 +29,8 @@ _MAX_CONTENT_CHARS = 1_000_000
     description=(
         'The files students receive with an assignment — the spec, starter '
         'code, and hidden helpers. Text content only (UTF-8).\n\n'
-        "op='list' shows the files. op='add' creates one; op='update' changes "
+        "op='list' shows the files. op='get' returns one file's content. "
+        "op='add' creates one; op='update' changes "
         "content or flags; op='remove' deletes one. Flags: required=true means "
         'students MUST include a file with this name in their submission; '
         'hidden=true hides it from students (available to tests).\n\n'
@@ -41,9 +42,10 @@ _MAX_CONTENT_CHARS = 1_000_000
         'type': 'object',
         'properties': {
             'assignmentId': {'type': 'integer'},
-            'op': {'enum': ['list', 'add', 'update', 'remove'], 'default': 'list'},
+            'op': {'enum': ['list', 'get', 'add', 'update', 'remove'],
+                   'default': 'list'},
             'fileId': {'type': 'integer',
-                       'description': "For update/remove (from op='list')."},
+                       'description': "For get/update/remove (from op='list')."},
             'name': {'type': 'string',
                      'description': "Filename with extension, e.g. 'hw3.py'."},
             'content': {'type': 'string',
@@ -85,8 +87,30 @@ def manage_assignment_files(ctx, assignmentId: int, op: str = 'list', fileId=Non
                             'name': assignment.get('name')},
              'files': rows},
             meta={'total': len(rows)},
-            warnings=['File contents are not listed. Fetch one file at a time '
-                      'by updating with unchanged flags, or use the codePost UI.']))
+            warnings=["File contents are not listed — read one with "
+                      "op='get', fileId=…."]))
+
+    if op == 'get':
+        if fileId is None:
+            raise errors.ToolError(
+                'PRECONDITION_NOT_MET', "op='get' needs a fileId.",
+                remedy="Get ids from op='list'.", retryable=True)
+        data = ctx.dispatch.require(
+            AssignmentFileViewSet, {'get': 'retrieve'},
+            method='GET', path=f'/assignmentFiles/{fileId}/', pk=fileId,
+            what=f'reading assignment file {fileId}')
+        content = data.get('data') or ''
+        truncated = len(content) > _MAX_CONTENT_CHARS
+        payload = shaping.project(data, ('id', 'name', 'extension', 'path',
+                                         'required', 'hidden', 'description'))
+        payload['content'] = content[:_MAX_CONTENT_CHARS]
+        return shaping.enforce_budget(shaping.envelope(
+            {'course': course_header(ctx.course),
+             'assignment': {'id': assignment.get('id'),
+                            'name': assignment.get('name')},
+             'file': payload},
+            warnings=([f'Content truncated to {_MAX_CONTENT_CHARS // 1000}KB.']
+                      if truncated else None)))
 
     if op == 'remove':
         if fileId is None:

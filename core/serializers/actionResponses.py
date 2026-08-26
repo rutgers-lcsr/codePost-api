@@ -246,6 +246,8 @@ class AssignmentAnalyticsLateByDaySerializer(serializers.Serializer):
 class AssignmentAnalyticsLateSubmissionsSerializer(serializers.Serializer):
     dueDate = serializers.CharField()
     onTime = serializers.IntegerField()
+    unknown = serializers.IntegerField(
+        help_text="Submissions with no dateUploaded — can't be bucketed on time.")
     late = serializers.IntegerField()
     lateByDay = AssignmentAnalyticsLateByDaySerializer(many=True)
 
