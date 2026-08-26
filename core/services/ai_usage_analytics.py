@@ -131,6 +131,7 @@ def get_usage_summary(
 
     # Rate resolver for projected cost (usage priced at *current* rates,
     # unlike estimatedCost which is frozen at request time).
+    org_rates = {}
     if projection_rates_per_org:
         from core.models import Organization
         org_ids = queryset.exclude(organization__isnull=True).values_list(
@@ -139,11 +140,12 @@ def get_usage_summary(
             o['id']: o['ai_token_rates']
             for o in Organization.objects.filter(id__in=org_ids).values('id', 'ai_token_rates')
         }
-        def rates_for_org(org_id):
+
+    # Single definition (a per-branch def trips Pyright's reportRedeclaration).
+    def rates_for_org(org_id):
+        if projection_rates_per_org:
             return org_rates.get(org_id) or None
-    else:
-        def rates_for_org(org_id):
-            return projection_rates
+        return projection_rates
 
     # Grand totals
     totals = queryset.aggregate(
