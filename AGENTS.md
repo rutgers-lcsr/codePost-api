@@ -40,6 +40,10 @@ pytest autograder/tests/    # autograder tests only
 
 # Regenerate TypeScript client for codePost-ui (run from this repo)
 ./scripts/generate_ts_client.sh
+
+# Re-sync the in-app user docs (markdown) from codePost-ui into docs/user/
+# — they back the agent's codepost_search_docs tool
+./scripts/sync_user_docs.sh
 ```
 
 ## Project Conventions
