@@ -1,0 +1,52 @@
+<!-- Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software. -->
+{% extends "oauth2_provider/base.html" %}
+{% block title %}Approve agent access — codePost{% endblock %}
+{% block content %}
+    {% if not error %}
+        <form id="authorizationForm" method="post">
+            {% csrf_token %}
+            {% for field in form %}{% if field.is_hidden %}{{ field }}{% endif %}{% endfor %}
+
+            <h1>Allow “{{ application.name }}” to access codePost?</h1>
+            <p>
+                You are signed in as <strong>{{ user.email }}</strong>.
+                This connection will be able to act in the courses you teach, with
+                these permissions:
+            </p>
+            <ul class="scopes">
+                {% for scope in scopes %}
+                    <li><code>{{ scope }}</code>
+                        {% if scope == "read" %}Read course data: rosters, assignments, submissions, grades
+                        {% elif scope == "write" %}Create and modify course content: assignments, quizzes, rubrics, grading
+                        {% elif scope == "admin" %}Full instructor tool access — destructive operations still require a dashboard confirmation code
+                        {% else %}{{ scope }}{% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+
+            {# DCR is open, so the application name above is chosen by whoever   #}
+            {# registered the client — the anti-phishing line is load-bearing.   #}
+            <div class="warn">
+                Only approve if <strong>you</strong> started this connection from your
+                own AI assistant (for example Claude) moments ago. If this appeared
+                unexpectedly, press Cancel.
+            </div>
+
+            {{ form.errors }}
+            {{ form.non_field_errors }}
+
+            <div>
+                <input type="submit" class="btn btn-primary" name="allow" value="Approve"/>
+                <input type="submit" class="btn btn-secondary" value="Cancel"/>
+            </div>
+        </form>
+        <p class="muted">
+            You can revoke this connection at any time from your AI assistant's
+            connector settings; codePost admins can revoke tokens from the admin site.
+        </p>
+    {% else %}
+        <h1>Authorization error</h1>
+        <p><strong>{{ error.error }}</strong></p>
+        <p>{{ error.description }}</p>
+    {% endif %}
+{% endblock %}

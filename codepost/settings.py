@@ -172,6 +172,63 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
+# ---------------------------------------------------------------------------
+# OAuth 2.1 authorization server (django-oauth-toolkit) — lets Claude Desktop /
+# claude.ai custom connectors reach the MCP endpoint natively. See the MCP auth
+# spec (2025-06-18): RFC 8414 + RFC 9728 metadata, PKCE(S256)-only, DCR open
+# but every token still requires a signed-in instructor consenting.
+# ---------------------------------------------------------------------------
+
+# django-oauth-toolkit's authorize view is LoginRequiredMixin; this page offers
+# SSO (CAS etc.) and password login and hands the browser back to /o/authorize.
+LOGIN_URL = "/auth/agent-login/"
+
+OAUTH2_PROVIDER = {
+    # Scopes mirror core/agent/registry.py SCOPE_READ/WRITE/ADMIN exactly —
+    # Connection._resolve_scope maps the granted set onto the agent tool tiers.
+    "SCOPES": {
+        "read": "Read course data: rosters, assignments, submissions, grades",
+        "write": "Create and modify course content: assignments, quizzes, rubrics, grading",
+        "admin": "Full instructor tool access, including destructive operations",
+    },
+    "DEFAULT_SCOPES": ["read", "write", "admin"],
+    # OAuth 2.1 posture
+    "PKCE_REQUIRED": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_METHOD": True,          # S256 only
+    "COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_PASSWORD_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_AUTHZ_RESPONSE_ISS": True,   # RFC 9207 iss param
+    # (COMPLIANT_BCP_RFC9700_REDIRECT_URI_SCHEME stays off: it forbids "http",
+    # which the RFC 8252 localhost loopback for Claude Code needs.)
+    # Token lifetimes
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
+    "REFRESH_TOKEN_EXPIRE_SECONDS": 60 * 60 * 24 * 90,
+    "ROTATE_REFRESH_TOKEN": True,
+    "REFRESH_TOKEN_REUSE_PROTECTION": True,
+    # Redirect URIs: Claude web/desktop https callbacks + Claude Code loopback
+    # (http://localhost:<any-port>/callback via the loopback exemption).
+    "ALLOWED_REDIRECT_URI_SCHEMES": ["https", "http"],
+    "ALLOW_LOCALHOST_LOOPBACK": True,
+    # RFC 8414 issuer + advertised capabilities
+    "OIDC_ISS_ENDPOINT": API_URL,
+    "OAUTH2_GRANT_TYPES_SUPPORTED": ["authorization_code", "refresh_token"],
+    "OAUTH2_RESPONSE_TYPES_SUPPORTED": ["code"],
+    "OAUTH2_TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED": [
+        "none", "client_secret_post", "client_secret_basic",
+    ],
+    # RFC 9728 protected-resource metadata (served by DOT's view; the resource
+    # is the MCP endpoint, not the whole API).
+    "OAUTH2_PROTECTED_RESOURCE_IDENTIFIER": f"{API_URL}/mcp",
+    "OAUTH2_PROTECTED_RESOURCE_AUTHORIZATION_SERVERS": [API_URL],
+    "OAUTH2_PROTECTED_RESOURCE_NAME": "codePost MCP",
+    # Dynamic client registration: open (registering grants nothing by itself —
+    # every token still requires an instructor consenting), rate-limited at the
+    # URL conf.
+    "DCR_ENABLED": True,
+    "DCR_REGISTRATION_PERMISSION_CLASSES": ("oauth2_provider.dcr.AllowAllDCRPermission",),
+    "REQUEST_APPROVAL_PROMPT": "force",
+}
+
 SPECTACULAR_SETTINGS = {
     'CAMELIZE_NAMES': True,
     'POSTPROCESSING_HOOKS': [
@@ -480,6 +537,7 @@ INSTALLED_APPS = [
     "core",
     "autograder",
     "rest_framework",
+    "oauth2_provider",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "rest_framework.authtoken",
@@ -693,6 +751,10 @@ CELERY_BEAT_SCHEDULE = {
     #     "task": "autograder.run.daily_assignment_check",
     #     "schedule": crontab(day_of_week="*", hour="14", minute="1"),
     # },
+    "clear-expired-oauth-tokens": {
+        "task": "core.tasks.clear_expired_oauth_tokens",
+        "schedule": crontab(minute=30, hour=4),  # Daily, off-peak
+    },
     "delete-expired-courses": {
         "task": "core.tasks.delete_expired_courses",
         "schedule": crontab(minute=0, hour="*"), # Run every hour

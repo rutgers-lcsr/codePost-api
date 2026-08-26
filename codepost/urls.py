@@ -70,6 +70,11 @@ from webhooks.view import WebhookViewSet
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
 from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView
+from oauth2_provider import views as oauth2_views
+from oauth2_provider.urls import metadata_urlpatterns as oauth2_metadata_urlpatterns
+
+from core.throttles import rate_limited
+from core.views.agent_login import agent_login
 from core.mcp.views import MCPEndpointView
 from core.views.capabilities import PlatformCapabilitiesView, BatchCapabilitiesView
 
@@ -149,6 +154,25 @@ API_DESCRIPTION = 'An API for administrators to mine course data and automate co
 #############################################
 #############################################
 
+
+# OAuth 2.1 authorization server (trimmed django-oauth-toolkit mount — see the
+# comment above each entry group; instance namespace must be "oauth2_provider"
+# so DOT's internal reverse() calls resolve).
+oauth2_urlpatterns = ([
+    path("authorize/", oauth2_views.AuthorizationView.as_view(), name="authorize"),
+    path("token/", rate_limited("oauth_token", "60/min")(
+        oauth2_views.TokenView.as_view()), name="token"),
+    path("revoke_token/", oauth2_views.RevokeTokenView.as_view(), name="revoke-token"),
+    path("introspect/", oauth2_views.IntrospectTokenView.as_view(), name="introspect"),
+    # Dynamic client registration (RFC 7591/7592): open by policy — registering
+    # grants nothing without a signed-in instructor consenting — but rate-limited.
+    path("register/", rate_limited("oauth_register", "10/min")(
+        oauth2_views.DynamicClientRegistrationView.as_view()), name="dcr-register"),
+    path("register/<str:client_id>/",
+         oauth2_views.DynamicClientRegistrationManagementView.as_view(),
+         name="dcr-register-management"),
+], "oauth2_provider")
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     re_path('^api-auth/', include('rest_framework.urls', namespace='rest_framework')),
@@ -174,6 +198,13 @@ urlpatterns = [
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
+    # OAuth: RFC 8414 + RFC 9728 well-known documents at the site root, the
+    # authorization server itself under /o/, and the browser login bridge the
+    # consent page redirects anonymous users to. All precede the catch-all.
+    path('', include((oauth2_metadata_urlpatterns, 'oauth2_provider'),
+                     namespace='oauth2_metadata')),
+    path('o/', include(oauth2_urlpatterns)),
+    path('auth/agent-login/', agent_login, name='agent_login'),
     # MCP endpoint for instructor agents. Must precede the router catch-all.
     path('mcp', MCPEndpointView.as_view(), name='mcp'),
     path('mcp/', MCPEndpointView.as_view(), name='mcp_slash'),

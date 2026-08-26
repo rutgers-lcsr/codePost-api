@@ -37,7 +37,13 @@ def csp_frame_ancestors_middleware(get_response):
 
     def middleware(request):
         response = get_response(request)
-        response["Content-Security-Policy"] = frame_ancestors
+        # The OAuth consent and agent-login pages must never be frameable —
+        # a framed consent screen is a clickjacking primitive. Everything else
+        # keeps the trusted-origin embedding policy.
+        if request.path.startswith(('/o/', '/auth/agent-login')):
+            response["Content-Security-Policy"] = "frame-ancestors 'none'"
+        else:
+            response["Content-Security-Policy"] = frame_ancestors
         return response
     return middleware
 

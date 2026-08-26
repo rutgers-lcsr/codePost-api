@@ -20,6 +20,7 @@ from rest_framework.authentication import TokenAuthentication
 from core.agent.context import Connection
 from core.authentication import (CourseAPIKeyAuthentication,
                                  CourseScopedJWTAuthentication)
+from core.mcp.oauth import MCPOAuth2Authentication
 from core.mcp import protocol
 from core.throttles import AgentToolThrottle
 
@@ -34,9 +35,16 @@ class MCPEndpointView(APIView):
     """
 
     # Course keys pin the course; personal instructor tokens (the SDK
-    # credential) connect unpinned and choose the course per tool call via
+    # credential) and OAuth Bearer tokens (Claude Desktop / claude.ai native
+    # connectors) connect unpinned and choose the course per tool call via
     # codepost_list_courses + a courseId argument.
-    authentication_classes = [CourseAPIKeyAuthentication,
+    #
+    # MCPOAuth2Authentication is FIRST on purpose: DRF takes the 401
+    # WWW-Authenticate challenge from the first authenticator, and the MCP auth
+    # spec requires it to be `Bearer ... resource_metadata="..."`. The class
+    # returns None for non-Bearer credentials, so the others are unaffected.
+    authentication_classes = [MCPOAuth2Authentication,
+                              CourseAPIKeyAuthentication,
                               CourseScopedJWTAuthentication,
                               TokenAuthentication]
     permission_classes = [IsAuthenticated]
@@ -58,10 +66,23 @@ class MCPEndpointView(APIView):
         if version_error:
             return version_error
 
-        # Both credential flavours are welcome. A course key arrives pinned to
-        # its course; a personal token arrives unpinned and every course-bound
-        # tool call must name a course the caller staffs — enforcement lives in
-        # Connection.context_for, per call.
+        # RFC 8707 audience strictness: django-oauth-toolkit only audience-
+        # validates tokens that carry a resource binding (a foreign-resource
+        # token is already 401'd upstream); a token with NO binding would skip
+        # the check entirely, so refuse it here — the MCP spec requires tokens
+        # issued specifically for this server.
+        from oauth2_provider.models import AccessToken as OAuthAccessToken
+        if isinstance(request.auth, OAuthAccessToken) and not request.auth.resource:
+            return Response(
+                {'detail': 'This token is not bound to the MCP resource. '
+                           'Reconnect so your client requests it with '
+                           'resource=' + f'{ _api_url() }/mcp.'},
+                status=403)
+
+        # All credential flavours are welcome. A course key arrives pinned to
+        # its course; a personal token or OAuth Bearer arrives unpinned and
+        # every course-bound tool call must name a course the caller staffs —
+        # enforcement lives in Connection.context_for, per call.
         conn = Connection(request)
 
         try:
@@ -75,6 +96,10 @@ class MCPEndpointView(APIView):
         if result is None:
             return Response(status=202)
         return Response(result)
+
+
+def _api_url() -> str:
+    return getattr(settings, 'API_URL', '')
 
 
 def _validate_origin(request):

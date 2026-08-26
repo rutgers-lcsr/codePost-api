@@ -1167,6 +1167,30 @@ Django = ">=5.2"
 drf = ["djangorestframework"]
 
 [[package]]
+name = "django-oauth-toolkit"
+version = "3.4.1"
+description = "OAuth 2.0 authorization server for Django"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "django_oauth_toolkit-3.4.1-py3-none-any.whl", hash = "sha256:c47f2a70e83bade0a47a5e9b20e86030d8ed9c0a8f10ec4ed30446cad7291f2d"},
+    {file = "django_oauth_toolkit-3.4.1.tar.gz", hash = "sha256:c4de73c0765eed55a99ea0fa8433b20664dcc1f43930149cff569abed166c5c2"},
+]
+
+[package.dependencies]
+django = ">=4.2"
+jwcrypto = ">=1.5.0"
+oauthlib = ">=3.3.0"
+requests = ">=2.13.0"
+urllib3 = ">=1.26"
+
+[package.extras]
+dev = ["coverage", "django-ninja", "djangorestframework", "myst-parser", "pytest", "pytest-cov", "pytest-django", "pytest-mock", "pytest-xdist", "ruff", "sphinx (==7.2.6)", "sphinx-rtd-theme (==2.0.0)"]
+docs = ["myst-parser", "sphinx (==7.2.6)", "sphinx-rtd-theme (==2.0.0)"]
+test = ["coverage", "django-ninja", "djangorestframework", "pytest", "pytest-cov", "pytest-django", "pytest-mock", "pytest-xdist"]
+
+[[package]]
 name = "django-stubs"
 version = "6.0.3"
 description = "Mypy stubs for Django"
@@ -2248,6 +2272,22 @@ docs = ["intersphinx-registry", "myst-parser", "pydata-sphinx-theme", "sphinx-au
 test = ["ipykernel", "pre-commit", "pytest (<9)", "pytest-cov", "pytest-timeout"]
 
 [[package]]
+name = "jwcrypto"
+version = "1.5.8"
+description = "Implementation of JOSE Web standards"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "jwcrypto-1.5.8-py3-none-any.whl", hash = "sha256:85aeb475f808d56bbc2f2ed1f6f73e6a317c4011a4321505f02f0aed695a3742"},
+    {file = "jwcrypto-1.5.8.tar.gz", hash = "sha256:c3d7114b6f6e65b52f6b7da817eb8cb8423e1da31e1ef13508447c81ecbdcc34"},
+]
+
+[package.dependencies]
+cryptography = ">=39.0.0"
+typing_extensions = ">=4.5.0"
+
+[[package]]
 name = "kiwisolver"
 version = "1.5.0"
 description = "A fast implementation of the Cassowary constraint solver"
@@ -3026,6 +3066,23 @@ files = [
     {file = "numpy-2.4.4-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:f2cf083b324a467e1ab358c105f6cad5ea950f50524668a80c486ff1db24e119"},
     {file = "numpy-2.4.4.tar.gz", hash = "sha256:2d390634c5182175533585cc89f3608a4682ccb173cc9bb940b2881c8d6f8fa0"},
 ]
+
+[[package]]
+name = "oauthlib"
+version = "3.3.1"
+description = "A generic, spec-compliant, thorough implementation of the OAuth request-signing logic"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "oauthlib-3.3.1-py3-none-any.whl", hash = "sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1"},
+    {file = "oauthlib-3.3.1.tar.gz", hash = "sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9"},
+]
+
+[package.extras]
+rsa = ["cryptography (>=3.0.0)"]
+signals = ["blinker (>=1.4.0)"]
+signedtoken = ["cryptography (>=3.0.0)", "pyjwt (>=2.0.0,<3)"]
 
 [[package]]
 name = "onnxruntime"
@@ -5086,4 +5143,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "8c831ee27ab490889c0ca910d6999b8acd34840229868f2b283737d583ec524a"
+content-hash = "1aab1488432297d0161b20d53ddce3e685c5fff750c47098f923f3a0c8b79a39"
