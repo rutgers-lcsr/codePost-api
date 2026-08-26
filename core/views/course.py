@@ -43,6 +43,7 @@ from core.permissions.course_scope import get_course_scope_id
 from core.serializers.course_audit_event import CourseAuditEventSerializer
 from core.models import CourseAuditEvent, CourseAPIKey
 from core.serializers.course_api_key import (
+    PendingAgentActionSerializer,
     CourseAPIKeyReadSerializer,
     CourseAPIKeyCreateSerializer,
     CourseAPIKeyCreateResponseSerializer,
@@ -962,6 +963,54 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         api_key.save()
         serializer = CourseAPIKeyReadSerializer(api_key)
         return Response(serializer.data)
+
+    @extend_schema(responses=PendingAgentActionSerializer(many=True))
+    @action(detail=True, methods=["GET"], url_path="pendingAgentActions")
+    def pendingAgentActions(self, request, pk=None):
+        """Active Tier-3 agent confirmation codes for this course.
+
+        The whole point of these codes is that the AGENT cannot read them, so a
+        course-scoped credential (the agent's own key) is refused outright —
+        only a human course admin, signed in normally, may see them.
+        """
+        from django.utils import timezone
+
+        from core.models import PendingAgentAction
+
+        course = self.get_object()
+        if get_course_scope_id(request) is not None:
+            return Response(
+                {"detail": "Confirmation codes are only visible to a signed-in "
+                           "course admin, never to a course-scoped credential."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+
+        rows = PendingAgentAction.objects.filter(
+            course=course, redeemed_at=None, expires_at__gt=timezone.now())
+        return Response(PendingAgentActionSerializer(rows, many=True).data)
+
+    @extend_schema(request=None, responses={204: None})
+    # POST, not DELETE: CoursePermissions forbids the DELETE verb on Course
+    # objects wholesale, and sub-actions inherit that object check.
+    @action(detail=True, methods=["POST"],
+            url_path=r"pendingAgentActions/(?P<action_id>\d+)/deny")
+    def denyPendingAgentAction(self, request, pk=None, action_id=None):
+        """Deny a pending agent action — the code stops working immediately."""
+        from core.models import PendingAgentAction
+
+        course = self.get_object()
+        if get_course_scope_id(request) is not None:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+
+        deleted, _ = PendingAgentAction.objects.filter(
+            pk=action_id, course=course).delete()
+        if not deleted:
+            return returnNotFound(message="No such pending action")
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(responses=QuestionBankSerializer(many=True))
     @action(detail=True, methods=["GET"], url_path="questionBanks")

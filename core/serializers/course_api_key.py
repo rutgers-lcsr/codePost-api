@@ -50,3 +50,25 @@ class CourseAPIKeyCreateResponseSerializer(serializers.Serializer):
     scope = serializers.CharField()
     createdBy = serializers.CharField()
     created = serializers.DateTimeField()
+
+
+class PendingAgentActionSerializer(serializers.ModelSerializer):
+    """Dashboard rows for Tier-3 agent confirmations — includes the code, so
+    this serializer must only ever be reachable by a human course admin."""
+
+    expiresAt = serializers.DateTimeField(source="expires_at", read_only=True)
+    requestedBy = serializers.CharField(source="requested_by.username",
+                                        read_only=True, allow_null=True)
+    # The legacy `jsonfield` package's field is opaque to DRF (it would render
+    # the dict as a Python-repr string); surface the real object.
+    plan = serializers.SerializerMethodField()
+
+    def get_plan(self, obj):
+        return obj.plan if isinstance(obj.plan, dict) else {}
+
+    class Meta:
+        from core.models import PendingAgentAction
+        model = PendingAgentAction
+        fields = ["id", "tool", "code", "plan", "expiresAt", "requestedBy",
+                  "created"]
+        read_only_fields = fields

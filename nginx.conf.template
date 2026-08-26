@@ -37,6 +37,21 @@ http {
             proxy_read_timeout 3600;
         }
 
+        # MCP endpoint for instructor agents — its own single-process container.
+        # Tool calls can be slow (autograder builds, fan-out reads), so it gets
+        # the /ws/-style timeout and unbuffered responses (ready for SSE).
+        location /mcp {
+            set $upstream_mcp codepost-mcp;
+            proxy_pass http://$upstream_mcp:8001;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 3600;
+            proxy_buffering off;
+        }
+
         location / {
             # Let Django handle CORS - don't add CORS headers in nginx
             set $upstream codepost-api;

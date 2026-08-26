@@ -155,5 +155,5 @@ def load_tools() -> None:
     from importlib import import_module
     for mod in ('course', 'assignments', 'grading', 'analytics', 'quizzes', 'jobs',
                 'assignments_write', 'quizzes_write', 'attention', 'content_write',
-                'people_write'):
+                'people_write', 'destructive_write'):
         import_module(f'core.agent.tools.{mod}')
