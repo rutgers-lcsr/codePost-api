@@ -420,6 +420,7 @@ class SystemAIUsageView(APIView):
             end_date=end_date,
             breakdown_field='organization',
             breakdown_name_field='organization__name',
+            projection_rates_per_org=True,
         )
 
         return Response(summary)

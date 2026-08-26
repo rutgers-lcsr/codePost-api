@@ -4494,6 +4494,65 @@ paths:
               schema:
                 type: string
           description: ''
+  /courses/{id}/pendingAgentActions/:
+    get:
+      operationId: courses_pendingAgentActionsList
+      description: |-
+        Active Tier-3 agent confirmation codes for this course.
+
+        The whole point of these codes is that the AGENT cannot read them, so a
+        course-scoped credential (the agent's own key) is refused outright —
+        only a human course admin, signed in normally, may see them.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingAgentAction'
+          description: ''
+  /courses/{id}/pendingAgentActions/{actionId}/deny/:
+    post:
+      operationId: courses_pendingAgentActionsDenyCreate
+      description: Deny a pending agent action — the code stops working immediately.
+      parameters:
+      - in: path
+        name: actionId
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /courses/{id}/questionBanks/:
     get:
       operationId: courses_questionBanksList
@@ -16069,6 +16128,15 @@ components:
           minimum: -1000000
           exclusiveMaximum: true
           exclusiveMinimum: true
+        projectedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Cost of this item's usage at the currently configured token
+            rates
         requestCount:
           type: integer
       required:
@@ -16077,6 +16145,7 @@ components:
       - inputTokens
       - name
       - outputTokens
+      - projectedCost
       - requestCount
       - totalTokens
     AIUsageBucket:
@@ -16104,6 +16173,15 @@ components:
           exclusiveMaximum: true
           exclusiveMinimum: true
           description: Total estimated cost in USD
+        projectedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Cost of this bucket's usage at the currently configured token
+            rates
         requestCount:
           type: integer
           description: Number of API calls in this bucket
@@ -16112,6 +16190,7 @@ components:
       - inputTokens
       - outputTokens
       - period
+      - projectedCost
       - requestCount
       - totalTokens
     AIUsageSummary:
@@ -16127,6 +16206,9 @@ components:
         outputTokens:
           type: integer
           description: Grand total output tokens
+        cachedTokens:
+          type: integer
+          description: Grand total cached input tokens
         estimatedCost:
           type: number
           format: double
@@ -16134,6 +16216,15 @@ components:
           minimum: -1000000
           exclusiveMaximum: true
           exclusiveMinimum: true
+        projectedCost:
+          type: number
+          format: double
+          maximum: 1000000
+          minimum: -1000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Total cost of the range's usage at the currently configured
+            token rates
         requestCount:
           type: integer
           description: Total number of requests
@@ -16167,11 +16258,13 @@ components:
           format: date-time
       required:
       - breakdown
+      - cachedTokens
       - endDate
       - estimatedCost
       - granularity
       - inputTokens
       - outputTokens
+      - projectedCost
       - requestCount
       - startDate
       - timeSeries
@@ -18308,6 +18401,12 @@ components:
             type: object
             additionalProperties: {}
           readOnly: true
+        orgTokenRates:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+          readOnly: true
       required:
       - aiCommentsEnabled
       - aiEnabled
@@ -18318,6 +18417,7 @@ components:
       - hasApiKey
       - id
       - orgAiAvailable
+      - orgTokenRates
     CourseAPIKeyCreate:
       type: object
       description: Input serializer for creating a new course API key.
@@ -21052,6 +21152,12 @@ components:
             type: object
             additionalProperties: {}
           readOnly: true
+        orgTokenRates:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: {}
+          readOnly: true
     PatchedCourseFile:
       type: object
       description: |-
@@ -23074,6 +23180,46 @@ components:
           type: string
       required:
       - status
+    PendingAgentAction:
+      type: object
+      description: |-
+        Dashboard rows for Tier-3 agent confirmations — includes the code, so
+        this serializer must only ever be reachable by a human course admin.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        tool:
+          type: string
+          readOnly: true
+          description: The agent tool name.
+        code:
+          type: string
+          readOnly: true
+          description: The short confirmation code shown in the dashboard.
+        plan:
+          type: string
+          readOnly: true
+        expiresAt:
+          type: string
+          format: date-time
+          readOnly: true
+        requestedBy:
+          type: string
+          readOnly: true
+          nullable: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - code
+      - created
+      - expiresAt
+      - id
+      - plan
+      - requestedBy
+      - tool
     PreviewDemoFile:
       type: object
       properties:

@@ -520,6 +520,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         return returnForbidden()
 
     from core.services.ai_usage_analytics import get_usage_summary
+    from core.services.ai_service import AIService
     from core.models import AIUsageRecord
     from django.utils.dateparse import parse_datetime
 
@@ -551,6 +552,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
             if entry.get('course__period')
             else entry['course__name'] or 'Unknown'
         ),
+        projection_rates=AIService.merged_token_rates(organization=organization),
     )
 
     return Response(summary)

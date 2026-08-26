@@ -7,7 +7,7 @@ from typing import Any
 
 from core.agent import errors
 from core.agent.dispatch import Dispatcher
-from core.agent.registry import SCOPE_ADMIN, SCOPE_READ
+from core.agent.registry import SCOPE_ADMIN, SCOPE_READ, SCOPE_WRITE
 
 
 @dataclass
@@ -48,6 +48,7 @@ class Connection:
         self.user = request.user
         self.pinned_course_id = _get_scope_id(request)
         self.scope = _narrow(_resolve_scope(request), request)
+        self._dispatch_meta = _dispatch_meta_for(request)
 
     @property
     def pinned(self) -> bool:
@@ -80,7 +81,7 @@ class Connection:
             user=self.user,
             course=course,
             scope=self.scope,
-            dispatch=Dispatcher(self.request.META, course_id=course_id),
+            dispatch=Dispatcher(self._dispatch_meta, course_id=course_id),
         )
 
     def pinned_context(self) -> AgentContext:
@@ -91,8 +92,32 @@ class Connection:
         """Context for the rare course_bound=False tool (codepost_list_courses)."""
         return AgentContext(
             user=self.user, course=None, scope=self.scope,
-            dispatch=Dispatcher(self.request.META, course_id=None),
+            dispatch=Dispatcher(self._dispatch_meta, course_id=None),
         )
+
+
+def _dispatch_meta_for(request) -> dict:
+    """The request META the in-process dispatcher replays into the viewsets.
+
+    Normally the caller's own META (their Authorization header re-runs the real
+    auth classes). OAuth Bearer tokens are the exception: they are opaque DOT
+    tokens, and the internal viewsets' JWT auth class RAISES on a Bearer value
+    it cannot decode — every dispatched call would 401. We deliberately do not
+    add OAuth2 auth to the API-wide defaults (a scope-less OAuth token would
+    then reach every REST endpoint directly), so instead the validated OAuth
+    identity is exchanged at the edge for a short-lived internal JWT for the
+    same user — from there the flow is identical to the personal-token path.
+    """
+    try:
+        from oauth2_provider.models import AccessToken as OAuthAccessToken
+    except ImportError:                                        # pragma: no cover
+        return request.META
+
+    if isinstance(getattr(request, 'auth', None), OAuthAccessToken):
+        from core.views.auth import access_token_for_user
+        internal = access_token_for_user(request.user)
+        return {'HTTP_AUTHORIZATION': f'Bearer {internal}'}
+    return request.META
 
 
 def _get_scope_id(request):
@@ -112,6 +137,19 @@ def _resolve_scope(request) -> str:
     auth = getattr(request, 'auth', None)
     if isinstance(auth, dict) and 'scope' in auth:
         return auth['scope'] or SCOPE_READ
+
+    # OAuth Bearer (django-oauth-toolkit): the instructor granted specific
+    # scopes on the consent page — honour them. Highest granted wins; a token
+    # with none of ours behaves as read. This branch must come before the
+    # admin fallback or a read-scoped token would silently get admin.
+    from oauth2_provider.models import AccessToken as OAuthAccessToken
+    if isinstance(auth, OAuthAccessToken):
+        granted = set((auth.scope or '').split())
+        for name in (SCOPE_ADMIN, SCOPE_WRITE, SCOPE_READ):
+            if name in granted:
+                return name
+        return SCOPE_READ
+
     return SCOPE_ADMIN
 
 

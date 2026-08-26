@@ -1334,3 +1334,14 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
         job.status = 'failed'
         job.errorMessage = str(e)
         job.save(update_fields=['status', 'errorMessage', 'modified'])
+
+
+@shared_task
+def clear_expired_oauth_tokens():
+    """Purge expired OAuth grants/tokens (django-oauth-toolkit's cleartokens).
+
+    Refresh-token revocation windows are governed by REFRESH_TOKEN_EXPIRE_SECONDS;
+    this just keeps the tables from growing without bound.
+    """
+    from django.core.management import call_command
+    call_command("cleartokens")

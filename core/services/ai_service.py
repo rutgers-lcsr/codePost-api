@@ -847,13 +847,24 @@ class AIService:
         When ``cached_tokens`` > 0, the cached portion of input tokens is billed
         at the provider's discounted rate (see ``CACHED_TOKEN_RATE``).
         """
+        # Gateway providers (e.g. Portkey) report slash-prefixed ids like
+        # "provider-slug/gemini-3-flash-preview"; fall back to the basename
+        # so bare-named rates still match. Exact match always wins.
+        candidates = [model]
+        if '/' in model:
+            candidates.append(model.rsplit('/', 1)[-1])
         rates = None
-        if custom_rates and model in custom_rates:
-            r = custom_rates[model]
-            if isinstance(r, dict) and 'input' in r and 'output' in r:
-                rates = (float(r['input']), float(r['output']))
+        if custom_rates:
+            for candidate in candidates:
+                r = custom_rates.get(candidate)
+                if isinstance(r, dict) and 'input' in r and 'output' in r:
+                    rates = (float(r['input']), float(r['output']))
+                    break
         if not rates:
-            rates = AIService.TOKEN_RATES.get(model)
+            for candidate in candidates:
+                rates = AIService.TOKEN_RATES.get(candidate)
+                if rates:
+                    break
         if not rates:
             return 0.0
         # Split input tokens into non-cached and cached portions
@@ -865,14 +876,17 @@ class AIService:
         output_cost = (output_tokens / 1_000_000) * rates[1]
         return float(Decimal(str(input_cost + cached_cost + output_cost)).quantize(Decimal('0.000001')))
 
-    def _get_merged_rates(self) -> dict | None:
-        """Merge custom token rates: course overrides org overrides."""
+    @staticmethod
+    def merged_token_rates(organization=None, course=None) -> dict | None:
+        """Merge custom token rates: course overrides org. The org defaults to
+        course.organization when not given explicitly (course-less scopes like
+        org connection tests pass it directly)."""
         rates: dict = {}
-        org = self.course.organization if self.course else None
+        org = organization or (course.organization if course else None)
         if org and org.ai_token_rates:
             rates.update(org.ai_token_rates)
-        if self.course and self.course.ai_token_rates:
-            rates.update(self.course.ai_token_rates)
+        if course and course.ai_token_rates:
+            rates.update(course.ai_token_rates)
         return rates or None
 
     def record_usage(
@@ -921,7 +935,8 @@ class AIService:
                 estimated_cost=self.estimate_cost(
                     self.provider or '', self.model or '',
                     result.input_tokens, result.output_tokens,
-                    custom_rates=self._get_merged_rates(),
+                    custom_rates=AIService.merged_token_rates(
+                        organization=organization, course=self.course),
                     cached_tokens=result.cached_tokens,
                 ),
                 status='success' if result.success else 'error',

@@ -252,6 +252,7 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
   aiFeatureModelsResolved = serializers.SerializerMethodField()
   aiFeatures = serializers.SerializerMethodField()
   defaultTokenRates = serializers.SerializerMethodField()
+  orgTokenRates = serializers.SerializerMethodField()
 
   class Meta:
     model = Course
@@ -275,6 +276,7 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'hasApiKey',
       'apiKeyHint',
       'defaultTokenRates',
+      'orgTokenRates',
     )
 
   @staticmethod
@@ -373,12 +375,26 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
 
   @extend_schema_field(serializers.DictField(child=serializers.DictField()))
   def get_defaultTokenRates(self, obj):
-    """Returns the hardcoded default token rates from AIService."""
+    """Returns the default token rates a course inherits: hardcoded AIService
+    defaults overlaid with the organization's custom rates."""
     from core.services.ai_service import AIService
-    return {
+    rates = {
       model: {'input': r[0], 'output': r[1]}
       for model, r in AIService.TOKEN_RATES.items()
     }
+    org = obj.organization
+    if org and org.ai_token_rates:
+      for model, r in org.ai_token_rates.items():
+        if isinstance(r, dict) and 'input' in r and 'output' in r:
+          rates[model] = {'input': float(r['input']), 'output': float(r['output'])}
+    return rates
+
+  @extend_schema_field(serializers.DictField(child=serializers.DictField()))
+  def get_orgTokenRates(self, obj):
+    """Returns the organization's custom token rates, so the UI can mark
+    which inherited defaults come from the org."""
+    org = obj.organization
+    return (org.ai_token_rates or {}) if org else {}
 
   @staticmethod
   def _mask_key(key):

@@ -6,6 +6,7 @@ Provides aggregated AI usage data for organizations, courses, assignments,
 and platform-wide views. Supports multiple time granularities (hourly, daily, monthly).
 """
 
+from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
 from typing import Optional, Literal
@@ -41,6 +42,36 @@ def _get_trunc_function(granularity: GranularityType):
         return TruncMonth
 
 
+def _projection_map(queryset, group_fields, rates_for_org):
+    """Compute projected cost (token sums x current rates) grouped by group_fields.
+
+    Rates are constant per (model, provider), so summing per-record costs equals
+    pricing the token sums of each (group, model, provider, organization) cell.
+    Returns {(group values tuple): Decimal cost}.
+    """
+    from core.services.ai_service import AIService
+
+    rows = (
+        queryset
+        .values(*group_fields, 'model', 'provider', 'organization_id')
+        .annotate(
+            in_sum=Sum('input_tokens'),
+            out_sum=Sum('output_tokens'),
+            cached_sum=Sum('cached_tokens'),
+        )
+    )
+    out: dict[tuple, Decimal] = defaultdict(lambda: Decimal('0'))
+    for r in rows:
+        cost = AIService.estimate_cost(
+            r['provider'] or '', r['model'] or '',
+            r['in_sum'] or 0, r['out_sum'] or 0,
+            custom_rates=rates_for_org(r['organization_id']),
+            cached_tokens=r['cached_sum'] or 0,
+        )
+        out[tuple(r[f] for f in group_fields)] += Decimal(str(cost))
+    return out
+
+
 def get_usage_summary(
     queryset=None,
     granularity: GranularityType = 'daily',
@@ -50,6 +81,8 @@ def get_usage_summary(
     breakdown_name_field: Optional[str] = None,
     breakdown_extra_fields: Optional[list[str]] = None,
     breakdown_name_formatter=None,
+    projection_rates: Optional[dict] = None,
+    projection_rates_per_org: bool = False,
 ):
     """
     Build an aggregated usage summary from AIUsageRecord queryset.
@@ -67,10 +100,16 @@ def get_usage_summary(
         breakdown_name_formatter: Optional callable(entry) -> str to format the breakdown name.
                                   Receives the raw query entry dict. If not provided, uses
                                   breakdown_name_field value directly.
+        projection_rates: Merged custom token rates ({"model": {"input", "output"}})
+                          applied to the whole queryset when computing projectedCost.
+                          Falls back to hardcoded defaults when None.
+        projection_rates_per_org: Resolve each organization's own ai_token_rates
+                                  instead (platform-wide scope).
 
     Returns:
         dict with keys: totalTokens, inputTokens, outputTokens, estimatedCost,
-                        requestCount, timeSeries, breakdown, granularity, startDate, endDate
+                        projectedCost, requestCount, timeSeries, breakdown,
+                        granularity, startDate, endDate
     """
     if queryset is None:
         queryset = AIUsageRecord.objects.all()
@@ -89,6 +128,24 @@ def get_usage_summary(
 
     # Apply date filter
     queryset = queryset.filter(created__gte=start_date, created__lte=end_date)
+
+    # Rate resolver for projected cost (usage priced at *current* rates,
+    # unlike estimatedCost which is frozen at request time).
+    org_rates = {}
+    if projection_rates_per_org:
+        from core.models import Organization
+        org_ids = queryset.exclude(organization__isnull=True).values_list(
+            'organization_id', flat=True).distinct()
+        org_rates = {
+            o['id']: o['ai_token_rates']
+            for o in Organization.objects.filter(id__in=org_ids).values('id', 'ai_token_rates')
+        }
+
+    # Single definition (a per-branch def trips Pyright's reportRedeclaration).
+    def rates_for_org(org_id):
+        if projection_rates_per_org:
+            return org_rates.get(org_id) or None
+        return projection_rates
 
     # Grand totals
     totals = queryset.aggregate(
@@ -116,6 +173,9 @@ def get_usage_summary(
         .order_by('period')
     )
 
+    time_series_projection = _projection_map(
+        queryset.annotate(period=trunc_fn('created')), ['period'], rates_for_org)
+
     time_series = [
         {
             'period': entry['period'],
@@ -123,6 +183,7 @@ def get_usage_summary(
             'inputTokens': entry['inputTokens'] or 0,
             'outputTokens': entry['outputTokens'] or 0,
             'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+            'projectedCost': str(time_series_projection.get((entry['period'],), Decimal('0'))),
             'requestCount': entry['requestCount'] or 0,
         }
         for entry in time_series_qs
@@ -147,6 +208,9 @@ def get_usage_summary(
             .order_by('-totalTokens')
         )
 
+        breakdown_projection = _projection_map(
+            queryset, [f'{breakdown_field}_id'], rates_for_org)
+
         for entry in breakdown_qs:
             if breakdown_name_formatter:
                 name = breakdown_name_formatter(entry)
@@ -159,6 +223,7 @@ def get_usage_summary(
                 'inputTokens': entry['inputTokens'] or 0,
                 'outputTokens': entry['outputTokens'] or 0,
                 'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+                'projectedCost': str(breakdown_projection.get((entry[f'{breakdown_field}_id'],), Decimal('0'))),
                 'requestCount': entry['requestCount'] or 0,
             })
 
@@ -175,6 +240,7 @@ def get_usage_summary(
         )
         .order_by('-totalTokens')
     )
+    model_projection = _projection_map(queryset, ['model'], rates_for_org)
     model_breakdown = [
         {
             'id': None,
@@ -183,6 +249,7 @@ def get_usage_summary(
             'inputTokens': entry['inputTokens'] or 0,
             'outputTokens': entry['outputTokens'] or 0,
             'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+            'projectedCost': str(model_projection.get((entry['model'],), Decimal('0'))),
             'requestCount': entry['requestCount'] or 0,
         }
         for entry in model_breakdown_qs
@@ -203,6 +270,7 @@ def get_usage_summary(
         )
         .order_by('-totalTokens')
     )
+    feature_projection = _projection_map(queryset, ['request_type'], rates_for_org)
     feature_breakdown = [
         {
             'id': None,
@@ -211,6 +279,7 @@ def get_usage_summary(
             'inputTokens': entry['inputTokens'] or 0,
             'outputTokens': entry['outputTokens'] or 0,
             'estimatedCost': str(entry['estimatedCost'] or Decimal('0')),
+            'projectedCost': str(feature_projection.get((entry['request_type'],), Decimal('0'))),
             'requestCount': entry['requestCount'] or 0,
         }
         for entry in feature_breakdown_qs
@@ -222,6 +291,7 @@ def get_usage_summary(
         'outputTokens': totals['output_tokens'] or 0,
         'cachedTokens': totals['cached_tokens'] or 0,
         'estimatedCost': str(totals['estimated_cost'] or Decimal('0')),
+        'projectedCost': str(sum(model_projection.values(), Decimal('0'))),
         'requestCount': totals['request_count'] or 0,
         'timeSeries': time_series,
         'breakdown': breakdown,

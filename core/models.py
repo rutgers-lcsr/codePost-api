@@ -3089,6 +3089,59 @@ class CourseAPIKey(BaseModel):
     return f"CourseAPIKey '{self.name}' for course {self.course_id}"
 
 
+
+class PendingAgentAction(BaseModel):
+  """An out-of-band confirmation for a Tier-3 agent operation.
+
+  When an MCP agent asks for something unrecoverable (deleting an assignment,
+  resetting quiz attempts, mass-emailing students), the server refuses and
+  creates one of these instead. The short ``code`` is shown ONLY in the course
+  dashboard — a channel the agent cannot read — so a human must fetch it and
+  paste it back into the chat. The agent then retries with the code.
+
+  Single-use (``redeemed_at``), expires after ``EXPIRY_MINUTES``, and bound to
+  the exact operation: ``args_hash`` pins the tool arguments and ``plan_hash``
+  pins the computed blast radius, so if the world changes between preview and
+  confirmation (say a TA grades six more submissions) the code dies and the
+  agent must re-preview. Deleting the row from the dashboard denies the action.
+  """
+  if TYPE_CHECKING:
+    id: int
+
+  EXPIRY_MINUTES = 10
+
+  course = models.ForeignKey(Course, on_delete=models.CASCADE,
+      related_name="pending_agent_actions",
+      help_text="The course the action would run in.")
+  tool = models.CharField(max_length=64, help_text="The agent tool name.")
+  args_hash = models.CharField(max_length=64,
+      help_text="SHA-256 of the canonicalised tool arguments.")
+  plan_hash = models.CharField(max_length=32,
+      help_text="Fingerprint of the computed plan; a changed plan kills the code.")
+  plan = JSONField(default=dict, blank=True,
+      help_text="Human-readable plan summary rendered in the dashboard panel.")
+  code = models.CharField(max_length=12,
+      help_text="The short confirmation code shown in the dashboard.")
+  requested_by = models.ForeignKey(User, null=True, blank=True,
+      on_delete=models.SET_NULL, related_name="pending_agent_actions",
+      help_text="The principal the agent was acting as (service account or instructor).")
+  expires_at = models.DateTimeField(help_text="Codes die quietly after this.")
+  redeemed_at = models.DateTimeField(null=True, blank=True,
+      help_text="Set once the code is used; a redeemed code never works again.")
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [models.Index(fields=['course', 'expires_at'])]
+
+  @property
+  def is_active(self) -> bool:
+    from django.utils import timezone
+    return self.redeemed_at is None and self.expires_at > timezone.now()
+
+  def __str__(self):
+    return f"PendingAgentAction {self.tool} course={self.course_id}"
+
+
 ############# Quizzes #############################################################
 # Phase 1 (authoring): instructors create/manage quiz questions, reusable question
 # banks, and quizzes; import from Canvas (QTI); attach a quiz to an assignment; and
