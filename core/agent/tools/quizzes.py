@@ -63,16 +63,37 @@ def get_quiz_status(ctx, view: str = 'list', quizId=None, limit: int = 50,
         CourseViewSet, {'get': 'quizzes'},
         method='GET', path=f'/courses/{ctx.course.id}/quizzes/', pk=ctx.course.id,
         what='listing quizzes')
-    rows = [shaping.project(q, ('id', 'title', 'assignment', 'published',
-                                'isPublished', 'availability', 'timeLimitMinutes',
-                                'maxAttempts', 'scoringPolicy', 'needsGrading'))
+    # Project only fields QuizSerializer actually emits — a phantom name here
+    # silently projects to nothing (that bug shipped once: 'needsGrading' is
+    # NOT a serializer field, it only exists on results rows).
+    rows = [shaping.project(q, ('id', 'title', 'assignment', 'isPublished',
+                                'assignmentTrigger', 'availableFrom',
+                                'availableUntil', 'timeLimitMinutes',
+                                'attemptsAllowed', 'scoringPolicy'))
             for q in (quizzes or [])]
 
     if view == 'needsGrading':
-        rows = [q for q in rows if q.get('needsGrading')]
+        counted = [(q, needs_grading_count(ctx, q.get('id'))) for q in rows]
+        rows = [dict(q, needsGrading=n) for q, n in counted if n]
 
     return shaping.enforce_budget(shaping.envelope(
         {'course': course_header(ctx.course), 'quizzes': rows},
         meta={'total': len(rows)},
         warnings=(['Per-student detail: codepost_get_quiz_status(view="results", '
                    'quizId=…).'] if rows else None)))
+
+
+def needs_grading_count(ctx, quiz_id) -> int:
+    """How many students on *quiz_id* have a response awaiting manual grading.
+
+    Computed from the results action (one dispatch per quiz — bounded by the
+    course's quiz count); the flag lives on attempts, not the quiz serializer.
+    """
+    from core.views.quiz import QuizViewSet
+
+    result = ctx.dispatch.call(
+        QuizViewSet, {'get': 'results'},
+        method='GET', path=f'/quizzes/{quiz_id}/results/', pk=quiz_id)
+    if not result.ok or not isinstance(result.data, list):
+        return 0
+    return sum(1 for r in result.data if r.get('needsGrading'))

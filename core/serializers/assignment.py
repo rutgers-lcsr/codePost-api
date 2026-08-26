@@ -353,33 +353,32 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
     submitted_students = all_students.filter(student_submissions__assignment=obj).count()
     return num_students - submitted_students
 
-  @extend_schema_field(serializers.FloatField)
+  @extend_schema_field(serializers.FloatField(allow_null=True))
   def get_stats_max(self, obj):
     val = getattr(obj, 'stats_max_anno', None)
     if val is not None:
       return val
-    stats_max = obj.submissions.filter(isFinalized=True).aggregate(Max('grade'))['grade__max']
-    return stats_max or 0
+    # None (no finalized submissions) stays None — coercing to 0 made an
+    # ungraded assignment read as a real 0-point average.
+    return obj.submissions.filter(isFinalized=True).aggregate(Max('grade'))['grade__max']
 
-  @extend_schema_field(serializers.FloatField)
+  @extend_schema_field(serializers.FloatField(allow_null=True))
   def get_stats_min(self, obj):
     val = getattr(obj, 'stats_min_anno', None)
     if val is not None:
       return val
-    stats_min = obj.submissions.filter(isFinalized=True).aggregate(Min('grade'))['grade__min']
-    return stats_min or 0
+    # None (no finalized submissions) stays None — coercing to 0 made an
+    # ungraded assignment read as a real 0-point average.
+    return obj.submissions.filter(isFinalized=True).aggregate(Min('grade'))['grade__min']
 
-  @extend_schema_field(serializers.FloatField)
+  @extend_schema_field(serializers.FloatField(allow_null=True))
   def get_stats_mean(self, obj):
     val = getattr(obj, 'stats_mean_anno', None)
     if val is not None:
       return val
-    stats_mean = obj.submissions.filter(isFinalized=True).aggregate(Avg('grade'))['grade__avg']
-    return stats_mean or 0
-
-
-
-    return stats_mean or 0
+    # None (no finalized submissions) stays None — coercing to 0 made an
+    # ungraded assignment read as a real 0-point average.
+    return obj.submissions.filter(isFinalized=True).aggregate(Avg('grade'))['grade__avg']
 
 
 class AssignmentCloneSerializer(serializers.Serializer):

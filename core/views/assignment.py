@@ -191,9 +191,12 @@ class AssignmentViewSet(ListProtectedViewSet):
           submissions_finalized_count_anno=Count('submissions', filter=Q(submissions__isFinalized=True), distinct=True),
           submissions_inprogress_count_anno=Count('submissions', filter=Q(submissions__isFinalized=False) & ~Q(submissions__grader=None), distinct=True),
           submissions_unclaimed_count_anno=Count('submissions', filter=Q(submissions__grader=None), distinct=True),
-          stats_max_anno=Coalesce(Max('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
-          stats_min_anno=Coalesce(Min('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
-          stats_mean_anno=Coalesce(Avg('submissions__grade', filter=Q(submissions__isFinalized=True)), 0.0, output_field=FloatField())
+          # No Coalesce to 0: an assignment with nothing finalized must read
+          # null, not a real-looking 0-point average. The serializer treats a
+          # null annotation as "recompute", which also returns null here.
+          stats_max_anno=Max('submissions__grade', filter=Q(submissions__isFinalized=True)),
+          stats_min_anno=Min('submissions__grade', filter=Q(submissions__isFinalized=True)),
+          stats_mean_anno=Avg('submissions__grade', filter=Q(submissions__isFinalized=True))
       )
     return queryset
 

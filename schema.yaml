@@ -16767,6 +16767,9 @@ components:
           type: string
         onTime:
           type: integer
+        unknown:
+          type: integer
+          description: Submissions with no dateUploaded — can't be bucketed on time.
         late:
           type: integer
         lateByDay:
@@ -16778,6 +16781,7 @@ components:
       - late
       - lateByDay
       - onTime
+      - unknown
     AssignmentAnalyticsResponse:
       type: object
       properties:

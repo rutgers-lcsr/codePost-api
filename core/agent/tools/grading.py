@@ -2,6 +2,8 @@
 """Submission-level read tools."""
 from __future__ import annotations
 
+import datetime
+
 from core.agent import shaping
 from core.agent.registry import SCOPE_READ, tool
 from core.agent.tools._common import (course_header, fetch_assignment,
@@ -99,6 +101,23 @@ def list_submissions(ctx, assignmentId: int, status: str = 'all',
     strip_fields = (_NEVER_RETURNED_ON_REGRADE if status == 'regradeRequested'
                     else _NEVER_RETURNED)
     cleaned = [shaping.project(_strip(r, strip_fields), projection) for r in rows]
+
+    # isLate is computed, not a serializer field (see _is_late).
+    if 'isLate' in projection:
+        due = assignment.get('uploadDueDate')
+        for out, src in zip(cleaned, rows):
+            out['isLate'] = _is_late(src.get('dateUploaded'), due)
+
+    warnings = ['Test results, file contents and comments are omitted. '
+                'Use codepost_get_assignment or the codePost UI for those.']
+    # A requested field that no row carries would otherwise vanish silently
+    # and read as "every value was empty".
+    absent = [f for f in projection
+              if f != 'isLate' and rows and all(f not in r for r in rows)]
+    if absent:
+        warnings.append('Requested field(s) not available on submission rows '
+                        'and omitted: ' + ', '.join(absent) + '.')
+
     offset = shaping.decode_cursor(cursor).get('offset', 0)
     window, meta = shaping.paginate(
         cleaned, limit=shaping.clamp_limit(limit), offset=offset,
@@ -111,8 +130,7 @@ def list_submissions(ctx, assignmentId: int, status: str = 'all',
          'status': status,
          'rows': window},
         meta=meta,
-        warnings=['Test results, file contents and comments are omitted. '
-                  'Use codepost_get_assignment or the codePost UI for those.'])
+        warnings=warnings)
     return shaping.enforce_budget(payload)
 
 
@@ -170,6 +188,29 @@ def _strip(row: dict, fields: tuple = _NEVER_RETURNED) -> dict:
     return {k: v for k, v in row.items() if k not in fields}
 
 
+def _is_late(date_uploaded, due_date):
+    """True/False vs the assignment's uploadDueDate; None when unknowable.
+
+    No serializer emits ``isLate`` — the projection used to reference it and
+    silently return nothing. Computed here instead; a submission with no
+    dateUploaded (or an assignment with no due date) is None, not False.
+    """
+    uploaded = _parse_dt(date_uploaded)
+    due = _parse_dt(due_date)
+    if uploaded is None or due is None:
+        return None
+    return uploaded > due
+
+
+def _parse_dt(value):
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+
+
 @tool(
     name='codepost_get_submission',
     title='Submission detail',
@@ -214,8 +255,10 @@ def get_submission(ctx, submissionId: int, include=None):
 
     core_fields = shaping.project(data, (
         'id', 'assignment', 'students', 'grader', 'isFinalized', 'grade',
-        'dateUploaded', 'dateEdited', 'isLate', 'lateDayCreditsUsed',
+        'dateUploaded', 'dateEdited', 'lateDayCreditsUsed',
         'questionText', 'questionResponse', 'questionIsOpen'))
+    core_fields['isLate'] = _is_late(data.get('dateUploaded'),
+                                     assignment.get('uploadDueDate'))
 
     payload = {'course': course_header(ctx.course),
                'assignment': {'id': assignment.get('id'),
