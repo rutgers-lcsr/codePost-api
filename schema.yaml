@@ -23123,10 +23123,13 @@ components:
           type: integer
           readOnly: true
         email:
-          type: string
-          format: email
           title: Email address
-          maxLength: 254
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
         password:
           type: string
           writeOnly: true
@@ -27156,10 +27159,13 @@ components:
           type: integer
           readOnly: true
         email:
-          type: string
-          format: email
           title: Email address
-          maxLength: 254
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
         password:
           type: string
           writeOnly: true
