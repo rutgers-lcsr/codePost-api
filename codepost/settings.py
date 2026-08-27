@@ -533,7 +533,6 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
-    "viewflow",
     "core",
     "autograder",
     "rest_framework",
