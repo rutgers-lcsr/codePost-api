@@ -17,8 +17,9 @@ A plain ``confirm: true`` boolean would be useless at any tier — a model that
 sees it in the schema sets it on the first call, every time.
 
 Stateless on purpose: HMAC + TTL works identically across every worker with no
-session and no Redis. (Tier 3 — out-of-band human confirmation codes for
-deletes/resets/mass email — arrives with those tools.)
+session and no Redis. (Tier 3 — a real human decision for deletes/resets/mass
+email, via the in-chat approval dialog or the dashboard — is the section at
+the bottom of this module.)
 """
 from __future__ import annotations
 
@@ -114,18 +115,19 @@ def confirmation_required(tool: str, args: dict, plan: dict, *, course_id: int,
 
 
 # ---------------------------------------------------------------------------
-# Tier 3 — out-of-band human confirmation codes
+# Tier 3 — human confirmation (in-chat dialog, dashboard fallback)
 # ---------------------------------------------------------------------------
 # The HMAC tokens above are a race guard, not a human gate: the server issues
 # them and the agent consumes them, so an agent can do preview→confirm alone.
-# Tier-3 operations (unrecoverable destruction, mass email) instead mint a
-# short code delivered ONLY through the course dashboard — a channel the agent
-# cannot read (the panel endpoint rejects course-scoped credentials) — so a
-# human must fetch it and paste it into the chat.
-
-import secrets
-
-CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'   # no 0/O/1/I/L lookalikes
+# Tier-3 operations (unrecoverable destruction, mass email) require a real
+# human decision through a channel the model cannot answer:
+#
+# - **Elicitation** (primary): the MCP client shows a native Approve/Decline
+#   dialog to the human mid-call. The client answers on the human's behalf;
+#   the model never sees the dialog, so prompt injection cannot approve it.
+# - **Dashboard** (fallback, clients without elicitation): a PendingAgentAction
+#   row with Approve/Deny buttons in Course Settings — endpoints that reject
+#   course-scoped credentials — and the agent's retry observes the decision.
 
 
 def _args_hash(tool: str, args: dict) -> str:
@@ -136,18 +138,41 @@ def _args_hash(tool: str, args: dict) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _generate_code() -> str:
-    body = ''.join(secrets.choice(CODE_ALPHABET) for _ in range(6))
-    return f'{body[:3]}-{body[3:]}'
+def require_human_confirmation(tool: str, args: dict, plan: dict, *, ctx,
+                               message: str) -> None:
+    """Block until a human has approved this exact operation, or raise.
 
-
-def require_confirmation_code(tool: str, args: dict, plan: dict, *, ctx,
-                              message: str) -> errors.ToolError:
-    """Mint a dashboard code for this exact operation and refuse the call.
-
-    Re-previewing an identical, still-active request reuses its code rather
-    than littering the dashboard with duplicates.
+    Returns normally only when approval is in hand — via the in-chat dialog
+    (same call) or a previously granted dashboard approval (this retry
+    consumes it). Every other outcome raises a ToolError.
     """
+    if ctx.elicit_channel is not None:
+        _confirm_via_elicitation(tool, plan, ctx=ctx, message=message)
+        return
+    _confirm_via_dashboard(tool, args, plan, ctx=ctx, message=message)
+
+
+def _confirm_via_elicitation(tool: str, plan: dict, *, ctx, message: str) -> None:
+    dialog = (f'{message}\n\nPlan:\n'
+              f'{json.dumps(plan, indent=2, default=str)[:1500]}\n\n'
+              'Approve to let the agent proceed; decline to cancel.')
+    result = ctx.elicit_channel.elicit(
+        message=dialog,
+        # Accept/decline IS the answer — no form fields to fill in.
+        requested_schema={'type': 'object', 'properties': {}})
+
+    approved = result.get('action') == 'accept'
+    _audit_confirmation(ctx, tool, plan, approved=approved, origin='elicitation')
+    if not approved:
+        raise errors.ToolError(
+            'CONFIRMATION_DENIED',
+            'The user declined this action in the approval dialog. Do not '
+            'retry; report the decision.',
+            retryable=False)
+
+
+def _confirm_via_dashboard(tool: str, args: dict, plan: dict, *, ctx,
+                           message: str) -> None:
     from django.utils import timezone
 
     from core.models import PendingAgentAction
@@ -155,67 +180,91 @@ def require_confirmation_code(tool: str, args: dict, plan: dict, *, ctx,
     ah, ph = _args_hash(tool, args), plan_hash(plan)
     now = timezone.now()
 
+    # A denial sticks until it expires — keyed on args alone, so plan drift
+    # (a TA grading in the background) can't be used to dodge it and re-nag.
+    denied = PendingAgentAction.objects.filter(
+        course=ctx.course, tool=tool, args_hash=ah,
+        denied_at__isnull=False, expires_at__gt=now).first()
+    if denied is not None:
+        raise errors.ToolError(
+            'CONFIRMATION_DENIED',
+            'The course admin denied this action from the dashboard. Do not '
+            'retry or re-request it; report the denial to the user.',
+            retryable=False,
+            context={'expiresAt': denied.expires_at.isoformat()})
+
     action = PendingAgentAction.objects.filter(
         course=ctx.course, tool=tool, args_hash=ah, plan_hash=ph,
-        redeemed_at=None, expires_at__gt=now).first()
+        denied_at=None, redeemed_at=None, expires_at__gt=now).first()
+
+    invalidated = False
     if action is None:
+        # The plan drifted out from under any older request for these args:
+        # expire the stale row (kept for audit) so the dashboard never shows
+        # two rows — or honours a superseded approval — for one operation.
+        invalidated = bool(PendingAgentAction.objects.filter(
+            course=ctx.course, tool=tool, args_hash=ah,
+            denied_at=None, redeemed_at=None, expires_at__gt=now,
+        ).exclude(plan_hash=ph).update(expires_at=now))
         action = PendingAgentAction.objects.create(
             course=ctx.course, tool=tool, args_hash=ah, plan_hash=ph,
-            plan=plan, code=_generate_code(),
+            plan=plan,
             requested_by=ctx.user if getattr(ctx.user, 'pk', None) else None,
             expires_at=now + datetime_timedelta(
                 minutes=PendingAgentAction.EXPIRY_MINUTES))
 
-    return errors.ToolError(
-        'CONFIRMATION_REQUIRED', message,
-        remedy=('A confirmation code was posted to the codePost dashboard '
-                '(Course Settings → Pending agent actions). Ask the user to '
-                'open it, read the code, and paste it here; then re-call with '
-                'confirmationCode set. It expires in '
-                f'{PendingAgentAction.EXPIRY_MINUTES} minutes and works once.'),
+    if action.approved_at is not None:
+        # Conditional UPDATE, not save(): two concurrent retries must not both
+        # consume the approval (select_for_update is unreliable under SQLite —
+        # see core/services/dataset_assignment.py).
+        claimed = PendingAgentAction.objects.filter(
+            pk=action.pk, redeemed_at=None, denied_at=None,
+            expires_at__gt=now).update(redeemed_at=now)
+        if claimed == 1:
+            return
+        raise errors.ToolError(
+            'CONFIRMATION_REQUIRED',
+            'The approval was already consumed by another call.',
+            remedy='Re-call to request a fresh approval from the dashboard.',
+            retryable=True)
+
+    raise errors.ToolError(
+        'CONFIRMATION_REQUIRED',
+        message + (' (An earlier request for this operation was invalidated '
+                   'because its blast radius changed.)' if invalidated else ''),
+        remedy=('This needs the course admin\'s approval in the codePost '
+                'dashboard. Give the user this link and ask them to click '
+                'Approve under Pending agent actions, then re-call this tool '
+                'with the same arguments: ' + _approve_url(ctx.course) +
+                f' — the request expires in '
+                f'{PendingAgentAction.EXPIRY_MINUTES} minutes.'),
         retryable=True,
         context={'plan': plan,
+                 'approveUrl': _approve_url(ctx.course),
                  'expiresAt': action.expires_at.isoformat()})
 
 
-def verify_confirmation_code(code: str, tool: str, args: dict, plan: dict, *,
-                             ctx) -> None:
-    """Redeem a dashboard code; raise unless it matches this exact operation."""
-    from django.utils import timezone
+def _approve_url(course) -> str:
+    from urllib.parse import quote
 
-    from core.models import PendingAgentAction
+    base = getattr(settings, 'CLIENT_URL', 'http://localhost:3000')
+    return (f'{base}/admin/{quote(course.name, safe="")}/'
+            f'{quote(course.period, safe="")}/settings?section=api-keys')
 
-    normalized = (code or '').strip().upper().replace(' ', '')
-    if '-' not in normalized and len(normalized) == 6:
-        normalized = f'{normalized[:3]}-{normalized[3:]}'
-    if not normalized:
-        raise errors.ToolError(
-            'CONFIRMATION_CODE_INVALID',
-            'This operation needs the confirmation code from the dashboard.',
-            remedy='Ask the user for the code shown under Course Settings → '
-                   'Pending agent actions, then re-call with confirmationCode.',
-            retryable=True)
 
-    now = timezone.now()
-    action = PendingAgentAction.objects.filter(
-        course=ctx.course, tool=tool, code=normalized).order_by('-created').first()
-
-    if action is None or action.redeemed_at is not None or action.expires_at <= now:
-        raise errors.ToolError(
-            'CONFIRMATION_CODE_INVALID',
-            'That code is unknown, already used, or expired.',
-            remedy='Re-run the tool without a code to mint a fresh one, and ask '
-                   'the user to read it from the dashboard again.',
-            retryable=True)
-
-    if action.args_hash != _args_hash(tool, args) or \
-            action.plan_hash != plan_hash(plan):
-        raise errors.ToolError(
-            'CONFIRMATION_CODE_INVALID',
-            'The operation (or its blast radius) changed since the code was '
-            'issued — the code no longer applies.',
-            remedy='Re-run without a code to get a fresh preview and code for '
-                   'the current state.', retryable=True)
-
-    action.redeemed_at = now
-    action.save(update_fields=['redeemed_at', 'modified'])
+def _audit_confirmation(ctx, tool: str, plan: dict, *, approved: bool,
+                        origin: str, action_id=None) -> None:
+    """One audit row per human Tier-3 decision. Never fails the call."""
+    try:
+        from core.services.audit import record_audit_event
+        meta = {'tool': tool, 'planHash': plan_hash(plan), 'origin': origin}
+        if action_id is not None:
+            meta['actionId'] = action_id
+        record_audit_event(
+            course=ctx.course,
+            event_type='agent_action_approved' if approved
+                       else 'agent_action_denied',
+            user=ctx.user if getattr(ctx.user, 'pk', None) else None,
+            meta=meta)
+    except Exception:                                          # pragma: no cover
+        pass

@@ -21,17 +21,20 @@ from core.agent.context import Connection
 from core.authentication import (CourseAPIKeyAuthentication,
                                  CourseScopedJWTAuthentication)
 from core.mcp.oauth import MCPOAuth2Authentication
-from core.mcp import protocol
+from core.mcp import elicitation, protocol, sessions
 from core.throttles import AgentToolThrottle
 
 
 class MCPEndpointView(APIView):
-    """MCP Streamable HTTP endpoint, stateless JSON mode.
+    """MCP Streamable HTTP endpoint.
 
-    Stateless means we never issue ``Mcp-Session-Id``, so any worker can serve
-    any request. GET and DELETE answer 405, which the spec explicitly allows
-    for servers offering no server-initiated SSE stream and no client-side
-    session termination.
+    Stateless JSON mode by default. The one exception: a client whose
+    ``initialize`` declares the ``elicitation`` capability gets a session-lite
+    ``Mcp-Session-Id`` (in-process — see ``core/mcp/sessions.py``), and its
+    Tier-3 tool calls answer as an SSE stream carrying an in-chat approval
+    dialog. GET and DELETE still answer 405, which the spec allows for servers
+    offering no server-initiated GET stream and no client-side session
+    termination.
     """
 
     # Course keys pin the course; personal instructor tokens (the SDK
@@ -85,6 +88,11 @@ class MCPEndpointView(APIView):
         # enforcement lives in Connection.context_for, per call.
         conn = Connection(request)
 
+        # A Tier-3 tool call from an elicitation-capable session answers as an
+        # SSE stream so the approval dialog can be asked mid-call.
+        if _wants_elicitation_stream(request):
+            return _stream_tools_call(request.data, conn)
+
         try:
             result = protocol.handle(request.data, conn)
         except protocol.JSONRPCError as exc:
@@ -95,11 +103,81 @@ class MCPEndpointView(APIView):
         # A notification carries no id and gets 202 with an empty body, per spec.
         if result is None:
             return Response(status=202)
-        return Response(result)
+
+        response = Response(result)
+        # Session-lite id minted by initialize (spec: delivered as a header on
+        # the initialize response).
+        new_session = getattr(conn, 'new_session_id', None)
+        if new_session:
+            response['Mcp-Session-Id'] = new_session
+        return response
 
 
 def _api_url() -> str:
     return getattr(settings, 'API_URL', '')
+
+
+def _wants_elicitation_stream(request) -> bool:
+    """True for a tools/call on a Tier-3 tool from an elicitation session.
+
+    Everything else — every stateless client, every non-destructive tool —
+    keeps the plain JSON response path untouched.
+    """
+    body = request.data
+    if not isinstance(body, dict) or body.get('method') != 'tools/call':
+        return False
+    session = sessions.get(request.META.get('HTTP_MCP_SESSION_ID'))
+    if not session or not session.get('elicitation'):
+        return False
+
+    from core.agent import registry
+    registry.load_tools()
+    name = (body.get('params') or {}).get('name')
+    spec = registry.get(name) if isinstance(name, str) else None
+    return spec is not None and getattr(spec, 'tier', 0) == 3
+
+
+def _stream_tools_call(body, conn):
+    """Answer one tools/call as an SSE stream that can carry an elicitation.
+
+    The handler runs in a worker thread with a Channel attached to the
+    connection; the generator forwards the channel's outbound frames (the
+    ``elicitation/create`` request) as SSE events, then emits the final
+    JSON-RPC response and closes. Per spec, a server MAY answer any POST with
+    an SSE stream, and clients MUST accept both forms.
+    """
+    import json
+    import threading
+
+    from django.http import StreamingHttpResponse
+
+    channel = elicitation.Channel()
+    conn.elicit_channel = channel
+    holder = {}
+
+    def worker():
+        try:
+            holder['response'] = protocol.handle(body, conn)
+        except protocol.JSONRPCError as exc:
+            holder['response'] = {
+                'jsonrpc': '2.0', 'id': body.get('id'),
+                'error': {'code': exc.code, 'message': exc.message}}
+        finally:
+            channel.close()
+
+    def stream():
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        for frame in channel.drain():
+            yield f'data: {json.dumps(frame, default=str)}\n\n'
+        thread.join()
+        yield f'data: {json.dumps(holder.get("response"), default=str)}\n\n'
+
+    response = StreamingHttpResponse(stream(),
+                                     content_type='text/event-stream')
+    response['Cache-Control'] = 'no-store'
+    response['X-Accel-Buffering'] = 'no'
+    return response
 
 
 def _validate_origin(request):

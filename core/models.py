@@ -2689,6 +2689,10 @@ class CourseAuditEvent(BaseModel):
       # repeated denials are the signal that a key leaked or a model is probing.
       ('agent_write', 'Agent Write'),
       ('agent_write_denied', 'Agent Write Denied'),
+      # Tier-3 human confirmations: who allowed/blocked a destructive agent
+      # operation, whether via the in-chat dialog or the dashboard buttons.
+      ('agent_action_approved', 'Agent Action Approved'),
+      ('agent_action_denied', 'Agent Action Denied'),
   ]
 
   course = models.ForeignKey(
@@ -3091,19 +3095,22 @@ class CourseAPIKey(BaseModel):
 
 
 class PendingAgentAction(BaseModel):
-  """An out-of-band confirmation for a Tier-3 agent operation.
+  """A human confirmation gate for a Tier-3 agent operation (dashboard path).
 
   When an MCP agent asks for something unrecoverable (deleting an assignment,
-  resetting quiz attempts, mass-emailing students), the server refuses and
-  creates one of these instead. The short ``code`` is shown ONLY in the course
-  dashboard — a channel the agent cannot read — so a human must fetch it and
-  paste it back into the chat. The agent then retries with the code.
+  resetting quiz attempts, mass-emailing students) and the client cannot show
+  an in-chat approval dialog (MCP elicitation), the server refuses and creates
+  one of these instead. The instructor approves or denies it in Course
+  Settings → Pending agent actions — a channel the agent cannot touch (the
+  endpoints reject course-scoped credentials) — and the agent's retry then
+  observes the decision.
 
   Single-use (``redeemed_at``), expires after ``EXPIRY_MINUTES``, and bound to
   the exact operation: ``args_hash`` pins the tool arguments and ``plan_hash``
   pins the computed blast radius, so if the world changes between preview and
-  confirmation (say a TA grades six more submissions) the code dies and the
-  agent must re-preview. Deleting the row from the dashboard denies the action.
+  approval (say a TA grades six more submissions) the approval dies and the
+  agent must re-preview. A denial (``denied_at``) sticks until the row
+  expires, so the agent cannot nag by re-requesting.
   """
   if TYPE_CHECKING:
     id: int
@@ -3117,17 +3124,26 @@ class PendingAgentAction(BaseModel):
   args_hash = models.CharField(max_length=64,
       help_text="SHA-256 of the canonicalised tool arguments.")
   plan_hash = models.CharField(max_length=32,
-      help_text="Fingerprint of the computed plan; a changed plan kills the code.")
+      help_text="Fingerprint of the computed plan; a changed plan kills the approval.")
   plan = JSONField(default=dict, blank=True,
       help_text="Human-readable plan summary rendered in the dashboard panel.")
-  code = models.CharField(max_length=12,
-      help_text="The short confirmation code shown in the dashboard.")
+  # Legacy confirmation code, superseded by dashboard approval. Kept nullable
+  # for one release so old processes survive a rolling deploy; drop after.
+  code = models.CharField(max_length=12, null=True, blank=True,
+      help_text="Unused legacy field (pre-approval-button confirmation code).")
   requested_by = models.ForeignKey(User, null=True, blank=True,
       on_delete=models.SET_NULL, related_name="pending_agent_actions",
       help_text="The principal the agent was acting as (service account or instructor).")
-  expires_at = models.DateTimeField(help_text="Codes die quietly after this.")
+  expires_at = models.DateTimeField(help_text="Requests die quietly after this.")
+  approved_at = models.DateTimeField(null=True, blank=True,
+      help_text="Set when a course admin clicks Approve in the dashboard.")
+  approved_by = models.ForeignKey(User, null=True, blank=True,
+      on_delete=models.SET_NULL, related_name="approved_agent_actions",
+      help_text="The course admin who approved it.")
+  denied_at = models.DateTimeField(null=True, blank=True,
+      help_text="Set when a course admin clicks Deny; blocks re-requests until expiry.")
   redeemed_at = models.DateTimeField(null=True, blank=True,
-      help_text="Set once the code is used; a redeemed code never works again.")
+      help_text="Set once the approval is consumed; it never authorises again.")
 
   class Meta:
     ordering = ('-created',)
@@ -3136,7 +3152,8 @@ class PendingAgentAction(BaseModel):
   @property
   def is_active(self) -> bool:
     from django.utils import timezone
-    return self.redeemed_at is None and self.expires_at > timezone.now()
+    return (self.redeemed_at is None and self.denied_at is None
+            and self.expires_at > timezone.now())
 
   def __str__(self):
     return f"PendingAgentAction {self.tool} course={self.course_id}"

@@ -1,4 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from core.models import COURSE_API_KEY_SCOPE_CHOICES, CourseAPIKey
@@ -53,8 +54,9 @@ class CourseAPIKeyCreateResponseSerializer(serializers.Serializer):
 
 
 class PendingAgentActionSerializer(serializers.ModelSerializer):
-    """Dashboard rows for Tier-3 agent confirmations — includes the code, so
-    this serializer must only ever be reachable by a human course admin."""
+    """Dashboard rows for Tier-3 agent confirmations. The plan describes a
+    destructive operation in instructor-only detail, so this serializer must
+    only ever be reachable by a human course admin."""
 
     expiresAt = serializers.DateTimeField(source="expires_at", read_only=True)
     requestedBy = serializers.CharField(source="requested_by.username",
@@ -62,13 +64,18 @@ class PendingAgentActionSerializer(serializers.ModelSerializer):
     # The legacy `jsonfield` package's field is opaque to DRF (it would render
     # the dict as a Python-repr string); surface the real object.
     plan = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
 
     def get_plan(self, obj):
         return obj.plan if isinstance(obj.plan, dict) else {}
 
+    @extend_schema_field(serializers.ChoiceField(choices=["pending", "approved"]))
+    def get_status(self, obj):
+        return "approved" if obj.approved_at is not None else "pending"
+
     class Meta:
         from core.models import PendingAgentAction
         model = PendingAgentAction
-        fields = ["id", "tool", "code", "plan", "expiresAt", "requestedBy",
+        fields = ["id", "tool", "plan", "status", "expiresAt", "requestedBy",
                   "created"]
         read_only_fields = fields
