@@ -34,6 +34,17 @@ class TestSerializer_CourseSerializer(APITestCase):
         # self.assertEqual(set(data.keys()), set(expected))
         pass
 
+    def test_timezone_validation(self):
+        """Timezones validate against the IANA database, incl. legacy aliases like US/Eastern."""
+        from rest_framework.exceptions import ValidationError
+        from core.serializers.course import CourseSerializer as CourseSerializerCls
+        serializer = CourseSerializerCls()
+        for tz in ["America/New_York", "US/Eastern", "UTC"]:
+            self.assertEqual(serializer.validate_timezone(tz), tz)
+        for tz in ["Not/AZone", "", "EST5EDT-invalid"]:
+            with self.assertRaises(ValidationError):
+                serializer.validate_timezone(tz)
+
     def test_create_course_add_roles(self):
         """Creating a course auto-adds the creator as courseAdmin and grader."""
         admin = self.course.courseAdmins.first()

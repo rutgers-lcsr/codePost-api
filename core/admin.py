@@ -361,7 +361,7 @@ class OrganizationAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request: Any) -> Any:
         qs = super().get_queryset(request)
-        return qs.select_related().prefetch_related("profiles", "courses")
+        return qs.prefetch_related("profiles", "courses")
 
 
 @admin.register(Profile)
