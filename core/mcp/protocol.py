@@ -8,9 +8,12 @@ exactly what the SDK's session manager needs.  A plain DRF view has no such
 dependency, and it lets the real ``CourseAPIKeyAuthentication`` and throttle
 classes run unmodified.
 
-Stateless means we never issue ``Mcp-Session-Id``; clients then never send one.
-That is what makes four round-robined gunicorn workers viable — a session dict
-would strand ``initialize`` on one worker and ``tools/call`` on another.
+Stateless is the default: no ``Mcp-Session-Id`` is issued unless the client's
+``initialize`` declares the ``elicitation`` capability, in which case a
+session-lite id (see ``core/mcp/sessions.py``) lets later Tier-3 tool calls
+stream an in-chat approval dialog. That state is in-process, which is exactly
+why production serves ``/mcp`` from the single-process ``codepost-mcp``
+container — never scale it to multiple workers.
 """
 from __future__ import annotations
 
@@ -75,6 +78,15 @@ def handle(body: Any, conn) -> dict | None:
     if body.get('jsonrpc') != '2.0':
         raise JSONRPCError(INVALID_REQUEST, "Missing or invalid 'jsonrpc' version.")
 
+    # A JSON-RPC *response* (id + result/error, no method) is a client
+    # answering an elicitation we sent on an SSE stream. Route it to the
+    # waiting call; per spec the HTTP answer is 202 either way.
+    if 'method' not in body and ('result' in body or 'error' in body) \
+            and body.get('id') is not None:
+        from core.mcp import elicitation
+        elicitation.deliver(body['id'], body)
+        return None
+
     method = body.get('method')
     request_id = body.get('id')
     params = body.get('params') or {}
@@ -109,6 +121,15 @@ def _initialize(params: dict, conn) -> dict:
     requested = params.get('protocolVersion')
     version = (requested if requested in SUPPORTED_PROTOCOL_VERSIONS
                else LATEST_PROTOCOL_VERSION)
+
+    # Session-lite: only a client that can show elicitation dialogs gets a
+    # session (used by Tier-3 confirmations to stream an approval request).
+    # Everyone else stays fully stateless, exactly as before.
+    client_caps = params.get('capabilities') or {}
+    if isinstance(client_caps, dict) and 'elicitation' in client_caps:
+        from core.mcp import sessions
+        conn.new_session_id = sessions.create(client_caps)
+
     if conn.pinned:
         instructions = (
             'Tools for managing one codePost course. The course is fixed by the '

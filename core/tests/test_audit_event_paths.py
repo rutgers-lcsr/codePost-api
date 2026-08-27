@@ -304,6 +304,26 @@ class TestRecordAuditEventAllTypes(TestCase):
         self._assert_event(event, 'agent_write_denied', self.user)
         self.assertEqual(event.meta['deniedCode'], 'COURSE_ARCHIVED')
 
+    def test_agent_action_approved(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_action_approved',
+            user=self.user,
+            meta={'tool': 'codepost_delete_resource', 'planHash': 'abc123',
+                  'actionId': 1, 'origin': 'dashboard'},
+        )
+        self._assert_event(event, 'agent_action_approved', self.user)
+        self.assertEqual(event.meta['origin'], 'dashboard')
+
+    def test_agent_action_denied(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_action_denied',
+            user=self.user,
+            meta={'tool': 'codepost_delete_resource', 'planHash': 'abc123',
+                  'origin': 'elicitation'},
+        )
+        self._assert_event(event, 'agent_action_denied', self.user)
+        self.assertEqual(event.meta['origin'], 'elicitation')
+
     def test_all_event_types_covered(self):
         """Ensure every EVENT_TYPE_CHOICES value has a dedicated test above."""
         defined_types = {choice[0] for choice in CourseAuditEvent.EVENT_TYPE_CHOICES}
@@ -323,6 +343,7 @@ class TestRecordAuditEventAllTypes(TestCase):
             'quiz_generated_set_regenerated',
             'quiz_generated_sets_published',
             'agent_write', 'agent_write_denied',
+            'agent_action_approved', 'agent_action_denied',
         }
         self.assertEqual(defined_types, tested_types,
                          f"Untested event types: {defined_types - tested_types}")

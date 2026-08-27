@@ -1,12 +1,13 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 """Tier-3 tools: unrecoverable destruction and mass email.
 
-Every tool here requires an ``admin``-scope key AND an out-of-band
-confirmation code the agent cannot obtain by itself — the code appears only in
-the course dashboard (Course Settings → Pending agent actions), whose endpoint
-refuses course-scoped credentials. A human reads it and pastes it into the
-chat. Codes are single-use, expire in 10 minutes, and die if the operation's
-blast radius changes between preview and confirmation.
+Every tool here requires an ``admin``-scope key AND a real human decision the
+agent cannot fabricate: on elicitation-capable clients the MCP client shows an
+Approve/Decline dialog in the chat UI (the model never sees it); elsewhere the
+operation waits on the Approve button in Course Settings → Pending agent
+actions, whose endpoints refuse course-scoped credentials. Approvals are
+single-use, expire in 10 minutes, and die if the operation's blast radius
+changes between preview and approval.
 """
 from __future__ import annotations
 
@@ -21,10 +22,10 @@ from core.permissions.capabilities import Capability
     title='Delete a resource',
     description=(
         'PERMANENTLY delete an assignment, section, quiz, test category or '
-        'question bank. The first call always returns the blast radius (what '
-        'cascades away with it) and posts a confirmation code to the codePost '
-        'dashboard — a human must read it there and provide it. Deleting an '
-        'assignment that has submissions is refused entirely: archive it with '
+        'question bank. The user must approve it first — via the approval '
+        'dialog your client shows, or the Approve button in the codePost '
+        'dashboard (the refusal includes the link). Deleting an assignment '
+        'that has submissions is refused entirely: archive it with '
         'codepost_set_assignment_stage instead.'
     ),
     input_schema={
@@ -33,9 +34,6 @@ from core.permissions.capabilities import Capability
             'resourceType': {'enum': ['assignment', 'section', 'quiz',
                                       'testCategory', 'questionBank']},
             'resourceId': {'type': 'integer'},
-            'confirmationCode': {
-                'type': 'string',
-                'description': 'The code the user read from the dashboard.'},
         },
         'required': ['resourceType', 'resourceId'],
         'additionalProperties': False,
@@ -44,8 +42,7 @@ from core.permissions.capabilities import Capability
     min_scope=SCOPE_ADMIN, tier=3,
     read_only=False, destructive=True, idempotent=False,
 )
-def delete_resource(ctx, resourceType: str, resourceId: int,
-                    confirmationCode: str = ''):
+def delete_resource(ctx, resourceType: str, resourceId: int):
     view_cls, path_root, plan = _blast_radius(ctx, resourceType, resourceId)
 
     args = {'resourceType': resourceType, 'resourceId': resourceId}
@@ -54,11 +51,8 @@ def delete_resource(ctx, resourceType: str, resourceId: int,
                + (f" and everything listed in the plan" if plan.get('cascades')
                   else '') + '.')
 
-    if not confirmationCode:
-        raise guardrails.require_confirmation_code(
-            'codepost_delete_resource', args, plan, ctx=ctx, message=message)
-    guardrails.verify_confirmation_code(
-        confirmationCode, 'codepost_delete_resource', args, plan, ctx=ctx)
+    guardrails.require_human_confirmation(
+        'codepost_delete_resource', args, plan, ctx=ctx, message=message)
 
     ctx.dispatch.require(
         view_cls, {'delete': 'destroy'},
@@ -162,15 +156,14 @@ def _blast_radius(ctx, resource_type: str, resource_id: int):
     description=(
         "PERMANENTLY delete every student's attempts (and answers, and any "
         'manual grading already done) on a quiz, so everyone retakes from '
-        'scratch. Use after a substantive quiz edit. The first call returns '
-        'the blast radius and posts a confirmation code to the dashboard for '
-        'the user to read back.'
+        'scratch. Use after a substantive quiz edit. The user must approve '
+        'it first — via the approval dialog your client shows, or the Approve '
+        'button in the codePost dashboard.'
     ),
     input_schema={
         'type': 'object',
         'properties': {
             'quizId': {'type': 'integer'},
-            'confirmationCode': {'type': 'string'},
         },
         'required': ['quizId'],
         'additionalProperties': False,
@@ -179,7 +172,7 @@ def _blast_radius(ctx, resource_type: str, resource_id: int):
     min_scope=SCOPE_ADMIN, tier=3,
     read_only=False, destructive=True, idempotent=False,
 )
-def reset_quiz_attempts(ctx, quizId: int, confirmationCode: str = ''):
+def reset_quiz_attempts(ctx, quizId: int):
     from core.views.quiz import QuizViewSet
 
     quiz = ctx.dispatch.require(
@@ -201,15 +194,12 @@ def reset_quiz_attempts(ctx, quizId: int, confirmationCode: str = ''):
     }
     args = {'quizId': quizId}
 
-    if not confirmationCode:
-        raise guardrails.require_confirmation_code(
-            'codepost_reset_quiz_attempts', args, plan, ctx=ctx,
-            message=f"This deletes {plan['attemptsUsed']} attempts from "
-                    f"{plan['studentsWithAttempts']} students on "
-                    f"'{quiz.get('title')}', including "
-                    f"{plan['gradedWorkDiscarded']} graded results.")
-    guardrails.verify_confirmation_code(
-        confirmationCode, 'codepost_reset_quiz_attempts', args, plan, ctx=ctx)
+    guardrails.require_human_confirmation(
+        'codepost_reset_quiz_attempts', args, plan, ctx=ctx,
+        message=f"This deletes {plan['attemptsUsed']} attempts from "
+                f"{plan['studentsWithAttempts']} students on "
+                f"'{quiz.get('title')}', including "
+                f"{plan['gradedWorkDiscarded']} graded results.")
 
     result = ctx.dispatch.require(
         QuizViewSet, {'post': 'resetAttempts'},
@@ -229,15 +219,15 @@ def reset_quiz_attempts(ctx, quizId: int, confirmationCode: str = ''):
     description=(
         'Send every eligible student on an assignment a REAL EMAIL saying '
         'their feedback is ready. Only finalized submissions with open '
-        'feedback qualify — the first call returns exactly who would be '
-        'emailed (and who is skipped, and why) plus a dashboard confirmation '
-        'code for the user to read back.'
+        'feedback qualify — the preview shows exactly who would be emailed '
+        '(and who is skipped, and why), and the user must approve the send — '
+        'via the approval dialog your client shows, or the Approve button in '
+        'the codePost dashboard.'
     ),
     input_schema={
         'type': 'object',
         'properties': {
             'assignmentId': {'type': 'integer'},
-            'confirmationCode': {'type': 'string'},
         },
         'required': ['assignmentId'],
         'additionalProperties': False,
@@ -246,8 +236,7 @@ def reset_quiz_attempts(ctx, quizId: int, confirmationCode: str = ''):
     min_scope=SCOPE_ADMIN, tier=3,
     read_only=False, destructive=False, idempotent=False,
 )
-def notify_students_feedback_ready(ctx, assignmentId: int,
-                                   confirmationCode: str = ''):
+def notify_students_feedback_ready(ctx, assignmentId: int):
     from core.views.assignment import AssignmentViewSet
     from core.views.submission import SubmissionViewSet
 
@@ -289,14 +278,10 @@ def notify_students_feedback_ready(ctx, assignmentId: int,
     }
     args = {'assignmentId': assignmentId}
 
-    if not confirmationCode:
-        raise guardrails.require_confirmation_code(
-            'codepost_notify_students_feedback_ready', args, plan, ctx=ctx,
-            message=f"This emails {len(recipients)} students that feedback on "
-                    f"'{assignment.get('name')}' is ready.")
-    guardrails.verify_confirmation_code(
-        confirmationCode, 'codepost_notify_students_feedback_ready', args,
-        plan, ctx=ctx)
+    guardrails.require_human_confirmation(
+        'codepost_notify_students_feedback_ready', args, plan, ctx=ctx,
+        message=f"This emails {len(recipients)} students that feedback on "
+                f"'{assignment.get('name')}' is ready.")
 
     sent, failures = 0, []
     for row in eligible:

@@ -967,11 +967,11 @@ class CourseViewSet(SuperUserListProtectedViewSet):
     @extend_schema(responses=PendingAgentActionSerializer(many=True))
     @action(detail=True, methods=["GET"], url_path="pendingAgentActions")
     def pendingAgentActions(self, request, pk=None):
-        """Active Tier-3 agent confirmation codes for this course.
+        """Tier-3 agent actions awaiting (or holding) this course's approval.
 
-        The whole point of these codes is that the AGENT cannot read them, so a
+        The whole point of this panel is that the AGENT cannot touch it, so a
         course-scoped credential (the agent's own key) is refused outright —
-        only a human course admin, signed in normally, may see them.
+        only a human course admin, signed in normally, may see or decide these.
         """
         from django.utils import timezone
 
@@ -980,15 +980,18 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         course = self.get_object()
         if get_course_scope_id(request) is not None:
             return Response(
-                {"detail": "Confirmation codes are only visible to a signed-in "
+                {"detail": "Pending agent actions are only visible to a signed-in "
                            "course admin, never to a course-scoped credential."},
                 status=status.HTTP_403_FORBIDDEN,
             )
         if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
             return returnForbidden()
 
+        # Approved-but-unconsumed rows stay visible so the admin can watch the
+        # request flip to executed (the agent's retry consumes it) or expire.
         rows = PendingAgentAction.objects.filter(
-            course=course, redeemed_at=None, expires_at__gt=timezone.now())
+            course=course, denied_at=None, redeemed_at=None,
+            expires_at__gt=timezone.now())
         return Response(PendingAgentActionSerializer(rows, many=True).data)
 
     @extend_schema(request=None, responses={204: None})
@@ -997,7 +1000,13 @@ class CourseViewSet(SuperUserListProtectedViewSet):
     @action(detail=True, methods=["POST"],
             url_path=r"pendingAgentActions/(?P<action_id>\d+)/deny")
     def denyPendingAgentAction(self, request, pk=None, action_id=None):
-        """Deny a pending agent action — the code stops working immediately."""
+        """Deny a pending agent action.
+
+        The denial sticks until the request expires: the agent's retries get a
+        clear "denied — stop asking" error instead of minting a fresh request.
+        """
+        from django.utils import timezone
+
         from core.models import PendingAgentAction
 
         course = self.get_object()
@@ -1006,11 +1015,65 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
             return returnForbidden()
 
-        deleted, _ = PendingAgentAction.objects.filter(
-            pk=action_id, course=course).delete()
-        if not deleted:
+        action_row = PendingAgentAction.objects.filter(
+            pk=action_id, course=course).first()
+        if action_row is None:
             return returnNotFound(message="No such pending action")
+        PendingAgentAction.objects.filter(
+            pk=action_row.pk, denied_at=None).update(denied_at=timezone.now())
+        self._audit_agent_action(request, course, action_row, approved=False)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=None, responses={204: None})
+    @action(detail=True, methods=["POST"],
+            url_path=r"pendingAgentActions/(?P<action_id>\d+)/approve")
+    def approvePendingAgentAction(self, request, pk=None, action_id=None):
+        """Approve a pending agent action — the agent's next retry executes it.
+
+        The conditional update makes approve-vs-deny and double-click races
+        resolve deterministically: whoever flips the row first wins, everyone
+        else gets 409.
+        """
+        from django.utils import timezone
+
+        from core.models import PendingAgentAction
+
+        course = self.get_object()
+        if get_course_scope_id(request) is not None:
+            return Response(
+                {"detail": "Only a signed-in course admin may approve agent "
+                           "actions, never a course-scoped credential."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+
+        action_row = PendingAgentAction.objects.filter(
+            pk=action_id, course=course).first()
+        if action_row is None:
+            return returnNotFound(message="No such pending action")
+        flipped = PendingAgentAction.objects.filter(
+            pk=action_row.pk, denied_at=None, approved_at=None,
+            redeemed_at=None, expires_at__gt=timezone.now(),
+        ).update(approved_at=timezone.now(), approved_by=request.user)
+        if not flipped:
+            return Response(
+                {"detail": "This action can no longer be approved (already "
+                           "decided, consumed, or expired)."},
+                status=status.HTTP_409_CONFLICT)
+        self._audit_agent_action(request, course, action_row, approved=True)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _audit_agent_action(self, request, course, action_row, *, approved):
+        from core.services.audit import record_audit_event
+
+        record_audit_event(
+            course=course,
+            event_type="agent_action_approved" if approved
+                       else "agent_action_denied",
+            user=request.user,
+            meta={"tool": action_row.tool, "planHash": action_row.plan_hash,
+                  "actionId": action_row.pk, "origin": "dashboard"})
 
     @extend_schema(responses=QuestionBankSerializer(many=True))
     @action(detail=True, methods=["GET"], url_path="questionBanks")

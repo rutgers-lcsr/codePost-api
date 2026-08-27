@@ -4498,11 +4498,11 @@ paths:
     get:
       operationId: courses_pendingAgentActionsList
       description: |-
-        Active Tier-3 agent confirmation codes for this course.
+        Tier-3 agent actions awaiting (or holding) this course's approval.
 
-        The whole point of these codes is that the AGENT cannot read them, so a
+        The whole point of this panel is that the AGENT cannot touch it, so a
         course-scoped credential (the agent's own key) is refused outright —
-        only a human course admin, signed in normally, may see them.
+        only a human course admin, signed in normally, may see or decide these.
       parameters:
       - in: path
         name: id
@@ -4526,10 +4526,46 @@ paths:
                 items:
                   $ref: '#/components/schemas/PendingAgentAction'
           description: ''
+  /courses/{id}/pendingAgentActions/{actionId}/approve/:
+    post:
+      operationId: courses_pendingAgentActionsApproveCreate
+      description: |-
+        Approve a pending agent action — the agent's next retry executes it.
+
+        The conditional update makes approve-vs-deny and double-click races
+        resolve deterministically: whoever flips the row first wins, everyone
+        else gets 409.
+      parameters:
+      - in: path
+        name: actionId
+        schema:
+          type: string
+          pattern: ^\d+$
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /courses/{id}/pendingAgentActions/{actionId}/deny/:
     post:
       operationId: courses_pendingAgentActionsDenyCreate
-      description: Deny a pending agent action — the code stops working immediately.
+      description: |-
+        Deny a pending agent action.
+
+        The denial sticks until the request expires: the agent's retries get a
+        clear "denied — stop asking" error instead of minting a fresh request.
       parameters:
       - in: path
         name: actionId
@@ -23187,8 +23223,9 @@ components:
     PendingAgentAction:
       type: object
       description: |-
-        Dashboard rows for Tier-3 agent confirmations — includes the code, so
-        this serializer must only ever be reachable by a human course admin.
+        Dashboard rows for Tier-3 agent confirmations. The plan describes a
+        destructive operation in instructor-only detail, so this serializer must
+        only ever be reachable by a human course admin.
       properties:
         id:
           type: integer
@@ -23197,12 +23234,12 @@ components:
           type: string
           readOnly: true
           description: The agent tool name.
-        code:
-          type: string
-          readOnly: true
-          description: The short confirmation code shown in the dashboard.
         plan:
           type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PendingAgentActionStatusEnum'
           readOnly: true
         expiresAt:
           type: string
@@ -23217,13 +23254,21 @@ components:
           format: date-time
           readOnly: true
       required:
-      - code
       - created
       - expiresAt
       - id
       - plan
       - requestedBy
+      - status
       - tool
+    PendingAgentActionStatusEnum:
+      enum:
+      - pending
+      - approved
+      type: string
+      description: |-
+        * `pending` - pending
+        * `approved` - approved
     PreviewDemoFile:
       type: object
       properties:

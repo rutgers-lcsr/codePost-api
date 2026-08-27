@@ -16,6 +16,10 @@ class AgentContext:
     course: Any
     scope: str
     dispatch: Dispatcher
+    # Set only for a Tier-3 call streaming over SSE from an elicitation-capable
+    # client: a core.mcp.elicitation.Channel that can pop an Approve/Decline
+    # dialog at the human mid-call. None everywhere else.
+    elicit_channel: Any = None
     # Per-call caches. The roster is the only identity-resolution path under a
     # course key (/users/{email}/ can't be reached), and the assignment list
     # costs an N-way fan-out, so both are worth holding for the call's life.
@@ -82,6 +86,7 @@ class Connection:
             course=course,
             scope=self.scope,
             dispatch=Dispatcher(self._dispatch_meta, course_id=course_id),
+            elicit_channel=getattr(self, 'elicit_channel', None),
         )
 
     def pinned_context(self) -> AgentContext:

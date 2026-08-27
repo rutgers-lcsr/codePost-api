@@ -1,9 +1,10 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-"""Tier-3 tools and the out-of-band confirmation-code gate.
+"""Tier-3 tools and the dashboard approval gate (the non-elicitation path).
 
 The property under test throughout: the agent cannot confirm a Tier-3
-operation by itself. The code lives only in the dashboard endpoint, which
-refuses the agent's own credential.
+operation by itself. Approval state can only be flipped by the dashboard
+endpoints, which refuse the agent's own credential. (The in-chat elicitation
+path is covered in test_mcp_elicitation.py.)
 """
 import json
 
@@ -72,14 +73,23 @@ def error_of(result):
     return json.loads(result["content"][0]["text"])["error"]
 
 
-def dashboard_code(api_client, course, admin):
-    """What a human does: read the code from the dashboard, signed in normally."""
+def dashboard_rows(api_client, course, admin):
+    """What a human sees: the pending actions panel, signed in normally."""
     api_client.credentials()
     api_client.force_authenticate(user=admin)
     resp = api_client.get(f"/courses/{course.id}/pendingAgentActions/")
     assert resp.status_code == status.HTTP_200_OK, resp.data
     api_client.force_authenticate(user=None)
     return resp.data
+
+
+def dashboard_decide(api_client, course, admin, action_id, verb):
+    api_client.credentials()
+    api_client.force_authenticate(user=admin)
+    resp = api_client.post(
+        f"/courses/{course.id}/pendingAgentActions/{action_id}/{verb}/")
+    api_client.force_authenticate(user=None)
+    return resp
 
 
 @pytest.fixture
@@ -110,9 +120,9 @@ class TestScopeGate:
         assert payload["error"]["code"] == -32601
 
 
-class TestConfirmationCodes:
+class TestDashboardApproval:
 
-    def test_first_call_mints_dashboard_code_not_inline_token(
+    def test_first_call_mints_pending_action_not_inline_token(
             self, api_client, admin_key, course, admin, empty_assignment):
         from core.models import PendingAgentAction
 
@@ -123,9 +133,11 @@ class TestConfirmationCodes:
         err = error_of(result)
         assert err["code"] == "CONFIRMATION_REQUIRED"
         # The refusal must NOT carry anything redeemable — no code, no token.
+        # The approveUrl is pure navigation, not a secret.
         assert "confirmToken" not in err.get("context", {})
         assert "code" not in err.get("context", {})
         assert "dashboard" in err["remedy"].lower()
+        assert err["context"]["approveUrl"].endswith("?section=api-keys")
 
         row = PendingAgentAction.objects.get(course=course)
         assert row.tool == "codepost_delete_resource"
@@ -141,62 +153,110 @@ class TestConfirmationCodes:
         assert resp.status_code == status.HTTP_403_FORBIDDEN
         assert "course-scoped" in resp.data["detail"]
 
-    def test_human_reads_code_and_agent_redeems_it_once(
+    def test_agents_own_key_cannot_approve(
+            self, api_client, admin_key, course, empty_assignment):
+        """The load-bearing security test: the agent's credential must never
+        be able to flip a pending action to approved."""
+        from core.models import PendingAgentAction
+
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        row = PendingAgentAction.objects.get(course=course)
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {admin_key}")
+        resp = api_client.post(
+            f"/courses/{course.id}/pendingAgentActions/{row.id}/approve/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        row.refresh_from_db()
+        assert row.approved_at is None
+
+    def test_retry_while_pending_refuses_again(
+            self, api_client, admin_key, course, empty_assignment):
+        from core.models import Assignment
+
+        for _ in range(2):
+            result = call(api_client, admin_key, "codepost_delete_resource",
+                          {"resourceType": "assignment",
+                           "resourceId": empty_assignment.id})["result"]
+            assert error_of(result)["code"] == "CONFIRMATION_REQUIRED"
+        assert Assignment.objects.filter(pk=empty_assignment.id).exists()
+
+    def test_approve_then_retry_executes_once(
             self, api_client, admin_key, course, admin, empty_assignment):
         from core.models import Assignment, PendingAgentAction
 
         call(api_client, admin_key, "codepost_delete_resource",
              {"resourceType": "assignment", "resourceId": empty_assignment.id})
 
-        rows = dashboard_code(api_client, course, admin)
+        rows = dashboard_rows(api_client, course, admin)
         assert len(rows) == 1
-        code = rows[0]["code"]
+        assert rows[0]["status"] == "pending"
         assert rows[0]["plan"]["name"] == "Disposable"
+        assert "code" not in rows[0]
+
+        resp = dashboard_decide(api_client, course, admin, rows[0]["id"],
+                                "approve")
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
 
         result = call(api_client, admin_key, "codepost_delete_resource",
                       {"resourceType": "assignment",
-                       "resourceId": empty_assignment.id,
-                       "confirmationCode": code})["result"]
+                       "resourceId": empty_assignment.id})["result"]
         assert result["isError"] is False, result["content"][0]["text"]
         assert not Assignment.objects.filter(pk=empty_assignment.id).exists()
         assert PendingAgentAction.objects.get(course=course).redeemed_at
 
-    def test_wrong_or_stale_code_is_refused(self, api_client, admin_key, course,
-                                            empty_assignment):
-        from core.models import Assignment
-
-        call(api_client, admin_key, "codepost_delete_resource",
-             {"resourceType": "assignment", "resourceId": empty_assignment.id})
-        result = call(api_client, admin_key, "codepost_delete_resource",
-                      {"resourceType": "assignment",
-                       "resourceId": empty_assignment.id,
-                       "confirmationCode": "XXX-XXX"})["result"]
-        assert error_of(result)["code"] == "CONFIRMATION_CODE_INVALID"
-        assert Assignment.objects.filter(pk=empty_assignment.id).exists()
-
-    def test_denying_from_dashboard_kills_the_code(
+    def test_approval_is_single_use(
             self, api_client, admin_key, course, admin, empty_assignment):
-        from core.models import Assignment
+        """A consumed approval never authorises again — the claim is a
+        conditional update, so a racing duplicate loses."""
+        from core.models import PendingAgentAction
+        from django.utils import timezone
 
         call(api_client, admin_key, "codepost_delete_resource",
              {"resourceType": "assignment", "resourceId": empty_assignment.id})
-        rows = dashboard_code(api_client, course, admin)
-        code, action_id = rows[0]["code"], rows[0]["id"]
+        row = PendingAgentAction.objects.get(course=course)
+        PendingAgentAction.objects.filter(pk=row.pk).update(
+            approved_at=timezone.now(), redeemed_at=timezone.now())
 
-        api_client.force_authenticate(user=admin)
-        resp = api_client.post(
-            f"/courses/{course.id}/pendingAgentActions/{action_id}/deny/")
+        # The direct claim (what a concurrent retry runs) must find 0 rows.
+        claimed = PendingAgentAction.objects.filter(
+            pk=row.pk, redeemed_at=None, denied_at=None,
+            expires_at__gt=timezone.now()).update(redeemed_at=timezone.now())
+        assert claimed == 0
+
+    def test_deny_blocks_re_requests(
+            self, api_client, admin_key, course, admin, empty_assignment):
+        from core.models import Assignment, PendingAgentAction
+
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        rows = dashboard_rows(api_client, course, admin)
+        resp = dashboard_decide(api_client, course, admin, rows[0]["id"], "deny")
         assert resp.status_code == status.HTTP_204_NO_CONTENT
-        api_client.force_authenticate(user=None)
 
         result = call(api_client, admin_key, "codepost_delete_resource",
                       {"resourceType": "assignment",
-                       "resourceId": empty_assignment.id,
-                       "confirmationCode": code})["result"]
-        assert error_of(result)["code"] == "CONFIRMATION_CODE_INVALID"
+                       "resourceId": empty_assignment.id})["result"]
+        err = error_of(result)
+        assert err["code"] == "CONFIRMATION_DENIED"
+        assert err["retryable"] is False
         assert Assignment.objects.filter(pk=empty_assignment.id).exists()
+        # No fresh row minted while the denial holds; the panel shows nothing.
+        assert PendingAgentAction.objects.filter(course=course).count() == 1
+        assert dashboard_rows(api_client, course, admin) == []
 
-    def test_expired_code_is_refused(self, api_client, admin_key, course, admin,
+    def test_approve_after_deny_conflicts(
+            self, api_client, admin_key, course, admin, empty_assignment):
+        from core.models import PendingAgentAction
+
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        row = PendingAgentAction.objects.get(course=course)
+        dashboard_decide(api_client, course, admin, row.id, "deny")
+        resp = dashboard_decide(api_client, course, admin, row.id, "approve")
+        assert resp.status_code == status.HTTP_409_CONFLICT
+
+    def test_expired_request_is_gone(self, api_client, admin_key, course, admin,
                                      empty_assignment):
         from django.utils import timezone
         from core.models import Assignment, PendingAgentAction
@@ -204,18 +264,19 @@ class TestConfirmationCodes:
         call(api_client, admin_key, "codepost_delete_resource",
              {"resourceType": "assignment", "resourceId": empty_assignment.id})
         row = PendingAgentAction.objects.get(course=course)
-        code = row.code
         PendingAgentAction.objects.filter(pk=row.pk).update(
+            approved_at=timezone.now(),
             expires_at=timezone.now() - timezone.timedelta(minutes=1))
 
+        # An expired approval cannot authorise; a fresh request is minted.
         result = call(api_client, admin_key, "codepost_delete_resource",
                       {"resourceType": "assignment",
-                       "resourceId": empty_assignment.id,
-                       "confirmationCode": code})["result"]
-        assert error_of(result)["code"] == "CONFIRMATION_CODE_INVALID"
+                       "resourceId": empty_assignment.id})["result"]
+        assert error_of(result)["code"] == "CONFIRMATION_REQUIRED"
         assert Assignment.objects.filter(pk=empty_assignment.id).exists()
+        assert PendingAgentAction.objects.filter(course=course).count() == 2
 
-    def test_repeat_preview_reuses_the_active_code(
+    def test_repeat_preview_reuses_the_active_request(
             self, api_client, admin_key, course, empty_assignment):
         from core.models import PendingAgentAction
 
@@ -224,6 +285,46 @@ class TestConfirmationCodes:
                  {"resourceType": "assignment",
                   "resourceId": empty_assignment.id})
         assert PendingAgentAction.objects.filter(course=course).count() == 1
+
+    def test_stale_approval_dies_when_plan_drifts(
+            self, api_client, admin_key, course, admin, empty_assignment):
+        """An approval granted for one blast radius must not authorise a
+        different one — the stale row is expired and a fresh request minted."""
+        from django.utils import timezone
+        from core.models import Assignment, PendingAgentAction
+
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        row = PendingAgentAction.objects.get(course=course)
+        PendingAgentAction.objects.filter(pk=row.pk).update(
+            approved_at=timezone.now())
+        # Drift the plan out from under the approval (name feeds the plan).
+        Assignment.objects.filter(pk=empty_assignment.id).update(
+            name="Disposable v2")
+
+        result = call(api_client, admin_key, "codepost_delete_resource",
+                      {"resourceType": "assignment",
+                       "resourceId": empty_assignment.id})["result"]
+        err = error_of(result)
+        assert err["code"] == "CONFIRMATION_REQUIRED"
+        assert "invalidated" in err["message"]
+        assert Assignment.objects.filter(pk=empty_assignment.id).exists()
+        row.refresh_from_db()
+        assert not row.is_active                        # superseded, expired
+
+    def test_dashboard_decisions_are_audited(
+            self, api_client, admin_key, course, admin, empty_assignment):
+        from core.models import CourseAuditEvent, PendingAgentAction
+
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        row = PendingAgentAction.objects.get(course=course)
+        dashboard_decide(api_client, course, admin, row.id, "approve")
+        event = CourseAuditEvent.objects.filter(
+            course=course, event_type="agent_action_approved").first()
+        assert event is not None
+        assert event.meta["tool"] == "codepost_delete_resource"
+        assert event.meta["origin"] == "dashboard"
 
 
 class TestTier3Tools:
