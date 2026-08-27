@@ -74,29 +74,47 @@ class BaseModel(models.Model):
   def save(self, *args: Any, **kwargs: Any) -> None:
     if self.pk:
       ''' Update '''
+      if kwargs.get('update_fields') is not None:
+        # The caller declared what changed — honor it (no diff, no extra SELECT)
+        # and persist the `modified` stamp alongside.
+        self.modified = now()
+        update_fields = list(kwargs['update_fields'])
+        if 'modified' not in update_fields:
+          update_fields.append('modified')
+        kwargs['update_fields'] = update_fields
+        return super(BaseModel, self).save(*args, **kwargs)
 
       ######################################################################
       # Check which fields have been updated
       ######################################################################
+      # Concrete fields compared by attname so FKs compare raw ids instead of
+      # lazy-loading related objects; deferred fields are skipped (touching
+      # them would fire a query each). An empty diff keeps update_fields=[],
+      # which makes Django skip the UPDATE and signals entirely.
       cls = self.__class__
       old = cls.objects.get(pk=self.pk)
-      new = self
+      deferred = self.get_deferred_fields()
       changed_fields: list[str] = []
-      for field in cls._meta.get_fields():
-        field_name = field.name
+      for field in cls._meta.concrete_fields:
+        attname = field.attname
+        if attname in deferred:
+          continue
         try:
-          if getattr(old, field_name) != getattr(new, field_name):
-            changed_fields.append(field_name)
+          if getattr(old, attname) != getattr(self, attname):
+            changed_fields.append(field.name)
         except Exception:
           pass
+      if changed_fields:
+        self.modified = now()
+        changed_fields.append('modified')
       kwargs['update_fields'] = changed_fields
       ######################################################################
       ######################################################################
     else:
       ''' Create '''
       self.created = now()
+      self.modified = now()
 
-    self.modified = now()
     return super(BaseModel, self).save(*args, **kwargs)
 
 ############# User Section ####################################################
