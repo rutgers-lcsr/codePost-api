@@ -332,6 +332,11 @@ services:
         environment:
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - FLOWER_BASIC_AUTH=${API_USER}:${API_PASSWORD}
+            # Flower monitors the broker and has no DB config. Django 6.1's
+            # run_checks() connects to the default DB (JSONField support check),
+            # which crashes flower on its unwritable sqlite fallback — skip
+            # celery's Django model checks here.
+            - CELERY_SKIP_CHECKS=true
         ports:
             - "5555:5555"
         healthcheck:
