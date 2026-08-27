@@ -249,7 +249,7 @@ def _approve_url(course) -> str:
 
     base = getattr(settings, 'CLIENT_URL', 'http://localhost:3000')
     return (f'{base}/admin/{quote(course.name, safe="")}/'
-            f'{quote(course.period, safe="")}/settings?section=api-keys')
+            f'{quote(course.period, safe="")}/settings?section=pending-agent-actions')
 
 
 def _audit_confirmation(ctx, tool: str, plan: dict, *, approved: bool,

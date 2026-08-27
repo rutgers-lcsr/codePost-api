@@ -137,7 +137,7 @@ class TestDashboardApproval:
         assert "confirmToken" not in err.get("context", {})
         assert "code" not in err.get("context", {})
         assert "dashboard" in err["remedy"].lower()
-        assert err["context"]["approveUrl"].endswith("?section=api-keys")
+        assert err["context"]["approveUrl"].endswith("?section=pending-agent-actions")
 
         row = PendingAgentAction.objects.get(course=course)
         assert row.tool == "codepost_delete_resource"
