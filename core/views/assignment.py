@@ -73,7 +73,7 @@ from core.serializers.actionResponses import CapabilitiesResponseSerializer
 
 from django.utils import timezone
 
-from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField, Prefetch
+from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField, Prefetch, FETCH_PEERS
 from django.db.models.functions import Coalesce
 
 from core.utils import copy_assignment
@@ -548,9 +548,10 @@ class AssignmentViewSet(ListProtectedViewSet):
     grader = self.request.query_params.get('grader', None)
     shouldReturnCompact = self.request.query_params.get('compact', None)
     # select_related the grader (FK) and assignment->course (the Submission.course property walks
-    # assignment.course, otherwise 2 FK queries per submission). The `files` prefetch is added only
-    # for the student branch below, since the compact grader serializer deliberately omits files.
-    submissions = assignment.submissions.all().select_related('grader', 'assignment__course').prefetch_related('students')
+    # assignment.course, otherwise 2 FK queries per submission). Every serializer variant returns
+    # tests; files (+ per-file comments/edit) are prefetched only on the branches that serialize
+    # them. FETCH_PEERS batches any forward relation the serializers touch beyond these.
+    submissions = assignment.submissions.all().select_related('grader', 'assignment__course').prefetch_related('students', 'tests').fetch_mode(FETCH_PEERS)
     shouldPaginate = self.request.query_params.get('page', None)
 
     #############################################################################################
@@ -651,6 +652,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     # Client has privilege that exceeds a student's
     else:
       if assignment.anonymousGrading and not canViewUnanonymizedSubmissions(user, course):
+        filteredSubs = filteredSubs.prefetch_related('files', 'files__comments', 'files__edit')
         serializer = AnonymousSubmissionSerializer(filteredSubs, many=True, context={'request': request})
       else:
         if shouldReturnCompact is not None and shouldReturnCompact != '0':
@@ -661,6 +663,7 @@ class AssignmentViewSet(ListProtectedViewSet):
               return self.get_paginated_response(serializer.data)
           serializer = SubmissionSerializerWithoutFiles(filteredSubs, many=True, context={'request': request})
         else:
+          filteredSubs = filteredSubs.prefetch_related('files', 'files__comments', 'files__edit')
           serializer = SubmissionSerializer(filteredSubs, many=True, context={'request': request})
 
     return Response(serializer.data)
