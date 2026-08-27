@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-import pytz
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
@@ -62,9 +62,10 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
 
   def validate_timezone(self, timezone):
     # Check that timezone corresponds to valid timezone
-    options = pytz.all_timezones
-    if timezone not in options:
-      raise serializers.ValidationError("Timezone is not valid. See pytz.all_timezones for options.")
+    try:
+      ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+      raise serializers.ValidationError("Timezone is not valid. See the IANA time zone database for options.")
     return timezone
 
   @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))

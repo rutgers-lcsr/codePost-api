@@ -507,11 +507,18 @@ if DEBUG:
 else:
     OVERRIDE_EMAIL = None
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
-EMAIL_PORT = 25
-EMAIL_USE_TLS = True
-EMAIL_USE_SSL = False
+# Django 6.1 MAILERS replaces the legacy EMAIL_* settings (removed in Django 7.0).
+MAILERS = {
+    "default": {
+        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "OPTIONS": {
+            "host": os.environ.get("EMAIL_HOST", "localhost"),
+            "port": 25,
+            "use_tls": True,
+            "use_ssl": False,
+        },
+    },
+}
 DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "no-reply@localhost")
 EMAIL_SUBJECT_PREFIX = "[Codepost] "
 
@@ -533,7 +540,6 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
-    "viewflow",
     "core",
     "autograder",
     "rest_framework",
@@ -825,9 +831,10 @@ if DEBUG:
     print(f"  Database User: {DATABASES['default'].get('USER', 'N/A')}")
     print("=" * 80)
     print("EMAIL Configuration:")
-    print(f"  EMAIL_HOST: {EMAIL_HOST}")
-    print(f"  EMAIL_PORT: {EMAIL_PORT}")
-    print(f"  TLS: {EMAIL_USE_TLS} SSL: {EMAIL_USE_SSL}")
+    _mail_opts = MAILERS["default"]["OPTIONS"]
+    print(f"  EMAIL_HOST: {_mail_opts['host']}")
+    print(f"  EMAIL_PORT: {_mail_opts['port']}")
+    print(f"  TLS: {_mail_opts['use_tls']} SSL: {_mail_opts['use_ssl']}")
     print(f"  DEFAULT_EMAIL_FROM: {DEFAULT_EMAIL_FROM}")
     if OVERRIDE_EMAIL:
         print(f"  OVERRIDE_EMAIL: {OVERRIDE_EMAIL}")

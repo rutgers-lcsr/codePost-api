@@ -119,9 +119,8 @@ async def _list_gemini_models(api_key: str) -> list[dict[str, str]]:
             model_id = model_id[len('models/'):]
         display_name = m.display_name or model_id
         # Only include generative models (skip embedding/retrieval models)
-        if hasattr(m, 'supported_generation_methods') and m.supported_generation_methods:  # type: ignore[attr-defined]  # google-generativeai Model
-            if 'generateContent' not in m.supported_generation_methods:  # type: ignore[operator]  # google-generativeai Model type
-                continue
+        if m.supported_actions and 'generateContent' not in m.supported_actions:
+            continue
         models.append({'id': model_id, 'name': display_name})
     return models
 

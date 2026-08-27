@@ -10,6 +10,7 @@ from core.serializers.course import (
     CourseRosterMapSerializer,
     CourseStudentCaptionsSerializer,
 )
+from core.serializers.assignment import AssignmentSerializer
 from core.serializers.gradebook import GradebookResponseSerializer
 from core.serializers.section import SectionSerializer
 from core.serializers.questionBank import QuestionBankSerializer
@@ -1167,6 +1168,73 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
             return returnForbidden()
         return Response(GradebookResponseSerializer(build_gradebook(course)).data)
+
+    @extend_schema(responses=AssignmentSerializer(many=True))
+    @action(detail=True, methods=["GET"])
+    def assignments(self, request, pk=None):
+        """Every assignment in the course the caller may see, each serialized exactly as
+        GET /assignments/{id}/ would serialize it for this caller. Replaces the client-side
+        per-id fan-out (the course detail returns ids only, and list endpoints are blocked).
+
+        The visible set mirrors AssignmentPermissions.has_object_permission, NOT the course
+        serializer's id list: staff and superusers see everything; students see
+        STUDENT_VISIBLE_STATES minus section-hidden assignments; anyone else who can read
+        the course (org staff of the org who is not a member) gets an empty list, because
+        every per-id retrieve 403s for them today."""
+        from django.db.models import Avg, Count, Max, Min, Q
+        from core.models import STUDENT_VISIBLE_STATES
+        from core.permissions.helpers import assignmentFeedbackOpen, isGrader, isStudent
+        from core.serializers.assignment import (
+            AssignmentSerializerWithStatisticsAndSummary,
+            AssignmentStudentSerializer,
+            AssignmentStudentSerializerNoStats,
+            AssignmentStudentSerializerWithStats,
+        )
+
+        course = self.get_object()
+        user = request.user
+
+        if user.is_superuser or isCourseStaff(user, course):
+            qs = course.assignments.all()
+        elif isStudent(user, course):
+            qs = (course.assignments
+                  .filter(state__in=STUDENT_VISIBLE_STATES)
+                  .exclude(hideFrom__students=user))
+        else:
+            return Response([])
+
+        qs = qs.prefetch_related('files', 'rubricCategories', 'testCategories', 'dataSets')
+        context = {'request': request}
+
+        # Serializer choice replicates AssignmentViewSet.get_serializer_class for retrieve —
+        # including the quirk that a superuser who is not a course member falls through to
+        # the student serializers, exactly as the per-id endpoint does.
+        if isCourseAdmin(user, course):
+            # Same annotations retrieve uses; without them the stats/summary fields
+            # recompute per object (~8 queries × N assignments).
+            qs = qs.annotate(
+                submissions_count_anno=Count('submissions', distinct=True),
+                submissions_finalized_count_anno=Count('submissions', filter=Q(submissions__isFinalized=True), distinct=True),
+                submissions_inprogress_count_anno=Count('submissions', filter=Q(submissions__isFinalized=False) & ~Q(submissions__grader=None), distinct=True),
+                submissions_unclaimed_count_anno=Count('submissions', filter=Q(submissions__grader=None), distinct=True),
+                stats_max_anno=Max('submissions__grade', filter=Q(submissions__isFinalized=True)),
+                stats_min_anno=Min('submissions__grade', filter=Q(submissions__isFinalized=True)),
+                stats_mean_anno=Avg('submissions__grade', filter=Q(submissions__isFinalized=True)),
+            )
+            return Response(AssignmentSerializerWithStatisticsAndSummary(qs, many=True, context=context).data)
+        if isGrader(user, course):
+            return Response(AssignmentSerializer(qs, many=True, context=context).data)
+
+        data = []
+        for assignment in qs:
+            if not assignmentFeedbackOpen(assignment, user):
+                serializer_class = AssignmentStudentSerializer
+            elif not course.showStudentsStatistics:
+                serializer_class = AssignmentStudentSerializerNoStats
+            else:
+                serializer_class = AssignmentStudentSerializerWithStats
+            data.append(serializer_class(assignment, context=context).data)
+        return Response(data)
 
     @extend_schema(
         responses={(200, 'text/csv'): OpenApiTypes.STR},

@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
-import pytz
+from zoneinfo import ZoneInfo
 from codepost.settings import (
     CLIENT_URL,
     API_URL,
@@ -375,7 +375,7 @@ class StudentUploadReceiptEmail(CodepostEmail):
         Sends an email to the user notifying them of a student upload receipt.
         """
         assert self.user is not None
-        tz = pytz.timezone(submission.assignment.course.timezone)
+        tz = ZoneInfo(submission.assignment.course.timezone)
         dateUploaded = submission.dateUploaded.astimezone(tz)
 
         dateUploadedHumanize = dateUploaded.strftime("%A, %m-%d-%Y %H:%M:%S")

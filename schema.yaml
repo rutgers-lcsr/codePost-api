@@ -4086,6 +4086,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourseAPIKeyRead'
           description: ''
+  /courses/{id}/assignments/:
+    get:
+      operationId: courses_assignmentsList
+      description: |-
+        Every assignment in the course the caller may see, each serialized exactly as
+        GET /assignments/{id}/ would serialize it for this caller. Replaces the client-side
+        per-id fan-out (the course detail returns ids only, and list endpoints are blocked).
+
+        The visible set mirrors AssignmentPermissions.has_object_permission, NOT the course
+        serializer's id list: staff and superusers see everything; students see
+        STUDENT_VISIBLE_STATES minus section-hidden assignments; anyone else who can read
+        the course (org staff of the org who is not a member) gets an empty list, because
+        every per-id retrieve 403s for them today.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this course.
+        required: true
+      tags:
+      - courses
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Assignment'
+          description: ''
   /courses/{id}/auditLog/:
     get:
       operationId: courses_auditLogList
@@ -23123,10 +23159,13 @@ components:
           type: integer
           readOnly: true
         email:
-          type: string
-          format: email
           title: Email address
-          maxLength: 254
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
         password:
           type: string
           writeOnly: true
@@ -27156,10 +27195,13 @@ components:
           type: integer
           readOnly: true
         email:
-          type: string
-          format: email
           title: Email address
-          maxLength: 254
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
         password:
           type: string
           writeOnly: true

@@ -4,7 +4,7 @@ from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import SubmissionHistory, User
 
-import pytz
+from zoneinfo import ZoneInfo
 
 class SubmissionHistorySerializer(ModelSerializerWithPOSTCheck):
   student = serializers.SlugRelatedField(many=False, slug_field='email', queryset=User.objects.all(), required=True)
@@ -18,7 +18,7 @@ class SubmissionHistorySerializer(ModelSerializerWithPOSTCheck):
   @extend_schema_field(serializers.DateTimeField(allow_null=True))
   def get_dateViewed(self, obj):
     if(obj.dateViewed):
-      tz = pytz.timezone(obj.submission.assignment.course.timezone)
+      tz = ZoneInfo(obj.submission.assignment.course.timezone)
       return obj.dateViewed.astimezone(tz)
     else:
       return None

@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-import pytz
+from zoneinfo import ZoneInfo
 
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
@@ -39,7 +39,7 @@ class SubmissionSerializerWithoutFiles(ModelSerializerWithPOSTCheck):
 
   @extend_schema_field(serializers.DateTimeField)
   def get_dateEdited(self, obj):
-    tz = pytz.timezone(obj.assignment.course.timezone)
+    tz = ZoneInfo(obj.assignment.course.timezone)
     return obj.dateEdited.astimezone(tz)
 
   def to_representation(self, obj):
@@ -73,7 +73,7 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
 
   @extend_schema_field(serializers.DateTimeField)
   def get_dateEdited(self, obj):
-    tz = pytz.timezone(obj.assignment.course.timezone)
+    tz = ZoneInfo(obj.assignment.course.timezone)
     return obj.dateEdited.astimezone(tz)
 
   # We can't use validate_students, because we need information from the assignment (the course)
@@ -297,7 +297,7 @@ class SubmissionConsoleDataSerializer(serializers.ModelSerializer):
 
   @extend_schema_field(serializers.DateTimeField)
   def get_dateEdited(self, obj):
-    tz = pytz.timezone(obj.assignment.course.timezone)
+    tz = ZoneInfo(obj.assignment.course.timezone)
     return obj.dateEdited.astimezone(tz)
 
   def to_representation(self, obj):

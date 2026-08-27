@@ -17,14 +17,12 @@ RUN /opt/poetry/bin/poetry config virtualenvs.create false \
 
 COPY . .
 
-# Skip stray node_modules bundled in package static dirs (viewflow); their CSS references
-# fonts they don't ship, which fails the manifest storage's strict post-processing.
-RUN python manage.py collectstatic --no-input --ignore node_modules
+RUN python manage.py collectstatic --no-input
 
 RUN chmod +x init.sh
 
 # API runs as root — requires Docker socket access and write access to NFS-mounted volumes
-CMD ["/opt/app/init.sh", "gunicorn", "--workers=4", "--worker-class", "uvicorn.workers.UvicornWorker", "codepost.asgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["/opt/app/init.sh", "gunicorn", "--workers=4", "--worker-class", "uvicorn_worker.UvicornWorker", "codepost.asgi:application", "--bind", "0.0.0.0:8000"]
 
 FROM python:3.12 AS worker
 
