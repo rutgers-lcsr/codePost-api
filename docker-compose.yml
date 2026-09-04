@@ -81,6 +81,9 @@ services:
             - .env
         environment:
             - DEBUG=${DEBUG:-FALSE}
+            # Same opt-in as codepost-api: settings refuse DEBUG=TRUE inside Docker
+            # without it, and the container crash-loops at import.
+            - DEV_DOCKER=${DEV_DOCKER:-FALSE}
             - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY}
             - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
             - API_URL=${API_URL}

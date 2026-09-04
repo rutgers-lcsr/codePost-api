@@ -108,6 +108,13 @@ jobs:
                   docker compose build
                   docker compose up -d --remove-orphans --wait --wait-timeout 180
 
+            - name: Reload nginx config
+              # nginx.conf is a bind mount; compose does not recreate codepost-entry when
+              # only that file changes. Validate, then graceful reload (no dropped requests).
+              run: |
+                  docker compose exec -T codepost-entry nginx -t
+                  docker compose exec -T codepost-entry nginx -s reload
+
             - name: Verify API readiness
               run: |
                   for i in $(seq 1 18); do
