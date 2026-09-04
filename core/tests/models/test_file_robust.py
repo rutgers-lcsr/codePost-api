@@ -210,7 +210,7 @@ class TestAssignmentFileBehavior(TestCase):
         org = OrganizationFactory(name="TestResOrg", shortname="tro")
         course = Course.objects.create(name="CS100", period="F2025", organization=org)
         assignment = Assignment.objects.create(
-            name="HW1", course=course, points=20, isReleased=False
+            name="HW1", course=course, points=20, state='preview'
         )
         af = AssignmentFile(
             name="test_helper.py",
@@ -228,7 +228,7 @@ class TestAssignmentFileBehavior(TestCase):
         org = OrganizationFactory(name="NormalOrg", shortname="no")
         course = Course.objects.create(name="CS200", period="F2025", organization=org)
         assignment = Assignment.objects.create(
-            name="HW2", course=course, points=20, isReleased=False
+            name="HW2", course=course, points=20, state='preview'
         )
         af = AssignmentFile(
             name="starter.py",
@@ -246,7 +246,7 @@ class TestAssignmentFileBehavior(TestCase):
         org = OrganizationFactory(name="CourseOrg", shortname="co")
         course = Course.objects.create(name="CS300", period="F2025", organization=org)
         assignment = Assignment.objects.create(
-            name="HW3", course=course, points=20, isReleased=False
+            name="HW3", course=course, points=20, state='preview'
         )
         af = AssignmentFile.objects.create(
             name="main.py", data="pass", extension=".py",

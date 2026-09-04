@@ -45,6 +45,7 @@ class AIUsageBucketSerializer(serializers.Serializer):
   inputTokens = serializers.IntegerField(help_text="Total input tokens in this bucket")
   outputTokens = serializers.IntegerField(help_text="Total output tokens in this bucket")
   estimatedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Total estimated cost in USD")
+  projectedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Cost of this bucket's usage at the currently configured token rates")
   requestCount = serializers.IntegerField(help_text="Number of API calls in this bucket")
 
 
@@ -56,6 +57,7 @@ class AIUsageBreakdownSerializer(serializers.Serializer):
   inputTokens = serializers.IntegerField()
   outputTokens = serializers.IntegerField()
   estimatedCost = serializers.DecimalField(max_digits=12, decimal_places=6)
+  projectedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Cost of this item's usage at the currently configured token rates")
   requestCount = serializers.IntegerField()
 
 
@@ -64,11 +66,14 @@ class AIUsageSummarySerializer(serializers.Serializer):
   totalTokens = serializers.IntegerField(help_text="Grand total tokens in the range")
   inputTokens = serializers.IntegerField(help_text="Grand total input tokens")
   outputTokens = serializers.IntegerField(help_text="Grand total output tokens")
+  cachedTokens = serializers.IntegerField(help_text="Grand total cached input tokens")
   estimatedCost = serializers.DecimalField(max_digits=12, decimal_places=6)
+  projectedCost = serializers.DecimalField(max_digits=12, decimal_places=6, help_text="Total cost of the range's usage at the currently configured token rates")
   requestCount = serializers.IntegerField(help_text="Total number of requests")
   timeSeries = AIUsageBucketSerializer(many=True, help_text="Usage data bucketed by time")
   breakdown = AIUsageBreakdownSerializer(many=True, help_text="Usage breakdown by dimension")
   modelBreakdown = AIUsageBreakdownSerializer(many=True, required=False, help_text="Usage breakdown by AI model")
+  featureBreakdown = AIUsageBreakdownSerializer(many=True, required=False, help_text="Usage breakdown by AI feature (request type)")
   granularity = serializers.ChoiceField(choices=['hourly', 'daily', 'monthly'])
   startDate = serializers.DateTimeField()
   endDate = serializers.DateTimeField()
@@ -311,3 +316,23 @@ class AIProviderModelsSerializer(serializers.Serializer):
 class AIProviderModelsListSerializer(serializers.Serializer):
   """Response wrapper for the AI models endpoint."""
   providers = AIProviderModelsSerializer(many=True, help_text="List of providers with their models")
+
+
+class AIProviderTestRequestSerializer(serializers.Serializer):
+  """Optional request body for the AI provider connection test."""
+  prompt = serializers.CharField(required=False, allow_blank=True, max_length=500, help_text="Optional custom prompt to send instead of the default connectivity prompt")
+  model = serializers.CharField(required=False, allow_blank=True, max_length=64, help_text="Optional model id to test against, overriding the saved model without saving it")
+
+
+class AIProviderTestResultSerializer(serializers.Serializer):
+  """Result of a live AI provider connection test."""
+  success = serializers.BooleanField(help_text="Whether the provider answered the test prompt")
+  provider = serializers.CharField(allow_blank=True, help_text="Provider identifier the test ran against")
+  model = serializers.CharField(allow_blank=True, help_text="Model the test ran against")
+  reportedModel = serializers.CharField(allow_null=True, required=False, help_text="Model id the provider reported back (may differ from the requested model, e.g. a gateway-routed or versioned model)")
+  latencyMs = serializers.FloatField(allow_null=True, required=False, help_text="Round-trip time of the test request in milliseconds")
+  requestSystemPrompt = serializers.CharField(allow_null=True, required=False, help_text="System prompt sent to the provider (null if no request was attempted)")
+  requestUserPrompt = serializers.CharField(allow_null=True, required=False, help_text="User prompt sent to the provider (null if no request was attempted)")
+  response = serializers.CharField(allow_null=True, required=False, help_text="The model's reply (up to 2000 characters)")
+  error = serializers.CharField(allow_null=True, required=False, help_text="Friendly error message")
+  errorDetail = serializers.CharField(allow_null=True, required=False, help_text="Raw exception detail for debugging")

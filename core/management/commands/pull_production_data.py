@@ -244,22 +244,32 @@ class Command(BaseCommand):
 
     def _create_assignment(self, remote: Any, local_course: Course) -> Assignment:
         """Create or update the assignment locally."""
+        # The remote (pre-lifecycle) API exposes the legacy booleans — derive state via
+        # migration 0140's mapping: hidden -> draft; released or upload-open -> published;
+        # visible-but-unreleased -> preview.
+        remote_visible = remote.is_visible if remote.is_visible is not None else True
+        if not remote_visible:
+            derived_state = "draft"
+        elif (remote.is_released or False) or (remote.allow_student_upload or False):
+            derived_state = "published"
+        else:
+            derived_state = "preview"
         local, created = Assignment.objects.update_or_create(
             name=remote.name,
             course=local_course,
             defaults={
                 "points": Decimal(str(remote.points)),
-                "isReleased": remote.is_released or False,
-                "feedbackReleased": remote.feedback_released or False,
+                "state": derived_state,
+                "feedbackStatus": ("live" if (remote.live_feedback_mode or False)
+                                   else "released" if (remote.feedback_released or False)
+                                   else "hidden"),
                 "allowStudentUpload": remote.allow_student_upload or False,
                 "anonymousGrading": remote.anonymous_grading or False,
                 "additiveGrading": remote.additive_grading or False,
                 "sortKey": remote.sort_key or 0,
-                "isVisible": remote.is_visible if remote.is_visible is not None else True,
                 "forcedRubricMode": remote.forced_rubric_mode or False,
                 "templateMode": remote.template_mode or False,
                 "collaborativeRubricMode": remote.collaborative_rubric_mode or False,
-                "liveFeedbackMode": remote.live_feedback_mode or False,
                 "commentFeedback": remote.comment_feedback if remote.comment_feedback is not None else True,
                 "hideGrades": remote.hide_grades or False,
                 "allowRegradeRequests": remote.allow_regrade_requests or False,

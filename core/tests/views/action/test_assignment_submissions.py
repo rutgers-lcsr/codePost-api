@@ -40,12 +40,12 @@ class TestPermissions_Assignment_submissions(APITestCase):
 
     ##############################################################################
     assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
-    assignment.isReleased = True
-    assignment.liveFeedbackMode = True
+    assignment.state = 'published'
+    assignment.feedbackStatus = 'live'
     assignment.allowStudentUpload = True
     assignment.save()
-    self.assertTrue(assignment.isReleased)
-    self.assertTrue(assignment.liveFeedbackMode)
+    self.assertEqual(assignment.state, 'published')
+    self.assertEqual(assignment.feedbackStatus, 'live')
     self.assertTrue(assignment.allowStudentUpload)
     ##############################################################################
 
@@ -97,8 +97,8 @@ class TestPermissions_Assignment_submissions(APITestCase):
 
     ##############################################################################
     assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
-    self.assertFalse(assignment.isReleased)
-    self.assertFalse(assignment.liveFeedbackMode)
+    self.assertNotIn(assignment.state, ('published', 'closed'))
+    self.assertNotEqual(assignment.feedbackStatus, 'live')
     self.assertFalse(assignment.allowStudentUpload)
     ##############################################################################
 
@@ -137,12 +137,12 @@ class TestPermissions_Assignment_submissions(APITestCase):
     response = request_as('read', student, endpoint, {})
     self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    assignment.isReleased = True
-    assignment.liveFeedbackMode = True
+    assignment.state = 'published'
+    assignment.feedbackStatus = 'live'
     assignment.allowStudentUpload = True
     assignment.save()
-    self.assertTrue(assignment.isReleased)
-    self.assertTrue(assignment.liveFeedbackMode)
+    self.assertEqual(assignment.state, 'published')
+    self.assertEqual(assignment.feedbackStatus, 'live')
     self.assertTrue(assignment.allowStudentUpload)
 
     response = request_as('read', student, endpoint, {})
@@ -163,12 +163,12 @@ class TestPermissions_Assignment_submissions(APITestCase):
 
     ##############################################################################
     assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
-    assignment.isReleased = True
-    assignment.liveFeedbackMode = True
+    assignment.state = 'published'
+    assignment.feedbackStatus = 'live'
     assignment.allowStudentUpload = True
     assignment.save()
-    self.assertTrue(assignment.isReleased)
-    self.assertTrue(assignment.liveFeedbackMode)
+    self.assertEqual(assignment.state, 'published')
+    self.assertEqual(assignment.feedbackStatus, 'live')
     self.assertTrue(assignment.allowStudentUpload)
     ##############################################################################
 

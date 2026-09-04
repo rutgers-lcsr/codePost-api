@@ -1,11 +1,11 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-import pytz
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
 from core.serializers.template import ModelSerializerWithPOSTCheck
-from core.models import Course, User
+from core.models import Course, User, STUDENT_VISIBLE_STATES
 
 from core.auth import type_of_auth
 
@@ -27,7 +27,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
   class Meta:
     model = Course
     fields = ('id', 'name', 'period', 'assignments', 'sections', 'sendReleasedSubmissionsToBack',
-              'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 
+              'showStudentsStatistics', 'timezone', 'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 'gradersCanGradeQuizzes',
               'minComments', 'noUnfinalize', 'archived', 'lateDayCreditsAllowable', 'activateQueue', 'inviteCode', 'emailWhitelist', 
               'inviteCodeEnabled', 'enableStudentFeedbackNotifications', 'webhooks', 'expirationDate', 'organization', 'studentsCanSeeGraders', 'studentCount', 'isRubricEditor', 'capabilities', 'cloneFrom')
     read_only_fields = ('assignments', 'sections', 'inviteCode', 'webhooks', 'studentCount', 'isRubricEditor', 'capabilities')
@@ -62,9 +62,10 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
 
   def validate_timezone(self, timezone):
     # Check that timezone corresponds to valid timezone
-    options = pytz.all_timezones
-    if timezone not in options:
-      raise serializers.ValidationError("Timezone is not valid. See pytz.all_timezones for options.")
+    try:
+      ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+      raise serializers.ValidationError("Timezone is not valid. See the IANA time zone database for options.")
     return timezone
 
   @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
@@ -79,9 +80,13 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
         if (isCourseStaff(user, obj)):
             return list(map(lambda x: x.id, obj.assignments.all()))
         else:
-            # hide the IDs of invisible assignments from students. This way, a client can safely
-            # load all the assignments in course.assignments without the risk of hitting a scary 403 error
-            return list(map(lambda x: x.id, filter(lambda x: x.isVisible, obj.assignments.all())))
+            # hide the IDs of draft/archived and section-hidden assignments from students. This
+            # way, a client can safely load all the assignments in course.assignments without
+            # the risk of hitting a scary 403 error. One bounded query for the hideFrom set —
+            # iterating obj.assignments.all() keeps the caller's prefetch effective.
+            hidden_ids = set(obj.assignments.filter(hideFrom__students=user).values_list('id', flat=True))
+            return [a.id for a in obj.assignments.all()
+                    if a.state in STUDENT_VISIBLE_STATES and a.id not in hidden_ids]
     else:
         return []
 
@@ -162,6 +167,7 @@ class CourseSerializer(ModelSerializerWithPOSTCheck):
                 obj.emailNewUsers = source_course.emailNewUsers
                 obj.anonymousGradingDefault = source_course.anonymousGradingDefault
                 obj.allowGradersToEditRubric = source_course.allowGradersToEditRubric
+                obj.gradersCanGradeQuizzes = source_course.gradersCanGradeQuizzes
                 obj.minComments = source_course.minComments
                 obj.noUnfinalize = source_course.noUnfinalize
                 obj.lateDayCreditsAllowable = source_course.lateDayCreditsAllowable
@@ -214,7 +220,8 @@ class CourseSettingsSerializer(ModelSerializerWithPOSTCheck):
   class Meta:
     model = Course
     fields = ('id', 'sendReleasedSubmissionsToBack', 'showStudentsStatistics', 'timezone',
-              'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric', 'archived', 'lateDayCreditsAllowable')
+              'emailNewUsers', 'anonymousGradingDefault', 'allowGradersToEditRubric',
+              'gradersCanGradeQuizzes', 'archived', 'lateDayCreditsAllowable')
 
 
 class CourseAISettingsSerializer(serializers.ModelSerializer):
@@ -246,6 +253,7 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
   aiFeatureModelsResolved = serializers.SerializerMethodField()
   aiFeatures = serializers.SerializerMethodField()
   defaultTokenRates = serializers.SerializerMethodField()
+  orgTokenRates = serializers.SerializerMethodField()
 
   class Meta:
     model = Course
@@ -269,6 +277,7 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
       'hasApiKey',
       'apiKeyHint',
       'defaultTokenRates',
+      'orgTokenRates',
     )
 
   @staticmethod
@@ -367,12 +376,26 @@ class CourseAISettingsSerializer(serializers.ModelSerializer):
 
   @extend_schema_field(serializers.DictField(child=serializers.DictField()))
   def get_defaultTokenRates(self, obj):
-    """Returns the hardcoded default token rates from AIService."""
+    """Returns the default token rates a course inherits: hardcoded AIService
+    defaults overlaid with the organization's custom rates."""
     from core.services.ai_service import AIService
-    return {
+    rates = {
       model: {'input': r[0], 'output': r[1]}
       for model, r in AIService.TOKEN_RATES.items()
     }
+    org = obj.organization
+    if org and org.ai_token_rates:
+      for model, r in org.ai_token_rates.items():
+        if isinstance(r, dict) and 'input' in r and 'output' in r:
+          rates[model] = {'input': float(r['input']), 'output': float(r['output'])}
+    return rates
+
+  @extend_schema_field(serializers.DictField(child=serializers.DictField()))
+  def get_orgTokenRates(self, obj):
+    """Returns the organization's custom token rates, so the UI can mark
+    which inherited defaults come from the org."""
+    org = obj.organization
+    return (org.ai_token_rates or {}) if org else {}
 
   @staticmethod
   def _mask_key(key):

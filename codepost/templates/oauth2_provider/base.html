@@ -1,0 +1,66 @@
+<!-- Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software. -->
+{# Standalone shell for the OAuth consent + agent-login pages. Deliberately   #}
+{# self-contained (no SPA assets, no CDN): these pages render on the API      #}
+{# origin during a top-level OAuth redirect and must work with nothing else.  #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}codePost{% endblock %}</title>
+    <style>
+        :root { color-scheme: light; }
+        * { box-sizing: border-box; margin: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         Helvetica, Arial, sans-serif;
+            background: #f4f6f5; color: #1c1e21;
+            min-height: 100vh; display: flex; align-items: center;
+            justify-content: center; padding: 24px;
+        }
+        .card {
+            background: #fff; border: 1px solid #e2e6e4; border-radius: 10px;
+            padding: 32px; width: 100%; max-width: 420px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
+        }
+        .brand { color: #198665; font-weight: 700; font-size: 20px; margin-bottom: 20px; }
+        h1 { font-size: 18px; margin-bottom: 12px; }
+        p { font-size: 14px; line-height: 1.5; margin-bottom: 12px; color: #444; }
+        ul.scopes { list-style: none; margin: 12px 0 16px; padding: 0; }
+        ul.scopes li {
+            font-size: 14px; padding: 8px 10px; border: 1px solid #e2e6e4;
+            border-radius: 6px; margin-bottom: 6px; background: #fafbfa;
+        }
+        ul.scopes li code {
+            background: #eef3f1; color: #198665; padding: 1px 6px;
+            border-radius: 4px; font-size: 12px; margin-right: 6px;
+        }
+        label { display: block; font-size: 13px; margin-bottom: 4px; color: #333; }
+        input[type=email], input[type=password] {
+            width: 100%; padding: 9px 10px; border: 1px solid #cfd6d2;
+            border-radius: 6px; font-size: 14px; margin-bottom: 14px;
+        }
+        .btn {
+            display: inline-block; border: 0; border-radius: 6px; cursor: pointer;
+            font-size: 14px; font-weight: 600; padding: 10px 18px; text-decoration: none;
+        }
+        .btn-primary { background: #198665; color: #fff; }
+        .btn-secondary { background: #eef1f0; color: #333; margin-left: 8px; }
+        .warn {
+            background: #fff8e6; border: 1px solid #f0dfa6; border-radius: 6px;
+            font-size: 13px; padding: 10px 12px; margin: 14px 0; color: #6b5510;
+        }
+        .error {
+            background: #fdecea; border: 1px solid #f5c6c0; border-radius: 6px;
+            font-size: 13px; padding: 10px 12px; margin-bottom: 14px; color: #8a2018;
+        }
+        .muted { font-size: 12px; color: #888; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="brand">codePost</div>
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

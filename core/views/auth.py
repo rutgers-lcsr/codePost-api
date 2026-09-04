@@ -21,6 +21,8 @@ from core.serializers.auth import (
   GenerateOTTRequestSerializer,
   GenerateOTTResponseSerializer,
   ValidateOTTRequestSerializer,
+  ExchangeOTTRequestSerializer,
+  ExchangeOTTResponseSerializer,
   JwtOttResponseSerializer,
   ImpersonateRequestSerializer,
   LogoutRequestSerializer,
@@ -346,6 +348,42 @@ def validate_one_time_token(request):
   update_last_login(None, user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
   
   return Response(data)
+
+@extend_schema(request=ExchangeOTTRequestSerializer, responses={200: ExchangeOTTResponseSerializer})
+@api_view(['POST'])
+@permission_classes([])
+@throttle_classes([AuthAnonRateThrottle])
+def exchange_one_time_token(request):
+  """
+  Consume a one-time token and issue a normal interactive access + refresh pair.
+
+  Used by the Safe Exam Browser launch flow: SEB opens a fresh browser session with no
+  stored auth, so the launch URL carries an OTT that this endpoint exchanges for the
+  same short-lived, rotating session a login would issue. Deliberately NOT
+  /ott/validate/, which issues a 365-day standalone token for long-lived Jupyter
+  servers — the wrong risk profile for a student quiz session.
+  """
+  token_str = request.data.get('token')
+  if not token_str:
+    return Response({"error": "token is required"}, status=400)
+
+  try:
+    token_obj = OneTimeToken.objects.get(token=token_str)
+  except OneTimeToken.DoesNotExist:
+    return Response({"error": "Invalid token"}, status=404)
+
+  if not token_obj.is_valid():
+    return Response({"error": "Token has expired or already used"}, status=400)
+
+  # Single-use, even in DEBUG: a reusable token in a URL is a session-hijack vector.
+  token_obj.used = True
+  token_obj.save()
+
+  user = token_obj.user
+  access, refresh = tokens_for_user(user, course_id=token_obj.course_id)
+  update_last_login(None, user)  # type: ignore[arg-type]  # Django stubs expect _UserModel sender
+  return Response({"token": access, "refresh": refresh})
+
 
 @extend_schema(responses={200: JwtOttResponseSerializer})
 @api_view(['GET'])

@@ -31,7 +31,7 @@ class AssignmentCloneTests(TestCase):
             name="HW1",
             course=self.source_course,
             points=100,
-            isReleased=True,
+            state='published',
         )
 
         self.template_file = AssignmentFile.objects.create(
@@ -245,3 +245,40 @@ class CourseCloneTests(TestCase):
         self.assertEqual(cloned_category.resources.count(), 1)
         self.assertEqual(cloned_category.resources.first().target_path, "helper.py")
         self.assertEqual(cloned_category.resources.first().file.assignment_id, cloned_assignment.id)
+
+
+class AssignmentCloneLifecycleResetTests(TestCase):
+    """A clone must land fully inert: draft, upload disabled, no schedules — the
+    pre-lifecycle behavior left allowStudentUpload on with no due date, so clones
+    accepted (hidden) uploads forever."""
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Clone Org 2", shortname="cloneorg2")
+        self.source_course = Course.objects.create(name="Src", period="F2026", organization=self.org)
+        self.destination_course = Course.objects.create(name="Dst", period="S2027", organization=self.org)
+
+    def test_clone_resets_lifecycle_and_upload_flags(self):
+        from django.utils import timezone
+        source = Assignment.objects.create(
+            name="HW-flags",
+            course=self.source_course,
+            points=50,
+            state='published',
+            allowStudentUpload=True,
+            allowStudentUploadWithPartners=True,
+            uploadDueDate=timezone.now(),
+            publishAt=timezone.now(),
+            scheduledPublishRanAt=timezone.now(),
+        )
+        clone = copy_assignment(source, self.destination_course)
+        self.assertIsNotNone(clone)
+        clone.refresh_from_db()
+
+        self.assertEqual(clone.state, 'draft')
+        self.assertIsNone(clone.publishedAt)
+        self.assertIsNone(clone.publishAt)
+        self.assertIsNone(clone.scheduledPublishRanAt)
+        self.assertFalse(clone.allowStudentUpload)
+        self.assertFalse(clone.allowStudentUploadWithPartners)
+        self.assertIsNone(clone.uploadDueDate)
+        self.assertEqual(clone.state, 'draft')

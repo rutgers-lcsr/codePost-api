@@ -13,6 +13,7 @@ from core.serializers.rubricCategory import RubricCategorySerializer, RubricCate
 from core.serializers.rubricComment import RubricCommentSerializer
 from core.serializers.quiz import QuizSerializer
 from core.serializers.suggestedQuizQuestion import SuggestedQuizQuestionSerializer
+from core.serializers.quizSuggestionJob import QuizSuggestionJobSerializer
 from core.serializers.submissionHistory import SubmissionHistorySerializer
 from core.serializers.comment import CommentSerializer
 
@@ -66,12 +67,13 @@ from core.permissions.permissions import AssignmentPermissions, RubricCommentPer
 from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isStudent, isGrader, isCourseAdmin, isCourseMember, isCourseStaff, isSuperGrader, canViewUnanonymizedSubmissions
+from core.permissions.helpers import assignmentFeedbackOpen
 from core.permissions.capabilities import compute_assignment_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability
 from core.serializers.actionResponses import CapabilitiesResponseSerializer
 
 from django.utils import timezone
 
-from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField, Prefetch
+from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField, Prefetch, FETCH_PEERS
 from django.db.models.functions import Coalesce
 
 from core.utils import copy_assignment
@@ -170,7 +172,9 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       # user is a student only
       else:
-        if (not assignment.isReleased and not assignment.liveFeedbackMode):
+        # Graded reveal: the stats-bearing serializers unlock once the feedback axis
+        # opens for this student (live/released, or per_student with a finalized sub)
+        if not assignmentFeedbackOpen(assignment, user):
           return AssignmentStudentSerializer
         elif (not course.showStudentsStatistics):
           return AssignmentStudentSerializerNoStats
@@ -187,11 +191,36 @@ class AssignmentViewSet(ListProtectedViewSet):
           submissions_finalized_count_anno=Count('submissions', filter=Q(submissions__isFinalized=True), distinct=True),
           submissions_inprogress_count_anno=Count('submissions', filter=Q(submissions__isFinalized=False) & ~Q(submissions__grader=None), distinct=True),
           submissions_unclaimed_count_anno=Count('submissions', filter=Q(submissions__grader=None), distinct=True),
-          stats_max_anno=Coalesce(Max('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
-          stats_min_anno=Coalesce(Min('submissions__grade', filter=Q(submissions__isFinalized=True)), Value(0, output_field=DecimalField()), output_field=DecimalField()),
-          stats_mean_anno=Coalesce(Avg('submissions__grade', filter=Q(submissions__isFinalized=True)), 0.0, output_field=FloatField())
+          # No Coalesce to 0: an assignment with nothing finalized must read
+          # null, not a real-looking 0-point average. The serializer treats a
+          # null annotation as "recompute", which also returns null here.
+          stats_max_anno=Max('submissions__grade', filter=Q(submissions__isFinalized=True)),
+          stats_min_anno=Min('submissions__grade', filter=Q(submissions__isFinalized=True)),
+          stats_mean_anno=Avg('submissions__grade', filter=Q(submissions__isFinalized=True))
       )
     return queryset
+
+  def perform_update(self, serializer):
+    # Audit lifecycle transitions (mirrors QuizViewSet.perform_update's publish events).
+    old_state = serializer.instance.state
+    old_feedback = serializer.instance.feedbackStatus
+    assignment = serializer.save()
+    if assignment.state != old_state:
+      record_audit_event(
+          course=assignment.course,
+          event_type='assignment_state_changed',
+          user=self.request.user,
+          assignment=assignment,
+          meta={'from': old_state, 'to': assignment.state},
+      )
+    if assignment.feedbackStatus != old_feedback:
+      record_audit_event(
+          course=assignment.course,
+          event_type='assignment_feedback_changed',
+          user=self.request.user,
+          assignment=assignment,
+          meta={'from': old_feedback, 'to': assignment.feedbackStatus},
+      )
 
   # Extra functions
   #####################################################################################
@@ -393,13 +422,11 @@ class AssignmentViewSet(ListProtectedViewSet):
           'question_types': serializers.ListField(child=serializers.CharField(), required=False),
           'instructions': serializers.CharField(required=False),
       }),
-      responses=inline_serializer('GenerateQuizQuestionsResponse', fields={
-          'task_id': serializers.CharField(),
-          'status': serializers.CharField(),
-      }),
+      responses=QuizSuggestionJobSerializer,
       description="Enqueue AI generation of suggested quiz questions for this assignment. "
-                  "Instructors review the suggestions and accept the good ones. Returns 403 when the "
-                  "course has the quiz_generation AI feature turned off.",
+                  "Instructors review the suggestions and accept the good ones. Returns the "
+                  "generation job to poll via quizSuggestionJobs/{id}/ for status and errors. "
+                  "Returns 403 when the course has the quiz_generation AI feature turned off.",
   )
   @action(detail=True, methods=['POST'], permission_classes=[IsAuthenticated])
   def generateQuizQuestions(self, request, pk=None):
@@ -408,15 +435,23 @@ class AssignmentViewSet(ListProtectedViewSet):
     if not isCourseStaff(request.user, assignment.course):
       return returnForbidden()
     require_capability(request.user, Capability.GENERATE_AI_QUIZ_QUESTIONS, assignment.course)
+    from core.models import QuizSuggestionJob
     from core.tasks import generate_quiz_question_suggestions
+    job = QuizSuggestionJob.objects.create(
+        course=assignment.course, assignment=assignment, requestedBy=request.user)
     task = generate_quiz_question_suggestions.delay(
         requested_by_id=request.user.id,
         assignment_id=assignment.id,
         num_questions=request.data.get('num_questions', 5),
         question_types=request.data.get('question_types'),
         instructions=request.data.get('instructions', '') or '',
+        job_id=job.id,
     )
-    return Response({'task_id': task.id, 'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+    # Queryset update (not job.save): under eager Celery the task may have already
+    # advanced the DB row, and BaseModel.save would clobber it from a stale instance.
+    QuizSuggestionJob.objects.filter(pk=job.pk).update(taskId=task.id)
+    job.refresh_from_db()
+    return Response(QuizSuggestionJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(responses=SubmissionSerializer(many=True))
   @action(detail=True, methods=['GET'])
@@ -513,9 +548,10 @@ class AssignmentViewSet(ListProtectedViewSet):
     grader = self.request.query_params.get('grader', None)
     shouldReturnCompact = self.request.query_params.get('compact', None)
     # select_related the grader (FK) and assignment->course (the Submission.course property walks
-    # assignment.course, otherwise 2 FK queries per submission). The `files` prefetch is added only
-    # for the student branch below, since the compact grader serializer deliberately omits files.
-    submissions = assignment.submissions.all().select_related('grader', 'assignment__course').prefetch_related('students')
+    # assignment.course, otherwise 2 FK queries per submission). Every serializer variant returns
+    # tests; files (+ per-file comments/edit) are prefetched only on the branches that serialize
+    # them. FETCH_PEERS batches any forward relation the serializers touch beyond these.
+    submissions = assignment.submissions.all().select_related('grader', 'assignment__course').prefetch_related('students', 'tests').fetch_mode(FETCH_PEERS)
     shouldPaginate = self.request.query_params.get('page', None)
 
     #############################################################################################
@@ -543,7 +579,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     # If you want to use this endpoint and you are a student only, then you must wait until the assignment
     # is released, student upload is allowed, or live feedback mode is enabled
     isOnlyStudent = isThisStudent and not isThisGrader and not isCourseAdminCached
-    if isOnlyStudent and not assignment.isReleased and not assignment.allowStudentUpload and not assignment.liveFeedbackMode:
+    # Students may list their own submissions from published onward (or in live-feedback
+    # mode) — before that there is nothing of theirs to see.
+    if isOnlyStudent and assignment.state not in ('published', 'closed') and assignment.feedbackStatus != 'live':
       return returnForbidden()
 
     # The student serializer renders files (StudentSubmissionSerializer.get_files) and each file's
@@ -606,14 +644,15 @@ class AssignmentViewSet(ListProtectedViewSet):
 
 
       # StudentSubmissionSerializer handles all cases:
-      # - Masks grade when feedbackReleased is False
-      # - Returns files without comments when feedbackReleased is False
+      # - Masks grade while the feedback axis is closed (or hideGrades)
+      # - Returns files without comments while the feedback axis is closed
       # - Preserves real isFinalized status so frontend can show submission correctly
       serializer = StudentSubmissionSerializer(filteredSubs, many=True, context={'request': request})
 
     # Client has privilege that exceeds a student's
     else:
       if assignment.anonymousGrading and not canViewUnanonymizedSubmissions(user, course):
+        filteredSubs = filteredSubs.prefetch_related('files', 'files__comments', 'files__edit')
         serializer = AnonymousSubmissionSerializer(filteredSubs, many=True, context={'request': request})
       else:
         if shouldReturnCompact is not None and shouldReturnCompact != '0':
@@ -624,6 +663,7 @@ class AssignmentViewSet(ListProtectedViewSet):
               return self.get_paginated_response(serializer.data)
           serializer = SubmissionSerializerWithoutFiles(filteredSubs, many=True, context={'request': request})
         else:
+          filteredSubs = filteredSubs.prefetch_related('files', 'files__comments', 'files__edit')
           serializer = SubmissionSerializer(filteredSubs, many=True, context={'request': request})
 
     return Response(serializer.data)
@@ -665,11 +705,11 @@ class AssignmentViewSet(ListProtectedViewSet):
 
     # If user is the course admin or the assignment is in live feedback mode return all test cases
     # We need to return all tests for users that are course admin for the "See as student" view
-    if isCourseAdmin(user, assignment.course) or assignment.liveFeedbackMode:
+    if isCourseAdmin(user, assignment.course) or assignment.feedbackStatus == 'live':
       test_cases = TestCase.objects.filter(testCategory__assignment=assignment)
     # If assignment is has been released and this endpoint has been called, check if the student's submission is finalized
     # If so, return all test cases. Else, return only exposed test cases
-    elif assignment.isReleased:
+    elif assignment.feedbackStatus in ('released', 'per_student'):
       filteredSubs = Submission.objects.filter(assignment=assignment, students__in=[user])
       if len(filteredSubs) > 0 and filteredSubs[0].isFinalized:
         test_cases = TestCase.objects.filter(testCategory__assignment=assignment)
@@ -727,7 +767,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     }
     """
     user = self.request.user
-    assignment = Assignment.objects.get(id=pk)
+    # get_object() runs AssignmentPermissions (lifecycle state + hideFrom); the
+    # upload_submission capability below adds the published/allowStudentUpload gate.
+    assignment = self.get_object()
     course = assignment.course
 
     if not isAuthenticated(user):
@@ -831,7 +873,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     TODO: add file limits to 10mb
     """
     user = self.request.user
-    assignment = Assignment.objects.get(id=pk)
+    # get_object() runs AssignmentPermissions (lifecycle state + hideFrom); the
+    # upload_submission capability below adds the published/allowStudentUpload gate.
+    assignment = self.get_object()
     course = assignment.course
 
     if not isAuthenticated(user):
@@ -844,16 +888,15 @@ class AssignmentViewSet(ListProtectedViewSet):
         raise serializers.ValidationError("No files provided")
 
 
-      # Began late submission check
+      # Began late submission check — boundary comes from submission_deadline() so this
+      # can never disagree with the derived 'closed' state (Assignment.effective_state).
       if assignment.uploadDueDate and timezone.now() > assignment.uploadDueDate:
         if not assignment.allowLateUploads:
           raise serializers.ValidationError("Late submissions are not allowed for this assignment.")
-        
-        # Calculate maxLateDate
-        maxLateDate = assignment.uploadDueDate + timedelta(days=assignment.maxLateDays)
-        if timezone.now() > maxLateDate:
+
+        if timezone.now() > assignment.submission_deadline():
           raise serializers.ValidationError("The maximum late submission period has passed for this assignment.")
-        
+
       # Ended late submission check
       
       
@@ -909,8 +952,8 @@ class AssignmentViewSet(ListProtectedViewSet):
         submission.students.add(cast(User, user))
         submission.save()
         
-      # Don't allow submission if the submission is finalized, unless we are in LiveFeedbackMode
-      if submission.isFinalized and not assignment.liveFeedbackMode:
+      # Don't allow submission if the submission is finalized, unless feedback is live
+      if submission.isFinalized and assignment.feedbackStatus != 'live':
         raise serializers.ValidationError("Cannot edit this submission, grading has started.")
 
       oldFiles = submission.files.all()
@@ -930,7 +973,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       # Update submission date once files have been uploaded, triggers auto-execution celery task
       submission.dateUploaded = timezone.now()
 
-      if assignment.liveFeedbackMode:
+      if assignment.feedbackStatus == 'live':
         submission.isFinalized = False
 
       submission.save()

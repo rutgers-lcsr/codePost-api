@@ -264,13 +264,13 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         redis_client_ref = self.redis_client
         if self.redis_client is not None:
             try:
-                await self.redis_client.close()
+                await self.redis_client.aclose()
             except Exception:
                 pass
             self.redis_client = None
         if self.metrics_client is not None and self.metrics_client is not redis_client_ref:
             try:
-                await self.metrics_client.close()
+                await self.metrics_client.aclose()
             except Exception:
                 pass
             self.metrics_client = None

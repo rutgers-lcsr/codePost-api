@@ -3,6 +3,7 @@ import logging
 import json
 import time
 from codepost.settings import DEBUG, HOSTNAME
+from django.db.utils import InterfaceError, OperationalError
 from log.models import Event
 
 
@@ -90,6 +91,11 @@ def logEvent(event: str, level=logging.INFO, message: str | None=None, skip_emai
         )
     except Exception as e:
         if skip_email:
+            return
+        # Database outage: the Event row itself cannot be written. Log it, but do not
+        # email — that would open an SMTP connection per request for the whole outage.
+        if isinstance(e, (OperationalError, InterfaceError)):
+            logging.getLogger(__name__).error(f"Failed to log event {event} (database unavailable): {e}")
             return
         # check if E is failed to send email
         if "Failed to send email" in str(e):

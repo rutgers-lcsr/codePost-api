@@ -1,8 +1,9 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from django.utils import timezone
@@ -13,6 +14,7 @@ from core.serializers.quiz import QuizSerializer, QuizQuestionSerializer
 from core.serializers.generatedQuiz import (
     GeneratedQuestionSetListSerializer, GeneratedQuestionSetSerializer,
 )
+from core.serializers.quizSuggestionJob import QuizSuggestionJobSerializer
 from core.serializers.studentQuiz import (
     StaffQuizAttemptSerializer, serialize_score, staff_reveal_context,
 )
@@ -21,7 +23,7 @@ from core.services.audit import record_audit_event
 from core.views.template import ListProtectedViewSet
 from core.permissions.helpers import isCourseAdmin, isCourseStaff, isStudent
 from core.permissions.permissions import (
-    QuizPermissions, canGradeQuiz, canReviewGeneratedQuestions,
+    QuizPermissions, canGenerateQuizQuestions, canGradeQuiz, canReviewGeneratedQuestions,
 )
 
 
@@ -43,6 +45,14 @@ def _review_guard(user, quiz):
   if canReviewGeneratedQuestions(user, quiz):
     return None
   return _forbidden('You do not have permission to review generated questions on this quiz.')
+
+
+def _generate_guard(user, quiz):
+  """The Generate-missing backfill: admins always, staff per the quiz's gradersCanGenerate
+  flag (the instructor's opt-in for a grader-run generate → review → release workflow)."""
+  if canGenerateQuizQuestions(user, quiz):
+    return None
+  return _forbidden('You do not have permission to generate questions on this quiz.')
 
 
 def _grading_guard(user, quiz, detail):
@@ -104,7 +114,10 @@ class QuizViewSet(ListProtectedViewSet):
     # Automatic generation (submission signal / section-created backfill) skips drafts, so
     # publishing must catch up students who have no generated set yet. missing_only: a
     # republish must never regenerate existing sets — a reviewer may have edited them.
-    if quiz.isPublished and not was_published and quiz.generatedSections.exists():
+    # Manual-generation quizzes don't catch up either — staff generate explicitly (a
+    # published-after-the-date generationDate run fires on the next sweep tick instead).
+    if quiz.isPublished and not was_published and quiz.generatedSections.exists() \
+        and not quiz.manualGeneration:
       from core.tasks import backfill_personalized_quiz_sets
       backfill_personalized_quiz_sets.delay(quiz.id, requested_by_id=self.request.user.id,
                                             missing_only=True)
@@ -140,7 +153,8 @@ class QuizViewSet(ListProtectedViewSet):
     # Prefetch each response's question/generatedQuestion — StaffQuizResponseSerializer reads
     # referenceSolution off them, which would otherwise be an N+1 per response.
     attempts = quiz.attempts.filter(status='submitted').select_related('student', 'quiz').prefetch_related(
-        Prefetch('responses', queryset=QuizResponse.objects.select_related('question', 'generatedQuestion'))
+        Prefetch('responses', queryset=QuizResponse.objects.select_related(
+            'question', 'generatedQuestion', 'gradedBy'))
     ).order_by('student__email', 'attemptNumber')
     if request.query_params.get('needsGrading') in ('true', 'True', '1'):
       attempts = attempts.filter(needsManualGrading=True)
@@ -229,6 +243,33 @@ class QuizViewSet(ListProtectedViewSet):
                        quiz=quiz, assignment=quiz.assignment,
                        meta={'title': quiz.title, 'cleared': quiz.accessCode is None})
     return Response({'accessCode': quiz.accessCode})
+
+  @extend_schema(
+      parameters=[OpenApiParameter(name='launch', type=str, location=OpenApiParameter.QUERY,
+                                   required=True, description='The launch token from sebLaunch.')],
+      responses={200: OpenApiTypes.BINARY},
+      description="Download the generated .seb config for a one-click Safe Exam Browser "
+                  "launch. Unauthenticated by design: SEB fetches this URL (via the seb:// "
+                  "protocol handler) before any session exists — the unguessable launch "
+                  "token is the credential. The token is checked but not consumed here; "
+                  "it is spent at /ott/exchange/ inside SEB.",
+  )
+  @action(detail=True, methods=['GET'], permission_classes=[AllowAny])
+  def sebConfig(self, request, pk=None):
+    from django.http import HttpResponse
+    from django.shortcuts import get_object_or_404
+    from core.models import QuizSebLaunch
+    # No get_object(): object permissions would reject the anonymous SEB fetch.
+    quiz = get_object_or_404(Quiz, pk=pk)
+    launch = QuizSebLaunch.objects.filter(
+        quiz=quiz, token__token=request.query_params.get('launch') or '',
+        expiresAt__gt=timezone.now()).order_by('-created').first()
+    if launch is None or not launch.token.is_valid():
+      return Response({'detail': 'Unknown or expired launch token.'},
+                      status=status.HTTP_404_NOT_FOUND)
+    response = HttpResponse(launch.configPlist, content_type='application/seb')
+    response['Content-Disposition'] = 'attachment; filename="quiz.seb"'
+    return response
 
   @extend_schema(responses=GeneratedQuestionSetListSerializer(many=True))
   @action(detail=True, methods=['GET'])
@@ -347,6 +388,122 @@ class QuizViewSet(ListProtectedViewSet):
                     status=status.HTTP_202_ACCEPTED)
 
   @extend_schema(
+      request=inline_serializer('PreviewGeneratedSectionRequest', {
+          'systemPrompt': serializers.CharField(),
+          'numQuestions': serializers.IntegerField(required=False, default=3),
+          'questionTypes': serializers.ListField(child=serializers.CharField(), required=False),
+          'seed': serializers.ChoiceField(choices=['random', 'demo'], required=False,
+                                          default='random'),
+          'demoFiles': serializers.ListField(child=inline_serializer('PreviewDemoFile', {
+              'name': serializers.CharField(),
+              'content': serializers.CharField(allow_blank=True),
+          }), required=False),
+      }),
+      responses=QuizSuggestionJobSerializer,
+      description="Test-generate example questions from an (unsaved) AI-section prompt "
+                  "without persisting anything to the quiz — the quiz builder's Test "
+                  "button. Returns a generation job to poll via quizSuggestionJobs/{id}/; "
+                  "the completed job's resultData holds the example questions. seed picks "
+                  "how per-student {variables} resolve: a random submitter's latest "
+                  "submission, or instructor-uploaded demoFiles.",
+  )
+  @action(detail=True, methods=['POST'])
+  def previewGeneratedSection(self, request, pk=None):
+    quiz = self.get_object()
+    # Generation spends AI credits, so it is admin-only — graders review/edit/approve.
+    denied = _admin_guard(request.user, quiz,
+                          'Only course admins can test-generate questions.')
+    if denied:
+      return denied
+    # Not _generation_ready_guard: it requires saved sections and validates their saved
+    # prompts — both wrong when testing the first, still-unsaved section. Only its
+    # feature check applies here.
+    from core.services.ai_service import AIService
+    if not AIService(quiz.course, quiz.assignment).is_feature_enabled('personalized_quiz_generation'):
+      return Response({'error': "AI quiz question generation is not enabled for this course. "
+                                "Enable the 'AI-Generated Quiz Questions' AI feature in the "
+                                "course's AI settings first."},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    system_prompt = request.data.get('systemPrompt') or ''
+    if not system_prompt.strip():
+      # Keyed like the section serializer's errors so the UI maps it into the form field.
+      return Response({'systemPrompt': ['Type a prompt to test.']},
+                      status=status.HTTP_400_BAD_REQUEST)
+    try:
+      num_questions = int(request.data.get('numQuestions') or 3)
+    except (TypeError, ValueError):
+      num_questions = 0
+    if num_questions < 1:
+      return Response({'error': 'numQuestions must be at least 1.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+    question_types = request.data.get('questionTypes') or []
+    from core.models import QUESTION_TYPE_CHOICES
+    valid_types = {key for key, _ in QUESTION_TYPE_CHOICES}
+    if not isinstance(question_types, list) or any(t not in valid_types for t in question_types):
+      return Response({'error': 'questionTypes must be a list of question type keys '
+                                f"({', '.join(sorted(valid_types))})."},
+                      status=status.HTTP_400_BAD_REQUEST)
+    seed = request.data.get('seed') or 'random'
+    if seed not in ('random', 'demo'):
+      return Response({'error': "seed must be 'random' or 'demo'."},
+                      status=status.HTTP_400_BAD_REQUEST)
+    demo_files = request.data.get('demoFiles') or []
+    # Size caps bound the Celery message body (file contents ride in it) to ~1 MB.
+    if (not isinstance(demo_files, list) or len(demo_files) > 10
+        or any(not isinstance(f, dict) or not f.get('name')
+               or not isinstance(f.get('content', ''), str)
+               or len(f.get('content') or '') > 100_000 for f in demo_files)):
+      return Response({'error': 'demoFiles must be at most 10 {name, content} entries of '
+                                'up to 100,000 characters each.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    # Same template validation as saving the section — catch prompt errors before
+    # spending an AI call.
+    from core.prompts.variables import (
+        VariableContext, template_requires_submission, validate_template,
+    )
+    errors = validate_template(system_prompt, VariableContext(
+        course=quiz.course, assignment=quiz.assignment))
+    if errors:
+      return Response({'systemPrompt': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    if template_requires_submission(system_prompt):
+      if seed == 'demo' and not demo_files:
+        return Response({'error': 'Upload at least one demo file to test this prompt.'},
+                        status=status.HTTP_400_BAD_REQUEST)
+      if seed == 'random':
+        if quiz.assignment_id is None:
+          return Response({'error': 'This prompt uses submission data — attach the quiz '
+                                    'to an assignment or test with demo files instead.'},
+                          status=status.HTTP_400_BAD_REQUEST)
+        if not quiz.assignment.submissions.filter(students__isnull=False).exists():
+          return Response({'error': 'No student has submitted yet — upload demo files '
+                                    'instead.'},
+                          status=status.HTTP_400_BAD_REQUEST)
+
+    from core.models import QuizSuggestionJob
+    from core.tasks import preview_generated_section
+    job = QuizSuggestionJob.objects.create(
+        course=quiz.course, assignment=quiz.assignment, quiz=quiz, requestedBy=request.user)
+    task = preview_generated_section.delay(
+        quiz_id=quiz.id,
+        requested_by_id=request.user.id,
+        job_id=job.id,
+        system_prompt=system_prompt,
+        num_questions=num_questions,
+        question_types=question_types,
+        seed=seed,
+        demo_files=([{'name': f['name'], 'content': f.get('content') or ''}
+                     for f in demo_files] if seed == 'demo' else None),
+    )
+    # Queryset update (not job.save): under eager Celery the task may have already
+    # advanced the DB row, and BaseModel.save would clobber it from a stale instance.
+    QuizSuggestionJob.objects.filter(pk=job.pk).update(taskId=task.id)
+    job.refresh_from_db()
+    return Response(QuizSuggestionJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+
+  @extend_schema(
       responses=inline_serializer('BackfillPreviewResponse', {
           'wouldGenerate': serializers.IntegerField(),
           'missing': serializers.IntegerField(),
@@ -383,10 +540,10 @@ class QuizViewSet(ListProtectedViewSet):
     assignment but no question set yet — e.g. they submitted before the AI section
     existed, or the feature was off / generation failed at the time."""
     quiz = self.get_object()
-    # Generation spends AI credits, so it is admin-only — graders review/edit/approve.
-    denied = (_admin_guard(request.user, quiz,
-                           'Only course admins can queue question generation.')
-              or _generation_ready_guard(quiz))
+    # Generation spends AI credits: admins always; graders only when the instructor turned
+    # on gradersCanGenerate (missing_only never touches existing sets, so the blast radius
+    # is bounded). Per-student generate/regenerate stays admin-only.
+    denied = _generate_guard(request.user, quiz) or _generation_ready_guard(quiz)
     if denied:
       return denied
 

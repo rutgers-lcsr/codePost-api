@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, re_path, include
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
-from core.views.auth import generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token, logout, logout_all, NON_COURSE_KEY_AUTH
+from core.views.auth import exchange_one_time_token, generate_one_time_token, get_jwt_ott, obtain_jwt_token, ImpersonateView, validate_one_time_token, logout, logout_all, NON_COURSE_KEY_AUTH
 
 from rest_framework.viewsets import ViewSet
 from core.views.user import UserViewSet
@@ -50,6 +50,7 @@ from core.views.quiz import QuizViewSet
 from core.views.quizQuestion import QuizQuestionViewSet
 from core.views.quizQuestionGroup import QuizQuestionGroupViewSet
 from core.views.suggestedQuizQuestion import SuggestedQuizQuestionViewSet
+from core.views.quizSuggestionJob import QuizSuggestionJobViewSet
 from core.views.quizImportJob import QuizImportJobViewSet
 from core.views.quizImage import QuizImageViewSet, serve_quiz_image
 from core.views.quizAttempt import QuizAttemptViewSet
@@ -68,7 +69,13 @@ from webhooks.view import WebhookViewSet
 
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
-from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView
+from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView, readiness_check
+from oauth2_provider import views as oauth2_views
+from oauth2_provider.urls import metadata_urlpatterns as oauth2_metadata_urlpatterns
+
+from core.throttles import rate_limited
+from core.views.agent_login import agent_login
+from core.mcp.views import MCPEndpointView
 from core.views.capabilities import PlatformCapabilitiesView, BatchCapabilitiesView
 
 
@@ -76,6 +83,10 @@ from django.http import HttpResponse
 
 
 def health_check(request):
+    # Liveness only, deliberately dependency-free: the compose healthchecks and
+    # autoheal act on this, and a DB/Redis outage must NOT make them restart the
+    # API (it would only crash-loop into wait_for_db). Dependency status is at
+    # /health-check/ready/ (core.views.system.readiness_check).
     return HttpResponse(status=200)
 
 class RedirectToAdminViewSet(ViewSet):
@@ -122,6 +133,7 @@ router.register(r'quizzes', QuizViewSet)
 router.register(r'quizQuestions', QuizQuestionViewSet)
 router.register(r'quizQuestionGroups', QuizQuestionGroupViewSet)
 router.register(r'suggestedQuizQuestions', SuggestedQuizQuestionViewSet)
+router.register(r'quizSuggestionJobs', QuizSuggestionJobViewSet)
 router.register(r'quizImportJobs', QuizImportJobViewSet)
 router.register(r'quizImages', QuizImageViewSet)
 router.register(r'quizAttempts', QuizAttemptViewSet)
@@ -146,6 +158,25 @@ API_DESCRIPTION = 'An API for administrators to mine course data and automate co
 #############################################
 #############################################
 
+
+# OAuth 2.1 authorization server (trimmed django-oauth-toolkit mount — see the
+# comment above each entry group; instance namespace must be "oauth2_provider"
+# so DOT's internal reverse() calls resolve).
+oauth2_urlpatterns = ([
+    path("authorize/", oauth2_views.AuthorizationView.as_view(), name="authorize"),
+    path("token/", rate_limited("oauth_token", "60/min")(
+        oauth2_views.TokenView.as_view()), name="token"),
+    path("revoke_token/", oauth2_views.RevokeTokenView.as_view(), name="revoke-token"),
+    path("introspect/", oauth2_views.IntrospectTokenView.as_view(), name="introspect"),
+    # Dynamic client registration (RFC 7591/7592): open by policy — registering
+    # grants nothing without a signed-in instructor consenting — but rate-limited.
+    path("register/", rate_limited("oauth_register", "10/min")(
+        oauth2_views.DynamicClientRegistrationView.as_view()), name="dcr-register"),
+    path("register/<str:client_id>/",
+         oauth2_views.DynamicClientRegistrationManagementView.as_view(),
+         name="dcr-register-management"),
+], "oauth2_provider")
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     re_path('^api-auth/', include('rest_framework.urls', namespace='rest_framework')),
@@ -156,11 +187,14 @@ urlpatterns = [
     path('logout-all/', logout_all, name='logout_all'),
     path('ott/generate/', generate_one_time_token, name='generate_one_time_token'),
     path('ott/validate/', validate_one_time_token, name='validate_one_time_token_by_query'),
+    path('ott/exchange/', exchange_one_time_token, name='exchange_one_time_token'),
     path('ott/', get_jwt_ott, name='get_jwt_ott'),
     re_path('registration/', include(('core.registration_urls', 'core'), namespace='registration')),
     path('auth/sso/', include(('core.sso_urls', 'core'), namespace='sso')),
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),
+    # Must precede the unanchored re_path below, which would swallow it.
+    path('health-check/ready/', readiness_check, name='readiness_check'),
     re_path('health-check/', health_check),
     path('system/health/', SystemHealthView.as_view(), name='system_health'),
     path('system/activity/', SystemActivityView.as_view(), name='system_activity'),
@@ -170,6 +204,16 @@ urlpatterns = [
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
+    # OAuth: RFC 8414 + RFC 9728 well-known documents at the site root, the
+    # authorization server itself under /o/, and the browser login bridge the
+    # consent page redirects anonymous users to. All precede the catch-all.
+    path('', include((oauth2_metadata_urlpatterns, 'oauth2_provider'),
+                     namespace='oauth2_metadata')),
+    path('o/', include(oauth2_urlpatterns)),
+    path('auth/agent-login/', agent_login, name='agent_login'),
+    # MCP endpoint for instructor agents. Must precede the router catch-all.
+    path('mcp', MCPEndpointView.as_view(), name='mcp'),
+    path('mcp/', MCPEndpointView.as_view(), name='mcp_slash'),
     path('capabilities/platform/', PlatformCapabilitiesView.as_view(), name='platform_capabilities'),
     path('capabilities/batch/', BatchCapabilitiesView.as_view(), name='batch_capabilities'),
     path('promptTypes/', PromptTypeListView.as_view(), name='prompt_types'),

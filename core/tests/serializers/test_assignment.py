@@ -15,14 +15,14 @@ class TestSerializer_AssignmentSerializer(APITestCase):
         self.instance_attributes = {
             "name": "Sierpinski",
             "points": 30,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course
         }
 
         self.serializer_data = {
             "name": "Nbody",
             "points": 100,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id
         }
 
@@ -58,7 +58,7 @@ class TestSerializer_AssignmentSerializer(APITestCase):
         response = request_as("create", admin, "/assignments/", {
             "name": "NewAsg",
             "points": 50,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id,
         })
         self.assertEqual(response.status_code, 201)
@@ -73,14 +73,14 @@ class TestSerializer_AssignmentSerializerWithStatistics(APITestCase):
         self.instance_attributes = {
             "name": "Sierpinski",
             "points": 30,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course
         }
 
         self.serializer_data = {
             "name": "Nbody",
             "points": 100,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id
         }
 
@@ -115,14 +115,14 @@ class TestSerializer_AssignmentStudentSerializer(APITestCase):
         self.instance_attributes = {
             "name": "Sierpinski",
             "points": 30,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course
         }
 
         self.serializer_data = {
             "name": "Nbody",
             "points": 100,
-            "isReleased": False,
+            "state": "preview",
             "course": self.course.id
         }
 
@@ -142,3 +142,69 @@ class TestSerializer_AssignmentStudentSerializer(APITestCase):
 
         self.assertNotIn('points', data.keys())
         self.assertNotIn('mean', data.keys())
+
+
+class TestStudentReleasedSerializersLeakGuard(APITestCase):
+    """The post-feedback student serializers must expose exactly the student base plus
+    STUDENT_RELEASED_EXTRA_FIELDS — staff-only fields (AI prompts, grading internals)
+    must never re-enter the student payload. (The persona matrix harness only checks a
+    key intersection, so this is the real guard.)"""
+
+    STAFF_ONLY_FIELDS = (
+        'ai_system_prompt', 'ai_summary_prompt', 'ai_description', 'ai_description_locked',
+        'anonymousGrading', 'hideGradersFromStudents', 'testCategories',
+        'showFrequentlyUsedRubricComments', 'forcedRubricMode', 'templateMode',
+        'collaborativeRubricMode', 'gradersCanEditSubmissions',
+        'runFilesOnSubmit', 'runTestsOnSubmit',
+    )
+
+    def setUp(self):
+        setUpBase(self)
+        self.assignment = Assignment.objects.get(id=self.DB['Assignment'].id)
+        self.assignment.state = 'published'
+        self.assignment.feedbackStatus = 'released'
+        self.assignment.save()
+
+    def test_no_stats_field_set_is_exactly_base_plus_extras(self):
+        expected = set(AssignmentSerializerBase.Meta.fields) | set(STUDENT_RELEASED_EXTRA_FIELDS)
+        self.assertEqual(set(AssignmentStudentSerializerNoStats.Meta.fields), expected)
+
+    def test_with_stats_adds_only_mean_median(self):
+        self.assertEqual(
+            set(AssignmentStudentSerializerWithStats.Meta.fields)
+            - set(AssignmentStudentSerializerNoStats.Meta.fields),
+            {'mean', 'median'})
+
+    def test_staff_fields_absent_and_student_fields_present(self):
+        for serializer_class in (AssignmentStudentSerializerNoStats,
+                                 AssignmentStudentSerializerWithStats):
+            data = serializer_class(instance=self.assignment).data
+            for field in self.STAFF_ONLY_FIELDS:
+                self.assertNotIn(field, data, f"{serializer_class.__name__} leaks {field}")
+            self.assertIn('explanation', data)
+            for field in STUDENT_RELEASED_EXTRA_FIELDS:
+                self.assertIn(field, data, f"{serializer_class.__name__} missing {field}")
+        self.assertNotIn('mean', AssignmentStudentSerializerNoStats(instance=self.assignment).data)
+
+    def test_student_retrieve_has_no_staff_fields(self):
+        from django.urls import reverse
+        from core.tests.views.personas import Persona
+        from rest_framework import status as drf_status
+
+        student = Persona.STUDENT_OF_COURSE(self)
+        endpoint = reverse("assignment-detail", args=[self.assignment.id])
+
+        response = request_as('read', student, endpoint)
+        self.assertEqual(response.status_code, drf_status.HTTP_200_OK)
+        # camelCase over the wire (djangorestframework-camel-case)
+        self.assertNotIn('aiSystemPrompt', response.data)
+        self.assertNotIn('anonymousGrading', response.data)
+        self.assertIn('points', response.data)
+        self.assertIn('explanation', response.data)
+        self.assertNotIn('mean', response.data)  # course stats off by default
+
+        self.course.showStudentsStatistics = True
+        self.course.save()
+        response = request_as('read', student, endpoint)
+        self.assertIn('mean', response.data)
+        self.assertNotIn('aiSystemPrompt', response.data)

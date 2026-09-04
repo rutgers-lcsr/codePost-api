@@ -84,12 +84,12 @@ class TestStudentSubmissionsFilesQueryCount(APITestCase):
     course.students.add(student)
 
     # Assignment 1: submission has the single file created by the factory.
-    a1 = AssignmentFactory(course=course, name='One File', isReleased=True)
+    a1 = AssignmentFactory(course=course, name='One File', state='published')
     s1 = a1.submissions.first()
     s1.students.add(student)
 
     # Assignment 2: submission has five files.
-    a2 = AssignmentFactory(course=course, name='Many Files', isReleased=True)
+    a2 = AssignmentFactory(course=course, name='Many Files', state='published')
     s2 = a2.submissions.first()
     s2.students.add(student)
     for i in range(4):
@@ -106,4 +106,50 @@ class TestStudentSubmissionsFilesQueryCount(APITestCase):
         q2, q1,
         msg=(f"submissions endpoint scales with file count ({q1} query for 1 file, "
              f"{q2} for 5); files may not be prefetched."),
+    )
+
+
+class TestHideFromQueryScaling(APITestCase):
+  """The server-side hideFrom filter in CourseSerializer.get_assignments adds one bounded
+  query per course for students — it must not scale with the number of assignments or
+  hideFrom rows."""
+  endpoint = '/users/me/'
+
+  def _count_me_queries(self, student):
+    client = APIClient()
+    client.force_authenticate(user=student)
+    with CaptureQueriesContext(connection) as ctx:
+      resp = client.get(self.endpoint)
+    return len(ctx.captured_queries), resp
+
+  def test_hidefrom_does_not_scale_per_assignment(self):
+    from core.tests.factories import SectionFactory
+    org = OrganizationFactory()
+
+    # Student A: course with 1 assignment carrying a hideFrom row.
+    studentA = StudentFactory(course='hfa', organization=org, count=300)
+    courseA = CourseFactory(name='hf_course_a', period='s2020', organization=org)
+    courseA.students.add(studentA)
+    sectionA = SectionFactory(course=courseA, name='HF-A')
+    a = AssignmentFactory(course=courseA, name='hf-a-0', state='published')
+    a.hideFrom.add(sectionA)
+
+    # Student B: course with 5 assignments, each carrying a hideFrom row.
+    studentB = StudentFactory(course='hfb', organization=org, count=301)
+    courseB = CourseFactory(name='hf_course_b', period='s2020', organization=org)
+    courseB.students.add(studentB)
+    sectionB = SectionFactory(course=courseB, name='HF-B')
+    for i in range(5):
+      assignment = AssignmentFactory(course=courseB, name=f'hf-b-{i}', state='published')
+      assignment.hideFrom.add(sectionB)
+
+    qA, respA = self._count_me_queries(studentA)
+    qB, respB = self._count_me_queries(studentB)
+
+    self.assertEqual(respA.status_code, 200)
+    self.assertEqual(respB.status_code, 200)
+    self.assertLessEqual(
+        qB, qA,
+        msg=(f"hideFrom filtering scales with assignment count ({qA} queries for 1 "
+             f"assignment, {qB} for 5); it must stay one bounded query per course."),
     )

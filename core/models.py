@@ -74,29 +74,47 @@ class BaseModel(models.Model):
   def save(self, *args: Any, **kwargs: Any) -> None:
     if self.pk:
       ''' Update '''
+      if kwargs.get('update_fields') is not None:
+        # The caller declared what changed — honor it (no diff, no extra SELECT)
+        # and persist the `modified` stamp alongside.
+        self.modified = now()
+        update_fields = list(kwargs['update_fields'])
+        if 'modified' not in update_fields:
+          update_fields.append('modified')
+        kwargs['update_fields'] = update_fields
+        return super(BaseModel, self).save(*args, **kwargs)
 
       ######################################################################
       # Check which fields have been updated
       ######################################################################
+      # Concrete fields compared by attname so FKs compare raw ids instead of
+      # lazy-loading related objects; deferred fields are skipped (touching
+      # them would fire a query each). An empty diff keeps update_fields=[],
+      # which makes Django skip the UPDATE and signals entirely.
       cls = self.__class__
       old = cls.objects.get(pk=self.pk)
-      new = self
+      deferred = self.get_deferred_fields()
       changed_fields: list[str] = []
-      for field in cls._meta.get_fields():
-        field_name = field.name
+      for field in cls._meta.concrete_fields:
+        attname = field.attname
+        if attname in deferred:
+          continue
         try:
-          if getattr(old, field_name) != getattr(new, field_name):
-            changed_fields.append(field_name)
+          if getattr(old, attname) != getattr(self, attname):
+            changed_fields.append(field.name)
         except Exception:
           pass
+      if changed_fields:
+        self.modified = now()
+        changed_fields.append('modified')
       kwargs['update_fields'] = changed_fields
       ######################################################################
       ######################################################################
     else:
       ''' Create '''
       self.created = now()
+      self.modified = now()
 
-    self.modified = now()
     return super(BaseModel, self).save(*args, **kwargs)
 
 ############# User Section ####################################################
@@ -309,7 +327,7 @@ class Course(BaseModel):
   rubricEditors = models.ManyToManyField(User, related_name="rubricEditor_courses", help_text=(
       "A list of usernames of graders for the course who are allowed to edit the rubric."))
   quizGraders = models.ManyToManyField(User, related_name="quizGrader_courses", blank=True, help_text=(
-      "A list of usernames of graders for the course who are allowed to grade quizzes. "
+      "Graders explicitly allowed to grade quizzes when gradersCanGradeQuizzes is off. "
       "Course admins can always grade quizzes."))
   courseAdmins = models.ManyToManyField(User, related_name="courseAdmin_courses", help_text=(
       "A list of usernames for admins for the course."))
@@ -327,6 +345,9 @@ class Course(BaseModel):
 
   allowGradersToEditRubric = models.BooleanField(default=False, help_text=(
       "A boolean field. If True, graders will be allowed to add and update unlinked rubric comments."))
+  gradersCanGradeQuizzes = models.BooleanField(default=True, help_text=(
+      "A boolean field. If True (default), all course graders may view and grade quiz attempts. "
+      "If False, quiz grading is restricted to course admins and the designated quizGraders."))
   minComments = models.IntegerField(default=0, help_text=(
       "An integer representing the minimum number of comments that graders are asked to make prior to finalizing. 0 indicates no minimum."))
   noUnfinalize = models.BooleanField(default=False, help_text=(
@@ -458,6 +479,30 @@ class Section(BaseModel):
     return self.name + " | " + str(self.course)
 
 
+# Assignment lifecycle. Students see visible/preview/published/closed; they can download
+# files from preview onward and submit only while published (and before the deadline —
+# see Assignment.effective_state). draft and archived are instructor-only.
+ASSIGNMENT_STATE_CHOICES = [
+    ('draft', 'Draft'),
+    ('visible', 'Visible'),
+    ('preview', 'Preview'),
+    ('published', 'Published'),
+    ('closed', 'Closed'),
+    ('archived', 'Archived'),
+]
+STUDENT_VISIBLE_STATES = ('visible', 'preview', 'published', 'closed')
+STUDENT_DOWNLOAD_STATES = ('preview', 'published', 'closed')
+
+# Feedback axis: how grading becomes visible to students. Orthogonal to the work-axis
+# `state` above, and to `hideGrades` (which masks numeric grades in ANY revealing state).
+FEEDBACK_STATUS_CHOICES = [
+    ('hidden', 'Hidden'),
+    ('live', 'Live'),
+    ('per_student', 'Per student'),
+    ('released', 'Released'),
+]
+
+
 class Assignment(BaseModel):
   if TYPE_CHECKING:
     id: int
@@ -471,8 +516,18 @@ class Assignment(BaseModel):
     uploadDueDate: models.DateTimeField[datetime, datetime]
     maxLateDays: models.IntegerField[int, int]
 
-  isVisible = models.BooleanField(default=True, help_text=(
-      "A boolean field. 'True' if the assignment is viewable by students."))
+  state = models.CharField(max_length=16, choices=ASSIGNMENT_STATE_CHOICES, default='draft',
+      help_text=("Lifecycle state: draft -> visible -> preview -> published -> closed -> archived. "
+                 "Students see visible through closed, download files from preview onward, and "
+                 "submit only while published."))
+  publishedAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "When the assignment last entered the published state. Cleared if it moves back to a "
+      "pre-published state (not on close/archive)."))
+  publishAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "Visible/Preview assignments auto-publish at this time (checked every few minutes)."))
+  scheduledPublishRanAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "When the scheduled publishAt run last fired (one-shot stamp). Moving publishAt past "
+      "this re-arms the run."))
 
   explanation = models.TextField(blank=True, help_text=("The explanation of an assignment, visible to students."))
   hideFrom = models.ManyToManyField(Section, related_name="hidden_sections", help_text=("Sections from which to hide this assignment."), blank=True)
@@ -481,8 +536,6 @@ class Assignment(BaseModel):
                              related_name='assignments', help_text=("The related course_id."))
   name = models.CharField(
       max_length=32, help_text=("The name of the assignment."))
-  isReleased = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if the assignment is released for students to view. 'False' otherwise."))
   points = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5,
                                decimal_places=2, help_text=("Total points for the assignment."))
   mean = models.DecimalField(validators=[MinValueValidator(0)], max_digits=5, decimal_places=2, blank=True, null=True, help_text=(
@@ -494,12 +547,22 @@ class Assignment(BaseModel):
 
   # Settings
   hideGrades = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if the students should not see their grades for this assignment. 'False' otherwise."))
+      "A boolean field. If True, numeric grades are masked from students in any revealing "
+      "feedbackStatus — they still see comments and the rubric."))
 
-  feedbackReleased = models.BooleanField(default=False, help_text=(
-      "A boolean field. 'True' if grades/feedback are released for students to view. 'False' otherwise."))
+  feedbackStatus = models.CharField(max_length=16, choices=FEEDBACK_STATUS_CHOICES, default='hidden',
+      help_text=("How grading becomes visible to students: hidden (nothing), live (as it's "
+                 "written), per_student (each student once their submission is finalized), "
+                 "released (finalized submissions, globally)."))
+  releaseFeedbackAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "Hidden/per-student assignments auto-release feedback at this time (checked every few "
+      "minutes)."))
+  scheduledFeedbackReleaseRanAt = models.DateTimeField(null=True, blank=True, help_text=(
+      "When the scheduled releaseFeedbackAt run last fired (one-shot stamp). Moving "
+      "releaseFeedbackAt past this re-arms the run."))
   feedbackReleasedAt = models.DateTimeField(null=True, blank=True, help_text=(
-      "When feedbackReleased was last set true. Anchors quiz close times relative to feedback release."))
+      "When feedbackStatus last entered 'released'. Anchors quiz close times relative to "
+      "feedback release."))
 
   anonymousGrading = models.BooleanField(default=False, help_text=(
       "A boolean field. If 'True', graders will not have access to the students field of submission objects, unless they have elevated privileges."))
@@ -513,8 +576,6 @@ class Assignment(BaseModel):
   maxLateDays = models.IntegerField(default=2, help_text=(
       "An integer representing the maximum number of late days to continue to accept submissions for this assignment."))
   
-  liveFeedbackMode = models.BooleanField(default=False, help_text=(
-      "A boolean field. If true, students can see their submission and comments before finalization and published"))
   additiveGrading = models.BooleanField(default=False, help_text=(
       "A boolean field. If true, grades begin at 0 (instead of assignment.points)"))
   hideGradersFromStudents = models.BooleanField(default=True, help_text=(
@@ -583,6 +644,30 @@ class Assignment(BaseModel):
   def __str__(self):
     return str(self.name) + " | " + str(self.course)
 
+  def submission_deadline(self):
+    """Final moment uploads are accepted, or None if no deadline.
+
+    Single source of truth for the upload boundary — the studentUpload view and the
+    derived 'closed' state (effective_state) both use it, so they can never disagree.
+    """
+    if not self.uploadDueDate:
+      return None
+    if self.allowLateUploads:
+      return self.uploadDueDate + timedelta(days=self.maxLateDays)
+    return self.uploadDueDate
+
+  def effective_state(self, at=None):
+    """Stored state, except a past-deadline published assignment reads as closed.
+
+    'closed' is also storable directly (early close); the stored value wins there.
+    """
+    if self.state != 'published':
+      return self.state
+    deadline = self.submission_deadline()
+    if deadline and (at or timezone.now()) > deadline:
+      return 'closed'
+    return 'published'
+
   def calculate_average_and_median(self):
     finalizedSubmissions = self.submissions.filter(isFinalized=True)
     if (len(finalizedSubmissions) == 0):
@@ -597,13 +682,20 @@ class Assignment(BaseModel):
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''
     is_new = self.pk is None
-    # Stamp the feedback-release time (before super() so it lands in update_fields).
-    if self.feedbackReleased and self.feedbackReleasedAt is None:
+    # Stamp the feedback-release time (before super() so it lands in update_fields —
+    # the quiz-deadline resync signal watches for feedbackReleasedAt changes).
+    if self.feedbackStatus == 'released' and self.feedbackReleasedAt is None:
       self.feedbackReleasedAt = now()
-    elif not self.feedbackReleased and self.feedbackReleasedAt is not None:
+    elif self.feedbackStatus != 'released' and self.feedbackReleasedAt is not None:
       self.feedbackReleasedAt = None
+    # Stamp the publish time (mirrors feedbackReleasedAt). Cleared only when the
+    # assignment moves back to a pre-published state — closed/archived keep it.
+    if self.state == 'published' and self.publishedAt is None:
+      self.publishedAt = now()
+    elif self.state in ('draft', 'visible', 'preview') and self.publishedAt is not None:
+      self.publishedAt = None
     super(Assignment, self).save(*args, **kwargs)
-    
+
     if is_new:
         # Now self.pk is available
         self.mean, self.median = self.calculate_average_and_median()
@@ -613,6 +705,9 @@ class Assignment(BaseModel):
   class Meta:
     unique_together = ('name', 'course')
     ordering = ('sortKey', 'name')
+    indexes = [
+        models.Index(fields=['course', 'state']),
+    ]
     
 
 
@@ -1455,7 +1550,7 @@ class AssignmentFile(File):
   is_test_resource = models.BooleanField(
       default=False,
       help_text="If True, this file is used as a resource for a TestCategory.")
-  isVisible = property(lambda self: self.assignment.isVisible)
+  isVisible = property(lambda self: self.assignment.state in STUDENT_DOWNLOAD_STATES)
 
   course = property(lambda self: self.assignment.course)
 
@@ -1855,6 +1950,65 @@ class Environment(BaseModel):
   course = property(lambda self: self.assignment.course)
 
 
+class AutograderExecutionEvent(BaseModel):
+  """One row per autograder cache consultation or execution, powering the
+  superadmin autograding stats dashboard. Insert-only; never updated."""
+  if TYPE_CHECKING:
+    id: int
+
+  ERROR_CATEGORY_CHOICES = [
+      ('timeout', 'Timeout'),
+      ('missing_dependency', 'Missing Dependency'),
+      ('compile_error', 'Compile Error'),
+      ('runtime_error', 'Runtime Error'),
+      ('marker_extraction', 'Marker Extraction'),
+      ('infra', 'Infrastructure'),
+      ('unknown', 'Unknown'),
+  ]
+
+  TRIGGER_CHOICES = [
+      ('file_run', 'File Run'),
+      ('submission_run', 'Submission Run'),
+      ('test_run', 'Test Run'),
+  ]
+
+  # SET_NULL, not CASCADE: expired courses are hard-deleted hourly and platform
+  # stats must survive them.
+  course = models.ForeignKey(
+      Course, on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='autograder_execution_events',
+      help_text="The course this execution belonged to",
+  )
+  assignment = models.ForeignKey(
+      'Assignment', on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='autograder_execution_events',
+      help_text="The assignment this execution belonged to",
+  )
+  cached = models.BooleanField(help_text="True if served from cache, False if actually executed")
+  success = models.BooleanField(help_text="Whether the execution (or cached result) succeeded")
+  # Snapshot of Environment.language at record time — no choices on purpose:
+  # the environment's choice list evolves and '' is a real auto-detect state.
+  language = models.CharField(max_length=25, blank=True, default='',
+                              help_text="Environment language at execution time")
+  trigger = models.CharField(max_length=20, choices=TRIGGER_CHOICES,
+                             help_text="Which execution path produced this event")
+  error_category = models.CharField(max_length=32, choices=ERROR_CATEGORY_CHOICES,
+                                    blank=True, default='',
+                                    help_text="Classified error category for failed executions")
+  error_message = models.CharField(max_length=500, blank=True, default='',
+                                   help_text="Truncated sample of the error output")
+
+  class Meta:
+    indexes = [
+        models.Index(fields=['created']),
+        models.Index(fields=['course', 'created']),
+    ]
+
+  def __str__(self):
+    return (f"AutograderExecutionEvent [{self.trigger}] cached={self.cached} "
+            f"success={self.success} course={self.course_id}")
 
 
 #### Data
@@ -2193,6 +2347,7 @@ __all__ = [
     "SubmissionHistory",
     "AssignmentDataSet",
     "CachedExecutionResult",
+    "AutograderExecutionEvent",
     "CommentTemplate",
     "MaintenanceBanner",
 ]
@@ -2291,6 +2446,7 @@ class AIUsageRecord(BaseModel):
       ('quiz_generation', 'Quiz Question Suggestions'),
       ('code_review', 'Code Review'),
       ('feedback', 'Feedback'),
+      ('provider_test', 'Provider Test'),
       ('other', 'Other'),
   ]
 
@@ -2526,6 +2682,8 @@ class CourseAuditEvent(BaseModel):
       ('autograder_failed', 'Autograder Failed'),
       ('late_day_used', 'Late Day Used'),
       ('comment_feedback', 'Comment Feedback'),
+      ('assignment_state_changed', 'Assignment State Changed'),
+      ('assignment_feedback_changed', 'Assignment Feedback Changed'),
       ('quiz_created', 'Quiz Created'),
       ('quiz_updated', 'Quiz Updated'),
       ('quiz_published', 'Quiz Published'),
@@ -2536,6 +2694,7 @@ class CourseAuditEvent(BaseModel):
       ('quiz_attempt_started_late', 'Quiz Attempt Started Late'),
       ('quiz_attempt_submitted', 'Quiz Attempt Submitted'),
       ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
+      ('quiz_attempt_seb_blocked', 'Quiz Attempt SEB Blocked'),
       ('quiz_attempts_reset', 'Quiz Attempts Reset'),
       ('quiz_response_graded', 'Quiz Response Graded'),
       ('quiz_response_grade_reopened', 'Quiz Response Grade Reopened'),
@@ -2543,6 +2702,15 @@ class CourseAuditEvent(BaseModel):
       ('quiz_generated_set_unapproved', 'Generated Question Set Unapproved'),
       ('quiz_generated_set_regenerated', 'Generated Question Set Regenerated'),
       ('quiz_generated_sets_published', 'Generated Question Sets Published'),
+      # MCP agent layer: one event per agent-initiated write (alongside the
+      # domain event the viewset itself records), and one per denied write —
+      # repeated denials are the signal that a key leaked or a model is probing.
+      ('agent_write', 'Agent Write'),
+      ('agent_write_denied', 'Agent Write Denied'),
+      # Tier-3 human confirmations: who allowed/blocked a destructive agent
+      # operation, whether via the in-chat dialog or the dashboard buttons.
+      ('agent_action_approved', 'Agent Action Approved'),
+      ('agent_action_denied', 'Agent Action Denied'),
   ]
 
   course = models.ForeignKey(
@@ -2887,6 +3055,16 @@ class PromptLabSettings(models.Model):
     return f"PromptLabSettings [{status}]"
 
 
+# How much a CourseAPIKey may do. Ordered weakest to strongest; an agent tool
+# declares the minimum scope that may call it, and tools above a key's scope are
+# never advertised to it at all.
+COURSE_API_KEY_SCOPE_CHOICES = [
+    ('read', 'Read only'),
+    ('write', 'Read and write (no deletes, no student email)'),
+    ('admin', 'Full course admin (deletes, resets, student email)'),
+]
+
+
 class CourseAPIKey(BaseModel):
   """A named, course-scoped API key.
 
@@ -2907,6 +3085,10 @@ class CourseAPIKey(BaseModel):
       related_name="created_course_api_keys", help_text="The admin who created this key.")
   is_active = models.BooleanField(default=True, help_text="If False, the key is revoked.")
   last_used_at = models.DateTimeField(null=True, blank=True, help_text="Last time this key was used to authenticate.")
+  scope = models.CharField(
+      max_length=8, choices=COURSE_API_KEY_SCOPE_CHOICES, default='read',
+      help_text=("How much this key may do. Agent tools are filtered by it: a key never "
+                 "even sees the tools above its scope. 'read' is the safe default."))
 
   class Meta:
     unique_together = ('course', 'name')
@@ -2927,6 +3109,72 @@ class CourseAPIKey(BaseModel):
 
   def __str__(self):
     return f"CourseAPIKey '{self.name}' for course {self.course_id}"
+
+
+
+class PendingAgentAction(BaseModel):
+  """A human confirmation gate for a Tier-3 agent operation (dashboard path).
+
+  When an MCP agent asks for something unrecoverable (deleting an assignment,
+  resetting quiz attempts, mass-emailing students) and the client cannot show
+  an in-chat approval dialog (MCP elicitation), the server refuses and creates
+  one of these instead. The instructor approves or denies it in Course
+  Settings → Pending agent actions — a channel the agent cannot touch (the
+  endpoints reject course-scoped credentials) — and the agent's retry then
+  observes the decision.
+
+  Single-use (``redeemed_at``), expires after ``EXPIRY_MINUTES``, and bound to
+  the exact operation: ``args_hash`` pins the tool arguments and ``plan_hash``
+  pins the computed blast radius, so if the world changes between preview and
+  approval (say a TA grades six more submissions) the approval dies and the
+  agent must re-preview. A denial (``denied_at``) sticks until the row
+  expires, so the agent cannot nag by re-requesting.
+  """
+  if TYPE_CHECKING:
+    id: int
+
+  EXPIRY_MINUTES = 10
+
+  course = models.ForeignKey(Course, on_delete=models.CASCADE,
+      related_name="pending_agent_actions",
+      help_text="The course the action would run in.")
+  tool = models.CharField(max_length=64, help_text="The agent tool name.")
+  args_hash = models.CharField(max_length=64,
+      help_text="SHA-256 of the canonicalised tool arguments.")
+  plan_hash = models.CharField(max_length=32,
+      help_text="Fingerprint of the computed plan; a changed plan kills the approval.")
+  plan = JSONField(default=dict, blank=True,
+      help_text="Human-readable plan summary rendered in the dashboard panel.")
+  # Legacy confirmation code, superseded by dashboard approval. Kept nullable
+  # for one release so old processes survive a rolling deploy; drop after.
+  code = models.CharField(max_length=12, null=True, blank=True,
+      help_text="Unused legacy field (pre-approval-button confirmation code).")
+  requested_by = models.ForeignKey(User, null=True, blank=True,
+      on_delete=models.SET_NULL, related_name="pending_agent_actions",
+      help_text="The principal the agent was acting as (service account or instructor).")
+  expires_at = models.DateTimeField(help_text="Requests die quietly after this.")
+  approved_at = models.DateTimeField(null=True, blank=True,
+      help_text="Set when a course admin clicks Approve in the dashboard.")
+  approved_by = models.ForeignKey(User, null=True, blank=True,
+      on_delete=models.SET_NULL, related_name="approved_agent_actions",
+      help_text="The course admin who approved it.")
+  denied_at = models.DateTimeField(null=True, blank=True,
+      help_text="Set when a course admin clicks Deny; blocks re-requests until expiry.")
+  redeemed_at = models.DateTimeField(null=True, blank=True,
+      help_text="Set once the approval is consumed; it never authorises again.")
+
+  class Meta:
+    ordering = ('-created',)
+    indexes = [models.Index(fields=['course', 'expires_at'])]
+
+  @property
+  def is_active(self) -> bool:
+    from django.utils import timezone
+    return (self.redeemed_at is None and self.denied_at is None
+            and self.expires_at > timezone.now())
+
+  def __str__(self):
+    return f"PendingAgentAction {self.tool} course={self.course_id}"
 
 
 ############# Quizzes #############################################################
@@ -3136,6 +3384,16 @@ class Quiz(BaseModel):
                  "Null/blank = no late access. Staff generate/rotate it via generateAccessCode; "
                  "a correct code bypasses only the close, nothing else."))
 
+  # --- Exam security (Safe Exam Browser) ---
+  requireSebBrowser = models.BooleanField(default=False,
+      help_text=("If true, taking this quiz (starting, answering, submitting, and reading an "
+                 "in-progress attempt) requires Safe Exam Browser: requests must carry a "
+                 "valid X-SafeExamBrowser-ConfigKeyHash header matching sebConfigKey."))
+  sebConfigKey = models.CharField(max_length=64, null=True, blank=True,
+      help_text=("SEB Config Key (64 hex chars) pasted by the instructor from the SEB Config "
+                 "Tool. Requests verify as SHA256(request URL + this key). Null/blank with "
+                 "requireSebBrowser on blocks students until a key is set."))
+
   # --- Standard options (apply to every quiz) ---
   timeLimitMinutes = models.PositiveIntegerField(null=True, blank=True,
       help_text=("Time limit in minutes. Null = untimed."))
@@ -3181,9 +3439,24 @@ class Quiz(BaseModel):
   gradersCanReviewGenerated = models.BooleanField(default=False,
       help_text=("If true, graders may review/edit/approve per-student generated question sets "
                  "on this quiz; if false, only course admins may."))
+  gradersCanGenerate = models.BooleanField(default=False,
+      help_text=("If true, graders may trigger the Generate-missing backfill on this quiz "
+                 "(generation spends AI credits), letting them generate, review, and release "
+                 "sets for their section; if false, only course admins may generate."))
   autoPublishGenerated = models.BooleanField(default=False,
       help_text=("If true, per-student generated question sets are approved automatically on "
                  "generation (no staff review gate)."))
+  manualGeneration = models.BooleanField(default=True,
+      help_text=("If true (the default), per-student question sets never generate "
+                 "automatically (no per-submission trigger, no backfill on publish or "
+                 "section creation) — staff generate via generateForStudent/generateMissing, "
+                 "or the one-time generationDate run."))
+  generationDate = models.DateTimeField(null=True, blank=True,
+      help_text=("Manual mode only: one-time scheduled run that generates question sets for "
+                 "students who have a submission but no set yet, at/after this time."))
+  scheduledGenerationRanAt = models.DateTimeField(null=True, blank=True,
+      help_text=("When the scheduled generationDate run last fired (one-shot stamp). "
+                 "Moving generationDate past this re-arms the run."))
 
   class Meta:
     ordering = ('title',)
@@ -3292,6 +3565,9 @@ class QuizAttempt(BaseModel):
   closeBypassed = models.BooleanField(default=False,
       help_text=("Started with the quiz access code after the close; its deadline is not "
                  "capped at the close time."))
+  lockdownVerified = models.BooleanField(default=False,
+      help_text=("Started with a verified Safe Exam Browser signature. False on attempts "
+                 "started before requireSebBrowser was enabled (or by exempt students)."))
 
   course = property(lambda self: self.quiz.course)
 
@@ -3320,12 +3596,51 @@ class QuizAccommodation(BaseModel):
       related_name="quizAccommodations", help_text=("The accommodated student."))
   timeMultiplier = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal('1'),
       help_text=("Multiplier applied to every timed quiz's time limit for this student."))
+  sebExempt = models.BooleanField(default=False,
+      help_text=("Exempt this student from Safe Exam Browser requirements (e.g. they use a "
+                 "platform SEB doesn't run on, like Linux or ChromeOS). Their attempts show "
+                 "lockdownVerified=False to staff."))
 
   class Meta:
     unique_together = ('course', 'student')
 
   def __str__(self):
     return f"QuizAccommodation course={self.course_id} student={self.student_id} ×{self.timeMultiplier}"
+
+
+class QuizSebLaunch(BaseModel):
+  """One student's Safe Exam Browser launch of a quiz: the served .seb config (whose
+  startURL embeds a one-time token for the auth handoff into SEB's fresh session) plus
+  the Config Key computed from it. Per-launch because each config's bytes — and thus its
+  key — are unique to the embedded token; verification accepts any of the student's
+  unexpired launch keys alongside the quiz's manually pasted key."""
+  if TYPE_CHECKING:
+    id: int
+    quiz: Quiz
+    student: User
+    token: OneTimeToken
+
+  quiz: 'Quiz' = models.ForeignKey(Quiz, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name='sebLaunches', help_text=("The quiz this launch opens."))
+  student: User = models.ForeignKey(User, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name='sebLaunches', help_text=("The launching student."))
+  token: OneTimeToken = models.ForeignKey(OneTimeToken, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name='sebLaunches', help_text=("The one-time token embedded in the config's "
+                                             "startURL, exchanged for a session inside SEB."))
+  configKey = models.CharField(max_length=64,
+      help_text=("SEB Config Key computed from configPlist; request hashes verify against it."))
+  configPlist = models.TextField(
+      help_text=("The exact .seb plist served for this launch — stored verbatim so the "
+                 "served bytes always match the computed configKey."))
+  expiresAt = models.DateTimeField(
+      help_text=("When this launch's configKey stops verifying (generous — it must outlive "
+                 "the whole quiz session, unlike the embedded auth token)."))
+
+  class Meta:
+    indexes = [models.Index(fields=['quiz', 'student'])]
+
+  def __str__(self):
+    return f"QuizSebLaunch quiz={self.quiz_id} student={self.student_id}"
 
 
 class QuizResponse(BaseModel):
@@ -3374,6 +3689,9 @@ class QuizResponse(BaseModel):
       help_text=("Optional feedback from the grader on a manually graded response."))
   gradedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
       related_name="+", help_text=("The staff user who manually graded this response."))
+  gradedAt = models.DateTimeField(null=True, blank=True,
+      help_text=("When the manual grade was recorded. Null until manually graded; cleared "
+                 "when the response is reopened."))
   codeExecution = models.JSONField(null=True, blank=True,
       help_text=("Staff-triggered sandbox run of a code answer: {status: running|success|"
                  "error, stdout, stderr, images, error, executionTime, requestedBy, "
@@ -3415,6 +3733,8 @@ class SuggestedQuizQuestion(BaseModel):
   questionType = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES,
       default='multiple_choice', help_text=("The suggested question type."))
   text = models.TextField(help_text=("The suggested question stem/prompt."))
+  description = models.TextField(blank=True, help_text=(
+      "Optional Markdown description shown beneath the stem (rich content: code blocks, lists, formatting)."))
   choicesData = JSONField(default=list, blank=True,
       help_text=("Proposed choices: list of {text, isCorrect, feedback}."))
   points = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
@@ -3507,6 +3827,61 @@ class QuizImportJob(BaseModel):
 
   def __str__(self):
     return f"QuizImportJob [{self.status}] (course {self.course_id})"
+
+
+# Labels deliberately differ from QuizImportJob's JOB_STATUS_CHOICES so
+# ENUM_NAME_OVERRIDES can match each choices list to its own enum name.
+SUGGESTION_JOB_STATUS_CHOICES = [
+    ('pending', 'Queued'),
+    ('running', 'Generating'),
+    ('completed', 'Completed'),
+    ('failed', 'Failed'),
+]
+
+
+class QuizSuggestionJob(BaseModel):
+  """Tracks one AI quiz-suggestion generation run (status + error reporting).
+
+  The generation task runs async and previously had no way to report failures —
+  clients polled the suggestion list and inferred 'disabled?' from emptiness.
+  The generate endpoints now create one of these and return it; the task updates
+  it on every exit path so clients can poll and surface the actual outcome."""
+  if TYPE_CHECKING:
+    id: int
+    course: Course
+    assignment: Assignment | None
+    sourceQuestion: Question | None
+
+  course: Course = models.ForeignKey(Course, on_delete=models.CASCADE,  # type: ignore[assignment]
+      related_name="quiz_suggestion_jobs", help_text=("The related course_id."))
+  assignment: Assignment | None = models.ForeignKey(Assignment, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.CASCADE, related_name="suggestion_jobs",
+      help_text=("The assignment suggestions were generated for (fresh generation)."))
+  sourceQuestion: Question | None = models.ForeignKey(Question, null=True, blank=True,  # type: ignore[assignment]
+      on_delete=models.CASCADE, related_name="suggestion_jobs",
+      help_text=("The existing question a refresh suggestion was generated from."))
+  quiz = models.ForeignKey('Quiz', null=True, blank=True, on_delete=models.CASCADE,
+      related_name="suggestion_jobs",
+      help_text=("The quiz a section-prompt test preview was run for (preview runs only)."))
+  requestedBy = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+      related_name="quiz_suggestion_jobs", help_text=("The staff user who requested the generation."))
+  status = models.CharField(max_length=16, choices=SUGGESTION_JOB_STATUS_CHOICES, default='pending',
+      help_text=("Current status of the generation run."))
+  taskId = models.CharField(max_length=191, blank=True, help_text=("Celery task id, for debugging."))
+  createdCount = models.PositiveIntegerField(default=0,
+      help_text=("Number of suggestions the run produced."))
+  errorMessage = models.TextField(blank=True,
+      help_text=("Friendly error detail if the run failed."))
+  generationBatch = models.UUIDField(null=True, blank=True,
+      help_text=("Batch UUID of the suggestions this run created."))
+  resultData = JSONField(default=dict, blank=True,
+      help_text=("Section-preview output: example questions, resolved prompt, seed info."))
+
+  class Meta:
+    ordering = ('-created',)
+
+  def __str__(self):
+    return f"QuizSuggestionJob [{self.status}] (course {self.course_id})"
 
 
 # --- Auto-link assignments to question banks ---------------------------------

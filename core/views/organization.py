@@ -18,7 +18,10 @@ from core.serializers.ai_usage import (
     OrganizationAISettingsUpdateSerializer,
     AIUsageSummarySerializer,
     AIProviderModelsListSerializer,
+    AIProviderTestRequestSerializer,
+    AIProviderTestResultSerializer,
 )
+from core.throttles import AIConnectionTestThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
   permission_classes = (IsAuthenticated, OrganizationPermissions)
 
   def get_permissions(self):
-    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage', 'aiModels', 'pending_admins', 'approve_admin', 'deny_admin']:
+    if self.action in ['verify_user', 'promote_staff', 'demote_staff', 'remove_user', 'reset_user_password', 'analytics', 'aiSettings', 'aiUsage', 'aiModels', 'aiTest', 'pending_admins', 'approve_admin', 'deny_admin']:
       return [IsAuthenticated()]
     return super().get_permissions()
 
@@ -441,6 +444,57 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
 
     return Response({'providers': [result]})
 
+  @extend_schema(request=AIProviderTestRequestSerializer, responses={200: AIProviderTestResultSerializer})
+  @action(detail=True, methods=['POST'], throttle_classes=[AIConnectionTestThrottle])
+  def aiTest(self, request, pk=None):
+    """
+    POST: Fire a small completion through the org's stored AI config and
+    report success, latency, and any error. Accepts an optional custom
+    prompt and a one-off model override. Recorded in AI usage as
+    'provider_test'. Only accessible by Org Staff or superuser.
+    """
+    import asyncio
+    from core.services.ai_service import AIService, GenerationResult
+
+    organization = self.get_object()
+
+    if not (request.user.is_superuser or (request.user.profile.isOrgStaff and request.user.profile.organization == organization)):
+        return returnForbidden()
+
+    body = AIProviderTestRequestSerializer(data=request.data)
+    body.is_valid(raise_exception=True)
+
+    svc = AIService.for_config(
+        provider=organization.ai_provider or '',
+        api_key=organization.ai_api_key or '',
+        base_url=organization.ai_base_url or '',
+        model=organization.ai_model or '',
+    ).set_request_context(user=request.user, request_type='provider_test')
+    result = asyncio.run(svc.test_connection(
+        prompt=body.validated_data.get('prompt') or None,
+        model=body.validated_data.get('model') or None,
+    ))
+
+    # Record usage when a request was actually attempted (sync context —
+    # record_usage does ORM work that can't run inside asyncio.run).
+    if result.get('requestSystemPrompt') is not None:
+        svc.record_usage(
+            GenerationResult(
+                text=result.get('response') or '',
+                success=result['success'],
+                error=result.get('error'),
+                input_tokens=result.get('_inputTokens', 0),
+                output_tokens=result.get('_outputTokens', 0),
+                total_tokens=result.get('_totalTokens', 0),
+                cached_tokens=result.get('_cachedTokens', 0),
+            ),
+            request.user,
+            request_type='provider_test',
+            organization=organization,
+        )
+
+    return Response(AIProviderTestResultSerializer(result).data)
+
   @extend_schema(
     responses=AIUsageSummarySerializer,
     parameters=[
@@ -466,6 +520,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         return returnForbidden()
 
     from core.services.ai_usage_analytics import get_usage_summary
+    from core.services.ai_service import AIService
     from core.models import AIUsageRecord
     from django.utils.dateparse import parse_datetime
 
@@ -497,6 +552,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
             if entry.get('course__period')
             else entry['course__name'] or 'Unknown'
         ),
+        projection_rates=AIService.merged_token_rates(organization=organization),
     )
 
     return Response(summary)

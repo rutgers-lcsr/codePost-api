@@ -36,6 +36,38 @@ class AssignmentDeadlineSerializer(serializers.Serializer):
     studentCount = serializers.IntegerField()
 
 
+class AutogradingLanguageUsageSerializer(serializers.Serializer):
+    language = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class AutogradingLanguageFailureSerializer(serializers.Serializer):
+    language = serializers.CharField()
+    executions = serializers.IntegerField()
+    failures = serializers.IntegerField()
+    failureRate = serializers.FloatField()
+
+
+class AutogradingTopErrorSerializer(serializers.Serializer):
+    # CharField, not ChoiceField, on purpose: no enum in the OpenAPI schema.
+    category = serializers.CharField()
+    count = serializers.IntegerField()
+    sampleMessage = serializers.CharField(allow_blank=True)
+
+
+class AutogradingStatsSerializer(serializers.Serializer):
+    dateFrom = serializers.DateTimeField()
+    dateTo = serializers.DateTimeField()
+    totalRequests = serializers.IntegerField()
+    cacheHits = serializers.IntegerField()
+    actualExecutions = serializers.IntegerField()
+    cacheHitRate = serializers.FloatField()
+    failedExecutions = serializers.IntegerField()
+    languageUsage = AutogradingLanguageUsageSerializer(many=True)
+    failuresPerLanguage = AutogradingLanguageFailureSerializer(many=True)
+    topErrors = AutogradingTopErrorSerializer(many=True)
+
+
 class PendingAdminActionRequestSerializer(serializers.Serializer):
     user_email = serializers.EmailField()
 

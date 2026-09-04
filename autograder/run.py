@@ -83,7 +83,15 @@ def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = Non
         logger.error(f"[BuildEnvironment] Auto-detect failed: {e}")
     # ----------------------------------
 
-    builder = Builder(environmentID)
+    try:
+        builder = Builder(environmentID)
+    except Exception as e:
+        # docker.from_env() failed (daemon down/restarting on this worker). The view set
+        # build_status=1 before enqueueing; mark it failed instead of stranding 'Building'.
+        Environment.objects.filter(pk=environmentID).update(
+            build_status=3,
+            build_logs=f"Build failed: the worker cannot reach its Docker daemon ({e}).\n")
+        raise
     result = builder.build()
     
     if result.get("success") and rerun_submission_ids:
@@ -357,7 +365,13 @@ class RunType(str, Enum):
     TestCase = "TESTCASE"
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=600,soft_time_limit=550)
+# acks_late + reject_on_worker_lost: a worker killed mid-run (OOM, docker restart, SIGKILL)
+# re-queues the task instead of silently dropping it. Only safe on tasks that are idempotent
+# (these upsert their results) AND finish well inside kombu's 1h visibility_timeout — a task
+# still running past it would be redelivered and run twice. Don't copy this onto RunAll,
+# BuildEnvironment or the AI tasks (unbounded and/or paid, non-idempotent calls).
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=600, soft_time_limit=550,
+             acks_late=True, reject_on_worker_lost=True)
 def RunSubmission(self, submissionID: int):
     """
     This celery task handles on-submit execution for a submission in two phases:
@@ -606,6 +620,16 @@ def RunSubmission(self, submissionID: int):
         logger.debug(f"[RunSubmission] runTestsOnSubmit disabled for assignment {submission.assignment.id}. Skipping tests.")
     # -----------------------------------------------
     
+    # Record one execution event per file for the autograding stats dashboard.
+    # RunSubmission never consults the cache, so these are always cached=False.
+    from autograder.services.execution_events import record_execution_event
+    for r in results:
+        record_execution_event(
+            trigger='submission_run', cached=False, success=r['success'],
+            assignment=submission.assignment, language=environment.language,
+            error_text=r.get('error'),
+        )
+
     summary = {
         "success": True,
         "submission_id": submissionID,
@@ -696,7 +720,8 @@ def queue_variant_robustness_reruns(submission):
     return len(sampled)
 
 
-@shared_task(bind=True, max_retries=2, default_retry_delay=30, time_limit=300, soft_time_limit=270)
+@shared_task(bind=True, max_retries=2, default_retry_delay=30, time_limit=300, soft_time_limit=270,
+             acks_late=True, reject_on_worker_lost=True)
 def RunSubmissionVariant(self, submission_id: int, dataset_id: int):
     """Rerun a finalized submission's main file against ONE dataset variant OTHER than the
     student's own (AssignmentDataSet.autogradeAllVariants) — an anti-hardcoding check: does
@@ -765,7 +790,7 @@ def RunSubmissionVariant(self, submission_id: int, dataset_id: int):
     return {"success": run.result.get('status') == 'success', "status": run.result.get('status')}
 
 
-@shared_task(time_limit=240, soft_time_limit=210)
+@shared_task(time_limit=240, soft_time_limit=210, acks_late=True, reject_on_worker_lost=True)
 def RunQuizResponseCode(response_id: int):
     """Sandbox-execute a student's code answer to one quiz question so a grader can see
     what it produces (see QuizResponse.codeExecution). Reuses the standard Executor. For an

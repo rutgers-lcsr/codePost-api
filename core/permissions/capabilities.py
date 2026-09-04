@@ -30,6 +30,7 @@ class Capability(str, Enum):
     MANAGE_COURSE_API_KEYS = "manage_course_api_keys"
     GRADE_QUIZ = "grade_quiz"
     GENERATE_AI_QUIZ_QUESTIONS = "generate_ai_quiz_questions"
+    GENERATE_PERSONALIZED_QUIZ_QUESTIONS = "generate_personalized_quiz_questions"
 
     # -- Assignment-level --
     EDIT_ASSIGNMENT = "edit_assignment"
@@ -91,8 +92,9 @@ CAPABILITY_DESCRIPTIONS: dict[Capability, str] = {
     Capability.VIEW_AUDIT_LOG: "View and export the course-level audit log of student and grader activity.",
     Capability.CHANGE_INVITE_CODE: "Regenerate the course join invite code.",
     Capability.MANAGE_COURSE_API_KEYS: "Create, revoke, and manage course-scoped API keys.",
-    Capability.GRADE_QUIZ: "View quiz attempts and manually grade essay/code responses (course admins and quiz graders).",
-    Capability.GENERATE_AI_QUIZ_QUESTIONS: "Request AI-suggested quiz questions for a bank or an existing question (requires the course's quiz_generation AI feature to be on).",
+    Capability.GRADE_QUIZ: "View quiz attempts and manually grade essay/code responses (course admins and all graders by default; only designated quiz graders when the course's graders-can-grade-quizzes setting is off).",
+    Capability.GENERATE_AI_QUIZ_QUESTIONS: "Request AI-suggested quiz questions for a question bank or an existing question (requires the course's quiz_generation AI feature to be on).",
+    Capability.GENERATE_PERSONALIZED_QUIZ_QUESTIONS: "Author per-student AI-generated quiz question sections — generated from the student's submission when they submit, or right away for prompts that don't use the submission (requires the course's personalized_quiz_generation AI feature to be on).",
     # Assignment
     Capability.EDIT_ASSIGNMENT: "Modify assignment settings including name, deadlines, point values, and visibility.",
     Capability.COPY_ASSIGNMENT: "Duplicate an assignment's configuration, rubric, and test cases to another course.",
@@ -157,15 +159,18 @@ COURSE_SCOPED_BLOCKED_CAPABILITIES: set[Capability] = {
 # Compute functions
 # ---------------------------------------------------------------------------
 
-def _quiz_generation_enabled(course) -> bool:
-    """Whether the course's ``quiz_generation`` AI feature is on and AI is configured.
+def _quiz_ai_features(course) -> tuple[bool, bool]:
+    """Resolved ``(quiz_generation, personalized_quiz_generation)`` AI feature
+    flags for the course (each requires AI to be configured).
 
     Only called after a role check has passed, so students and non-staff never
     pay the extra organization lookup ``AIService`` performs.
     """
     from core.services.ai_service import AIService
 
-    return AIService(course).is_feature_enabled('quiz_generation')
+    service = AIService(course)
+    return (service.is_feature_enabled('quiz_generation'),
+            service.is_feature_enabled('personalized_quiz_generation'))
 
 def compute_course_capabilities(user, course, *, is_course_scoped: bool = False, _rc: RoleCache | None = None) -> dict[Capability, bool]:
     """Return a dict of ``{capability_key: bool}`` for the given user/course.
@@ -187,6 +192,11 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
     archived = course.archived
     org_staff = hasattr(user, 'profile') and user.profile.isOrgStaff
 
+    # One AIService lookup covers both quiz AI capabilities; skipped entirely
+    # unless the role/archived gates could grant them.
+    quiz_suggestions_on, personalized_quiz_on = (
+        _quiz_ai_features(course) if staff and not archived else (False, False))
+
     caps = {
         Capability.VIEW_COURSE: member,
         Capability.EDIT_COURSE_SETTINGS: (admin or org_staff) and not archived,
@@ -199,8 +209,9 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
         Capability.CREATE_ASSIGNMENT: admin and not archived,
         Capability.CLAIM_SUBMISSIONS: (grader or admin) and course.activateQueue and not archived,
         Capability.EDIT_RUBRIC: (admin or rubric_editor or (grader and course.allowGradersToEditRubric)) and not archived,
-        Capability.GRADE_QUIZ: admin or quiz_grader,
-        Capability.GENERATE_AI_QUIZ_QUESTIONS: staff and not archived and _quiz_generation_enabled(course),
+        Capability.GRADE_QUIZ: admin or quiz_grader or (grader and course.gradersCanGradeQuizzes),
+        Capability.GENERATE_AI_QUIZ_QUESTIONS: quiz_suggestions_on,
+        Capability.GENERATE_PERSONALIZED_QUIZ_QUESTIONS: personalized_quiz_on,
         Capability.MANAGE_REGRADES: admin or super_grader,
         Capability.VIEW_AUDIT_LOG: admin,
         Capability.CHANGE_INVITE_CODE: admin,
@@ -231,21 +242,27 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
     rubric_editor = rc.is_rubric_editor(course)
     archived = course.archived
 
+    # Lifecycle gates (see Assignment.state). The `student and` prefix keeps
+    # staff/admin paths at zero extra queries.
+    can_see = student and rc.student_can_see_assignment(assignment)
+    can_download = student and rc.student_can_download_assignment(assignment)
+    can_submit = student and rc.student_can_submit_to_assignment(assignment)
+
     # Rubric editing: admin always; rubric editors if explicitly flagged;
     # all graders if the course-level setting is on.
     can_edit_rubric = admin or rubric_editor or (grader and course.allowGradersToEditRubric)
 
-    # Students can view the rubric only after feedback is released or live mode is on
-    student_can_see_rubric = (
-        student and (assignment.feedbackReleased or assignment.liveFeedbackMode)
-    )
+    # Students see the rubric once the feedback axis opens for them (live/released,
+    # or per_student with a finalized submission).
+    from core.permissions.helpers import assignmentFeedbackOpen
+    student_can_see_rubric = student and assignmentFeedbackOpen(assignment, user)
 
     super_grader = rc.is_super_grader(course)
 
     caps.update({
         Capability.EDIT_ASSIGNMENT: admin and not archived,
         Capability.COPY_ASSIGNMENT: admin,
-        Capability.VIEW_ASSIGNMENT: staff or (student and assignment.isVisible),
+        Capability.VIEW_ASSIGNMENT: staff or can_see,
         Capability.EDIT_RUBRIC: can_edit_rubric and not archived,
         Capability.VIEW_RUBRIC: staff or student_can_see_rubric,
         Capability.RELEASE_GRADES: admin,
@@ -253,10 +270,10 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
         Capability.VIEW_QUEUE: staff,
         Capability.MANAGE_TEST_CASES: admin,
         Capability.VIEW_ASSIGNMENT_STATISTICS: admin,
-        Capability.UPLOAD_SUBMISSION: (student and getattr(assignment, 'allowStudentUpload', False) and not archived) or (admin and not archived),
+        Capability.UPLOAD_SUBMISSION: (can_submit and getattr(assignment, 'allowStudentUpload', False) and not archived) or (admin and not archived),
         Capability.GENERATE_AI_TEST_CASES: (admin or super_grader) and not archived,
         Capability.MANAGE_DATASETS: admin and not archived,
-        Capability.DOWNLOAD_ASSIGNMENT_FILES: staff or (student and assignment.isVisible),
+        Capability.DOWNLOAD_ASSIGNMENT_FILES: staff or can_download,
         Capability.MANAGE_GLOBAL_TEMPLATES: admin or super_grader,
     })
     return caps
@@ -277,7 +294,8 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
     student_of_sub = rc.is_student_of_sub(submission)
     archived = course.archived
     super_grader = rc.is_super_grader(course)
-    feedback_available = assignment.feedbackReleased or assignment.liveFeedbackMode
+    from core.permissions.helpers import feedbackOpenForSubmission, testResultsVisibleForSubmission
+    feedback_available = feedbackOpenForSubmission(submission)
 
     _student = rc.is_student(course)
 
@@ -300,10 +318,10 @@ def compute_submission_capabilities(user, submission, *, _rc: RoleCache | None =
         Capability.REQUEST_REGRADE: student_of_sub and bool(getattr(assignment, 'allowRegradeRequests', False)),
         Capability.MANAGE_REGRADES: admin or super_grader,
         Capability.RUN_AUTOGRADER: staff_of_sub,
-        Capability.VIEW_TEST_RESULTS: staff_of_sub or (student_of_sub and feedback_available),
+        Capability.VIEW_TEST_RESULTS: staff_of_sub or (student_of_sub and testResultsVisibleForSubmission(submission)),
         Capability.RUN_CODE: staff_of_sub or student_of_sub,
         Capability.GENERATE_AI_COMMENTS: staff_of_sub and not getattr(course, 'ai_disabled', False) and not getattr(course, 'ai_comments_disabled', False),
-        Capability.MANAGE_PARTNERS: student_of_sub and bool(getattr(assignment, 'allowStudentUploadWithPartners', False)) and not archived,
+        Capability.MANAGE_PARTNERS: student_of_sub and rc.student_can_submit_to_assignment(assignment) and bool(getattr(assignment, 'allowStudentUploadWithPartners', False)) and not archived,
         Capability.NOTIFY_STUDENTS_FEEDBACK: staff_of_sub,
         Capability.VIEW_AI_ASSISTANCE: staff_of_sub and not getattr(course, 'ai_disabled', False),
         Capability.TRIGGER_AI_ASSISTANCE: staff_of_sub and not getattr(course, 'ai_disabled', False),
@@ -337,13 +355,17 @@ def compute_platform_capabilities(user) -> dict[Capability, bool]:
 # Enforcement helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_capabilities(user, obj) -> dict[Capability, bool]:
-    """Compute capabilities for a user on the given object (Course, Assignment, or Submission)."""
+def _resolve_capabilities(user, obj, *, is_course_scoped: bool = False) -> dict[Capability, bool]:
+    """Compute capabilities for a user on the given object (Course, Assignment, or Submission).
+
+    ``is_course_scoped`` only affects Course objects — every capability in
+    ``COURSE_SCOPED_BLOCKED_CAPABILITIES`` is course-level.
+    """
     # Import models locally to avoid circular imports
     from core.models import Course, Assignment, Submission
 
     if isinstance(obj, Course):
-        return compute_course_capabilities(user, obj)
+        return compute_course_capabilities(user, obj, is_course_scoped=is_course_scoped)
     elif isinstance(obj, Assignment):
         return compute_assignment_capabilities(user, obj)
     elif isinstance(obj, Submission):
@@ -352,25 +374,29 @@ def _resolve_capabilities(user, obj) -> dict[Capability, bool]:
         raise TypeError(f"check_capability: unsupported object type {type(obj).__name__}")
 
 
-def check_capability(user, capability: Union[str, Capability], obj) -> bool:
+def check_capability(user, capability: Union[str, Capability], obj, *, is_course_scoped: bool = False) -> bool:
     """Check if a user has a specific capability on an object.
 
     Returns ``True`` if the capability is granted, ``False`` otherwise.
     Accepts either a ``Capability`` enum member or its string value.
     """
     key = capability.value if isinstance(capability, Capability) else capability
-    caps = _resolve_capabilities(user, obj)
+    caps = _resolve_capabilities(user, obj, is_course_scoped=is_course_scoped)
     return caps.get(key, False)
 
 
-def require_capability(user, capability: Union[str, Capability], obj) -> None:
+def require_capability(user, capability: Union[str, Capability], obj, *, is_course_scoped: bool = False) -> None:
     """Raise ``PermissionDenied`` if the user lacks the given capability.
 
     Use this in view action methods to replace inline ``isCourseAdmin()``
     and similar checks::
 
         require_capability(request.user, 'manage_roster', course)
+
+    Pass ``is_course_scoped=True`` for requests authenticated with a course
+    API key or course-scoped JWT so ``COURSE_SCOPED_BLOCKED_CAPABILITIES``
+    is enforced.
     """
     key = capability.value if isinstance(capability, Capability) else capability
-    if not check_capability(user, key, obj):
+    if not check_capability(user, key, obj, is_course_scoped=is_course_scoped):
         raise PermissionDenied(f"You do not have the '{key}' capability on this resource.")

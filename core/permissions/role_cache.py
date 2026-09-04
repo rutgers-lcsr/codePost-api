@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
-    from core.models import Course, Submission
+    from core.models import Assignment, Course, Submission
 
 
 class RoleCache:
@@ -80,6 +80,20 @@ class RoleCache:
     def is_course_member(self, course: "Course") -> bool:
         from core.permissions.helpers import isCourseMember
         return self._get_or_compute("isCourseMember", isCourseMember, course)
+
+    # -- Assignment-level helpers --
+
+    def student_can_see_assignment(self, assignment: "Assignment") -> bool:
+        from core.permissions.helpers import studentCanSeeAssignment
+        return self._get_or_compute("studentCanSeeAssignment", studentCanSeeAssignment, assignment)
+
+    def student_can_download_assignment(self, assignment: "Assignment") -> bool:
+        from core.permissions.helpers import studentCanDownloadAssignment
+        return self._get_or_compute("studentCanDownloadAssignment", studentCanDownloadAssignment, assignment)
+
+    def student_can_submit_to_assignment(self, assignment: "Assignment") -> bool:
+        from core.permissions.helpers import studentCanSubmitToAssignment
+        return self._get_or_compute("studentCanSubmitToAssignment", studentCanSubmitToAssignment, assignment)
 
     # -- Submission-level helpers --
 

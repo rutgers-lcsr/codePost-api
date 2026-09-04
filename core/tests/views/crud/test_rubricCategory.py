@@ -21,7 +21,9 @@ class TestPermissions_RubricCategory_Released(BaseTestCases.TestPermissions):
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.isReleased = True
+      # Students see rubric categories once feedback is released (Phase 4 gate)
+      assignment.state = 'published'
+      assignment.feedbackStatus = 'released'
       assignment.save()
 
     def assertModification(self, detail):
@@ -29,7 +31,7 @@ class TestPermissions_RubricCategory_Released(BaseTestCases.TestPermissions):
       assignment = rubricCategory.assignment
       submission = Submission.objects.filter(assignment__course=self.course).first()
       self.assertEqual(submission.assignment, rubricCategory.assignment)
-      self.assertTrue(assignment.isReleased)
+      self.assertEqual(assignment.state, 'published')
       self.assertFalse(assignment.collaborativeRubricMode)
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
@@ -52,7 +54,7 @@ class TestPermissions_RubricCategory_CollaborativeRubric(BaseTestCases.TestPermi
       assignment = rubricCategory.assignment
       submission = Submission.objects.filter(assignment__course=self.course).first()
       self.assertEqual(submission.assignment, rubricCategory.assignment)
-      self.assertFalse(assignment.isReleased)
+      self.assertNotIn(assignment.state, ('published', 'closed'))
       self.assertTrue(assignment.collaborativeRubricMode)
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
@@ -67,7 +69,8 @@ class TestPermissions_RubricCategory_ReleasedCollaborativeRubric(BaseTestCases.T
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.isReleased = True
+      assignment.state = 'published'
+      assignment.feedbackStatus = 'released'
       assignment.collaborativeRubricMode = True
       assignment.save()
 
@@ -76,7 +79,7 @@ class TestPermissions_RubricCategory_ReleasedCollaborativeRubric(BaseTestCases.T
       assignment = rubricCategory.assignment
       submission = Submission.objects.filter(assignment__course=self.course).first()
       self.assertEqual(submission.assignment, rubricCategory.assignment)
-      self.assertTrue(assignment.isReleased)
+      self.assertEqual(assignment.state, 'published')
       self.assertTrue(assignment.collaborativeRubricMode)
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
@@ -95,7 +98,7 @@ class TestPermissions_RubricCategory_LiveFeedback(BaseTestCases.TestPermissions)
     def modifier(self):
       submission = Submission.objects.filter(assignment__course=self.course).first()
       assignment = submission.assignment
-      assignment.liveFeedbackMode = True
+      assignment.feedbackStatus = 'live'
       assignment.save()
 
     def assertModification(self, detail):
@@ -103,9 +106,9 @@ class TestPermissions_RubricCategory_LiveFeedback(BaseTestCases.TestPermissions)
       assignment = rubricCategory.assignment
       submission = Submission.objects.filter(assignment__course=self.course).first()
       self.assertEqual(submission.assignment, rubricCategory.assignment)
-      self.assertTrue(assignment.liveFeedbackMode)
+      self.assertEqual(assignment.feedbackStatus, 'live')
       self.assertFalse(assignment.collaborativeRubricMode)
-      self.assertFalse(assignment.isReleased)
+      self.assertNotIn(assignment.state, ('published', 'closed'))
 
     super().__init__(*args, model=self.model, permissions=self.permissions,
                      modifier=modifier, assertModification=assertModification, **kwargs)

@@ -460,11 +460,17 @@ class Executor(abc.ABC):
                     logger.error("Docker SDK not available")
                     return None
                 cls._docker_client = docker.from_env()
-                # Test connection
-                cls._docker_client.ping()
             except Exception as e:
                 logger.error(f"Failed to connect to Docker: {e}")
                 return None
+        try:
+            # Every acquisition, not just the first: a daemon restart is only visible
+            # here, and a client cached across it would fail every later run.
+            cls._docker_client.ping()
+        except Exception as e:
+            logger.error(f"Docker daemon unreachable: {e}")
+            cls._docker_client = None  # rebuild next time instead of reusing a dead client
+            return None
         return cls._docker_client
     
     @classmethod
@@ -895,10 +901,12 @@ class Executor(abc.ABC):
         # Datasets priority: kwargs > assignment.active. Shared datasets (is_student_variant=
         # False) go to everyone; a variant pool contributes only the submitting student's
         # assigned variant, so different students' code sees different data at the same path.
+        # Test resources (grading fixtures/answer keys) are excluded here — they only mount
+        # via the 'resources' kwarg during a test category's runs.
         if 'datasets' in kwargs:
              self.datasets = kwargs['datasets']
         elif assignment:
-             shared = list(assignment.dataSets.filter(is_active=True, is_student_variant=False))
+             shared = list(assignment.dataSets.filter(is_active=True, is_student_variant=False, is_test_resource=False))
              variant = get_or_assign_for_submission(assignment, submission) if submission else None
              if variant is not None and variant.is_active:
                  shared.append(variant)
@@ -1558,7 +1566,10 @@ class NotebookExecutor(Executor):
             needs_network=needs_network,
         )
         if not container or container is None:
-            result = ExecutionResult.error("Failed to create Docker container\nThis might be caused by missing container, or File and Dataset mounts being incorrect\nPlease check assignment setttings and environment setup and Try again!")
+            if self._get_docker_client() is None:
+                result = ExecutionResult.error("The autograder worker cannot reach its Docker daemon.\nThis is an infrastructure problem, not an assignment configuration issue — retry in a few minutes or contact support.")
+            else:
+                result = ExecutionResult.error("Failed to create Docker container\nThis might be caused by missing container, or File and Dataset mounts being incorrect\nPlease check assignment setttings and environment setup and Try again!")
             result.stderr = "\n".join(self.executor_logs)
             return result
 

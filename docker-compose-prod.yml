@@ -53,6 +53,60 @@ services:
             interval: 30s
             timeout: 10s
             retries: 5
+            start_period: 330s
+        volumes:
+            - ${HOST_DATASET_ROOT:-/mnt/datasets}:/assignment_datasets
+            - /tmp/codepost-staging:/staging
+        restart: unless-stopped
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+    # ─── MCP endpoint for instructor agents ─────────────────────────────
+    # Same image and Django app as codepost-api, but a SINGLE uvicorn process
+    # on purpose: agent traffic stays off the 4 api workers, slow tool calls
+    # get their own timeout budget (see the nginx /mcp block), and one process
+    # keeps a future stateful MCP mode (SSE, elicitation) possible — a session
+    # cannot be stranded across workers when there is only one.
+    # No init.sh: migrations belong to codepost-api.
+    codepost-mcp:
+        container_name: codepost-mcp
+        env_file:
+            - .env
+        environment:
+            - DEBUG=False
+            - FIELD_ENCRYPTION_KEY=${FIELD_ENCRYPTION_KEY}
+            - CELERY_BROKER_URL=redis://${DB_HOSTNAME}:6379
+            - API_URL=${API_URL}
+            - CLIENT_URL=${CLIENT_URL}
+            - DB_NAME=codepost
+            - DB_HOSTNAME=${DB_HOSTNAME}
+            - DB_PORT=3306
+            - DB_USERNAME=codepost_user
+            - DB_PASSWORD=${DB_PASSWORD}
+            - SECRET_KEY=${SECRET_KEY}
+            - EMAIL_HOST=${EMAIL_HOST}
+            - DEFAULT_EMAIL_FROM=${DEFAULT_EMAIL_FROM}
+            - API_HOSTNAME=codepost-mcp
+            - HOST_STAGING_ROOT=/tmp/codepost-staging
+            - WORKER_STAGING_ROOT=/staging
+            - HOST_DATASET_ROOT=${HOST_DATASET_ROOT:-/mnt/datasets}
+            - WORKER_DATASET_ROOT=/assignment_datasets
+            - WORKER_SHELL_REDIS_URL=redis://${DB_HOSTNAME}:6379
+            - WORKER_SHELL_SHARED_SECRET=${WORKER_SHELL_SHARED_SECRET}
+        build:
+            context: .
+            target: api
+        command: ["python", "-m", "uvicorn", "codepost.asgi:application", "--host", "0.0.0.0", "--port", "8001"]
+        labels:
+            - "autoheal=true"
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://codepost-mcp:8001/health-check"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
         volumes:
             - ${HOST_DATASET_ROOT:-/mnt/datasets}:/assignment_datasets
             - /tmp/codepost-staging:/staging

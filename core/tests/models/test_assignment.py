@@ -26,7 +26,7 @@ class TestModel_Assignment(APITestCase):
             "course": self.course.id,
             "name": "New Assignment",
             "points": -10,
-            "isReleased": False,
+            "state": "preview",
         }
 
         self.assertTrue(payload['points'] < 0)
@@ -49,14 +49,14 @@ class TestModel_Assignment(APITestCase):
             "course": self.course.id,
             "name": "New Assignment",
             "points": 20,
-            "isReleased": False,
+            "state": "preview",
         }
 
         payload2 = {
             "course": self.other_course.id,
             "name": "New Assignment",
             "points": 20,
-            "isReleased": False,
+            "state": "preview",
         }
 
         self.assertNotEqual(payload1["course"], payload2["course"])
@@ -77,14 +77,14 @@ class TestModel_Assignment(APITestCase):
             "course": self.course.id,
             "name": "New Assignment",
             "points": 20,
-            "isReleased": False,
+            "state": "preview",
         }
 
         payload2 = {
             "course": self.course.id,
             "name": "New Assignment",
             "points": 25,
-            "isReleased": True,
+            "state": "published",
         }
 
         self.assertEqual(payload1["course"], payload2["course"])

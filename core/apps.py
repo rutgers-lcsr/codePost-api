@@ -9,5 +9,9 @@ class CoreConfig(AppConfig):
     def ready(self):
         # Import signals to connect them
         import core.signals  # noqa: F401
+
+        # OAuth consent/DCR audit trail (log.Event; course-agnostic)
+        from core.oauth_audit import register_oauth_audit_receivers
+        register_oauth_audit_receivers()
         
         # logEvent("Core App Ready", message="Core app has been initialized and logging handler added.")

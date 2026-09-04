@@ -25,3 +25,71 @@ class AuthUserRateThrottle(UserRateThrottle):
         if settings.TESTING:
             return True
         return super().allow_request(request, view)
+
+
+class AIConnectionTestThrottle(UserRateThrottle):
+    """Rate limit for AI provider connection tests (each fires a real, paid LLM call)."""
+    scope = 'ai_connection_test'
+    rate = '10/minute'
+
+    def allow_request(self, request, view):
+        if settings.TESTING:
+            return True
+        return super().allow_request(request, view)
+
+
+class AgentToolThrottle(UserRateThrottle):
+    """Rate limit for MCP agent tool calls.
+
+    Keyed on ``request.user.pk``, which for a course API key is that course's
+    service account — so this is a per-course budget and one runaway agent
+    loop cannot starve another course.
+
+    Both ``scope`` and ``rate`` are set: there is no ``DEFAULT_THROTTLE_RATES``
+    in settings, so a scope-only throttle would raise at init.
+    """
+    scope = 'agent_tool'
+    rate = '120/minute'
+
+    def allow_request(self, request, view):
+        if settings.TESTING:
+            return True
+        return super().allow_request(request, view)
+
+
+class AgentWriteThrottle(AgentToolThrottle):
+    """Tighter budget for agent-initiated writes, same per-course keying."""
+    scope = 'agent_write'
+    rate = '20/minute'
+
+
+def rate_limited(scope: str, rate: str):
+    """Cache-based rate limiting for plain Django views (the OAuth endpoints —
+    django-oauth-toolkit's views aren't DRF, so DRF throttles can't apply).
+
+    Keyed on REMOTE_ADDR. Same conventions as the classes above: bypassed under
+    TESTING, and per-worker because the default cache is locmem.
+    """
+    num, period = rate.split('/')
+    seconds = {'sec': 1, 'second': 1, 'min': 60, 'minute': 60,
+               'hour': 3600}[period.rstrip('s')]
+    limit = int(num)
+
+    def deco(view):
+        from functools import wraps
+
+        @wraps(view)
+        def wrapped(request, *args, **kwargs):
+            if settings.TESTING:
+                return view(request, *args, **kwargs)
+            from django.core.cache import cache
+            from django.http import JsonResponse
+
+            key = f'rl:{scope}:{request.META.get("REMOTE_ADDR", "?")}'
+            added = cache.add(key, 1, timeout=seconds)
+            count = 1 if added else cache.incr(key)
+            if count > limit:
+                return JsonResponse({'error': 'rate_limited'}, status=429)
+            return view(request, *args, **kwargs)
+        return wrapped
+    return deco

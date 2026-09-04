@@ -198,7 +198,10 @@ class AssignmentFactory(factory.django.DjangoModelFactory):
 
   name = 'Hello World'
   points = 20
-  isReleased = False
+  # preview mirrors the pre-lifecycle default (isVisible=True, isReleased=False):
+  # students can see and download, not submit. Tests exercising submit/draft/etc.
+  # set state explicitly.
+  state = 'preview'
   course = factory.SubFactory('core.tests.factories.CourseFactory')
 
   submissions = factory.RelatedFactory(SubmissionFactory, 'assignment')
@@ -304,3 +307,19 @@ class CourseFactory(factory.django.DjangoModelFactory):
     f = a1.submissions.first().files.first()
     f.comments.add(CommentFactory(author=a1.course.courseAdmins.first(), file=f))
     f.save()
+
+
+@factory.django.mute_signals(post_save)
+class AutograderExecutionEventFactory(factory.django.DjangoModelFactory):
+
+  class Meta:
+    model = AutograderExecutionEvent
+
+  # course/assignment default to None (SET_NULL fields) — pass explicitly when
+  # a test needs attribution; a SubFactory here would build a full Course per event.
+  course = None
+  assignment = None
+  cached = False
+  success = True
+  language = 'python-3.12'
+  trigger = 'file_run'

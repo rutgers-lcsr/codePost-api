@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from celery import shared_task
 from core.models import Course
+from datetime import timedelta
 from django.utils import timezone
 import logging
 
@@ -39,6 +40,129 @@ def finalize_expired_quiz_attempts():
     return count
 
 @shared_task
+def reap_stale_autograder_state(build_minutes: int = 30, code_run_minutes: int = 10):
+    """Beat sweep: reset async markers that only a worker clears, after that worker died
+    mid-flight (OOM, docker restart, SIGKILL) or the broker lost the task. The Builder saves
+    build_logs as the image builds, so `modified` is a heartbeat: 'Building' untouched for
+    30 min is dead. RunQuizResponseCode has a 240 s hard time_limit, so a codeExecution still
+    'running' after 10 min will never be written back.
+    """
+    from core.models import Environment, QuizResponse
+
+    now = timezone.now()
+    builds = 0
+    for env in Environment.objects.filter(build_status=1, modified__lt=now - timedelta(minutes=build_minutes)):
+        env.build_status = 3
+        env.build_logs += f"\nMarked failed: no build progress for {build_minutes} min (worker lost?).\n"
+        env.save(update_fields=['build_status', 'build_logs'])
+        builds += 1
+    runs = 0
+    for resp in QuizResponse.objects.filter(codeExecution__status='running',
+                                            modified__lt=now - timedelta(minutes=code_run_minutes)):
+        resp.codeExecution = {**resp.codeExecution, 'status': 'error',
+                              'error': 'Execution did not complete (worker unavailable).',
+                              'finishedAt': now.isoformat()}
+        resp.save(update_fields=['codeExecution'])
+        runs += 1
+    if builds or runs:
+        logger.info(f"reap_stale_autograder_state: reset {builds} build(s), {runs} code run(s)")
+    return {"builds": builds, "code_runs": runs}
+
+@shared_task
+def run_scheduled_assignment_publish():
+    """One-shot scheduled publish for assignments: when a visible/preview assignment's
+    publishAt arrives, transition it to published. scheduledPublishRanAt makes the run
+    one-shot; moving publishAt forward past the stamp re-arms it. Drafts and archived
+    assignments never auto-publish — the schedule only fires from a student-visible
+    pre-published state (mirrors run_scheduled_quiz_generation).
+    """
+    from django.db.models import F, Q
+    from core.models import Assignment
+    from core.services.audit import record_audit_event
+
+    now = timezone.now()
+    due = Assignment.objects.filter(
+        state__in=('visible', 'preview'), course__archived=False,
+        publishAt__isnull=False, publishAt__lte=now,
+    ).filter(
+        Q(scheduledPublishRanAt__isnull=True)
+        | Q(scheduledPublishRanAt__lt=F('publishAt'))
+    )
+    # Snapshot ids first (stamping mutates rows out of the filter), and isolate each
+    # assignment so one bad row can't strand the others.
+    count = 0
+    for assignment_id in list(due.values_list('id', flat=True)):
+        try:
+            assignment = Assignment.objects.get(pk=assignment_id)
+            old_state = assignment.state
+            # Stamp BEFORE the transition lands so a crash can't re-fire every tick.
+            assignment.scheduledPublishRanAt = now
+            assignment.state = 'published'
+            assignment.save()
+            record_audit_event(
+                course=assignment.course,
+                event_type='assignment_state_changed',
+                user=None,
+                assignment=assignment,
+                meta={'from': old_state, 'to': 'published', 'scheduled': True},
+            )
+            count += 1
+        except Assignment.DoesNotExist:
+            continue
+        except Exception:
+            logger.exception(f"Failed scheduled publish for assignment {assignment_id}")
+    if count:
+        logger.info(f"Scheduled publish fired for {count} assignment(s)")
+    return count
+
+
+@shared_task
+def run_scheduled_feedback_release():
+    """One-shot scheduled feedback release: when a hidden/per_student assignment's
+    releaseFeedbackAt arrives, transition feedbackStatus to released.
+    scheduledFeedbackReleaseRanAt makes the run one-shot; moving releaseFeedbackAt
+    forward past the stamp re-arms it. live/released assignments never fire (mirrors
+    run_scheduled_assignment_publish).
+    """
+    from django.db.models import F, Q
+    from core.models import Assignment
+    from core.services.audit import record_audit_event
+
+    now = timezone.now()
+    due = Assignment.objects.filter(
+        feedbackStatus__in=('hidden', 'per_student'), course__archived=False,
+        releaseFeedbackAt__isnull=False, releaseFeedbackAt__lte=now,
+    ).filter(
+        Q(scheduledFeedbackReleaseRanAt__isnull=True)
+        | Q(scheduledFeedbackReleaseRanAt__lt=F('releaseFeedbackAt'))
+    )
+    count = 0
+    for assignment_id in list(due.values_list('id', flat=True)):
+        try:
+            assignment = Assignment.objects.get(pk=assignment_id)
+            old_status = assignment.feedbackStatus
+            # Stamp BEFORE the transition lands so a crash can't re-fire every tick.
+            assignment.scheduledFeedbackReleaseRanAt = now
+            assignment.feedbackStatus = 'released'
+            assignment.save()
+            record_audit_event(
+                course=assignment.course,
+                event_type='assignment_feedback_changed',
+                user=None,
+                assignment=assignment,
+                meta={'from': old_status, 'to': 'released', 'scheduled': True},
+            )
+            count += 1
+        except Assignment.DoesNotExist:
+            continue
+        except Exception:
+            logger.exception(f"Failed scheduled feedback release for assignment {assignment_id}")
+    if count:
+        logger.info(f"Scheduled feedback release fired for {count} assignment(s)")
+    return count
+
+
+@shared_task
 def delete_expired_courses():
     """
     Deletes courses whose expiration_date has passed.
@@ -54,6 +178,47 @@ def delete_expired_courses():
         expired_courses.delete()
     else:
         logger.info("No expired courses found")
+
+
+@shared_task
+def flush_expired_tokens():
+    """Delete OutstandingToken rows whose refresh token has expired.
+
+    BlacklistedToken rows cascade-delete with their OutstandingToken.
+    Equivalent to SimpleJWT's `manage.py flushexpiredtokens`.
+    """
+    from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+
+    count, _ = OutstandingToken.objects.filter(expires_at__lte=timezone.now()).delete()
+    if count:
+        logger.info(f"flush_expired_tokens: deleted {count} expired token row(s)")
+    return count
+
+
+@shared_task
+def prune_autograder_execution_events(retention_days: int = 400, batch_size: int = 5000):
+    """Delete AutograderExecutionEvent rows older than the retention window.
+
+    400 days preserves year-over-year semester comparison. Deletes in pk
+    batches to avoid long-running locks on MySQL.
+    """
+    from core.models import AutograderExecutionEvent
+
+    cutoff = timezone.now() - timedelta(days=retention_days)
+    total = 0
+    while True:
+        pks = list(
+            AutograderExecutionEvent.objects
+            .filter(created__lt=cutoff)
+            .values_list('pk', flat=True)[:batch_size]
+        )
+        if not pks:
+            break
+        deleted, _ = AutograderExecutionEvent.objects.filter(pk__in=pks).delete()
+        total += deleted
+    if total:
+        logger.info(f"prune_autograder_execution_events: deleted {total} event row(s)")
+    return total
 
 
 @shared_task
@@ -352,6 +517,18 @@ def _normalize_choices(raw_choices) -> list:
     return out
 
 
+def _update_suggestion_job(job_id: int | None, **fields):
+    """Persist generation-run state on the QuizSuggestionJob (no-op without a job).
+
+    Queryset update, not .save(): the enqueueing request may still hold the row.
+    """
+    if job_id is None:
+        return
+    from django.utils import timezone
+    from core.models import QuizSuggestionJob
+    QuizSuggestionJob.objects.filter(pk=job_id).update(modified=timezone.now(), **fields)
+
+
 @shared_task
 def generate_quiz_question_suggestions(
     requested_by_id: int,
@@ -360,6 +537,7 @@ def generate_quiz_question_suggestions(
     num_questions: int = 5,
     question_types: list | None = None,
     instructions: str = '',
+    job_id: int | None = None,
 ):
     """Generate AI quiz-question suggestions for an instructor to review and accept.
 
@@ -368,10 +546,16 @@ def generate_quiz_question_suggestions(
       for that assignment and proposes ``num_questions`` new questions.
     - Refresh, question-seeded (``source_question_id``): proposes one improved variant
       of an existing question (cross-semester update).
+
+    ``job_id`` names the QuizSuggestionJob the enqueueing endpoint created; every
+    exit path below records its outcome there so clients polling the job see the
+    real failure instead of inferring it from an empty suggestion list.
     """
     import uuid
     from asgiref.sync import async_to_sync
     from core.models import Assignment, Question, SuggestedQuizQuestion, User
+
+    _update_suggestion_job(job_id, status='running')
 
     user = User.objects.filter(id=requested_by_id).first()
     assignment = Assignment.objects.filter(id=assignment_id).select_related(
@@ -382,15 +566,23 @@ def generate_quiz_question_suggestions(
     course = (assignment.course if assignment else None) or (source_question.course if source_question else None)
     if course is None:
         logger.warning("[QuizGen] No course resolvable (assignment/source_question missing). Skipping.")
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The assignment or question this run was started from no longer exists.')
         return
 
     from core.services.ai_service import AIService
     service = AIService(course, assignment)
     if not service.is_configured or service.is_globally_disabled:
         logger.debug(f"[QuizGen] AI not configured/disabled for course {course.id}. Skipping.")
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='AI is not configured or is disabled for this course. '
+                                            "Check the course's AI settings.")
         return
     if not service.is_feature_enabled('quiz_generation'):
         logger.debug(f"[QuizGen] quiz_generation disabled for course {course.id}. Skipping.")
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage="The 'Quiz Question Suggestions' AI feature is turned off "
+                                            "for this course.")
         return
 
     service.set_request_context(
@@ -406,11 +598,15 @@ def generate_quiz_question_suggestions(
         )
     except Exception as e:
         logger.error(f"[QuizGen] Generation failed for course {course.id}: {e}", exc_info=True)
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage=f'The AI request failed: {str(e)[:500]}')
         return
 
     if not result.success or not result.text:
         logger.warning(f"[QuizGen] Empty/failed generation for course {course.id}: {result.error}")
         service.record_usage(result, user=user, request_type='quiz_generation')
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage=(result.error or 'The AI provider returned no output.')[:500])
         return
 
     try:
@@ -418,6 +614,10 @@ def generate_quiz_question_suggestions(
     except Exception as e:
         logger.error(f"[QuizGen] Could not parse model output as JSON: {e}", exc_info=True)
         service.record_usage(result, user=user, request_type='quiz_generation')
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The model returned output that could not be parsed as questions. '
+                                            'Try again — repeated failures usually mean the configured model is '
+                                            'unsuitable for structured output.')
         return
 
     batch = uuid.uuid4()
@@ -452,6 +652,7 @@ def generate_quiz_question_suggestions(
                 sourceQuestion=source_question,
                 questionType=qtype,
                 text=q.get('text', ''),
+                description=q.get('description') or '',
                 choicesData=choices,
                 points=q.get('points', 1) or 1,
                 language=q.get('language') or (source_question.language if source_question else None),
@@ -474,6 +675,11 @@ def generate_quiz_question_suggestions(
             f"Raw model output (truncated): {(result.text or '')[:1500]}"
         )
     service.record_usage(result, user=user, request_type='quiz_generation')
+    if created == 0:
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The model responded but produced no usable questions. Try again.')
+    else:
+        _update_suggestion_job(job_id, status='completed', createdCount=created, generationBatch=batch)
 
 
 @shared_task
@@ -538,9 +744,10 @@ def generate_personalized_quiz_sets(
         if quiz_id is not None:
             quiz_qs = quiz_qs.filter(id=quiz_id)
         else:
-            # Automatic (signal) fan-out never touches drafts — only staff actions, which
-            # scope to a quiz_id, may generate for an unpublished quiz they're preparing.
-            quiz_qs = quiz_qs.filter(isPublished=True)
+            # Automatic (signal) fan-out never touches drafts or manual-generation
+            # quizzes — only staff actions and the scheduled run, which scope to a
+            # quiz_id, may.
+            quiz_qs = quiz_qs.filter(isPublished=True, manualGeneration=False)
         quizzes = list(quiz_qs.prefetch_related('generatedSections'))
     if not students or not quizzes:
         return
@@ -586,6 +793,32 @@ def generate_personalized_quiz_sets(
 
 
 _CHOICE_TYPES = {'multiple_choice', 'multiple_answers', 'true_false', 'short_answer', 'numerical'}
+
+
+def _normalize_generated_question(q, env_language) -> dict | None:
+    """Normalize one parsed model question into GeneratedQuizQuestion-shaped fields.
+
+    Returns None for unusable entries: non-dicts, empty stems, and choice-type
+    questions with no correct choice (no usable answer key — these auto-grade off
+    the choices, so a keyless question would mark every student wrong)."""
+    if not isinstance(q, dict) or not q.get('text'):
+        return None
+    qtype = q.get('type', 'multiple_choice')
+    choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
+    if qtype in _CHOICE_TYPES and not any(c.get('isCorrect') for c in choices):
+        return None
+    language = q.get('language')
+    if qtype == 'code' and not language:
+        language = env_language or None
+    return {
+        'questionType': qtype,
+        'text': q.get('text', ''),
+        'description': q.get('description', '') or '',
+        'choicesData': choices,
+        'language': language,
+        'starterCode': q.get('starter_code'),
+        'referenceSolution': q.get('reference_solution') or q.get('referenceSolution') or '',
+    }
 
 
 def _claim_generation_sets(quiz, students, submission, force, batch):
@@ -653,30 +886,17 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
             break
         section_rows = []
         for q in parsed:
-            if not isinstance(q, dict) or not q.get('text'):
+            fields = _normalize_generated_question(q, env_language)
+            if fields is None:
+                if isinstance(q, dict) and q.get('text'):
+                    # Keyless skips are worth a trace (worse under autoPublishGenerated,
+                    # where no human reviews the set before students are scored).
+                    logger.warning(
+                        f"[PersonalQuizGen] Skipping a '{q.get('type', 'multiple_choice')}' question "
+                        f"with no correct choice (quiz {quiz.id}). "
+                        f"Raw output (truncated): {(result.text or '')[:1500]}")
                 continue
-            qtype = q.get('type', 'multiple_choice')
-            choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
-            if qtype in _CHOICE_TYPES and not any(c.get('isCorrect') for c in choices):
-                # No usable answer key: these auto-grade off the choices, so a keyless
-                # question would mark every student wrong (worse under autoPublishGenerated,
-                # where no human reviews it before students are scored).
-                logger.warning(
-                    f"[PersonalQuizGen] Skipping a '{qtype}' question with no correct choice "
-                    f"(quiz {quiz.id}). Raw output (truncated): {(result.text or '')[:1500]}")
-                continue
-            language = q.get('language')
-            if qtype == 'code' and not language:
-                language = env_language or None
-            section_rows.append((section, {
-                'questionType': qtype,
-                'text': q.get('text', ''),
-                'description': q.get('description', '') or '',
-                'choicesData': choices,
-                'language': language,
-                'starterCode': q.get('starter_code'),
-                'referenceSolution': q.get('reference_solution') or q.get('referenceSolution') or '',
-            }))
+            section_rows.append((section, fields))
         if not section_rows:
             error = 'The model returned no usable questions.'
             break
@@ -728,6 +948,134 @@ def _write_generation_results(quiz, claimed_ids, batch, question_rows, error,
             gen_set.promptVariant_id = variant_id
             gen_set.save(update_fields=['status', 'approvedAt', 'generationMetadata',
                                         'promptVariant', 'modified'])
+
+
+@shared_task
+def preview_generated_section(
+    quiz_id: int,
+    requested_by_id: int,
+    job_id: int,
+    system_prompt: str = '',
+    num_questions: int = 3,
+    question_types: list | None = None,
+    seed: str = 'random',
+    demo_files: list | None = None,
+):
+    """Test-generate example questions for an (unsaved) AI section prompt — the quiz
+    builder's Test button. Nothing is persisted to the quiz: the parsed questions, the
+    resolved prompt, and the seed used land in the job's ``resultData`` for the UI.
+
+    ``seed`` picks how per-student {variables} resolve: 'random' uses a random
+    submitter's latest submission on the attached assignment; 'demo' uses the
+    instructor-uploaded ``demo_files`` ({'name','content'} dicts). Prompts that don't
+    draw on submission data ignore the seed entirely.
+    """
+    import random
+    from asgiref.sync import async_to_sync
+    from core.models import Quiz, QuizGeneratedSection, User
+    from core.prompts.variables import template_requires_submission
+    from core.services.ai_service import AIService
+    from core.services.quiz_grading import latest_submission_for
+
+    _update_suggestion_job(job_id, status='running')
+
+    quiz = Quiz.objects.filter(id=quiz_id).select_related(
+        'course', 'course__organization', 'assignment').first()
+    if quiz is None:
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The quiz this test run was started from no longer exists.')
+        return
+
+    service = AIService(quiz.course, quiz.assignment)
+    if not service.is_configured or service.is_globally_disabled:
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='AI is not configured or is disabled for this course. '
+                                            "Check the course's AI settings.")
+        return
+    if not service.is_feature_enabled('personalized_quiz_generation'):
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage="The 'AI-Generated Quiz Questions' AI feature is turned off "
+                                            'for this course.')
+        return
+
+    # Unsaved on purpose — generation only reads plain attributes off the section, so the
+    # instructor's in-progress form values can be tested without touching the quiz.
+    section = QuizGeneratedSection(quiz=quiz, systemPrompt=system_prompt,
+                                   numQuestions=num_questions,
+                                   questionTypes=question_types or [])
+
+    submission = demo = sample_student = None
+    seed_used = 'none'
+    if template_requires_submission(system_prompt):
+        if seed == 'demo':
+            demo = tuple(demo_files or ())
+            if not demo:
+                _update_suggestion_job(job_id, status='failed',
+                                       errorMessage='Upload at least one demo file to test this prompt.')
+                return
+            seed_used = 'demo'
+        else:
+            student_ids = list(quiz.assignment.submissions.filter(students__isnull=False)
+                               .values_list('students__id', flat=True)
+                               .distinct()) if quiz.assignment_id else []
+            if not student_ids:
+                _update_suggestion_job(job_id, status='failed',
+                                       errorMessage='No student has submitted yet — upload demo files instead.')
+                return
+            student = User.objects.get(id=random.choice(student_ids))
+            submission = latest_submission_for(student, quiz.assignment)
+            sample_student = student.email
+            seed_used = 'random'
+
+    user = User.objects.filter(id=requested_by_id).first()
+    service.set_request_context(user=user, request_type='personalized_quiz_generation')
+    try:
+        result = async_to_sync(service.generate_personalized_quiz_questions)(
+            section, submission, demo_files=demo)
+    except Exception as e:
+        logger.error(f"[QuizPreview] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage=f'The AI request failed: {str(e)[:500]}')
+        return
+
+    service.record_usage(result, user=user, request_type='personalized_quiz_generation')
+    result_data = {
+        'seed': seed_used,
+        'sampleStudent': sample_student,
+        # Bounded: a prompt embedding large submission files could be huge.
+        'resolvedPrompt': (result.resolved_prompt or '')[:100_000],
+        'questions': [],
+    }
+    if not result.success or not result.text:
+        logger.warning(f"[QuizPreview] Empty/failed generation for quiz {quiz.id}: {result.error}")
+        _update_suggestion_job(job_id, status='failed', resultData=result_data,
+                               errorMessage=(result.error or 'The AI provider returned no output.')[:500])
+        return
+    try:
+        parsed = _parse_json_questions(result.text)
+    except Exception as e:
+        logger.error(f"[QuizPreview] Could not parse model output as JSON: {e}", exc_info=True)
+        _update_suggestion_job(job_id, status='failed', resultData=result_data,
+                               errorMessage='The model returned output that could not be parsed as questions. '
+                                            'Try again — repeated failures usually mean the configured model is '
+                                            'unsuitable for structured output.')
+        return
+
+    try:
+        env_language = (quiz.assignment.environment.language or '') if quiz.assignment else ''
+    except Exception:
+        env_language = ''
+    questions = [fields for fields in
+                 (_normalize_generated_question(q, env_language) for q in parsed)
+                 if fields is not None][:num_questions]
+    if not questions:
+        _update_suggestion_job(job_id, status='failed', resultData=result_data,
+                               errorMessage='The model responded but produced no usable questions. Try again.')
+        return
+    result_data['questions'] = questions
+    logger.info(f"[QuizPreview] Generated {len(questions)} example questions for quiz {quiz.id}")
+    _update_suggestion_job(job_id, status='completed', createdCount=len(questions),
+                           resultData=result_data)
 
 
 def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
@@ -822,6 +1170,48 @@ def backfill_personalized_quiz_sets(quiz_id: int, requested_by_id: int | None = 
                                            missing_only=missing_only)
     if queued:
         logger.info(f"[PersonalQuizGen] Backfill for quiz {quiz_id}: queued {queued} student(s).")
+
+
+@shared_task
+def run_scheduled_quiz_generation():
+    """One-shot scheduled generation for manual-generation quizzes: when a quiz's
+    generationDate arrives, backfill question sets for students who have a submission but
+    no set yet (missing_only — existing sets, possibly staff-edited, are never touched).
+    scheduledGenerationRanAt makes the run one-shot; moving generationDate forward past
+    the stamp re-arms it. Late submitters after the run stay manual (the review panel's
+    missing count / Generate missing). Only published quizzes with generated sections
+    run — a quiz published after its date fires on the next sweep tick.
+    """
+    from django.db.models import F, Q
+    from core.models import Quiz
+
+    now = timezone.now()
+    due = Quiz.objects.filter(
+        manualGeneration=True, isPublished=True, course__archived=False,
+        generationDate__isnull=False, generationDate__lte=now,
+        generatedSections__isnull=False,
+    ).filter(
+        Q(scheduledGenerationRanAt__isnull=True)
+        | Q(scheduledGenerationRanAt__lt=F('generationDate'))
+    ).distinct()
+    # Snapshot ids first (stamping mutates rows out of the filter), and isolate each quiz
+    # so one bad quiz can't strand the others — mirrors finalize_expired_quiz_attempts.
+    count = 0
+    for quiz_id in list(due.values_list('id', flat=True)):
+        try:
+            quiz = Quiz.objects.get(pk=quiz_id)
+            # Stamp BEFORE enqueueing so a crash can't re-fire the backfill every tick.
+            quiz.scheduledGenerationRanAt = now
+            quiz.save()
+            backfill_personalized_quiz_sets.delay(quiz_id, missing_only=True)
+            count += 1
+        except Quiz.DoesNotExist:
+            continue
+        except Exception:
+            logger.exception(f"Failed scheduled quiz generation for quiz {quiz_id}")
+    if count:
+        logger.info(f"Scheduled generation fired for {count} quiz(es)")
+    return count
 
 
 @shared_task
@@ -973,3 +1363,14 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
         job.status = 'failed'
         job.errorMessage = str(e)
         job.save(update_fields=['status', 'errorMessage', 'modified'])
+
+
+@shared_task
+def clear_expired_oauth_tokens():
+    """Purge expired OAuth grants/tokens (django-oauth-toolkit's cleartokens).
+
+    Refresh-token revocation windows are governed by REFRESH_TOKEN_EXPIRE_SECONDS;
+    this just keeps the tables from growing without bound.
+    """
+    from django.core.management import call_command
+    call_command("cleartokens")

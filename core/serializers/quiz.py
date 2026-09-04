@@ -43,6 +43,8 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         # Availability
         'assignmentTrigger', 'availableFrom', 'availableUntil',
         'closeEvent', 'closeOffsetMinutes', 'endAttemptsAtClose', 'accessCode',
+        # Exam security
+        'requireSebBrowser', 'sebConfigKey',
         # Standard options
         'timeLimitMinutes', 'attemptsAllowed', 'shuffleQuestions',
         'oneQuestionAtATime', 'allowBacktracking',
@@ -50,12 +52,14 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         'passingScore', 'passingScoreUnit', 'scoringPolicy',
         'multiAttemptScoreMethod', 'isPublished',
         # Per-student generated questions
-        'gradersCanReviewGenerated', 'autoPublishGenerated', 'generatedSections',
+        'gradersCanReviewGenerated', 'gradersCanGenerate', 'autoPublishGenerated', 'manualGeneration',
+        'generationDate', 'scheduledGenerationRanAt', 'generatedSections',
         'quizQuestions', 'questionGroups', 'source', 'createdBy', 'metadata',
     )
     # accessCode is view-only here — staff set/rotate/clear it via the generateAccessCode action.
+    # scheduledGenerationRanAt is the one-shot stamp of the scheduled generation sweep.
     read_only_fields = ('source', 'createdBy', 'metadata', 'accessCode', 'quizQuestions',
-                        'questionGroups', 'generatedSections')
+                        'questionGroups', 'generatedSections', 'scheduledGenerationRanAt')
     POST_permissions_fields = ('course',)
 
   def validate(self, data):
@@ -64,6 +68,15 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
     # A PATCH may move the quiz into a course the caller has no rights in (course is
     # writable) — object permissions only checked the source course. Re-authorize.
     self.assert_authoring_course(proposed.get('course'))
+    # The SEB Config Key is a 64-char hex hash from the SEB Config Tool; anything else can
+    # never verify and would silently lock every student out.
+    seb_key = data.get('sebConfigKey')
+    if seb_key:
+      seb_key = seb_key.strip()
+      if len(seb_key) != 64 or any(c not in '0123456789abcdefABCDEF' for c in seb_key):
+        raise serializers.ValidationError(
+            {'sebConfigKey': 'Must be the 64-character hex Config Key shown in the SEB Config Tool.'})
+      data['sebConfigKey'] = seb_key.lower()
     # The attached assignment must belong to the quiz's own course. Otherwise prompt
     # variables ({assignment_file:...}) and close-event logic resolve against another
     # course's private assignment data — a cross-course information leak. Enforce only
@@ -86,6 +99,23 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
     available_until = proposed.get('availableUntil')
     if available_from and available_until and available_from >= available_until:
       raise serializers.ValidationError("availableUntil must be after availableFrom.")
+    # A scheduled generation time only means anything in manual-generation mode — in
+    # automatic mode sets generate on submission and the date would silently do nothing.
+    # Enforce only when THIS change introduces the pairing (matches the seal check below):
+    # a quiz already stored with a date-but-no-manual pair must stay editable for
+    # unrelated settings.
+    proposed_manual = proposed.get('manualGeneration')
+    if proposed_manual is None and self.instance is None:
+      proposed_manual = True  # model default: an unsent flag on create leaves the quiz manual
+    proposed_date_without_manual = (proposed.get('generationDate') is not None
+                                    and not proposed_manual)
+    already_date_without_manual = (self.instance is not None
+                                   and self.instance.generationDate is not None
+                                   and not self.instance.manualGeneration)
+    if proposed_date_without_manual and not already_date_without_manual:
+      raise serializers.ValidationError(
+          {'generationDate': 'A scheduled generation time requires manual generation mode — '
+                             'enable manualGeneration, or clear generationDate.'})
     # Passing score: never negative; capped at 100 only when expressed as a percent.
     passing_score = proposed.get('passingScore')
     if passing_score is not None:
@@ -119,6 +149,20 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
       if degenerate:
         raise serializers.ValidationError(
             "Set a duration for the close — it would otherwise close the moment the quiz opens.")
+
+    # per_student assignments have no global feedback-release moment, so quiz timing
+    # anchored on it can never fire — reject the combination up front.
+    proposed_assignment = proposed.get('assignment')
+    if proposed_assignment is not None and getattr(proposed_assignment, 'feedbackStatus', None) == 'per_student':
+      if proposed.get('assignmentTrigger') == 'after_feedback':
+        raise serializers.ValidationError(
+            {'assignmentTrigger': "This assignment releases feedback per student — use the "
+             "self-paced trigger (after each student's feedback is ready) instead of the "
+             "whole-assignment feedback trigger."})
+      if proposed.get('closeEvent') == 'feedback_released':
+        raise serializers.ValidationError(
+            {'closeEvent': "This assignment releases feedback per student, so there is no "
+             "single feedback-release moment to close at — pick a different close event."})
     # Generated sections whose prompts draw on assignment/submission data are seeded by
     # the attached assignment; detaching or re-attaching would orphan them (and any
     # per-student sets). Submission-free sections don't depend on the assignment, so the

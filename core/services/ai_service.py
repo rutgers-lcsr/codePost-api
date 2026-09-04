@@ -26,7 +26,7 @@ import hashlib
 import logging
 import re
 from decimal import Decimal
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 from dataclasses import dataclass
 from core.constants import DEFAULT_OLLAMA_URL, DEFAULT_PORTKEY_URL
 from core.models import Course, Assignment, Submission, SubmissionFile, User
@@ -119,9 +119,8 @@ async def _list_gemini_models(api_key: str) -> list[dict[str, str]]:
             model_id = model_id[len('models/'):]
         display_name = m.display_name or model_id
         # Only include generative models (skip embedding/retrieval models)
-        if hasattr(m, 'supported_generation_methods') and m.supported_generation_methods:  # type: ignore[attr-defined]  # google-generativeai Model
-            if 'generateContent' not in m.supported_generation_methods:  # type: ignore[operator]  # google-generativeai Model type
-                continue
+        if m.supported_actions and 'generateContent' not in m.supported_actions:
+            continue
         models.append({'id': model_id, 'name': display_name})
     return models
 
@@ -217,6 +216,10 @@ class AIService:
     # This is to ensure the ai response is consistently in markdown format
     GLOBAL_SYSTEM_PROMPT =""""""
 
+    # Timeout for connection tests (test_connection); shorter than the 60s
+    # generation timeouts because a human is waiting on a button.
+    TEST_TIMEOUT_SECONDS = 20
+
     def __init__(self, course: Course, assignment: Optional[Assignment] = None):
         self.course = course
         self.assignment = assignment
@@ -268,6 +271,112 @@ class AIService:
         self.request_type: Optional[str] = None
         self.request_instructions: str = ''
         self._trace_id: Optional[str] = None
+        # Metadata from the most recent _call_* response (e.g. the model id
+        # the provider reported back). Consumed by test_connection.
+        self._last_provider_meta: Optional[dict] = None
+
+    @classmethod
+    def for_config(cls, provider: str, api_key: str = '', base_url: str = '', model: str = '') -> 'AIService':
+        """Build an AIService bound to an explicit config, with no course.
+
+        Used by the connection-test endpoints (e.g. org-level settings, which
+        have no course). Only the generation plumbing (_dispatch_provider /
+        _call_*) is safe on the returned instance; course-dependent helpers
+        (feature toggles, record_usage, prompt resolution) must not be called.
+        """
+        svc = cls.__new__(cls)
+        svc.course = cast(Course, None)
+        svc.assignment = None
+        svc._config_from_org = False
+        svc.provider = provider
+        svc.api_key = api_key
+        svc.base_url = base_url
+        svc.model = model or svc._get_default_model()
+        svc.base_model = svc.model
+        svc.request_user = None
+        svc.request_type = None
+        svc.request_instructions = ''
+        svc._trace_id = None
+        svc._last_provider_meta = None
+        return svc
+
+    # Custom test prompts are clamped to keep test-call costs bounded.
+    TEST_PROMPT_MAX_CHARS = 500
+
+    async def test_connection(self, prompt: Optional[str] = None, model: Optional[str] = None) -> dict:
+        """Fire a minimal completion through the configured provider.
+
+        ``prompt`` optionally replaces the default connectivity prompt so the
+        caller can eyeball a real generation. ``model`` optionally overrides
+        ``self.model`` for this test only (nothing is saved); length is
+        enforced by AIProviderTestRequestSerializer.
+        Returns a camelCase dict ready for AIProviderTestResultSerializer.
+        Never raises and never records usage (record_usage is caller-driven).
+        """
+        import time
+
+        if model and model.strip():
+            self.model = model.strip()
+
+        user_prompt = (prompt or '').strip()[:self.TEST_PROMPT_MAX_CHARS]
+        if user_prompt:
+            # A real prompt: don't prime the model with connectivity-test
+            # framing or it answers "Connection successful." instead.
+            system_prompt = 'You are a helpful assistant. Answer briefly in plain text.'
+        else:
+            system_prompt = 'You are a connectivity test. Answer briefly in plain text.'
+            user_prompt = 'Reply with exactly: OK'
+
+        result: dict = {
+            'success': False,
+            'provider': self.provider or '',
+            'model': self.model or '',
+            'reportedModel': None,
+            'latencyMs': None,
+            'requestSystemPrompt': None,
+            'requestUserPrompt': None,
+            'response': None,
+            'error': None,
+            'errorDetail': None,
+        }
+        # Deliberately not is_configured: ollama/portkey fall back to default
+        # base URLs in _call_* when base_url is blank, so provider alone is
+        # enough there; only gemini/openai strictly require an API key.
+        if not self.provider:
+            result['error'] = 'No AI provider is configured.'
+            return result
+        if self.provider in ('gemini', 'openai') and not self.api_key:
+            result['error'] = 'No API key is configured for this provider.'
+            return result
+
+        self._last_provider_meta = None
+        result['requestSystemPrompt'] = system_prompt
+        result['requestUserPrompt'] = user_prompt
+        start = time.perf_counter()
+        try:
+            text, in_tok, out_tok, total_tok, cached_tok = await asyncio.wait_for(
+                self._dispatch_provider(system_prompt, user_prompt),
+                timeout=self.TEST_TIMEOUT_SECONDS,
+            )
+            result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
+            result['success'] = True
+            result['response'] = (text or '').strip()[:2000]
+            result['reportedModel'] = (self._last_provider_meta or {}).get('model')
+            # Private keys for the caller's record_usage — not serialized
+            # (AIProviderTestResultSerializer only outputs declared fields).
+            result['_inputTokens'] = in_tok
+            result['_outputTokens'] = out_tok
+            result['_totalTokens'] = total_tok
+            result['_cachedTokens'] = cached_tok
+        except asyncio.TimeoutError:
+            result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
+            result['error'] = f'The provider did not respond within {self.TEST_TIMEOUT_SECONDS} seconds.'
+            result['errorDetail'] = 'TimeoutError'
+        except Exception as e:
+            result['latencyMs'] = round((time.perf_counter() - start) * 1000, 1)
+            result['error'] = self._parse_error(e)
+            result['errorDetail'] = f'{type(e).__name__}: {str(e)[:500]}'
+        return result
 
     def set_request_context(
         self,
@@ -618,8 +727,11 @@ class AIService:
     def is_configured(self) -> bool:
         """Check if AI is properly configured for this course."""
         if self.provider in ('ollama', 'portkey'):
-            # Ollama and Portkey (self-hosted) only need provider + base_url
-            return bool(self.provider and self.base_url)
+            # Ollama and Portkey work with a blank base_url — _call_ollama and
+            # _call_portkey fall back to their default URLs — so the provider
+            # alone is enough (matches test_connection and the settings
+            # serializers' _provider_is_configured).
+            return bool(self.provider)
         return bool(self.provider and self.api_key)
 
     @property
@@ -734,13 +846,24 @@ class AIService:
         When ``cached_tokens`` > 0, the cached portion of input tokens is billed
         at the provider's discounted rate (see ``CACHED_TOKEN_RATE``).
         """
+        # Gateway providers (e.g. Portkey) report slash-prefixed ids like
+        # "provider-slug/gemini-3-flash-preview"; fall back to the basename
+        # so bare-named rates still match. Exact match always wins.
+        candidates = [model]
+        if '/' in model:
+            candidates.append(model.rsplit('/', 1)[-1])
         rates = None
-        if custom_rates and model in custom_rates:
-            r = custom_rates[model]
-            if isinstance(r, dict) and 'input' in r and 'output' in r:
-                rates = (float(r['input']), float(r['output']))
+        if custom_rates:
+            for candidate in candidates:
+                r = custom_rates.get(candidate)
+                if isinstance(r, dict) and 'input' in r and 'output' in r:
+                    rates = (float(r['input']), float(r['output']))
+                    break
         if not rates:
-            rates = AIService.TOKEN_RATES.get(model)
+            for candidate in candidates:
+                rates = AIService.TOKEN_RATES.get(candidate)
+                if rates:
+                    break
         if not rates:
             return 0.0
         # Split input tokens into non-cached and cached portions
@@ -752,14 +875,17 @@ class AIService:
         output_cost = (output_tokens / 1_000_000) * rates[1]
         return float(Decimal(str(input_cost + cached_cost + output_cost)).quantize(Decimal('0.000001')))
 
-    def _get_merged_rates(self) -> dict | None:
-        """Merge custom token rates: course overrides org overrides."""
+    @staticmethod
+    def merged_token_rates(organization=None, course=None) -> dict | None:
+        """Merge custom token rates: course overrides org. The org defaults to
+        course.organization when not given explicitly (course-less scopes like
+        org connection tests pass it directly)."""
         rates: dict = {}
-        org = self.course.organization if self.course else None
+        org = organization or (course.organization if course else None)
         if org and org.ai_token_rates:
             rates.update(org.ai_token_rates)
-        if self.course and self.course.ai_token_rates:
-            rates.update(self.course.ai_token_rates)
+        if course and course.ai_token_rates:
+            rates.update(course.ai_token_rates)
         return rates or None
 
     def record_usage(
@@ -768,6 +894,7 @@ class AIService:
         user: User,
         request_type: str = 'comment_generation',
         experiment: 'PromptExperiment | None' = None,
+        organization=None,
     ) -> None:
         """
         Persist an AIUsageRecord for the generation that just completed.
@@ -791,7 +918,9 @@ class AIService:
                 prompt_variant = SystemPromptVariant.objects.filter(pk=result.variant_id).first()
 
             AIUsageRecord.objects.create(
-                organization=self.course.organization,
+                # Course-less instances (for_config, org-level tests) pass an
+                # explicit organization instead.
+                organization=self.course.organization if self.course else organization,
                 course=self.course,
                 assignment=self.assignment,
                 user=user,
@@ -805,7 +934,8 @@ class AIService:
                 estimated_cost=self.estimate_cost(
                     self.provider or '', self.model or '',
                     result.input_tokens, result.output_tokens,
-                    custom_rates=self._get_merged_rates(),
+                    custom_rates=AIService.merged_token_rates(
+                        organization=organization, course=self.course),
                     cached_tokens=result.cached_tokens,
                 ),
                 status='success' if result.success else 'error',
@@ -1184,12 +1314,28 @@ end"""
             logger.error(f"AI test generation failed: {e}", exc_info=True)
             return GenerationResult(text="", success=False, error=error_msg)
 
+    @property
+    def api_key_looks_undecrypted(self) -> bool:
+        """True when the resolved API key is still Fernet ciphertext.
+
+        EncryptedCharField silently returns the raw ciphertext (``gAAAA…``) when
+        this process's FIELD_ENCRYPTION_KEY doesn't match the one that saved the
+        value (classically: a worker container missing the env var) — the
+        provider then rejects it as an invalid API key.
+        """
+        return bool(self.api_key) and str(self.api_key).startswith('gAAAA')
+
     def _parse_error(self, e: Exception) -> str:
         """Parse exception into user-friendly error message."""
         error_str = str(e).lower()
-        
+
         # API key errors
         if 'api_key' in error_str or 'api key' in error_str or 'invalid' in error_str and 'key' in error_str:
+            if self.api_key_looks_undecrypted:
+                return ("The stored API key could not be decrypted in this process — its "
+                        "FIELD_ENCRYPTION_KEY does not match the one the key was saved with. "
+                        "Check that the web and worker containers share the same "
+                        "FIELD_ENCRYPTION_KEY environment variable.")
             return "Invalid API key. Please check your AI configuration in Course Settings."
         
         # Rate limiting
@@ -1288,6 +1434,7 @@ end"""
         output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
         total_tokens = getattr(response.usage_metadata, 'total_token_count', 0) or (input_tokens + output_tokens)
         cached_tokens = getattr(response.usage_metadata, 'cached_content_token_count', 0) or 0
+        self._last_provider_meta = {'model': getattr(response, 'model_version', None)}
         return response.text or "", input_tokens, output_tokens, total_tokens, cached_tokens
     
     async def _call_openai(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
@@ -1310,6 +1457,7 @@ end"""
         cached_tokens = 0
         if usage and hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
             cached_tokens = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+        self._last_provider_meta = {'model': getattr(response, 'model', None)}
         return response.choices[0].message.content or "", input_tokens, output_tokens, total_tokens, cached_tokens
     
     async def _call_ollama(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
@@ -1332,6 +1480,7 @@ end"""
             data = response.json()
             input_tokens = data.get('prompt_eval_count', 0) or 0
             output_tokens = data.get('eval_count', 0) or 0
+            self._last_provider_meta = {'model': data.get('model')}
             return data["response"], input_tokens, output_tokens, input_tokens + output_tokens, 0
     
     async def _call_portkey(self, system_prompt: str, user_prompt: str) -> tuple[str, int, int, int, int]:
@@ -1388,6 +1537,7 @@ end"""
             input_tokens = usage.get('prompt_tokens', 0) or 0
             output_tokens = usage.get('completion_tokens', 0) or 0
             total_tokens = usage.get('total_tokens', 0) or (input_tokens + output_tokens)
+            self._last_provider_meta = {'model': data.get('model')}
             return data["choices"][0]["message"]["content"], input_tokens, output_tokens, total_tokens, 0
 
     # ------------------------------------------------------------------
@@ -1976,6 +2126,9 @@ Provide a concise markdown summary following the guidelines in your instructions
                     f"Points: {source_question.points}",
                     f"Stem: {source_question.text}",
                 ]
+                if source_question.description:
+                    lines.append(f"Description (Markdown, shown to the student beneath the stem):\n"
+                                 f"{source_question.description}")
                 choices = list(source_question.choices.all())
                 if choices:
                     lines.append("Current choices:")
@@ -2024,7 +2177,9 @@ Provide a concise markdown summary following the guidelines in your instructions
             "Generate the quiz questions now as a JSON array, following the format exactly. "
             "CRITICAL: every multiple_choice, multiple_answers, true_false, short_answer, and numerical "
             'question MUST include a non-empty "choices" array (each item: {"text": ..., "is_correct": ...}). '
-            "Only essay and code questions omit choices."
+            "Only essay and code questions omit choices. Each question may include an optional "
+            '"description" — it is shown to the student beneath the stem and rendered as Markdown, '
+            "so use Markdown there for highlighting (fenced code blocks, bold, inline code)."
         )
         result = await self._generate(system_prompt, user_prompt, label='quiz question generation')
         if result.success:
@@ -2032,7 +2187,8 @@ Provide a concise markdown summary following the guidelines in your instructions
             result.variant_id = variant_id
         return result
 
-    async def generate_personalized_quiz_questions(self, section, submission) -> GenerationResult:
+    async def generate_personalized_quiz_questions(self, section, submission,
+                                                   demo_files=None) -> GenerationResult:
         """Generate per-student quiz questions for one QuizGeneratedSection from the
         student's submission.
 
@@ -2053,7 +2209,8 @@ Provide a concise markdown summary following the guidelines in your instructions
             # whatever context exists.
             assignment = submission.assignment if submission is not None else self.assignment
             ctx = VariableContext(course=self.course, assignment=assignment,
-                                  submission=submission, section=section)
+                                  submission=submission, section=section,
+                                  demo_files=demo_files)
             instructor_text, _ = substitute_variables(section.systemPrompt, ctx)
             try:
                 language = (assignment.environment.language or '') if assignment else ''

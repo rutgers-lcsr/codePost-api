@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-from core.models import Course, Section
+from core.models import Course, Section, STUDENT_DOWNLOAD_STATES, STUDENT_VISIBLE_STATES
 
 from rest_framework.response import Response
 from rest_framework import status
@@ -50,9 +50,10 @@ def isRubricEditor(user, course):
 
 def isQuizGrader(user, course):
   """
-  Check if the user has the quiz-grader role in the course. Assignment graders do NOT
-  grade quizzes by default — instructors grant this role explicitly. (Course admins can
-  always grade quizzes; check isCourseAdmin separately.)
+  Check if the user has the explicit quiz-grader role in the course — the opt-in list
+  used when the course's gradersCanGradeQuizzes flag is off (by default the flag is on
+  and every grader can grade quizzes; see canGradeQuiz). (Course admins can always grade
+  quizzes; check isCourseAdmin separately.)
   """
   return course in user.quizGrader_courses.all()
 
@@ -70,6 +71,73 @@ def isCourseStaff(user, course):
 
 def isCourseMember(user, course):
   return isStudent(user, course) or isCourseStaff(user, course)
+
+# --- Assignment lifecycle predicates -------------------------------------------------
+# The single source of truth for what a student may do with an assignment, keyed off
+# Assignment.state (+ hideFrom). Callers must have already established the user is a
+# student of the course. State is checked first so the hideFrom query only runs for
+# assignments the student could otherwise access.
+
+def isAssignmentHiddenFromStudent(user, assignment):
+  return assignment.hideFrom.filter(students=user).exists()
+
+def studentCanSeeAssignment(user, assignment):
+  """visible/preview/published/closed: the assignment appears in the student console."""
+  return (assignment.state in STUDENT_VISIBLE_STATES
+          and not isAssignmentHiddenFromStudent(user, assignment))
+
+def studentCanDownloadAssignment(user, assignment):
+  """preview/published/closed: starter files are available."""
+  return (assignment.state in STUDENT_DOWNLOAD_STATES
+          and not isAssignmentHiddenFromStudent(user, assignment))
+
+def studentCanSubmitToAssignment(user, assignment):
+  """published only — and not past the deadline (derived close)."""
+  return (assignment.effective_state() == 'published'
+          and not isAssignmentHiddenFromStudent(user, assignment))
+
+# --- Feedback-axis predicates --------------------------------------------------------
+# The single source of truth for what a student may see of grading, keyed off
+# Assignment.feedbackStatus (hidden/live/per_student/released) + the orthogonal
+# hideGrades modifier. Callers must have already established the caller is the
+# submission's student / a course student.
+
+def feedbackOpenForSubmission(submission):
+  """Comments/rubric/feedback axis open for this submission's student.
+
+  live and released open unconditionally (released content views additionally require
+  isFinalized at their gates, as before); per_student opens exactly when THIS
+  submission is finalized."""
+  status = submission.assignment.feedbackStatus
+  if status in ('live', 'released'):
+    return True
+  if status == 'per_student':
+    return submission.isFinalized
+  return False
+
+def gradesVisibleForSubmission(submission):
+  """Numeric grades: feedback open AND not masked by hideGrades."""
+  return feedbackOpenForSubmission(submission) and not submission.assignment.hideGrades
+
+def testResultsVisibleForSubmission(submission):
+  """Full test results / autograder logs: live immediately; released/per_student only
+  once the submission is finalized (the pre-existing conjunction, per_student-aware)."""
+  status = submission.assignment.feedbackStatus
+  if status == 'live':
+    return True
+  return status in ('released', 'per_student') and submission.isFinalized
+
+def assignmentFeedbackOpen(assignment, user=None):
+  """Assignment-level feedback gate (rubric visibility, serializer choice).
+
+  live/released open for every student; per_student opens for a user once they have a
+  finalized submission (one bounded query, only on the per_student path)."""
+  status = assignment.feedbackStatus
+  if status in ('live', 'released'):
+    return True
+  if status == 'per_student' and user is not None:
+    return assignment.submissions.filter(students=user, isFinalized=True).exists()
+  return False
 
 def isSectionLeader(user, section):
   return user in section.leaders.all()

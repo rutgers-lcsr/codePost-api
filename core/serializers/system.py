@@ -10,6 +10,12 @@ class HealthCheckSerializer(serializers.Serializer):
     latency_ms = serializers.FloatField(allow_null=True, required=False)
 
 
+class DatabaseCheckSerializer(HealthCheckSerializer):
+    connections_current = serializers.IntegerField(allow_null=True, required=False)
+    connections_max_used = serializers.IntegerField(allow_null=True, required=False)
+    connections_limit = serializers.IntegerField(allow_null=True, required=False)
+
+
 class DiskCheckSerializer(HealthCheckSerializer):
     used_pct = serializers.FloatField(allow_null=True, required=False)
     free_gb = serializers.FloatField(allow_null=True, required=False)
@@ -26,7 +32,7 @@ class MigrationCheckSerializer(HealthCheckSerializer):
 class SystemHealthResponseSerializer(serializers.Serializer):
     checked_at = serializers.DateTimeField()
     overall = serializers.ChoiceField(choices=['ok', 'degraded', 'critical'])
-    database = HealthCheckSerializer()
+    database = DatabaseCheckSerializer()
     celery = CeleryCheckSerializer()
     cache = HealthCheckSerializer()
     migrations = MigrationCheckSerializer()

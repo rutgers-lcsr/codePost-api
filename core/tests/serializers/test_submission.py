@@ -177,7 +177,7 @@ class TestSerializer_StudentSubmissionSerializer(APITestCase):
     def test_grade_is_present_when_feedback_released_and_hide_grades_false(self):
         from core.serializers.submission import StudentSubmissionSerializer
         assignment = self.submission.assignment
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.hideGrades = False
         assignment.save()
 
@@ -187,7 +187,7 @@ class TestSerializer_StudentSubmissionSerializer(APITestCase):
     def test_grade_is_masked_when_hide_grades_true(self):
         from core.serializers.submission import StudentSubmissionSerializer
         assignment = self.submission.assignment
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.hideGrades = True
         assignment.save()
 
@@ -204,7 +204,7 @@ class TestSerializer_StudentConsoleDataSerializer(APITestCase):
     def test_grade_is_present_when_feedback_released_and_hide_grades_false(self):
         from core.serializers.submission import StudentConsoleDataSerializer
         assignment = self.submission.assignment
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.hideGrades = False
         assignment.save()
 
@@ -214,7 +214,7 @@ class TestSerializer_StudentConsoleDataSerializer(APITestCase):
     def test_grade_is_masked_when_hide_grades_true(self):
         from core.serializers.submission import StudentConsoleDataSerializer
         assignment = self.submission.assignment
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.hideGrades = True
         assignment.save()
 

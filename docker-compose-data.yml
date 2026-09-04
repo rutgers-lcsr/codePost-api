@@ -11,6 +11,11 @@ services:
         environment:
             - CELERY_BROKER_URL=redis://codepost-redis:6379
             - FLOWER_BASIC_AUTH=${API_USER}:${API_PASSWORD}
+            # Flower monitors the broker and has no DB config. Django 6.1's
+            # run_checks() connects to the default DB (JSONField support check),
+            # which crashes flower on its unwritable sqlite fallback — skip
+            # celery's Django model checks here.
+            - CELERY_SKIP_CHECKS=true
         depends_on:
             - codepost-redis
         labels:
@@ -69,6 +74,13 @@ services:
             - --innodb_page_size=16k
             - --innodb_buffer_pool_size=10G
             - --innodb_log_file_size=256M
+            - --max_connections=1000
+            - --wait_timeout=600
+            - --interactive_timeout=3600
+            # Reserved listener so the healthcheck still succeeds during connection
+            # exhaustion — otherwise autoheal restarts a full-but-healthy DB.
+            - --extra_port=3307
+            - --extra_max_connections=3
         labels:
             - "autoheal=true"
         healthcheck:
@@ -79,6 +91,7 @@ services:
                     "ping",
                     "-h",
                     "codepost-database",
+                    "--port=3307",
                     "--silent",
                     "--user=root",
                     "--password=${ROOT_DATABASE_PASSWORD}",

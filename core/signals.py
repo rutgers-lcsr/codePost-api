@@ -123,11 +123,14 @@ def auto_generate_personalized_quiz(sender, instance, created, **kwargs):
         return
 
     try:
-        # Draft quizzes never generate automatically (the task applies the same filter) —
-        # publishing catches missing sets up via QuizViewSet.perform_update. Without this,
-        # every upload would spend AI credits preparing a quiz nobody may ever publish.
+        # Draft and manual-generation quizzes never generate automatically (the task
+        # applies the same filter) — publishing catches missing sets up via
+        # QuizViewSet.perform_update; manual quizzes generate only via staff actions or
+        # the scheduled generationDate run. Without this, every upload would spend AI
+        # credits preparing a quiz nobody may ever publish.
         if not instance.assignment.quizzes.filter(
-                isPublished=True, generatedSections__isnull=False).exists():
+                isPublished=True, manualGeneration=False,
+                generatedSections__isnull=False).exists():
             return
         # Import here to avoid circular imports.
         from core.tasks import generate_personalized_quiz_sets
@@ -158,6 +161,10 @@ def backfill_generated_sets_on_section_created(sender, instance, created, **kwar
     if not created:
         return
     if not instance.quiz.isPublished:
+        return
+    # Manual-generation quizzes never backfill automatically — staff trigger generation
+    # themselves (or via the scheduled generationDate run).
+    if instance.quiz.manualGeneration:
         return
     try:
         from core.tasks import backfill_personalized_quiz_sets

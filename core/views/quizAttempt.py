@@ -28,7 +28,7 @@ from core.serializers.studentQuiz import (
     StudentQuizSerializer,
     staff_reveal_context,
 )
-from core.services import quiz_grading
+from core.services import quiz_grading, seb
 from core.services.audit import record_audit_event
 
 
@@ -89,7 +89,8 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     qs = super().get_queryset()
     if getattr(self, 'action', None) == 'retrieve':
       qs = qs.prefetch_related(
-          Prefetch('responses', queryset=QuizResponse.objects.select_related('question', 'generatedQuestion')))
+          Prefetch('responses', queryset=QuizResponse.objects.select_related(
+              'question', 'generatedQuestion', 'gradedBy')))
     return qs
 
   def _attempt_context(self, attempt):
@@ -106,8 +107,9 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     attempt = self.get_object()
     # Quiz graders / admins reading someone else's attempt get the grading projection
     # (student identity, answers, scores, and the answer key revealed); the owner keeps the
-    # policy-gated student view. Assignment-only graders are NOT quiz graders — the answer
-    # key must not leak to them (mirrors the attempts/results list gate).
+    # policy-gated student view. canGradeQuiz decides who that is: all graders by default,
+    # or only the quizGraders role when the course turns gradersCanGradeQuizzes off
+    # (mirrors the attempts/results list gate).
     if request.user != attempt.student and canGradeQuiz(request.user, attempt.quiz.course):
       return Response(StaffQuizAttemptSerializer(
           attempt, context=staff_reveal_context(request)).data)
@@ -180,6 +182,10 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
             quiz=quiz, student=user, attemptNumber=used + 1,
             startedAt=started, deadline=deadline, status='in_progress',
             closeBypassed=bypass,
+            # Reaching create on a SEB-required quiz means the permission layer verified
+            # the Safe Exam Browser signature — unless the student is SEB-exempt, whose
+            # attempts stay visibly unverified for staff.
+            lockdownVerified=quiz.requireSebBrowser and not seb.is_exempt(user, quiz),
         )
         quiz_grading.build_attempt_responses(attempt)
     except IntegrityError:
@@ -367,6 +373,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
         return Response({'detail': 'This answer is already running.'},
                         status=status.HTTP_409_CONFLICT)
 
+    previous = response.codeExecution
     response.codeExecution = {
         'status': 'running',
         'requestedBy': request.user.email,
@@ -375,7 +382,14 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     response.save(update_fields=['codeExecution', 'modified'])
 
     from autograder.run import RunQuizResponseCode
-    RunQuizResponseCode.delay(response.id)
+    try:
+      RunQuizResponseCode.delay(response.id)
+    except Exception:
+      # Broker down: undo the 'running' marker (queryset update — under eager Celery the
+      # task may already have written the row, and save() from this instance would
+      # clobber it) and let DependencyUnavailableMiddleware answer 503.
+      QuizResponse.objects.filter(pk=response.pk).update(codeExecution=previous)
+      raise
     return Response(StaffQuizAttemptSerializer(
         attempt, context=staff_reveal_context(request)).data)
 
@@ -429,8 +443,66 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     # Review disabled: submitted attempts can't be reopened, so the review history is empty.
     if not quiz.allowSubmissionReview:
       attempts = attempts.exclude(status='submitted')
-    data = [StudentQuizAttemptSerializer(a, context=self._attempt_context(a)).data for a in attempts]
+    # A SEB-required quiz's in-progress questions are only readable from inside SEB —
+    # otherwise a second, normal browser could mine them mid-quiz. Submitted attempts
+    # (review) stay readable anywhere.
+    hide_in_progress = quiz.requireSebBrowser and seb.verify_seb_request(request, quiz) is not None
+    data = []
+    for a in attempts:
+      serialized = StudentQuizAttemptSerializer(a, context=self._attempt_context(a)).data
+      if hide_in_progress and a.status == 'in_progress':
+        serialized['responses'] = []
+      data.append(serialized)
     return Response(data)
+
+  @extend_schema(
+      request=inline_serializer('SebLaunchRequest', {'quiz': serializers.IntegerField()}),
+      responses=inline_serializer('SebLaunchResponse', {
+          'sebUrl': serializers.CharField(),
+          'configUrl': serializers.CharField(),
+          'expiresAt': serializers.DateTimeField(),
+      }),
+  )
+  @action(detail=False, methods=['POST'])
+  def sebLaunch(self, request):
+    """Create a one-click Safe Exam Browser launch for ``quiz``.
+
+    Called from the student's NORMAL browser (the gate screen): generates a .seb config
+    whose startURL carries a one-time token, so SEB's fresh session can authenticate and
+    land on the take route. Returns the seb(s):// URL that opens SEB directly plus the
+    plain config URL as a download fallback.
+    """
+    from datetime import timedelta as _td
+    from core.models import OneTimeToken, QuizSebLaunch
+    quiz_id = _require_int(request.data.get('quiz'))
+    if quiz_id is None:
+      return Response({'detail': 'A valid quiz id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    quiz = get_object_or_404(Quiz, pk=quiz_id)
+    if not isStudent(request.user, quiz.course):
+      return Response({'detail': 'Only enrolled students can take this quiz.'},
+                      status=status.HTTP_403_FORBIDDEN)
+    if not quiz.requireSebBrowser:
+      return Response({'detail': 'This quiz does not require Safe Exam Browser.'},
+                      status=status.HTTP_400_BAD_REQUEST)
+
+    # 10 minutes to get SEB installed/opened (cold starts are slow); the auth token is
+    # single-use, but the launch's Config Key stays valid for the whole quiz session.
+    ott = OneTimeToken.objects.create(
+        user=request.user, expires_at=timezone.now() + _td(minutes=10),
+        course=quiz.course)
+    config = seb.build_seb_config(seb.build_launch_start_url(quiz, ott.token))
+    launch = QuizSebLaunch.objects.create(
+        quiz=quiz, student=request.user, token=ott,
+        configKey=seb.compute_config_key(config),
+        configPlist=seb.config_to_plist(config),
+        expiresAt=timezone.now() + _td(hours=24),
+    )
+    config_url = request.build_absolute_uri(f'/quizzes/{quiz.pk}/sebConfig/?launch={ott.token}')
+    # http → seb / https → sebs: the protocol swap that makes the OS hand the URL to SEB,
+    # which fetches the config over the corresponding http(s) and starts the exam.
+    seb_url = config_url.replace('https://', 'sebs://', 1).replace('http://', 'seb://', 1)
+    return Response({'sebUrl': seb_url, 'configUrl': config_url,
+                     'expiresAt': ott.expires_at.isoformat()})
 
   @extend_schema(
       parameters=[OpenApiParameter(name='course', type=int, location=OpenApiParameter.QUERY, required=True)],
@@ -468,7 +540,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
       # see the card and enter the code (attached quizzes already surface once released).
       code_unlockable = bool(quiz.accessCode) and reason in quiz_grading.LATE_BYPASSABLE_REASONS
       if quiz.assignment_id is not None:
-        if quiz.assignment.isReleased or attempted:
+        if quiz.assignment.state in ('published', 'closed') or attempted:
           result.append(quiz)
       elif is_open or attempted or code_unlockable:
         result.append(quiz)

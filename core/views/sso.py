@@ -11,6 +11,7 @@ from core.models import Organization, User
 from core.utils import get_or_create_user
 import requests
 import secrets
+import json
 import urllib.parse
 import xml.etree.ElementTree as ET
 import logging
@@ -41,7 +42,7 @@ def get_organization_by_email_domain(domain, **filters):
 
 
 # Helper to get service URL
-def get_service_url(request, provider, org_id=None):
+def get_service_url(request, provider, org_id=None, next_path=None):
     # Construct the callback URL dynamically based on the request's host
     # e.g. https://api.codepost.io/auth/sso/callback/CAS/?org=123
     host = request.get_host()
@@ -53,6 +54,13 @@ def get_service_url(request, provider, org_id=None):
     url = f"{scheme}://{host}/auth/sso/callback/{provider}/"
     if org_id:
         url += f"?org={org_id}"
+    if next_path:
+        # OAuth consent flow (see core/views/agent_login.py): the local
+        # /o/authorize URL rides the CAS service URL so the callback can finish
+        # with a session instead of a SPA JWT redirect. CAS requires the login
+        # and validation legs to use a byte-identical service URL — both call
+        # sites build it here, threading the raw incoming value.
+        url += f"&next={urllib.parse.quote(next_path, safe='')}"
     return url
 
 @extend_schema(
@@ -108,8 +116,11 @@ def initiate_sso(request, provider):
         if not cas_url:
             return JsonResponse({'error': 'CAS Server URL is missing from config'}, status=500)
             
-        # Pass org_id to service URL so we can retrieve config on callback
-        service_url = get_service_url(request, provider, organization.id)
+        # Pass org_id to service URL so we can retrieve config on callback.
+        # A validated `next` (OAuth consent flow) rides along too.
+        from core.views.agent_login import validate_next
+        next_path = validate_next(request.query_params.get('next'))
+        service_url = get_service_url(request, provider, organization.id, next_path)
         encoded_service = urllib.parse.quote(service_url)
         
         # USE PROVIDED URL AS LOGIN ENDPOINT DIRECTLY (per user request)
@@ -126,7 +137,14 @@ def initiate_sso(request, provider):
         scopes = "openid email profile"
         redirect_uri = get_service_url(request, provider, organization.id)
         state = secrets.token_urlsafe(32)
-        cache.set(f"sso_state:{state}", str(organization.id), timeout=600)  # 10 min TTL
+        from core.views.agent_login import validate_next
+        next_path = validate_next(request.query_params.get('next'))
+        # JSON so the OAuth consent flow's `next` can ride the state (the
+        # redirect_uri must stay constant for these providers). The callback
+        # keeps a plain-string fallback for entries cached before this change.
+        cache.set(f"sso_state:{state}",
+                  json.dumps({"org": str(organization.id), "next": next_path}),
+                  timeout=600)  # 10 min TTL
         
         auth_endpoint = ""
         
@@ -201,6 +219,8 @@ def sso_callback(request, provider):
 
     sso_config = organization.sso_config or {}
     email = None
+    # OAuth consent flow: set by the CAS query param or the provider-state JSON.
+    oauth_next = None
 
     # --- CAS VALIDATION ---
     if provider == 'CAS':
@@ -221,8 +241,10 @@ def sso_callback(request, provider):
         elif cas_version == '1':
              validate_path = '/validate'
              
-        # Reconstruct the EXACT service URL used in initiation (including query params)
-        service_url = get_service_url(request, provider, org_id)
+        # Reconstruct the EXACT service URL used in initiation (including query
+        # params — the raw `next` must round-trip byte-for-byte for CAS).
+        service_url = get_service_url(request, provider, org_id,
+                                      request.query_params.get('next'))
         
         # DERIVE BASE URL FOR VALIDATION
         # If user provided default '/login' URL, strip it to find base.
@@ -286,10 +308,22 @@ def sso_callback(request, provider):
         received_state = request.query_params.get('state')
         if not received_state:
             return error_redirect('Missing state parameter')
-        cached_org_id = cache.get(f"sso_state:{received_state}")
-        if cached_org_id is None:
+        cached_state = cache.get(f"sso_state:{received_state}")
+        if cached_state is None:
             return error_redirect('Invalid or expired state parameter')
         cache.delete(f"sso_state:{received_state}")  # One-time use
+        try:
+            state_data = json.loads(cached_state)
+        except (TypeError, ValueError):
+            state_data = None
+        if isinstance(state_data, dict):
+            cached_org_id = state_data.get('org')
+            oauth_next = state_data.get('next')
+        else:
+            # Entry cached before the JSON format landed. Note a bare numeric
+            # org id ("123") parses as JSON too — hence the isinstance check,
+            # not just the except.
+            cached_org_id, oauth_next = cached_state, None
         if str(org_id) != cached_org_id:
             return error_redirect('State parameter does not match organization')
 
@@ -345,26 +379,25 @@ def sso_callback(request, provider):
             # Extract Email logic ...
             if provider == 'GOOGLE':
                  userinfo_resp = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', 
-                                    headers={'Authorization': f'Bearer {access_token}'})
+                                    headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
                  if userinfo_resp.status_code == 200:
                      email = userinfo_resp.json().get('email')
                      
             elif provider == 'AZURE':
                  graph_resp = requests.get('https://graph.microsoft.com/v1.0/me',
-                                    headers={'Authorization': f'Bearer {access_token}'})
+                                    headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
                  if graph_resp.status_code == 200:
                      data = graph_resp.json()
                      email = data.get('mail') or data.get('userPrincipalName')
 
             elif provider == 'OIDC':
                  if userinfo_endpoint:
-                     u_resp = requests.get(userinfo_endpoint, headers={'Authorization': f'Bearer {access_token}'})
+                     u_resp = requests.get(userinfo_endpoint, headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
                      if u_resp.status_code == 200:
                          email = u_resp.json().get('email')
             
             if not email and id_token:
                 try:
-                    import json
                     import base64
                     parts = id_token.split('.')
                     if len(parts) > 1:
@@ -399,6 +432,25 @@ def sso_callback(request, provider):
     
     if not user:
          return error_redirect('Failed to create/retrieve user locally')
+
+    # OAuth consent flow (agent connections): when a validated local
+    # /o/authorize `next` rode the SSO round-trip, finish with a short-lived
+    # Django session on the API origin and hand the browser back to the consent
+    # page. Everything below this block — the normal SPA JWT redirect — is
+    # untouched when no `next` is present.
+    from core.views.agent_login import (SESSION_LIFETIME_SECONDS, validate_next)
+
+    if provider == 'CAS':
+        oauth_next = request.query_params.get('next')
+    oauth_next = validate_next(oauth_next)
+    if oauth_next:
+        from django.contrib.auth import login as auth_login
+        # Explicit backend: the user was resolved from the SSO assertion, not
+        # via authenticate(), so Django can't infer one.
+        auth_login(request, user,
+                   backend='django.contrib.auth.backends.ModelBackend')
+        request.session.set_expiry(SESSION_LIFETIME_SECONDS)
+        return HttpResponseRedirect(oauth_next)
 
     # Generate a short-lived access token to hand off via the redirect URL. The
     # refresh token is NOT put in the URL — the frontend exchanges this access

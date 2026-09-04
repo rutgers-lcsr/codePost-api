@@ -20,6 +20,15 @@ class JwtOttResponseSerializer(serializers.Serializer):
     expires_at = serializers.IntegerField()
 
 
+class ExchangeOTTRequestSerializer(serializers.Serializer):
+    token = serializers.CharField()
+
+
+class ExchangeOTTResponseSerializer(serializers.Serializer):
+    token = serializers.CharField(help_text="Short-lived access token.")
+    refresh = serializers.CharField(help_text="Rotating refresh token.")
+
+
 class ImpersonateRequestSerializer(serializers.Serializer):
     username = serializers.CharField(required=False)
     email = serializers.EmailField(required=False)

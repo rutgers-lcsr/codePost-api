@@ -1,7 +1,8 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from core.models import CourseAPIKey
+from core.models import COURSE_API_KEY_SCOPE_CHOICES, CourseAPIKey
 
 
 class CourseAPIKeyReadSerializer(serializers.ModelSerializer):
@@ -16,6 +17,7 @@ class CourseAPIKeyReadSerializer(serializers.ModelSerializer):
             "name",
             "keyPrefix",
             "isActive",
+            "scope",
             "lastUsedAt",
             "createdBy",
             "created",
@@ -33,6 +35,10 @@ class CourseAPIKeyCreateSerializer(serializers.Serializer):
     """Input serializer for creating a new course API key."""
 
     name = serializers.CharField(max_length=128)
+    # Defaults to the safest option: a key that can only read. Agent tools above
+    # a key's scope are never advertised to it, so this is the real guardrail.
+    scope = serializers.ChoiceField(
+        choices=COURSE_API_KEY_SCOPE_CHOICES, default="read", required=False)
 
 
 class CourseAPIKeyCreateResponseSerializer(serializers.Serializer):
@@ -42,5 +48,34 @@ class CourseAPIKeyCreateResponseSerializer(serializers.Serializer):
     name = serializers.CharField()
     key = serializers.CharField(help_text="The full API key. This is only shown once.")
     keyPrefix = serializers.CharField()
+    scope = serializers.CharField()
     createdBy = serializers.CharField()
     created = serializers.DateTimeField()
+
+
+class PendingAgentActionSerializer(serializers.ModelSerializer):
+    """Dashboard rows for Tier-3 agent confirmations. The plan describes a
+    destructive operation in instructor-only detail, so this serializer must
+    only ever be reachable by a human course admin."""
+
+    expiresAt = serializers.DateTimeField(source="expires_at", read_only=True)
+    requestedBy = serializers.CharField(source="requested_by.username",
+                                        read_only=True, allow_null=True)
+    # The legacy `jsonfield` package's field is opaque to DRF (it would render
+    # the dict as a Python-repr string); surface the real object.
+    plan = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+
+    def get_plan(self, obj):
+        return obj.plan if isinstance(obj.plan, dict) else {}
+
+    @extend_schema_field(serializers.ChoiceField(choices=["pending", "approved"]))
+    def get_status(self, obj):
+        return "approved" if obj.approved_at is not None else "pending"
+
+    class Meta:
+        from core.models import PendingAgentAction
+        model = PendingAgentAction
+        fields = ["id", "tool", "plan", "status", "expiresAt", "requestedBy",
+                  "created"]
+        read_only_fields = fields

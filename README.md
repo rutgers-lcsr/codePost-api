@@ -194,7 +194,7 @@ docker-compose --env-file .env -f docker-compose.yml up -d --build
 
 #### 7) Verify deployment
 
-- API health check: `https://<api-domain>/health-check`
+- API health check: `https://<api-domain>/health-check` (liveness) and `https://<api-domain>/health-check/ready/` (readiness: database + Redis, 503 when either is down)
 - Frontend loads over HTTPS
 - Login succeeds in UI
 - Background jobs run successfully on worker
@@ -348,7 +348,7 @@ At startup, API containers run `init.sh`, which:
 After deploy:
 
 - Data VM: DB and Redis containers healthy
-- Backend VM: `https://<api-domain>/health-check` reachable
+- Backend VM: `https://<api-domain>/health-check/ready/` returns 200
 - Worker VM: worker containers running and stable
 - Frontend VM: UI loads and can make authenticated API requests
 

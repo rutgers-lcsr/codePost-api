@@ -153,7 +153,7 @@ class TestAssignmentCapabilitiesEndpoint(APITestCase):
 
     def test_student_sees_visible_assignment(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.save()
         try:
             response = self._get(self.student)
@@ -163,12 +163,12 @@ class TestAssignmentCapabilitiesEndpoint(APITestCase):
             self.assertFalse(caps['edit_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_student_cannot_see_hidden_assignment(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = False
+            self.assignment.state = 'draft'
             self.assignment.save()
         response = self._get(self.student)
         # Student is denied access to a hidden assignment at the permission level
@@ -581,44 +581,43 @@ class TestAssignmentCapsExtended(APITestCase):
 
     def test_student_no_rubric_before_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.state = 'preview'
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
             self.assertFalse(caps['view_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_student_sees_rubric_after_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
-            self.assignment.feedbackReleased = True
+            self.assignment.state = 'preview'
+            self.assignment.feedbackStatus = 'released'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
             self.assertTrue(caps['view_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
-                self.assignment.isVisible = False
+                self.assignment.feedbackStatus = 'hidden'
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_student_sees_rubric_live_feedback(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
-            self.assignment.liveFeedbackMode = True
+            self.assignment.state = 'preview'
+            self.assignment.feedbackStatus = 'live'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
             self.assertTrue(caps['view_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.liveFeedbackMode = False
-                self.assignment.isVisible = False
+                self.assignment.feedbackStatus = 'hidden'
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     # -- download_assignment_files --
@@ -628,14 +627,14 @@ class TestAssignmentCapsExtended(APITestCase):
 
     def test_student_can_download_visible_assignment_files(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilitiesMap']
             self.assertTrue(caps['download_assignment_files'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     # -- manage_global_templates --
@@ -671,7 +670,7 @@ class TestAssignmentCapsExtended(APITestCase):
 
     def test_student_upload_when_allowed(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'published'
             self.assignment.allowStudentUpload = True
             self.assignment.save()
         try:
@@ -680,12 +679,31 @@ class TestAssignmentCapsExtended(APITestCase):
         finally:
             with factory.django.mute_signals(post_save):
                 self.assignment.allowStudentUpload = False
-                self.assignment.isVisible = False
+                self.assignment.state = 'preview'
                 self.assignment.save()
+
+    def test_student_no_upload_before_published(self):
+        # preview/visible: the assignment is announced (maybe downloadable) but not open —
+        # allowStudentUpload alone must not grant upload. This was the original exploit.
+        for state in ('draft', 'visible', 'preview'):
+            with factory.django.mute_signals(post_save):
+                self.assignment.state = state
+                self.assignment.allowStudentUpload = True
+                self.assignment.save()
+            try:
+                from core.permissions.capabilities import compute_assignment_capabilities
+                caps = compute_assignment_capabilities(self.student, self.assignment)
+                self.assertFalse(caps['upload_submission'],
+                                 f"upload_submission must be False in state={state}")
+            finally:
+                with factory.django.mute_signals(post_save):
+                    self.assignment.allowStudentUpload = False
+                    self.assignment.state = 'preview'
+                    self.assignment.save()
 
     def test_student_no_upload_when_disabled(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.allowStudentUpload = False
             self.assignment.save()
         try:
@@ -693,7 +711,7 @@ class TestAssignmentCapsExtended(APITestCase):
             self.assertFalse(caps['upload_submission'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     # -- Archived course blocks assignment edits --
@@ -869,34 +887,33 @@ class TestSubmissionCapsExtended(APITestCase):
     # -- view_feedback depends on release state --
     def test_student_no_feedback_before_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         caps = self._get(self.student).data['capabilities']
         self.assertFalse(caps['view_feedback'])
 
     def test_student_feedback_after_release(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = True
+            self.assignment.feedbackStatus = 'released'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilities']
             self.assertTrue(caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.save()
 
     def test_student_feedback_live_mode(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.liveFeedbackMode = True
+            self.assignment.feedbackStatus = 'live'
             self.assignment.save()
         try:
             caps = self._get(self.student).data['capabilities']
             self.assertTrue(caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.liveFeedbackMode = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.save()
 
     def test_grader_always_sees_feedback(self):
@@ -952,6 +969,8 @@ class TestSubmissionCapsExtended(APITestCase):
     # -- manage_partners --
     def test_student_manage_partners_when_allowed(self):
         with factory.django.mute_signals(post_save):
+            # Partner management requires an assignment the student can submit to.
+            self.assignment.state = 'published'
             self.assignment.allowStudentUploadWithPartners = True
             self.assignment.save()
         try:
@@ -959,6 +978,7 @@ class TestSubmissionCapsExtended(APITestCase):
             self.assertTrue(caps['manage_partners'])
         finally:
             with factory.django.mute_signals(post_save):
+                self.assignment.state = 'preview'
                 self.assignment.allowStudentUploadWithPartners = False
                 self.assignment.save()
 
@@ -1177,7 +1197,7 @@ class TestCourseSettingsCombinations(APITestCase):
     # -- archived + student upload: blocked even when allowed --
     def test_archived_blocks_student_upload(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.allowStudentUpload = True
             self.assignment.save()
             self.course.archived = True
@@ -1188,7 +1208,7 @@ class TestCourseSettingsCombinations(APITestCase):
         finally:
             with factory.django.mute_signals(post_save):
                 self.assignment.allowStudentUpload = False
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
                 self.course.archived = False
                 self.course.save()
@@ -1209,12 +1229,11 @@ class TestCourseSettingsCombinations(APITestCase):
                 self.course.archived = False
                 self.course.save()
 
-    # -- feedbackReleased + liveFeedbackMode both off: student can't see feedback or rubric --
+    # -- feedback hidden: student can't see feedback or rubric --
     def test_no_feedback_modes_blocks_student(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.state = 'preview'
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         try:
             caps = self._get_assignment(self.student).data['capabilitiesMap']
@@ -1223,15 +1242,14 @@ class TestCourseSettingsCombinations(APITestCase):
             self.assertFalse(sub_caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
-    # -- feedbackReleased + liveFeedbackMode both on: student can see both --
+    # -- live feedback: student can see rubric and feedback --
     def test_both_feedback_modes_on(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
-            self.assignment.feedbackReleased = True
-            self.assignment.liveFeedbackMode = True
+            self.assignment.state = 'preview'
+            self.assignment.feedbackStatus = 'live'
             self.assignment.save()
         try:
             caps = self._get_assignment(self.student).data['capabilitiesMap']
@@ -1240,9 +1258,8 @@ class TestCourseSettingsCombinations(APITestCase):
             self.assertTrue(sub_caps['view_feedback'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
-                self.assignment.liveFeedbackMode = False
-                self.assignment.isVisible = False
+                self.assignment.feedbackStatus = 'hidden'
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
 
@@ -1588,7 +1605,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
 
     def test_download_student_allowed(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.isVisible = True
+            self.assignment.state = 'preview'
             self.assignment.save()
         try:
             url = f'/assignments/{self.assignment.id}/download/'
@@ -1597,7 +1614,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
             self.assertIn(resp.status_code, [status.HTTP_200_OK, status.HTTP_204_NO_CONTENT])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.isVisible = False
+                self.assignment.state = 'draft'
                 self.assignment.save()
 
     def test_download_grader_allowed(self):
@@ -1647,8 +1664,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
 
     def test_checkPermission_student_filesOnly_when_no_feedback(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = False
-            self.assignment.liveFeedbackMode = False
+            self.assignment.feedbackStatus = 'hidden'
             self.assignment.save()
         url = f'/submissions/{self.submission.id}/checkPermission/'
         resp = self._client_for(self.student).get(url)
@@ -1656,7 +1672,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
 
     def test_checkPermission_student_full_when_feedback_released(self):
         with factory.django.mute_signals(post_save):
-            self.assignment.feedbackReleased = True
+            self.assignment.feedbackStatus = 'released'
             self.assignment.save()
         try:
             url = f'/submissions/{self.submission.id}/checkPermission/'
@@ -1664,7 +1680,7 @@ class TestCapabilityEnforcementOnViews(APITestCase):
             self.assertFalse(resp.data['filesOnly'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.assignment.feedbackReleased = False
+                self.assignment.feedbackStatus = 'hidden'
                 self.assignment.save()
 
     # -- email: requires manage_roster (admin only) --
@@ -1683,3 +1699,129 @@ class TestCapabilityEnforcementOnViews(APITestCase):
             'template': 'generic',
         })
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestAssignmentLifecycleCaps(APITestCase):
+    """Per-state capability matrix for the assignment lifecycle:
+    see/download/submit per draft/visible/preview/published/closed/archived."""
+
+    # state -> (view_assignment, download_assignment_files, upload_submission)
+    MATRIX = {
+        'draft':     (False, False, False),
+        'visible':   (True,  False, False),
+        'preview':   (True,  True,  False),
+        'published': (True,  True,  True),
+        'closed':    (True,  True,  False),
+        'archived':  (False, False, False),
+    }
+
+    @classmethod
+    def setUpTestData(cls):
+        with factory.django.mute_signals(post_save):
+            cls.org = OrganizationFactory(name='lifecycleorg')
+            cls.course = CourseFactory(name='cs777', organization=cls.org)
+            cls.admin = cls.course.courseAdmins.first()
+            cls.grader = GraderFactory(course='cs777', organization=cls.org)
+            cls.course.graders.add(cls.grader)
+            cls.student = UserFactory(role='student', course='cs777', organization=cls.org)
+            cls.course.students.add(cls.student)
+            cls.assignment = AssignmentFactory(
+                name='hw-lifecycle', course=cls.course, allowStudentUpload=True)
+
+    def _caps(self, user):
+        from core.permissions.capabilities import compute_assignment_capabilities
+        return compute_assignment_capabilities(user, self.assignment)
+
+    def test_student_matrix(self):
+        for state, (see, download, upload) in self.MATRIX.items():
+            with factory.django.mute_signals(post_save):
+                self.assignment.state = state
+                self.assignment.save()
+            caps = self._caps(self.student)
+            self.assertEqual(caps['view_assignment'], see, f"view in {state}")
+            self.assertEqual(caps['download_assignment_files'], download, f"download in {state}")
+            self.assertEqual(caps['upload_submission'], upload, f"upload in {state}")
+
+    def test_derived_close_blocks_upload(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        with factory.django.mute_signals(post_save):
+            self.assignment.state = 'published'
+            self.assignment.allowLateUploads = False
+            self.assignment.uploadDueDate = timezone.now() - timedelta(hours=1)
+            self.assignment.save()
+        caps = self._caps(self.student)
+        self.assertFalse(caps['upload_submission'])
+        self.assertTrue(caps['download_assignment_files'])  # closed still downloads
+        self.assertEqual(self.assignment.effective_state(), 'closed')
+
+    def test_staff_unaffected_by_state(self):
+        for state in self.MATRIX:
+            with factory.django.mute_signals(post_save):
+                self.assignment.state = state
+                self.assignment.save()
+            for user in (self.grader, self.admin):
+                caps = self._caps(user)
+                self.assertTrue(caps['view_assignment'], f"staff view in {state}")
+                self.assertTrue(caps['download_assignment_files'], f"staff download in {state}")
+
+    def test_endpoint_403s_for_student_on_draft_and_archived(self):
+        client = APIClient()
+        client.force_authenticate(user=self.student)
+        for state in ('draft', 'archived'):
+            with factory.django.mute_signals(post_save):
+                self.assignment.state = state
+                self.assignment.save()
+            response = client.get(f'/assignments/{self.assignment.id}/capabilities/')
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, state)
+
+
+class TestAssignmentHideFromGate(APITestCase):
+    """Server-side hideFrom enforcement: a student in a hidden section loses see,
+    download, and upload — regardless of state. Other students and staff unaffected."""
+
+    @classmethod
+    def setUpTestData(cls):
+        with factory.django.mute_signals(post_save):
+            cls.org = OrganizationFactory(name='hidefromorg')
+            cls.course = CourseFactory(name='cs888', organization=cls.org)
+            cls.admin = cls.course.courseAdmins.first()
+            cls.grader = GraderFactory(course='cs888', organization=cls.org)
+            cls.course.graders.add(cls.grader)
+            # CourseFactory already populates a student roster (count 0..1 active).
+            students = list(cls.course.students.all())
+            cls.hidden_student, cls.other_student = students[0], students[1]
+            cls.assignment = AssignmentFactory(
+                name='hw-hidefrom', course=cls.course,
+                state='published', allowStudentUpload=True)
+        from core.tests.factories import SectionFactory
+        section = SectionFactory(course=cls.course, name='P99')
+        section.students.add(cls.hidden_student)
+        cls.assignment.hideFrom.add(section)
+
+    def _caps(self, user):
+        from core.permissions.capabilities import compute_assignment_capabilities
+        return compute_assignment_capabilities(user, self.assignment)
+
+    def test_hidden_section_student_loses_everything(self):
+        caps = self._caps(self.hidden_student)
+        self.assertFalse(caps['view_assignment'])
+        self.assertFalse(caps['download_assignment_files'])
+        self.assertFalse(caps['upload_submission'])
+
+        client = APIClient()
+        client.force_authenticate(user=self.hidden_student)
+        response = client.get(f'/assignments/{self.assignment.id}/capabilities/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_section_student_unaffected(self):
+        caps = self._caps(self.other_student)
+        self.assertTrue(caps['view_assignment'])
+        self.assertTrue(caps['download_assignment_files'])
+        self.assertTrue(caps['upload_submission'])
+
+    def test_staff_unaffected(self):
+        for user in (self.grader, self.admin):
+            caps = self._caps(user)
+            self.assertTrue(caps['view_assignment'])
+            self.assertTrue(caps['download_assignment_files'])

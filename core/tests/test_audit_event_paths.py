@@ -241,6 +241,9 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_attempt_autosubmitted(self):
         self._assert_quiz_event('quiz_attempt_autosubmitted')
 
+    def test_quiz_attempt_seb_blocked(self):
+        self._assert_quiz_event('quiz_attempt_seb_blocked')
+
     def test_quiz_attempts_reset(self):
         self._assert_quiz_event('quiz_attempts_reset')
 
@@ -262,6 +265,65 @@ class TestRecordAuditEventAllTypes(TestCase):
     def test_quiz_generated_sets_published(self):
         self._assert_quiz_event('quiz_generated_sets_published')
 
+    def test_assignment_feedback_changed(self):
+        event = record_audit_event(
+            course=self.course, event_type='assignment_feedback_changed',
+            user=self.user, assignment=self.assignment,
+            meta={'from': 'hidden', 'to': 'released'},
+        )
+        self._assert_event(event, 'assignment_feedback_changed', self.user)
+        self.assertEqual(event.assignment_id, self.assignment.id)
+
+    def test_assignment_state_changed(self):
+        event = record_audit_event(
+            course=self.course, event_type='assignment_state_changed',
+            user=self.user, assignment=self.assignment,
+            meta={'from': 'draft', 'to': 'published'},
+        )
+        self._assert_event(event, 'assignment_state_changed', self.user)
+        self.assertEqual(event.assignment_id, self.assignment.id)
+        self.assertEqual(event.meta, {'from': 'draft', 'to': 'published'})
+
+    def test_agent_write(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_write',
+            user=self.user,
+            meta={'tool': 'codepost_create_assignment', 'origin': 'mcp',
+                  'args': {'name': 'HW9'}, 'applied': True},
+        )
+        self._assert_event(event, 'agent_write', self.user)
+        self.assertEqual(event.meta['tool'], 'codepost_create_assignment')
+
+    def test_agent_write_denied(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_write_denied',
+            user=self.user,
+            meta={'tool': 'codepost_set_assignment_stage', 'origin': 'mcp',
+                  'args': {}, 'applied': False, 'deniedCode': 'COURSE_ARCHIVED'},
+        )
+        self._assert_event(event, 'agent_write_denied', self.user)
+        self.assertEqual(event.meta['deniedCode'], 'COURSE_ARCHIVED')
+
+    def test_agent_action_approved(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_action_approved',
+            user=self.user,
+            meta={'tool': 'codepost_delete_resource', 'planHash': 'abc123',
+                  'actionId': 1, 'origin': 'dashboard'},
+        )
+        self._assert_event(event, 'agent_action_approved', self.user)
+        self.assertEqual(event.meta['origin'], 'dashboard')
+
+    def test_agent_action_denied(self):
+        event = record_audit_event(
+            course=self.course, event_type='agent_action_denied',
+            user=self.user,
+            meta={'tool': 'codepost_delete_resource', 'planHash': 'abc123',
+                  'origin': 'elicitation'},
+        )
+        self._assert_event(event, 'agent_action_denied', self.user)
+        self.assertEqual(event.meta['origin'], 'elicitation')
+
     def test_all_event_types_covered(self):
         """Ensure every EVENT_TYPE_CHOICES value has a dedicated test above."""
         defined_types = {choice[0] for choice in CourseAuditEvent.EVENT_TYPE_CHOICES}
@@ -271,14 +333,17 @@ class TestRecordAuditEventAllTypes(TestCase):
             'regrade_request', 'regrade_deleted',
             'autograder_triggered', 'autograder_completed', 'autograder_failed',
             'late_day_used', 'comment_feedback',
+            'assignment_state_changed', 'assignment_feedback_changed',
             'quiz_created', 'quiz_updated', 'quiz_published', 'quiz_unpublished', 'quiz_deleted',
             'quiz_access_code_changed',
             'quiz_attempt_started', 'quiz_attempt_started_late',
-            'quiz_attempt_submitted', 'quiz_attempt_autosubmitted',
+            'quiz_attempt_submitted', 'quiz_attempt_autosubmitted', 'quiz_attempt_seb_blocked',
             'quiz_attempts_reset', 'quiz_response_graded', 'quiz_response_grade_reopened',
             'quiz_generated_set_approved', 'quiz_generated_set_unapproved',
             'quiz_generated_set_regenerated',
             'quiz_generated_sets_published',
+            'agent_write', 'agent_write_denied',
+            'agent_action_approved', 'agent_action_denied',
         }
         self.assertEqual(defined_types, tested_types,
                          f"Untested event types: {defined_types - tested_types}")
@@ -321,7 +386,7 @@ class _AuditIntegrationBase(APITestCase):
 
         resp = self.client.post('/assignments/', {
             "name": "AuditHW", "points": 100, "course": self.course_id,
-            "isReleased": True, "allowStudentUpload": True, "allowRegradeRequests": True,
+            "state": "published", "allowStudentUpload": True, "allowRegradeRequests": True,
         })
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
         self.assignment_id = resp.data['id']
@@ -364,7 +429,7 @@ class TestCheckPermissionAudit(_AuditIntegrationBase):
     def test_records_feedback_view_for_finalized(self):
         sub_id = self._upload_submission()
         # Set feedbackReleased so student gets feedback_view instead of file_view
-        Assignment.objects.filter(id=self.assignment_id).update(feedbackReleased=True)
+        Assignment.objects.filter(id=self.assignment_id).update(feedbackStatus='released')
         # Finalize directly in DB to avoid email template rendering (staticfiles)
         Submission.objects.filter(id=sub_id).update(isFinalized=True)
 

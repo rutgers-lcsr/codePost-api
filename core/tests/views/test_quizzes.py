@@ -12,6 +12,7 @@ import factory
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models.signals import post_save
+from django.utils import timezone
 from rest_framework import status
 
 
@@ -423,6 +424,8 @@ class TestQuizAuthoring:
         assert resp.data['passingScoreUnit'] == 'percent'
         assert resp.data['oneQuestionAtATime'] is False
         assert resp.data['allowBacktracking'] is True
+        assert resp.data['manualGeneration'] is True
+        assert resp.data['generationDate'] is None
         quiz_id = resp.data['id']
 
         patch = api_client.patch(f'/quizzes/{quiz_id}/', {
@@ -484,6 +487,69 @@ class TestQuizAuthoring:
         }, format='json')
         assert resp.status_code == status.HTTP_200_OK
         assert resp.data['shuffleQuestions'] is True
+
+    def test_generation_date_requires_manual_mode(self, api_client, quiz_setup):
+        # A scheduled generation time without manual mode would silently do nothing —
+        # automatic quizzes generate on submission.
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        course = quiz_setup['course']
+        bad = api_client.post('/quizzes/', {
+            'course': course.id, 'title': 'Scheduled', 'manualGeneration': False,
+            'generationDate': '2026-09-01T09:00:00Z',
+        }, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'generationDate' in bad.data
+        # An unsent flag falls back to the model default (manual), so a date alone is fine.
+        ok = api_client.post('/quizzes/', {
+            'course': course.id, 'title': 'Scheduled OK',
+            'generationDate': '2026-09-01T09:00:00Z',
+        }, format='json')
+        assert ok.status_code == status.HTTP_201_CREATED
+        assert ok.data['manualGeneration'] is True
+
+    def test_toggling_manual_off_must_clear_generation_date(self, api_client, quiz_setup):
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Manual',
+                                   manualGeneration=True,
+                                   generationDate=timezone.now())
+        # The settings form re-sends every field — turning manual off while re-sending the
+        # stored date is the change that introduces the bad pairing.
+        bad = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'manualGeneration': False, 'generationDate': quiz.generationDate.isoformat(),
+        }, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        ok = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'manualGeneration': False, 'generationDate': None,
+        }, format='json')
+        assert ok.status_code == status.HTTP_200_OK
+        quiz.refresh_from_db()
+        assert quiz.manualGeneration is False and quiz.generationDate is None
+
+    def test_generation_date_bad_state_does_not_block_unrelated_edits(self, api_client, quiz_setup):
+        # A quiz already stored with date-but-no-manual (created before the guard) must stay
+        # editable for unrelated settings — only the change that INTRODUCES the state is blocked.
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Legacy scheduled',
+                                   manualGeneration=False, generationDate=timezone.now())
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'shuffleQuestions': True,
+            'generationDate': quiz.generationDate.isoformat(),  # the form re-sends this
+        }, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['shuffleQuestions'] is True
+
+    def test_scheduled_generation_ran_at_is_read_only(self, api_client, quiz_setup):
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Stamped')
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'scheduledGenerationRanAt': '2026-09-01T09:00:00Z',
+        }, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        quiz.refresh_from_db()
+        assert quiz.scheduledGenerationRanAt is None
 
     def test_quiz_availability_window_must_be_ordered(self, api_client, quiz_setup):
         from core.models import Quiz
@@ -842,6 +908,7 @@ class TestAISuggestions:
 
         _mock_ai(monkeypatch, """[
           {"type": "multiple_choice", "text": "Q1?", "points": 2,
+           "description": "Consider:\\n```python\\nx = {}\\n```",
            "choices": [{"text": "a", "is_correct": true}, {"text": "b", "is_correct": false}]},
           {"type": "essay", "text": "Explain.", "points": 5}
         ]""")
@@ -854,6 +921,9 @@ class TestAISuggestions:
         assert pending.filter(questionType='essay').exists()
         mc = pending.get(questionType='multiple_choice')
         assert mc.choicesData[0]['isCorrect'] is True
+        assert mc.description == "Consider:\n```python\nx = {}\n```"
+        # Omitted description normalizes to '' (the model may skip the optional key).
+        assert pending.get(questionType='essay').description == ''
 
     def test_feature_flag_gates_generation(self, quiz_setup, monkeypatch):
         from core.models import SuggestedQuizQuestion
@@ -877,6 +947,115 @@ class TestAISuggestions:
 
         api_client.force_authenticate(user=quiz_setup['student'])
         assert api_client.post(url, format='json').status_code == status.HTTP_403_FORBIDDEN
+
+    @staticmethod
+    def _run_task_inline(monkeypatch):
+        """Route .delay through the real task so job rows advance like eager Celery."""
+        from core.tasks import generate_quiz_question_suggestions as task_fn
+
+        def run_inline(*a, **kw):
+            task_fn(*a, **kw)
+            return type('R', (), {'id': 'task-inline'})()
+        monkeypatch.setattr('core.tasks.generate_quiz_question_suggestions.delay', run_inline)
+
+    def test_generate_endpoint_returns_job_that_completes(self, api_client, quiz_setup, monkeypatch):
+        """The endpoint returns a pollable QuizSuggestionJob; the task records the outcome on it."""
+        _mock_ai(monkeypatch, '[{"type": "essay", "text": "Explain.", "points": 5}]')
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(
+            f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/", format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        job_id = resp.data['id']
+
+        poll = api_client.get(f'/quizSuggestionJobs/{job_id}/')
+        assert poll.status_code == status.HTTP_200_OK
+        assert poll.data['status'] == 'completed'
+        assert poll.data['createdCount'] == 1
+        assert poll.data['errorMessage'] == ''
+
+        # Students never see generation runs.
+        api_client.force_authenticate(user=quiz_setup['student'])
+        assert api_client.get(f'/quizSuggestionJobs/{job_id}/').status_code == status.HTTP_403_FORBIDDEN
+
+    def test_job_records_parse_failure(self, api_client, quiz_setup, monkeypatch):
+        """Unparseable model output surfaces as a failed job with a friendly error."""
+        _mock_ai(monkeypatch, 'this is not json')
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(
+            f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/", format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'failed'
+        assert 'parsed' in poll.data['errorMessage']
+
+    def test_job_records_empty_generation(self, api_client, quiz_setup, monkeypatch):
+        """A run that yields zero usable questions fails the job instead of completing silently."""
+        _mock_ai(monkeypatch, '[]')
+        self._run_task_inline(monkeypatch)
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(
+            f"/assignments/{quiz_setup['assignment'].id}/generateQuizQuestions/", format='json')
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'failed'
+        assert 'no usable questions' in poll.data['errorMessage']
+
+    def test_job_records_feature_disabled(self, quiz_setup, monkeypatch):
+        """The task (not just the endpoint) marks the job failed when the feature is off —
+        covers races where the toggle flips between enqueue and execution."""
+        from core.models import QuizSuggestionJob
+        from core.tasks import generate_quiz_question_suggestions
+
+        _mock_ai(monkeypatch, '[]')
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: False)
+        job = QuizSuggestionJob.objects.create(
+            course=quiz_setup['course'], assignment=quiz_setup['assignment'],
+            requestedBy=quiz_setup['admin'])
+        generate_quiz_question_suggestions(
+            requested_by_id=quiz_setup['admin'].id,
+            assignment_id=quiz_setup['assignment'].id, job_id=job.id)
+        job.refresh_from_db()
+        assert job.status == 'failed'
+        assert 'turned off' in job.errorMessage
+
+    def test_regenerate_endpoint_returns_job(self, api_client, quiz_setup, monkeypatch):
+        _mock_ai(monkeypatch, """[{"type": "multiple_choice", "text": "Improved?",
+          "choices": [{"text": "a", "is_correct": true}, {"text": "b", "is_correct": false}]}]""")
+        self._run_task_inline(monkeypatch)
+        question = _mc_question(quiz_setup['course'])
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(f'/questions/{question.id}/regenerateSuggestion/', format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert resp.data['sourceQuestion'] == question.id
+
+        poll = api_client.get(f"/quizSuggestionJobs/{resp.data['id']}/")
+        assert poll.data['status'] == 'completed'
+        assert poll.data['createdCount'] == 1
+
+    def test_regenerate_broker_outage_is_503_and_drops_the_job(self, api_client, quiz_setup, monkeypatch):
+        """Redis down at dispatch time: no orphaned 'pending' job row nobody would ever advance,
+        and a 503 (DependencyUnavailableMiddleware) instead of a 500."""
+        import kombu.exceptions
+        from core.models import QuizSuggestionJob
+
+        _mock_ai(monkeypatch, '[]')
+
+        def broker_down(*a, **kw):
+            raise kombu.exceptions.OperationalError('Error 111 connecting to redis:6379')
+        monkeypatch.setattr('core.tasks.generate_quiz_question_suggestions.delay', broker_down)
+        question = _mc_question(quiz_setup['course'])
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(f'/questions/{question.id}/regenerateSuggestion/', format='json')
+        assert resp.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert not QuizSuggestionJob.objects.filter(sourceQuestion=question).exists()
 
     def test_generate_endpoints_403_when_feature_disabled(self, api_client, quiz_setup, monkeypatch):
         """The quiz_generation toggle is a capability, so the endpoints reject the request
@@ -906,11 +1085,35 @@ class TestAISuggestions:
                             lambda self, key: key != 'quiz_generation')
         assert api_client.get(url).data['capabilitiesMap']['generate_ai_quiz_questions'] is False
 
+    def test_personalized_capability_follows_its_own_feature_toggle(self, api_client, quiz_setup, monkeypatch):
+        """The two quiz AI capabilities split cleanly: bank suggestions follow
+        quiz_generation, per-student sections follow personalized_quiz_generation."""
+        _enable_ai(monkeypatch)
+        url = f"/courses/{quiz_setup['course'].id}/capabilities/"
+        api_client.force_authenticate(user=quiz_setup['admin'])
+
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: key == 'personalized_quiz_generation')
+        caps = api_client.get(url).data['capabilitiesMap']
+        assert caps['generate_personalized_quiz_questions'] is True
+        assert caps['generate_ai_quiz_questions'] is False
+
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, key: key == 'quiz_generation')
+        caps = api_client.get(url).data['capabilitiesMap']
+        assert caps['generate_personalized_quiz_questions'] is False
+        assert caps['generate_ai_quiz_questions'] is True
+
+        api_client.force_authenticate(user=quiz_setup['student'])
+        caps = api_client.get(url).data['capabilitiesMap']
+        assert caps['generate_personalized_quiz_questions'] is False
+
     def test_accept_creates_question_authored_by_instructor(self, api_client, quiz_setup):
         from core.models import SuggestedQuizQuestion, Question, QuestionBank
         bank = QuestionBank.objects.create(course=quiz_setup['course'], name='Target')
         suggestion = SuggestedQuizQuestion.objects.create(
             assignment=quiz_setup['assignment'], questionType='multiple_choice', text='Q?', points=2,
+            description='Sample output:\n```\n42\n```',
             choicesData=[{'text': 'a', 'isCorrect': True}, {'text': 'b', 'isCorrect': False}], status='pending')
 
         api_client.force_authenticate(user=quiz_setup['grader'])
@@ -922,6 +1125,7 @@ class TestAISuggestions:
         assert question.bank_id == bank.id                   # filed into the chosen bank
         assert question.createdBy == quiz_setup['grader']   # instructor is the author
         assert question.source == 'ai'                       # staff-internal provenance
+        assert question.description == 'Sample output:\n```\n42\n```'
         assert question.choices.filter(isCorrect=True).first().text == 'a'
 
         suggestion.refresh_from_db()
@@ -1018,11 +1222,12 @@ class TestRefreshLoop:
         bank = QuestionBank.objects.create(course=quiz_setup['course'], name='Pool')
         question = _mc_question(quiz_setup['course'], text="Old text", bank=bank)
         question.createdBy = quiz_setup['admin']
+        question.description = 'Stale excerpt from last semester'
         question.save()
 
         suggestion = SuggestedQuizQuestion.objects.create(
             sourceQuestion=question, questionType='multiple_choice', text='Updated text', points=3,
-            choicesData=[{'text': '5', 'isCorrect': True}], status='pending')
+            description='Fresh excerpt', choicesData=[{'text': '5', 'isCorrect': True}], status='pending')
 
         api_client.force_authenticate(user=quiz_setup['grader'])
         resp = api_client.post(f'/suggestedQuizQuestions/{suggestion.id}/accept/', format='json')
@@ -1031,6 +1236,8 @@ class TestRefreshLoop:
 
         question.refresh_from_db()
         assert question.text == 'Updated text'
+        # The old description must not survive under the new stem.
+        assert question.description == 'Fresh excerpt'
         assert question.createdBy == quiz_setup['admin']        # original author preserved
         assert question.bank_id == bank.id  # bank preserved
         assert question.choices.count() == 1

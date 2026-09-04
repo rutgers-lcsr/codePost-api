@@ -49,7 +49,7 @@ class TestRegradeFlow(APITestCase):
         response = self.client.post('/assignments/', {
             "name": "Regrade HW",
             "points": 100,
-            "isReleased": True,
+            "state": "published",
             "allowStudentUpload": True,
             "allowRegradeRequests": True,
             "course": course_id,
@@ -154,7 +154,7 @@ class TestRegradeFlow(APITestCase):
         response = self.client.post('/assignments/', {
             "name": "Filter HW",
             "points": 50,
-            "isReleased": True,
+            "state": "published",
             "allowStudentUpload": True,
             "course": course_id,
         })
@@ -206,7 +206,7 @@ class TestRegradeFlow(APITestCase):
         })
 
         response = self.client.post('/assignments/', {
-            "name": "Forbidden HW", "points": 50, "isReleased": True,
+            "name": "Forbidden HW", "points": 50, "state": "published",
             "allowStudentUpload": True, "course": course_id,
         })
         assignment_id = response.data['id']

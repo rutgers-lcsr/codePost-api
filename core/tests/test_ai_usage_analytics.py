@@ -158,6 +158,86 @@ class TestGetUsageSummary(APITestCase):
         self.assertEqual(summary['requestCount'], 1)
 
 
+class TestProjectedCost(APITestCase):
+    """Test read-time cost projection (token sums x current rates)."""
+
+    def setUp(self):
+        setUpBase(self)
+        self.org = self.DB['Organization']
+        self.course = self.DB['Course']
+        self.assignment = self.DB['Assignment']
+        self.user = self.course.courseAdmins.first()
+
+        # Historical records frozen at $0 (rates were not configured yet)
+        for _ in range(2):
+            AIUsageRecord.objects.create(
+                organization=self.org,
+                course=self.course,
+                assignment=self.assignment,
+                user=self.user,
+                provider='portkey',
+                model='proj-model',
+                request_type='comment_generation',
+                input_tokens=1_000_000,
+                output_tokens=500_000,
+                total_tokens=1_500_000,
+                estimated_cost=Decimal('0'),
+                status='success',
+            )
+        self.queryset = AIUsageRecord.objects.filter(course=self.course, model='proj-model')
+
+    def test_projected_cost_with_custom_rates(self):
+        summary = get_usage_summary(
+            queryset=self.queryset,
+            granularity='daily',
+            breakdown_field='assignment',
+            breakdown_name_field='assignment__name',
+            projection_rates={'proj-model': {'input': 1.0, 'output': 2.0}},
+        )
+        # 2M input x $1/M + 1M output x $2/M = $4; stored cost stays 0
+        self.assertEqual(Decimal(summary['estimatedCost']), Decimal('0'))
+        self.assertEqual(Decimal(summary['projectedCost']), Decimal('4'))
+        self.assertEqual(Decimal(summary['timeSeries'][0]['projectedCost']), Decimal('4'))
+        self.assertEqual(Decimal(summary['breakdown'][0]['projectedCost']), Decimal('4'))
+        self.assertEqual(Decimal(summary['modelBreakdown'][0]['projectedCost']), Decimal('4'))
+        self.assertEqual(Decimal(summary['featureBreakdown'][0]['projectedCost']), Decimal('4'))
+
+    def test_projected_cost_falls_back_to_default_rates(self):
+        # gpt-4o-mini is in TOKEN_RATES; no projection_rates passed
+        AIUsageRecord.objects.create(
+            organization=self.org, course=self.course, user=self.user,
+            provider='openai', model='gpt-4o-mini',
+            request_type='comment_generation',
+            input_tokens=1_000_000, output_tokens=1_000_000, total_tokens=2_000_000,
+            estimated_cost=Decimal('0'), status='success',
+        )
+        summary = get_usage_summary(
+            queryset=AIUsageRecord.objects.filter(course=self.course, model='gpt-4o-mini'),
+            granularity='daily',
+        )
+        self.assertEqual(Decimal(summary['projectedCost']), Decimal('0.75'))
+
+    def test_projected_cost_unknown_model_is_zero(self):
+        summary = get_usage_summary(queryset=self.queryset, granularity='daily')
+        self.assertEqual(Decimal(summary['projectedCost']), Decimal('0'))
+
+    def test_projected_cost_applies_cached_token_discount(self):
+        AIUsageRecord.objects.create(
+            organization=self.org, course=self.course, user=self.user,
+            provider='gemini', model='gemini-2.5-flash',
+            request_type='comment_generation',
+            input_tokens=1_000_000, output_tokens=0, total_tokens=1_000_000,
+            cached_tokens=1_000_000,
+            estimated_cost=Decimal('0'), status='success',
+        )
+        summary = get_usage_summary(
+            queryset=AIUsageRecord.objects.filter(course=self.course, model='gemini-2.5-flash'),
+            granularity='daily',
+        )
+        # All input cached: 1M x $0.15/M x 25% = $0.0375
+        self.assertEqual(Decimal(summary['projectedCost']), Decimal('0.0375'))
+
+
 # ===========================================================================
 # Course AI Usage endpoint
 # ===========================================================================
@@ -236,6 +316,19 @@ class TestCourseAIUsageEndpoint(APITestCase):
         other_admin = Persona.ADMIN_OF_OTHER_COURSE(self)
         response = request_as('read', other_admin, self.endpoint, {})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_projected_cost_uses_course_rate_over_org(self):
+        """Course token-rate override beats the org rate in the projection."""
+        self.org.ai_token_rates = {'gpt-4o-mini': {'input': 10.0, 'output': 10.0}}
+        self.org.save()
+        self.course.ai_token_rates = {'gpt-4o-mini': {'input': 100.0, 'output': 100.0}}
+        self.course.save()
+
+        admin = Persona.ADMIN_OF_COURSE(self)
+        response = request_as('read', admin, self.endpoint, {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # 1500 input + 300 output tokens at $100/M each = $0.18
+        self.assertEqual(Decimal(response.data['projectedCost']), Decimal('0.18'))
 
 
 # ===========================================================================
@@ -385,13 +478,40 @@ class TestSystemAIUsageEndpoint(APITestCase):
         data = response.data
         expected_keys = {
             'totalTokens', 'inputTokens', 'outputTokens', 'cachedTokens',
-            'estimatedCost', 'requestCount', 'timeSeries', 'breakdown',
-            'modelBreakdown', 'granularity', 'startDate', 'endDate',
+            'estimatedCost', 'projectedCost', 'requestCount', 'timeSeries', 'breakdown',
+            'modelBreakdown', 'featureBreakdown', 'granularity', 'startDate', 'endDate',
         }
         self.assertEqual(set(data.keys()), expected_keys)
+
+    def test_feature_breakdown_uses_display_labels(self):
+        su = User.objects.create_superuser('su_feat@test.edu', 'su_feat@test.edu', 'pass')
+        response = request_as('read', su, self.endpoint, {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [entry['name'] for entry in response.data['featureBreakdown']]
+        self.assertTrue(names)
+        # Labels come from REQUEST_TYPE_CHOICES, not raw keys
+        self.assertNotIn('comment_generation', names)
 
     def test_staff_user_can_access(self):
         """is_staff (non-superuser) should also be able to access."""
         staff = User.objects.create_user('staff@test.edu', 'staff@test.edu', 'pass', is_staff=True)
         response = request_as('read', staff, self.endpoint, {})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_projected_cost_uses_each_orgs_own_rates(self):
+        """Platform projection resolves each organization's ai_token_rates."""
+        self.org.ai_token_rates = {'gpt-4o-mini': {'input': 10.0, 'output': 10.0}}
+        self.org.save()
+        self.other_org.ai_token_rates = {'gemini-2.5-flash': {'input': 100.0, 'output': 100.0}}
+        self.other_org.save()
+
+        su = User.objects.create_superuser('su_proj@test.edu', 'su_proj@test.edu', 'pass')
+        response = request_as('read', su, self.endpoint, {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        projections = {item['id']: Decimal(item['projectedCost']) for item in response.data['breakdown']}
+        # Org 1: 3000 input + 600 output tokens at $10/M = $0.036
+        self.assertEqual(projections[self.org.id], Decimal('0.036'))
+        # Org 2: 1000 input + 200 output tokens at $100/M = $0.12
+        self.assertEqual(projections[self.other_org.id], Decimal('0.12'))
+        self.assertEqual(Decimal(response.data['projectedCost']), Decimal('0.156'))

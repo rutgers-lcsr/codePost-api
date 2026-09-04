@@ -168,9 +168,65 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
-        'core.permissions.course_scope.CourseScopePermission',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# ---------------------------------------------------------------------------
+# OAuth 2.1 authorization server (django-oauth-toolkit) — lets Claude Desktop /
+# claude.ai custom connectors reach the MCP endpoint natively. See the MCP auth
+# spec (2025-06-18): RFC 8414 + RFC 9728 metadata, PKCE(S256)-only, DCR open
+# but every token still requires a signed-in instructor consenting.
+# ---------------------------------------------------------------------------
+
+# django-oauth-toolkit's authorize view is LoginRequiredMixin; this page offers
+# SSO (CAS etc.) and password login and hands the browser back to /o/authorize.
+LOGIN_URL = "/auth/agent-login/"
+
+OAUTH2_PROVIDER = {
+    # Scopes mirror core/agent/registry.py SCOPE_READ/WRITE/ADMIN exactly —
+    # Connection._resolve_scope maps the granted set onto the agent tool tiers.
+    "SCOPES": {
+        "read": "Read course data: rosters, assignments, submissions, grades",
+        "write": "Create and modify course content: assignments, quizzes, rubrics, grading",
+        "admin": "Full instructor tool access, including destructive operations",
+    },
+    "DEFAULT_SCOPES": ["read", "write", "admin"],
+    # OAuth 2.1 posture
+    "PKCE_REQUIRED": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_METHOD": True,          # S256 only
+    "COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_PASSWORD_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_AUTHZ_RESPONSE_ISS": True,   # RFC 9207 iss param
+    # (COMPLIANT_BCP_RFC9700_REDIRECT_URI_SCHEME stays off: it forbids "http",
+    # which the RFC 8252 localhost loopback for Claude Code needs.)
+    # Token lifetimes
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
+    "REFRESH_TOKEN_EXPIRE_SECONDS": 60 * 60 * 24 * 90,
+    "ROTATE_REFRESH_TOKEN": True,
+    "REFRESH_TOKEN_REUSE_PROTECTION": True,
+    # Redirect URIs: Claude web/desktop https callbacks + Claude Code loopback
+    # (http://localhost:<any-port>/callback via the loopback exemption).
+    "ALLOWED_REDIRECT_URI_SCHEMES": ["https", "http"],
+    "ALLOW_LOCALHOST_LOOPBACK": True,
+    # RFC 8414 issuer + advertised capabilities
+    "OIDC_ISS_ENDPOINT": API_URL,
+    "OAUTH2_GRANT_TYPES_SUPPORTED": ["authorization_code", "refresh_token"],
+    "OAUTH2_RESPONSE_TYPES_SUPPORTED": ["code"],
+    "OAUTH2_TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED": [
+        "none", "client_secret_post", "client_secret_basic",
+    ],
+    # RFC 9728 protected-resource metadata (served by DOT's view; the resource
+    # is the MCP endpoint, not the whole API).
+    "OAUTH2_PROTECTED_RESOURCE_IDENTIFIER": f"{API_URL}/mcp",
+    "OAUTH2_PROTECTED_RESOURCE_AUTHORIZATION_SERVERS": [API_URL],
+    "OAUTH2_PROTECTED_RESOURCE_NAME": "codePost MCP",
+    # Dynamic client registration: open (registering grants nothing by itself —
+    # every token still requires an instructor consenting), rate-limited at the
+    # URL conf.
+    "DCR_ENABLED": True,
+    "DCR_REGISTRATION_PERMISSION_CLASSES": ("oauth2_provider.dcr.AllowAllDCRPermission",),
+    "REQUEST_APPROVAL_PROMPT": "force",
 }
 
 SPECTACULAR_SETTINGS = {
@@ -183,6 +239,11 @@ SPECTACULAR_SETTINGS = {
     # (otherwise drf-spectacular assigns hash-suffixed names that change between
     # runs and break the generated TS client's named enum imports).
     'ENUM_NAME_OVERRIDES': {
+        # Assignment lifecycle — shared by Assignment.state and the read-only
+        # effectiveState serializer field.
+        'AssignmentStateEnum': 'core.models.ASSIGNMENT_STATE_CHOICES',
+        # Feedback axis (hidden/live/per_student/released).
+        'AssignmentFeedbackStatusEnum': 'core.models.FEEDBACK_STATUS_CHOICES',
         # pending/accepted/rejected — shared by SuggestedComment and SuggestedQuizQuestion.
         'SuggestedCommentStatusEnum': [
             ('pending', 'Pending'), ('accepted', 'Accepted'), ('rejected', 'Rejected'),
@@ -194,6 +255,10 @@ SPECTACULAR_SETTINGS = {
         ],
         # Quiz record provenance — shared by QuestionBank, Question, and Quiz.
         'QuizSourceEnum': 'core.models.QUIZ_SOURCE_CHOICES',
+        # How much a course API key may do. Auto-naming lands on the far too
+        # generic 'ScopeEnum'; pinning it now avoids a collision the first time
+        # any other model grows a 'scope' field.
+        'CourseAPIKeyScopeEnum': 'core.models.COURSE_API_KEY_SCOPE_CHOICES',
         # Question types — shared by Question, SuggestedQuizQuestion, and
         # GeneratedQuizQuestion. Auto-naming currently lands on this same name; pinning it
         # keeps the TS client stable if a differently-named field ever shares the values.
@@ -226,6 +291,9 @@ SPECTACULAR_SETTINGS = {
         ],
         # Per-student generated question set lifecycle.
         'GeneratedQuestionSetStatusEnum': 'core.models.GENERATED_SET_STATUS_CHOICES',
+        # AI quiz-suggestion generation run lifecycle (labels differ from
+        # QuizImportJobStatusEnum on purpose — overrides match value+label pairs).
+        'QuizSuggestionJobStatusEnum': 'core.models.SUGGESTION_JOB_STATUS_CHOICES',
     },
     'TITLE': 'codePost API',
     'DESCRIPTION': """
@@ -285,7 +353,7 @@ print(rows[0])
 
 See the [Python SDK Repository](https://github.com/rutgers-lcsr/codepost-python) for more examples.
 """,
-    'VERSION': '4.0.0',
+    'VERSION': '4.3.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SWAGGER_UI_SETTINGS': {
         'deepLinking': True,
@@ -398,8 +466,14 @@ if "DB_HOSTNAME" in os.environ:
             "PASSWORD": os.environ["DB_PASSWORD"],
             "HOST": os.environ["DB_HOSTNAME"],
             "PORT": os.environ["DB_PORT"],
-            "OPTIONS": {"charset": "utf8mb4"},
-            "CONN_MAX_AGE": 60,
+            # connect_timeout: mysqlclient's default is wait-forever; fail fast when the
+            # DB is saturated or restarting so request threads free their slot.
+            "OPTIONS": {"charset": "utf8mb4", "connect_timeout": 10},
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+            # Ping persistent connections on reuse so clients transparently reconnect
+            # after a DB restart or server-side wait_timeout reap instead of raising
+            # "MySQL server has gone away".
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 else:
@@ -433,11 +507,18 @@ if DEBUG:
 else:
     OVERRIDE_EMAIL = None
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
-EMAIL_PORT = 25
-EMAIL_USE_TLS = True
-EMAIL_USE_SSL = False
+# Django 6.1 MAILERS replaces the legacy EMAIL_* settings (removed in Django 7.0).
+MAILERS = {
+    "default": {
+        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "OPTIONS": {
+            "host": os.environ.get("EMAIL_HOST", "localhost"),
+            "port": 25,
+            "use_tls": True,
+            "use_ssl": False,
+        },
+    },
+}
 DEFAULT_EMAIL_FROM = os.environ.get("DEFAULT_EMAIL_FROM", "no-reply@localhost")
 EMAIL_SUBJECT_PREFIX = "[Codepost] "
 
@@ -459,10 +540,10 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
-    "viewflow",
     "core",
     "autograder",
     "rest_framework",
+    "oauth2_provider",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "rest_framework.authtoken",
@@ -485,6 +566,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "core.middleware.csp_frame_ancestors_middleware",
     "core.middleware.no_cache_middleware",
+    # Innermost: CorsMiddleware / no_cache still decorate the 503 it returns.
+    "core.middleware.DependencyUnavailableMiddleware",
 ]
 if DEBUG:
     MIDDLEWARE.append("core.middleware.dev_cors_middleware")
@@ -635,7 +718,7 @@ if DEBUG:
 # The reason for the PYCURL command is that MacOSX uses a different ssl backend than our linux server.
 #
 # To run the worker locally, run the following in a second terminal:
-# > celery worker -A autograder --loglevel=info -Q dev-api-celery,dev-api-celery-long-tasks
+# > celery -A autograder worker --loglevel=info -Q celery,ai-tasks
 
 
 if DEBUG:
@@ -643,16 +726,33 @@ if DEBUG:
 else:
     CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://codepost-redis:6379")
 
-CELERY_DEFAULT_QUEUE = "prod-celery"
-# CELERY_ROUTES = {
-#     "autograder.tasks.RunAll": {"queue": "prod-celery"},
-#     # "autograder.tasks.daily_assignment_check": {"queue": "prod-celery-crontasks"},
-#     # "webhooks.tasks.DeliverHook": {"queue": "prod-celery-webhooks"},
-# }
+# These tasks decrypt EncryptedCharField secrets (course/org/prompt-lab AI keys)
+# and must run on the AI worker — the only worker with FIELD_ENCRYPTION_KEY.
+# The autograder workers execute untrusted student code and never get the key;
+# everything unrouted stays on the default 'celery' queue they consume.
+# Routing applies at send time, so every enqueueing process honors this map.
+CELERY_TASK_ROUTES = {
+    'core.tasks.generate_ai_grading_assistance': {'queue': 'ai-tasks'},
+    'core.tasks.generate_quiz_question_suggestions': {'queue': 'ai-tasks'},
+    'core.tasks.generate_personalized_quiz_sets': {'queue': 'ai-tasks'},
+    'core.tasks.backfill_personalized_quiz_sets': {'queue': 'ai-tasks'},
+    'core.tasks.preview_generated_section': {'queue': 'ai-tasks'},
+    'core.tasks.auto_improve_prompts_scheduled': {'queue': 'ai-tasks'},
+    'core.tasks.auto_improve_prompt_threshold': {'queue': 'ai-tasks'},
+}
 
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     "priority_steps": list(range(10)),
+    # Bound the TCP connect so a request-path .delay() against an unreachable Redis
+    # fails in seconds (-> 503 via DependencyUnavailableMiddleware) instead of blocking
+    # on the kernel SYN timeout for each publish retry. Connect-only: the consumer's
+    # BRPOP path is unaffected.
+    "socket_connect_timeout": 5,
 }
+# Celery 5.x falls back to broker_connection_retry (True) when this is unset, with a
+# pending-deprecation warning; Celery 6 drops the fallback. Pin the behaviour we rely
+# on: a worker/beat started before Redis waits for it instead of exiting.
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 DJANGO_CELERY_RESULTS_TASK_ID_MAX_LENGTH = 191
 CELERY_ACCEPT_CONTENT = ["application/json"]
@@ -668,6 +768,10 @@ CELERY_BEAT_SCHEDULE = {
     #     "task": "autograder.run.daily_assignment_check",
     #     "schedule": crontab(day_of_week="*", hour="14", minute="1"),
     # },
+    "clear-expired-oauth-tokens": {
+        "task": "core.tasks.clear_expired_oauth_tokens",
+        "schedule": crontab(minute=30, hour=4),  # Daily, off-peak
+    },
     "delete-expired-courses": {
         "task": "core.tasks.delete_expired_courses",
         "schedule": crontab(minute=0, hour="*"), # Run every hour
@@ -676,9 +780,33 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.tasks.finalize_expired_quiz_attempts",
         "schedule": crontab(minute="*/5"),  # Every 5 minutes
     },
+    "reap-stale-autograder-state": {
+        "task": "core.tasks.reap_stale_autograder_state",
+        "schedule": crontab(minute="*/10"),  # Every 10 minutes
+    },
+    "run-scheduled-quiz-generation": {
+        "task": "core.tasks.run_scheduled_quiz_generation",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "run-scheduled-assignment-publish": {
+        "task": "core.tasks.run_scheduled_assignment_publish",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "run-scheduled-feedback-release": {
+        "task": "core.tasks.run_scheduled_feedback_release",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
     "auto-improve-prompts": {
         "task": "core.tasks.auto_improve_prompts_scheduled",
         "schedule": crontab(minute=0, hour=3, day_of_week=1),  # Monday 3 AM
+    },
+    "flush-expired-tokens": {
+        "task": "core.tasks.flush_expired_tokens",
+        "schedule": crontab(minute=30, hour=4),  # Daily, off-peak
+    },
+    "prune-autograder-execution-events": {
+        "task": "core.tasks.prune_autograder_execution_events",
+        "schedule": crontab(minute=45, hour=4),  # Daily, off-peak
     },
 }
 CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "FALSE").upper() == "TRUE"
@@ -707,7 +835,6 @@ if DEBUG:
     print("=" * 80)
     print("Celery Configuration:")
     print(f"  Broker URL: {CELERY_BROKER_URL}")
-    print(f"  Default Queue: {CELERY_DEFAULT_QUEUE}")
     print(f"  Result Backend: {CELERY_RESULT_BACKEND}")
     print(f"  Autograder Auto Execute: {AUTOGRADER_AUTO_EXECUTE}")
     print("=" * 80)
@@ -719,9 +846,10 @@ if DEBUG:
     print(f"  Database User: {DATABASES['default'].get('USER', 'N/A')}")
     print("=" * 80)
     print("EMAIL Configuration:")
-    print(f"  EMAIL_HOST: {EMAIL_HOST}")
-    print(f"  EMAIL_PORT: {EMAIL_PORT}")
-    print(f"  TLS: {EMAIL_USE_TLS} SSL: {EMAIL_USE_SSL}")
+    _mail_opts = MAILERS["default"]["OPTIONS"]
+    print(f"  EMAIL_HOST: {_mail_opts['host']}")
+    print(f"  EMAIL_PORT: {_mail_opts['port']}")
+    print(f"  TLS: {_mail_opts['use_tls']} SSL: {_mail_opts['use_ssl']}")
     print(f"  DEFAULT_EMAIL_FROM: {DEFAULT_EMAIL_FROM}")
     if OVERRIDE_EMAIL:
         print(f"  OVERRIDE_EMAIL: {OVERRIDE_EMAIL}")

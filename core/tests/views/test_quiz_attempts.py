@@ -392,10 +392,10 @@ class TestRevealAndAccess:
         api_client.force_authenticate(user=taking_setup['admin'])
         assert api_client.get(f"/quizAttempts/{start.data['id']}/").status_code == status.HTTP_200_OK
 
-    def test_only_quiz_graders_and_admins_can_read_an_attempt(self, api_client, taking_setup):
+    def test_attempt_read_follows_quiz_grading_gate(self, api_client, taking_setup):
         # Reading an attempt exposes the answer key (correct choices, referenceSolution), so it
-        # must match the quiz-grading gate — NOT the broader course-staff one. An assignment
-        # grader who is not a quiz grader must be denied.
+        # follows canGradeQuiz: every grader by default; only the quizGraders role once the
+        # course turns gradersCanGradeQuizzes off.
         course = taking_setup['course']
         quiz = _quiz(course)
         _add(quiz, _mc(course, _bank(course)))
@@ -403,10 +403,14 @@ class TestRevealAndAccess:
         api_client.force_authenticate(user=student)
         attempt_id = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json').data['id']
 
-        grader = course.graders.first()  # assignment grader, without the quiz-grader role
+        grader = course.graders.first()  # plain assignment grader
         api_client.force_authenticate(user=grader)
+        assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_200_OK
+        # Restrictive course: the flag off locks plain graders out...
+        course.gradersCanGradeQuizzes = False
+        course.save()
         assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_403_FORBIDDEN
-        # Granting the quiz-grader role unlocks it.
+        # ...and the explicit quiz-grader role unlocks it again.
         course.quizGraders.add(grader)
         assert api_client.get(f'/quizAttempts/{attempt_id}/').status_code == status.HTTP_200_OK
         # Course admins can always read; the owner keeps their own view.
@@ -428,6 +432,23 @@ class TestRevealAndAccess:
         api_client.force_authenticate(user=taking_setup['students'][0])
         start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
         assert start.data['responses'][0]['answerText'] == '# write your code here'
+
+    def test_non_code_question_does_not_inherit_stale_starter_code(self, api_client, taking_setup):
+        # starterCode survives a question's type changing away from 'code', so an essay can carry
+        # leftover code. It must not be snapshotted (it would seed the answer, making the question
+        # look answered before the student starts, and render as their essay text).
+        from core.models import Question
+        course = taking_setup['course']
+        essay_q = Question.objects.create(
+            course=course, bank=_bank(course), questionType='essay', text='Compare stacks and queues.',
+            points=_dec('5'), language='r', starterCode='# left over from when this was a code question')
+        quiz = _quiz(course)
+        _add(quiz, essay_q)
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        response = start.data['responses'][0]
+        assert response['answerText'] == ''
+        assert response['question']['starterCode'] is None
 
     def test_student_cannot_read_another_students_attempt(self, api_client, taking_setup):
         course = taking_setup['course']
@@ -556,7 +577,7 @@ class TestRevealAndAccess:
         course = taking_setup['course']
         assignment = taking_setup['assignment']
         # Assignment is visible to students, but feedback isn't released yet.
-        Assignment.objects.filter(pk=assignment.id).update(isReleased=True, feedbackReleased=False)
+        Assignment.objects.filter(pk=assignment.id).update(state='published', feedbackStatus='hidden')
         bank = _bank(course)
 
         # Attached quiz that unlocks only after feedback → still locked, but should be listed
@@ -608,11 +629,11 @@ class TestClosing:
     def test_feedback_released_at_stamped_and_cleared(self, taking_setup):
         assignment = taking_setup['assignment']
         assert assignment.feedbackReleasedAt is None
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
         assignment.refresh_from_db()
         assert assignment.feedbackReleasedAt is not None
-        assignment.feedbackReleased = False
+        assignment.feedbackStatus = 'hidden'
         assignment.save()
         assignment.refresh_from_db()
         assert assignment.feedbackReleasedAt is None
@@ -623,7 +644,7 @@ class TestClosing:
         course, assignment, student = taking_setup['course'], taking_setup['assignment'], taking_setup['students'][0]
         due = timezone.now() + timedelta(days=1)
         assignment.uploadDueDate = due
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
 
         q = _quiz(course, assignment=assignment, closeEvent='assignment_due', closeOffsetMinutes=1440)
@@ -636,7 +657,7 @@ class TestClosing:
         # feedback_released: None until released, then feedbackReleasedAt + offset.
         Quiz.objects.filter(pk=q.id).update(closeEvent='feedback_released', closeOffsetMinutes=10080)
         assert quiz_close_time(Quiz.objects.get(pk=q.id), student) is None
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
         assignment.refresh_from_db()
         assert quiz_close_time(Quiz.objects.get(pk=q.id), student) == assignment.feedbackReleasedAt + timedelta(minutes=10080)
@@ -648,7 +669,7 @@ class TestClosing:
         from core.models import Quiz, Submission
         from core.services.quiz_grading import quiz_availability, quiz_close_time
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         student, other = taking_setup['students'][0], taking_setup['students'][1]
         q = _quiz(course, assignment=assignment, assignmentTrigger='after_submission',
@@ -675,7 +696,7 @@ class TestClosing:
         from core.models import Submission
         from core.services.quiz_grading import quiz_availability
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         student, other = taking_setup['students'][0], taking_setup['students'][1]
         q = _quiz(course, assignment=assignment, assignmentTrigger='after_student_feedback')
@@ -691,7 +712,7 @@ class TestClosing:
         assert quiz_availability(q, student) == (False, 'student_feedback_not_ready')
 
         # Whole-assignment feedback released → opens for the submitter only.
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
         assert quiz_availability(q, student) == (True, 'open')
         assert quiz_availability(q, other) == (False, 'student_feedback_not_ready')
@@ -700,8 +721,8 @@ class TestClosing:
         from core.models import Submission
         from core.services.quiz_grading import quiz_availability
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
-        assignment.liveFeedbackMode = True
+        assignment.state = 'published'
+        assignment.feedbackStatus = 'live'
         assignment.save()
         student = taking_setup['students'][0]
         q = _quiz(course, assignment=assignment, assignmentTrigger='after_student_feedback')
@@ -720,7 +741,7 @@ class TestClosing:
     def test_end_attempts_at_close_caps_deadline(self, api_client, taking_setup):
         from django.utils.dateparse import parse_datetime
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         close = timezone.now() + timedelta(minutes=30)
         q = _quiz(course, assignment=assignment, assignmentTrigger='during',
@@ -755,7 +776,7 @@ class TestClosing:
 
     def test_start_blocked_after_fixed_close(self, api_client, taking_setup):
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         q = _quiz(course, assignment=assignment, assignmentTrigger='during',
                   closeEvent='fixed_date', availableUntil=timezone.now() - timedelta(minutes=1))
@@ -766,7 +787,7 @@ class TestClosing:
 
     def test_soft_close_does_not_cap_deadline(self, api_client, taking_setup):
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         close = timezone.now() + timedelta(minutes=30)
         # Untimed, soft close (endAttemptsAtClose=False) → the attempt has no deadline.
@@ -807,7 +828,7 @@ class TestClosing:
 
     def test_close_at_exposed_in_available_quizzes(self, api_client, taking_setup):
         course, assignment = taking_setup['course'], taking_setup['assignment']
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.save()
         close = timezone.now() + timedelta(days=2)
         q = _quiz(course, assignment=assignment, assignmentTrigger='during',
@@ -954,7 +975,7 @@ class TestSettingsReflection:
         course = taking_setup['course']
         assignment = taking_setup['assignment']
         due = timezone.now() + timedelta(hours=1)
-        assignment.isReleased = True
+        assignment.state = 'published'
         assignment.uploadDueDate = due
         assignment.save()
         quiz = _quiz(course, assignment=assignment, closeEvent='assignment_due',
@@ -1175,31 +1196,36 @@ class TestManualGrading:
         _add(quiz, _essay(course, bank), sortKey=1)        # 5 pts manual
         return quiz
 
-    def test_only_quiz_graders_and_admins_can_grade(self, api_client, taking_setup):
+    def test_graders_grade_by_default_and_flag_restricts(self, api_client, taking_setup):
         course = taking_setup['course']
         grader = course.graders.first()
         quiz = self._essay_quiz(taking_setup)
         attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
 
-        # A plain (assignment) grader is NOT a quiz grader → blocked from grading + the queue.
+        # gradersCanGradeQuizzes defaults on: a plain grader sees the queue and grades.
+        assert course.gradersCanGradeQuizzes is True
+        api_client.force_authenticate(user=grader)
+        listing = api_client.get(f'/quizzes/{quiz.id}/attempts/?needsGrading=true')
+        assert listing.status_code == status.HTTP_200_OK
+        assert [a['id'] for a in listing.data] == [attempt_id]
+
+        # The student can't grade their own attempt.
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        own = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                              {'response': essay_id, 'pointsEarned': '5'}, format='json')
+        assert own.status_code == status.HTTP_403_FORBIDDEN
+
+        # Restrictive course: flag off blocks plain graders from grading + the queue.
+        course.gradersCanGradeQuizzes = False
+        course.save()
         api_client.force_authenticate(user=grader)
         denied = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
                                  {'response': essay_id, 'pointsEarned': '4'}, format='json')
         assert denied.status_code == status.HTTP_403_FORBIDDEN
         assert api_client.get(f'/quizzes/{quiz.id}/attempts/').status_code == status.HTTP_403_FORBIDDEN
 
-        # The student can't grade their own attempt either.
-        api_client.force_authenticate(user=taking_setup['students'][0])
-        own = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
-                              {'response': essay_id, 'pointsEarned': '5'}, format='json')
-        assert own.status_code == status.HTTP_403_FORBIDDEN
-
-        # Granting the quizGraders role unlocks both.
+        # The explicit quizGraders role is the flag-off opt-in.
         course.quizGraders.add(grader)
-        api_client.force_authenticate(user=grader)
-        listing = api_client.get(f'/quizzes/{quiz.id}/attempts/?needsGrading=true')
-        assert listing.status_code == status.HTTP_200_OK
-        assert [a['id'] for a in listing.data] == [attempt_id]
         graded = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
                                  {'response': essay_id, 'pointsEarned': '4'}, format='json')
         assert graded.status_code == status.HTTP_200_OK
@@ -1225,6 +1251,7 @@ class TestManualGrading:
 
         graded = QuizResponse.objects.get(pk=essay_id)
         assert graded.gradedBy == taking_setup['admin']
+        assert graded.gradedAt is not None
         assert graded.graderFeedback == 'Good, but expand on queues.'
         # The auto-graded MC's score was preserved (no regrade).
         assert QuizAttempt.objects.get(pk=attempt_id).score == Decimal('6.50')
@@ -1251,6 +1278,24 @@ class TestManualGrading:
         assert _dec(essay['pointsEarned']) == _dec('3.00')
         assert essay['graderFeedback'] == 'Solid.'
         assert _dec(mine.data['score']) == _dec('5.00')
+
+    def test_graded_by_and_at_staff_only(self, api_client, taking_setup):
+        # Grading provenance shows in the staff projection but never in the student's own view.
+        quiz = self._essay_quiz(taking_setup, showCorrectAnswers=True)
+        attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                        {'response': essay_id, 'pointsEarned': '3'}, format='json')
+
+        staff_view = api_client.get(f'/quizAttempts/{attempt_id}/')
+        essay = next(r for r in staff_view.data['responses'] if r['id'] == essay_id)
+        assert essay['gradedBy'] == taking_setup['admin'].email
+        assert essay['gradedAt'] is not None
+
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        mine = api_client.get(f'/quizAttempts/{attempt_id}/')
+        student_essay = next(r for r in mine.data['responses'] if r['id'] == essay_id)
+        assert 'gradedBy' not in student_essay and 'gradedAt' not in student_essay
 
     def test_roster_grants_and_revokes_quiz_grader_role(self, api_client, taking_setup):
         course, grader = taking_setup['course'], taking_setup['course'].graders.first()
@@ -1283,6 +1328,7 @@ class TestManualGrading:
         assert resp.data['passed'] is None
         reopened = QuizResponse.objects.get(pk=essay_id)
         assert reopened.pointsEarned is None and reopened.gradedBy is None
+        assert reopened.gradedAt is None
         assert reopened.graderFeedback == 'Nice.'  # kept as a draft for the next grader
 
     def test_reopen_requires_grading_role_and_graded_state(self, api_client, taking_setup):
@@ -1299,7 +1345,10 @@ class TestManualGrading:
         api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
                         {'response': essay_id, 'pointsEarned': '3'}, format='json')
 
-        # Plain graders and students can't reopen.
+        # With the course's graders-grade-quizzes default off, plain graders can't reopen;
+        # students never can.
+        course.gradersCanGradeQuizzes = False
+        course.save()
         api_client.force_authenticate(user=course.graders.first())
         assert api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
                                {'response': essay_id},
@@ -1363,9 +1412,16 @@ class TestManualGrading:
         attempt_id, essay_id = self._submitted_attempt(api_client, taking_setup, quiz)
         student = taking_setup['students'][0]
 
-        # Plain graders can't view results.
-        api_client.force_authenticate(user=taking_setup['course'].graders.first())
+        # Results follow the quiz-grading gate: graders see them by default, and are locked
+        # out once the course restricts quiz grading to the explicit role.
+        course = taking_setup['course']
+        api_client.force_authenticate(user=course.graders.first())
+        assert api_client.get(f'/quizzes/{quiz.id}/results/').status_code == status.HTTP_200_OK
+        course.gradersCanGradeQuizzes = False
+        course.save()
         assert api_client.get(f'/quizzes/{quiz.id}/results/').status_code == status.HTTP_403_FORBIDDEN
+        course.gradersCanGradeQuizzes = True
+        course.save()
 
         # While the essay is ungraded: the row exists but carries no official score yet.
         api_client.force_authenticate(user=taking_setup['admin'])
@@ -1404,18 +1460,42 @@ class TestManualGrading:
                                  {'response': essay_id}, format='json')
         assert reopen.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_grade_quiz_capability_follows_role(self, api_client, taking_setup):
+    def test_grade_quiz_capability_follows_flag_and_role(self, api_client, taking_setup):
         course = taking_setup['course']
         grader = course.graders.first()
         api_client.force_authenticate(user=grader)
-        before = api_client.get(f'/courses/{course.id}/capabilities/')
-        assert before.data['capabilitiesMap']['grade_quiz'] is False
+        # Default: every grader has the capability.
+        default = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert default.data['capabilitiesMap']['grade_quiz'] is True
+        # Flag off: only the explicit role grants it.
+        course.gradersCanGradeQuizzes = False
+        course.save()
+        restricted = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert restricted.data['capabilitiesMap']['grade_quiz'] is False
         course.quizGraders.add(grader)
-        after = api_client.get(f'/courses/{course.id}/capabilities/')
-        assert after.data['capabilitiesMap']['grade_quiz'] is True
+        with_role = api_client.get(f'/courses/{course.id}/capabilities/')
+        assert with_role.data['capabilitiesMap']['grade_quiz'] is True
         api_client.force_authenticate(user=taking_setup['admin'])
         admin_caps = api_client.get(f'/courses/{course.id}/capabilities/')
         assert admin_caps.data['capabilitiesMap']['grade_quiz'] is True
+
+    def test_flag_default_and_settings_roundtrip(self, api_client, taking_setup):
+        course = taking_setup['course']
+        api_client.force_authenticate(user=taking_setup['admin'])
+        detail = api_client.get(f'/courses/{course.id}/')
+        assert detail.data['gradersCanGradeQuizzes'] is True
+        settings_view = api_client.get(f'/courses/{course.id}/courseSettings/')
+        assert settings_view.data['gradersCanGradeQuizzes'] is True
+        flipped = api_client.patch(f'/courses/{course.id}/courseSettings/',
+                                   {'gradersCanGradeQuizzes': False}, format='json')
+        assert flipped.status_code == status.HTTP_200_OK
+        course.refresh_from_db()
+        assert course.gradersCanGradeQuizzes is False
+        # Non-admins can't flip it.
+        api_client.force_authenticate(user=course.graders.first())
+        denied = api_client.patch(f'/courses/{course.id}/courseSettings/',
+                                  {'gradersCanGradeQuizzes': True}, format='json')
+        assert denied.status_code == status.HTTP_403_FORBIDDEN
 
 
 class TestRunCode:
@@ -1464,6 +1544,27 @@ class TestRunCode:
         code_resp = next(r for r in resp.data['responses'] if r['id'] == code_id)
         assert code_resp['codeExecution']['status'] == 'running'
 
+    def test_broker_outage_is_503_and_clears_the_running_marker(self, api_client, taking_setup, monkeypatch):
+        """Redis down at dispatch time must not strand the answer at 'running' (nothing would
+        ever write it back) — the row is restored and DependencyUnavailableMiddleware answers 503."""
+        import kombu.exceptions
+        from core.models import QuizResponse
+
+        def broker_down(*a, **kw):
+            raise kombu.exceptions.OperationalError('Error 111 connecting to redis:6379')
+        monkeypatch.setattr('autograder.run.RunQuizResponseCode.delay', broker_down)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+
+        grader = taking_setup['course'].graders.first()
+        taking_setup['course'].quizGraders.add(grader)
+        api_client.force_authenticate(user=grader)
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert resp['Retry-After'] == '10'
+        assert QuizResponse.objects.get(pk=code_id).codeExecution is None
+
     def test_student_cannot_run_code(self, api_client, taking_setup, monkeypatch):
         self._mock_dispatch(monkeypatch)
         quiz = self._code_quiz(taking_setup)
@@ -1473,11 +1574,19 @@ class TestRunCode:
                                {'response': code_id}, format='json')
         assert resp.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_plain_grader_without_role_cannot_run_code(self, api_client, taking_setup, monkeypatch):
+    def test_plain_grader_run_code_follows_flag(self, api_client, taking_setup, monkeypatch):
         self._mock_dispatch(monkeypatch)
+        course = taking_setup['course']
         quiz = self._code_quiz(taking_setup)
         attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
-        api_client.force_authenticate(user=taking_setup['course'].graders.first())
+        # Default: plain graders may run code (they can grade).
+        api_client.force_authenticate(user=course.graders.first())
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        # Flag off without the role: blocked.
+        course.gradersCanGradeQuizzes = False
+        course.save()
         resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
                                {'response': code_id}, format='json')
         assert resp.status_code == status.HTTP_403_FORBIDDEN
@@ -1986,6 +2095,113 @@ class TestAccommodations:
                          {'student': student.email, 'timeMultiplier': '1'}, format='json')
         assert api_client.get(f'/courses/{course.id}/quizAccommodations/').data == []
 
+    def test_multiplier_capped_by_hard_close(self, api_client, taking_setup):
+        from django.utils.dateparse import parse_datetime
+        from core.models import QuizAccommodation, QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('1.5'))
+        api_client.force_authenticate(user=student)
+
+        # Close in 30 min, extended timer 60 min (40 × 1.5) → the close still wins.
+        near_close = timezone.now() + timedelta(minutes=30)
+        near = _quiz(course, title='Near', timeLimitMinutes=40,
+                     availableUntil=near_close, endAttemptsAtClose=True)
+        _add(near, _mc(course, _bank(course)))
+        start = api_client.post('/quizAttempts/', {'quiz': near.id}, format='json')
+        assert parse_datetime(start.data['deadline']) == near_close
+
+        # Close in 70 min → the full extended timer applies inside the cap.
+        far = _quiz(course, title='Far', timeLimitMinutes=40,
+                    availableUntil=timezone.now() + timedelta(minutes=70),
+                    endAttemptsAtClose=True)
+        _add(far, _mc(course, _bank(course)))
+        start = api_client.post('/quizAttempts/', {'quiz': far.id}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        minutes = (attempt.deadline - attempt.startedAt).total_seconds() / 60
+        assert 59.9 < minutes < 60.1
+
+    def test_access_code_bypass_keeps_multiplied_time(self, api_client, taking_setup):
+        from core.models import QuizAccommodation, QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('1.5'))
+        quiz = _quiz(course, availableUntil=timezone.now() - timedelta(minutes=1),
+                     accessCode='ABC123', endAttemptsAtClose=True, timeLimitMinutes=40)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        attempt = QuizAttempt.objects.get(pk=resp.data['id'])
+        assert attempt.closeBypassed is True
+        # Full extended timer (40 × 1.5), not the past close.
+        minutes = (attempt.deadline - attempt.startedAt).total_seconds() / 60
+        assert 59.9 < minutes < 60.1
+
+    def test_accommodation_change_preserves_close_bypass(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        quiz = _quiz(course, availableUntil=timezone.now() - timedelta(minutes=1),
+                     accessCode='ABC123', endAttemptsAtClose=True, timeLimitMinutes=40)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        attempt = QuizAttempt.objects.get(pk=start.data['id'])
+        assert attempt.closeBypassed is True
+
+        # Granting extra time mid-attempt extends the bypassed attempt; it must NOT
+        # re-cap the deadline to the (past) close.
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1.5'}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        attempt.refresh_from_db()
+        assert attempt.deadline == attempt.startedAt + timedelta(minutes=60)
+        assert attempt.deadline > timezone.now()
+
+    def test_expiry_honors_extended_deadline(self, api_client, taking_setup):
+        from core.models import QuizAccommodation, QuizAttempt
+        from core.tasks import finalize_expired_quiz_attempts
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('1.5'))
+        quiz = _quiz(course, timeLimitMinutes=40)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+
+        # 45 minutes elapse — past the base 40-minute limit but inside the extended 60:
+        # neither the sweep nor a resume may auto-submit.
+        now = timezone.now()
+        QuizAttempt.objects.filter(pk=start.data['id']).update(
+            startedAt=now - timedelta(minutes=45), deadline=now + timedelta(minutes=15))
+        assert finalize_expired_quiz_attempts() == 0
+        resume = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resume.status_code == status.HTTP_200_OK
+        assert resume.data['status'] == 'in_progress'
+
+        # Once the extended deadline passes too, the sweep finalizes it.
+        QuizAttempt.objects.filter(pk=start.data['id']).update(deadline=now - timedelta(minutes=1))
+        assert finalize_expired_quiz_attempts() == 1
+        assert QuizAttempt.objects.get(pk=start.data['id']).status == 'submitted'
+
+    def test_untimed_quiz_ignores_multiplier(self, api_client, taking_setup):
+        from core.models import QuizAccommodation
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student,
+                                         timeMultiplier=Decimal('2'))
+        quiz = _quiz(course)  # untimed
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        assert start.data['deadline'] is None
+
 
 # --------------------------------------------------------------------------- #
 # Late-access code: a code an instructor gives late students to start a CLOSED quiz.
@@ -2119,3 +2335,426 @@ class TestAccessCode:
         assert q_data['hasAccessCode'] is True
         # The raw code is never sent to students.
         assert 'accessCode' not in q_data
+
+
+# --------------------------------------------------------------------------- #
+# Browser-only taking: static credentials cannot start/answer/submit
+# --------------------------------------------------------------------------- #
+
+class TestBrowserOnlyTaking:
+    """Quiz-taking is browser-only: personal API tokens, course keys, and basic
+    auth must not start, answer, or submit attempts (blocks scripting attempts
+    through the SDK). JWT/session auth — the browser flow — is unaffected."""
+
+    def _token_client(self, user):
+        from rest_framework.authtoken.models import Token
+        from rest_framework.test import APIClient
+        token, _ = Token.objects.get_or_create(user=user)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        return client
+
+    def test_api_token_cannot_start_attempt(self, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        client = self._token_client(taking_setup['students'][0])
+        resp = client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_api_token_cannot_save_or_submit(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        attempt_id = start.data['id']
+        response_id = start.data['responses'][0]['id']
+
+        client = self._token_client(student)
+        save = client.patch(f'/quizAttempts/{attempt_id}/saveAnswer/',
+                            {'response': response_id, 'answerText': 'scripted'}, format='json')
+        assert save.status_code == status.HTTP_403_FORBIDDEN
+        submit = client.post(f'/quizAttempts/{attempt_id}/submit/', {}, format='json')
+        assert submit.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_api_token_can_still_read_attempts(self, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        client = self._token_client(taking_setup['students'][0])
+        resp = client.get(f'/quizAttempts/myAttempts/?quiz={quiz.id}')
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_jwt_can_start_attempt(self, taking_setup):
+        from core.views.auth import access_token_for_user
+        from rest_framework.test import APIClient
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        student = taking_setup['students'][0]
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token_for_user(student)}")
+        resp = client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
+    def test_course_key_cannot_start_attempt(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['admin'])
+        key_resp = api_client.post(f'/courses/{course.id}/apiKeys/',
+                                   {'name': 'quiz-lockout'}, format='json')
+        assert key_resp.status_code == status.HTTP_201_CREATED
+        api_client.force_authenticate(user=None)
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {key_resp.data['key']}")
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# --------------------------------------------------------------------------- #
+# Safe Exam Browser lockdown (requireSebBrowser)
+# --------------------------------------------------------------------------- #
+
+SEB_KEY = 'a' * 64
+
+
+def _seb_header(path, key=SEB_KEY):
+    """The X-SafeExamBrowser-ConfigKeyHash SEB would stamp on a request to ``path``:
+    SHA256(absolute URL + Config Key). The test client's absolute URLs are
+    http://testserver + path."""
+    import hashlib
+    return {'HTTP_X_SAFEEXAMBROWSER_CONFIGKEYHASH':
+            hashlib.sha256(('http://testserver' + path + key).encode()).hexdigest()}
+
+
+class TestSebLockdown:
+    def _seb_quiz(self, course, **kw):
+        quiz = _quiz(course, requireSebBrowser=True, sebConfigKey=SEB_KEY, **kw)
+        _add(quiz, _mc(course, _bank(course)))
+        return quiz
+
+    def test_start_without_header_blocked_with_structured_403(self, api_client, taking_setup):
+        from core.models import CourseAuditEvent, QuizAttempt
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['lockdownRequired'] is True
+        assert resp.data['lockdownReason'] == 'missing_header'
+        assert not QuizAttempt.objects.filter(quiz=quiz).exists()
+        # Blocked starts are audited (with the denial reason).
+        event = CourseAuditEvent.objects.get(event_type='quiz_attempt_seb_blocked', quiz=quiz)
+        assert event.meta['reason'] == 'missing_header'
+
+    def test_start_with_wrong_hash_blocked(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                               **_seb_header('/quizAttempts/', key='b' * 64))
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['lockdownReason'] == 'invalid_key'
+
+    def test_flag_on_without_key_blocks_as_not_configured(self, api_client, taking_setup):
+        quiz = _quiz(taking_setup['course'], requireSebBrowser=True, sebConfigKey=None)
+        _add(quiz, _mc(taking_setup['course'], _bank(taking_setup['course'])))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                               **_seb_header('/quizAttempts/'))
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data['lockdownReason'] == 'not_configured'
+
+    def test_full_taking_flow_with_valid_hashes(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert started.status_code == status.HTTP_201_CREATED
+        attempt_id = started.data['id']
+        assert started.data['requireSebBrowser'] is True
+        assert QuizAttempt.objects.get(pk=attempt_id).lockdownVerified is True
+        response_id = started.data['responses'][0]['id']
+        save_path = f'/quizAttempts/{attempt_id}/saveAnswer/'
+        saved = api_client.patch(save_path, {'response': response_id, 'selectedChoices': []},
+                                 format='json', **_seb_header(save_path))
+        assert saved.status_code == status.HTTP_200_OK
+        submit_path = f'/quizAttempts/{attempt_id}/submit/'
+        done = api_client.post(submit_path, {}, format='json', **_seb_header(submit_path))
+        assert done.status_code == status.HTTP_200_OK
+
+    def test_save_and_submit_blocked_without_header(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        attempt_id = started.data['id']
+        response_id = started.data['responses'][0]['id']
+        saved = api_client.patch(f'/quizAttempts/{attempt_id}/saveAnswer/',
+                                 {'response': response_id, 'selectedChoices': []}, format='json')
+        assert saved.status_code == status.HTTP_403_FORBIDDEN
+        assert saved.data['lockdownRequired'] is True
+        done = api_client.post(f'/quizAttempts/{attempt_id}/submit/', {}, format='json')
+        assert done.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_retrieve_gated_in_progress_open_after_submit(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        attempt_id = started.data['id']
+        # A second, normal browser can't read the questions mid-quiz…
+        resp = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        # …but review after submission is open anywhere.
+        submit_path = f'/quizAttempts/{attempt_id}/submit/'
+        api_client.post(submit_path, {}, format='json', **_seb_header(submit_path))
+        resp = api_client.get(f'/quizAttempts/{attempt_id}/')
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_myAttempts_strips_in_progress_responses_outside_seb(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert len(started.data['responses']) == 1
+        listed = api_client.get(f'/quizAttempts/myAttempts/?quiz={quiz.id}')
+        assert listed.status_code == status.HTTP_200_OK
+        assert listed.data[0]['responses'] == []
+
+    def test_staff_reads_unaffected(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.get(f"/quizAttempts/{started.data['id']}/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['lockdownVerified'] is True
+
+    def test_toggle_off_stops_enforcement(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        quiz.requireSebBrowser = False
+        quiz.save()
+        saved = api_client.patch(f"/quizAttempts/{started.data['id']}/saveAnswer/",
+                                 {'response': started.data['responses'][0]['id'],
+                                  'selectedChoices': []}, format='json')
+        assert saved.status_code == status.HTTP_200_OK
+
+    def test_non_seb_quiz_untouched(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
+    def test_student_endpoints_never_leak_config_key(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        cards = api_client.get(f"/quizAttempts/availableQuizzes/?course={taking_setup['course'].id}")
+        card = next(c for c in cards.data if c['id'] == quiz.id)
+        assert card['requireSebBrowser'] is True
+        assert 'sebConfigKey' not in card
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert 'sebConfigKey' not in started.data
+
+    def test_staff_key_validation_and_normalization(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'])
+        api_client.force_authenticate(user=taking_setup['admin'])
+        bad = api_client.patch(f'/quizzes/{quiz.id}/', {'sebConfigKey': 'nope'}, format='json')
+        assert bad.status_code == status.HTTP_400_BAD_REQUEST
+        upper = api_client.patch(f'/quizzes/{quiz.id}/', {'sebConfigKey': 'B' * 64}, format='json')
+        assert upper.status_code == status.HTTP_200_OK
+        quiz.refresh_from_db()
+        assert quiz.sebConfigKey == 'b' * 64
+
+
+class TestSebLaunch:
+    """Phase 2: one-click SEB launch (generated config + OTT handoff) and exemptions."""
+
+    def _seb_quiz(self, course, **kw):
+        quiz = _quiz(course, requireSebBrowser=True, **kw)
+        _add(quiz, _mc(course, _bank(course)))
+        return quiz
+
+    def _launch(self, api_client, student, quiz):
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/sebLaunch/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        return resp.data
+
+    def test_launch_returns_seb_url_and_creates_rows(self, api_client, taking_setup):
+        from core.models import OneTimeToken, QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        student = taking_setup['students'][0]
+        data = self._launch(api_client, student, quiz)
+        assert data['sebUrl'].startswith('seb://')  # http test server → seb://
+        assert f'/quizzes/{quiz.id}/sebConfig/' in data['configUrl']
+        launch = QuizSebLaunch.objects.get(quiz=quiz, student=student)
+        assert len(launch.configKey) == 64
+        assert launch.token.is_valid()
+        assert str(launch.token.token) in launch.configPlist  # startURL embeds the OTT
+        assert OneTimeToken.objects.get(pk=launch.token_id).course_id == quiz.course_id
+
+    def test_launch_requires_seb_quiz_and_student(self, api_client, taking_setup):
+        course = taking_setup['course']
+        plain = _quiz(course)
+        _add(plain, _mc(course, _bank(course)))
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/sebLaunch/', {'quiz': plain.id}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        seb_quiz = self._seb_quiz(course)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post('/quizAttempts/sebLaunch/', {'quiz': seb_quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_seb_config_download_is_anonymous_and_token_gated(self, api_client, taking_setup):
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        data = self._launch(api_client, taking_setup['students'][0], quiz)
+        launch = QuizSebLaunch.objects.get(quiz=quiz)
+        api_client.force_authenticate(user=None)
+        good = api_client.get(f'/quizzes/{quiz.id}/sebConfig/?launch={launch.token.token}')
+        assert good.status_code == status.HTTP_200_OK
+        assert good['Content-Type'] == 'application/seb'
+        body = good.content.decode()
+        assert '<key>startURL</key>' in body and 'seb/launch' in body
+        bad = api_client.get(f'/quizzes/{quiz.id}/sebConfig/?launch=nope')
+        assert bad.status_code == status.HTTP_404_NOT_FOUND
+        assert data['configUrl']  # returned URL matches the served route
+
+    def test_ott_exchange_issues_pair_and_is_single_use(self, api_client, taking_setup):
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        self._launch(api_client, taking_setup['students'][0], quiz)
+        token = QuizSebLaunch.objects.get(quiz=quiz).token.token
+        api_client.force_authenticate(user=None)
+        first = api_client.post('/ott/exchange/', {'token': token}, format='json')
+        assert first.status_code == status.HTTP_200_OK
+        assert first.data['token'] and first.data['refresh']
+        again = api_client.post('/ott/exchange/', {'token': token}, format='json')
+        assert again.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_launch_key_verifies_taking_requests(self, api_client, taking_setup):
+        """The whole point: a launch's Config Key (no pasted key at all) hard-unblocks
+        create/save/submit when the header is hashed with it."""
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])  # NO sebConfigKey
+        student = taking_setup['students'][0]
+        self._launch(api_client, student, quiz)
+        key = QuizSebLaunch.objects.get(quiz=quiz).configKey
+        api_client.force_authenticate(user=student)
+        # Without the header the quiz stays blocked (launch alone grants nothing).
+        blocked = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert blocked.status_code == status.HTTP_403_FORBIDDEN
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/', key=key))
+        assert started.status_code == status.HTTP_201_CREATED
+        submit_path = f"/quizAttempts/{started.data['id']}/submit/"
+        done = api_client.post(submit_path, {}, format='json', **_seb_header(submit_path, key=key))
+        assert done.status_code == status.HTTP_200_OK
+
+    def test_pasted_key_still_verifies_alongside_launches(self, api_client, taking_setup):
+        quiz = self._seb_quiz(taking_setup['course'], sebConfigKey=SEB_KEY)
+        student = taking_setup['students'][0]
+        self._launch(api_client, student, quiz)
+        api_client.force_authenticate(user=student)
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                                  **_seb_header('/quizAttempts/'))
+        assert started.status_code == status.HTTP_201_CREATED
+
+    def test_expired_launch_key_stops_verifying(self, api_client, taking_setup):
+        from core.models import QuizSebLaunch
+        quiz = self._seb_quiz(taking_setup['course'])
+        student = taking_setup['students'][0]
+        self._launch(api_client, student, quiz)
+        launch = QuizSebLaunch.objects.get(quiz=quiz)
+        QuizSebLaunch.objects.filter(pk=launch.pk).update(
+            expiresAt=timezone.now() - timedelta(minutes=1))
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json',
+                               **_seb_header('/quizAttempts/', key=launch.configKey))
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_seb_exempt_student_skips_enforcement(self, api_client, taking_setup):
+        from core.models import QuizAccommodation, QuizAttempt
+        course = taking_setup['course']
+        quiz = self._seb_quiz(course, sebConfigKey=SEB_KEY)
+        student = taking_setup['students'][0]
+        QuizAccommodation.objects.create(course=course, student=student, sebExempt=True)
+        api_client.force_authenticate(user=student)
+        started = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert started.status_code == status.HTTP_201_CREATED
+        # Exempt attempts are visibly unverified to staff.
+        assert QuizAttempt.objects.get(pk=started.data['id']).lockdownVerified is False
+        done = api_client.post(f"/quizAttempts/{started.data['id']}/submit/", {}, format='json')
+        assert done.status_code == status.HTTP_200_OK
+
+    def test_set_accommodation_seb_exempt_roundtrip(self, api_client, taking_setup):
+        from core.models import QuizAccommodation
+        course = taking_setup['course']
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1',
+                                 'sebExempt': True}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['sebExempt'] is True
+        assert QuizAccommodation.objects.get(course=course, student=student).sebExempt is True
+        # Omitting sebExempt (the roster's time control) must not clear the exemption.
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1.5'},
+                                format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert QuizAccommodation.objects.get(course=course, student=student).sebExempt is True
+        # Multiplier back to 1 with the exemption still on keeps the row.
+        resp = api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                                {'student': student.email, 'timeMultiplier': '1'},
+                                format='json')
+        assert QuizAccommodation.objects.filter(course=course, student=student).exists()
+        # Clearing both deletes the row.
+        api_client.patch(f'/courses/{course.id}/setQuizAccommodation/',
+                         {'student': student.email, 'timeMultiplier': '1',
+                          'sebExempt': False}, format='json')
+        assert not QuizAccommodation.objects.filter(course=course, student=student).exists()
+
+
+class TestSebConfigKey:
+    """The Config Key normalization (ported from Sakai's SecureDeliverySeb)."""
+
+    def test_key_is_stable_and_case_insensitively_sorted(self):
+        from core.services import seb
+        config = seb.build_seb_config('https://client.example/seb/launch?ott=x&redirect=%2Fy')
+        key = seb.compute_config_key(config)
+        assert len(key) == 64
+        # Deterministic for identical config…
+        assert key == seb.compute_config_key(dict(reversed(list(config.items()))))
+        # …and sensitive to any value change.
+        other = dict(config, startURL='https://client.example/other')
+        assert key != seb.compute_config_key(other)
+
+    def test_plist_round_trips_the_config(self):
+        import plistlib
+        from core.services import seb
+        config = seb.build_seb_config('https://client.example/seb/launch?ott=x')
+        parsed = plistlib.loads(seb.config_to_plist(config).encode())
+        assert parsed == config
+
+    def test_take_path_encodes_like_the_spa(self):
+        from core.services import seb
+
+        class _C:
+            name, period = 'cos 333/x', 'S(2026)!'
+
+        class _Q:
+            pk, course = 7, _C()
+
+        # encodeURIComponent: '/'→%2F, ' '→%20; !'()*-._~ stay literal.
+        assert seb.quiz_take_path(_Q()) == "/student/cos%20333%2Fx/S(2026)!/quizzes/7/take"

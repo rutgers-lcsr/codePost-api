@@ -895,6 +895,8 @@ class TestService:
         # Check Cache
         cached = CachedExecutionResult.get_cached_result(file)
         if cached:
+            from autograder.services.execution_events import record_execution_event
+            record_execution_event(trigger='test_run', cached=True, success=True, file=file)
             return {
                 "success": True, # Cached results imply successful execution, usually
                 "stdout": cached.output_data.get('stdout', ''),
@@ -923,7 +925,11 @@ class TestService:
                 pass
                 
         result.save_cache(file, executed_by=user)
-        
+
+        from autograder.services.execution_events import record_execution_event
+        record_execution_event(trigger='test_run', cached=False, success=result.success,
+                               file=file, error_text=result.err or result.stderr)
+
         return {
             "success": result.success,
             "stdout": result.stdout,

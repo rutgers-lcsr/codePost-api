@@ -10,6 +10,7 @@ from core.serializers.course import (
     CourseRosterMapSerializer,
     CourseStudentCaptionsSerializer,
 )
+from core.serializers.assignment import AssignmentSerializer
 from core.serializers.gradebook import GradebookResponseSerializer
 from core.serializers.section import SectionSerializer
 from core.serializers.questionBank import QuestionBankSerializer
@@ -19,7 +20,7 @@ from core.views.template import SuperUserListProtectedViewSet
 
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import serializers
@@ -35,13 +36,15 @@ from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isCourseAdmin, isCourseMember, isCourseStaff
 from core.permissions.helpers import isSuperGrader
 import logging
-from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
+from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer, AIProviderTestRequestSerializer, AIProviderTestResultSerializer
+from core.throttles import AIConnectionTestThrottle
 from core.serializers.actionResponses import CapabilitiesResponseSerializer
 from core.permissions.capabilities import compute_course_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
-from core.permissions.course_scope import _get_course_scope_id
+from core.permissions.course_scope import get_course_scope_id
 from core.serializers.course_audit_event import CourseAuditEventSerializer
 from core.models import CourseAuditEvent, CourseAPIKey
 from core.serializers.course_api_key import (
+    PendingAgentActionSerializer,
     CourseAPIKeyReadSerializer,
     CourseAPIKeyCreateSerializer,
     CourseAPIKeyCreateResponseSerializer,
@@ -59,9 +62,11 @@ from core.utils import get_or_create_user
 from core.emails import UserAddedToCourseEmail
 
 class QuizAccommodationRowSerializer(serializers.Serializer):
-    """One per-student quiz extra-time accommodation (course-level multiplier)."""
+    """One per-student quiz accommodation: extra-time multiplier + SEB exemption."""
     student = serializers.EmailField()
     timeMultiplier = serializers.DecimalField(max_digits=4, decimal_places=2)
+    # Omitted on write = leave the student's current exemption unchanged.
+    sebExempt = serializers.BooleanField(required=False)
 
 
 def generate_invite_code():
@@ -141,7 +146,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not isCourseMember(user, course):
             return returnForbidden()
 
-        is_scoped = _get_course_scope_id(request) is not None
+        is_scoped = get_course_scope_id(request) is not None
         caps = compute_course_capabilities(user, course, is_course_scoped=is_scoped)
 
         include_descriptions = request.query_params.get('descriptions', '').lower() in ('true', '1')
@@ -255,6 +260,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         require_capability(user, 'view_ai_usage', course)
 
         from core.services.ai_usage_analytics import get_usage_summary
+        from core.services.ai_service import AIService
         from core.models import AIUsageRecord
         from django.utils.dateparse import parse_datetime
 
@@ -280,6 +286,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             end_date=end_date,
             breakdown_field='assignment',
             breakdown_name_field='assignment__name',
+            projection_rates=AIService.merged_token_rates(course=course),
         )
 
         return Response(summary)
@@ -333,6 +340,55 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             result['liveError'] = str(e)
 
         return Response({'providers': [result]})
+
+    @extend_schema(request=AIProviderTestRequestSerializer, responses={200: AIProviderTestResultSerializer})
+    @action(detail=True, methods=["POST"], throttle_classes=[AIConnectionTestThrottle])
+    def aiTest(self, request, pk=None):
+        """
+        POST: Fire a small completion through the course's effective AI
+        config (own settings or inherited org settings) and report success,
+        latency, and any error. Accepts an optional custom prompt and a
+        one-off model override. Recorded in AI usage as 'provider_test'.
+        Only accessible by course admins.
+        """
+        import asyncio
+        from core.services.ai_service import AIService, GenerationResult
+
+        user = request.user
+        if not isAuthenticated(user):
+            return returnNotAuthorized()
+
+        course: Course = self.get_object()
+
+        require_capability(user, 'configure_ai', course)
+
+        body = AIProviderTestRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+
+        svc = AIService(course).set_request_context(user=user, request_type='provider_test')
+        result = asyncio.run(svc.test_connection(
+            prompt=body.validated_data.get('prompt') or None,
+            model=body.validated_data.get('model') or None,
+        ))
+
+        # Record usage when a request was actually attempted (sync context —
+        # record_usage does ORM work that can't run inside asyncio.run).
+        if result.get('requestSystemPrompt') is not None:
+            svc.record_usage(
+                GenerationResult(
+                    text=result.get('response') or '',
+                    success=result['success'],
+                    error=result.get('error'),
+                    input_tokens=result.get('_inputTokens', 0),
+                    output_tokens=result.get('_outputTokens', 0),
+                    total_tokens=result.get('_totalTokens', 0),
+                    cached_tokens=result.get('_cachedTokens', 0),
+                ),
+                user,
+                request_type='provider_test',
+            )
+
+        return Response(AIProviderTestResultSerializer(result).data)
 
     @extend_schema(responses=CourseRosterSerializer)
     @action(detail=True, methods=["GET", "PATCH"])
@@ -678,6 +734,35 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         return Response(serializer.data)
 
     @extend_schema(
+        responses=inline_serializer('QuizGradingProgress', {
+            'quizzes': inline_serializer('QuizGradingProgressQuiz', {
+                'id': serializers.IntegerField(),
+                'title': serializers.CharField(),
+                'totalManual': serializers.IntegerField(),
+                'graded': serializers.IntegerField(),
+                'pending': serializers.IntegerField(),
+            }, many=True),
+            'graders': inline_serializer('QuizGradingProgressGrader', {
+                'grader': serializers.EmailField(),
+                'totalGraded': serializers.IntegerField(),
+                'lastGradedAt': serializers.DateTimeField(allow_null=True),
+                'perQuiz': serializers.DictField(child=serializers.IntegerField()),
+            }, many=True),
+            'pendingUngraded': serializers.IntegerField(),
+        }),
+        description="Per-grader manual quiz-grading progress across the course's published "
+                    "quizzes (submitted attempts only). perQuiz keys are quiz ids; graders "
+                    "who left the course keep their rows (accountability, not a roster).",
+    )
+    @action(detail=True, methods=["GET"])
+    def quizGradingProgress(self, request, pk=None):
+        """Per-grader manual quiz-grading progress for the course's published quizzes."""
+        course = self.get_object()
+        require_capability(request.user, 'view_analytics', course)
+        from core.services.quiz_analytics import get_quiz_grading_progress
+        return Response(get_quiz_grading_progress(course))
+
+    @extend_schema(
         responses=CourseAuditEventSerializer(many=True),
         parameters=[
             OpenApiParameter(name='student', type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False, description='Filter by student email'),
@@ -788,12 +873,19 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         request=CourseAPIKeyCreateSerializer,
         responses={201: CourseAPIKeyCreateResponseSerializer},
     )
-    @action(detail=True, methods=["GET", "POST"], url_path="apiKeys", url_name="api-keys")
+    @action(
+        detail=True,
+        methods=["GET", "POST"],
+        url_path="apiKeys",
+        url_name="api-keys",
+        permission_classes=[IsAuthenticated],
+    )
     def apiKeys(self, request, pk=None):
         """List or create course-scoped API keys."""
         course = self.get_object()
 
-        require_capability(request.user, 'manage_course_api_keys', course)
+        is_scoped = get_course_scope_id(request) is not None
+        require_capability(request.user, 'manage_course_api_keys', course, is_course_scoped=is_scoped)
 
         if request.method == "GET":
             keys = CourseAPIKey.objects.filter(course=course).order_by("-created")
@@ -804,6 +896,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         ser = CourseAPIKeyCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         name = ser.validated_data["name"]
+        scope = ser.validated_data.get("scope", "read")
 
         if CourseAPIKey.objects.filter(course=course, name=name).exists():
             return Response(
@@ -820,6 +913,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             key_prefix=prefix,
             hashed_key=CourseAPIKey.hash_key(raw_key),
             created_by=request.user,
+            scope=scope,
         )
 
         return Response(
@@ -828,6 +922,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                 "name": api_key.name,
                 "key": raw_key,
                 "keyPrefix": api_key.key_prefix,
+                "scope": api_key.scope,
                 "createdBy": request.user.username,
                 "created": api_key.created,
             },
@@ -848,7 +943,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         """Update or revoke a single course API key."""
         course = self.get_object()
 
-        require_capability(request.user, 'manage_course_api_keys', course)
+        is_scoped = get_course_scope_id(request) is not None
+        require_capability(request.user, 'manage_course_api_keys', course, is_course_scoped=is_scoped)
 
         try:
             api_key = CourseAPIKey.objects.get(pk=key_id, course=course)
@@ -868,6 +964,117 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         api_key.save()
         serializer = CourseAPIKeyReadSerializer(api_key)
         return Response(serializer.data)
+
+    @extend_schema(responses=PendingAgentActionSerializer(many=True))
+    @action(detail=True, methods=["GET"], url_path="pendingAgentActions")
+    def pendingAgentActions(self, request, pk=None):
+        """Tier-3 agent actions awaiting (or holding) this course's approval.
+
+        The whole point of this panel is that the AGENT cannot touch it, so a
+        course-scoped credential (the agent's own key) is refused outright —
+        only a human course admin, signed in normally, may see or decide these.
+        """
+        from django.utils import timezone
+
+        from core.models import PendingAgentAction
+
+        course = self.get_object()
+        if get_course_scope_id(request) is not None:
+            return Response(
+                {"detail": "Pending agent actions are only visible to a signed-in "
+                           "course admin, never to a course-scoped credential."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+
+        # Approved-but-unconsumed rows stay visible so the admin can watch the
+        # request flip to executed (the agent's retry consumes it) or expire.
+        rows = PendingAgentAction.objects.filter(
+            course=course, denied_at=None, redeemed_at=None,
+            expires_at__gt=timezone.now())
+        return Response(PendingAgentActionSerializer(rows, many=True).data)
+
+    @extend_schema(request=None, responses={204: None})
+    # POST, not DELETE: CoursePermissions forbids the DELETE verb on Course
+    # objects wholesale, and sub-actions inherit that object check.
+    @action(detail=True, methods=["POST"],
+            url_path=r"pendingAgentActions/(?P<action_id>\d+)/deny")
+    def denyPendingAgentAction(self, request, pk=None, action_id=None):
+        """Deny a pending agent action.
+
+        The denial sticks until the request expires: the agent's retries get a
+        clear "denied — stop asking" error instead of minting a fresh request.
+        """
+        from django.utils import timezone
+
+        from core.models import PendingAgentAction
+
+        course = self.get_object()
+        if get_course_scope_id(request) is not None:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+
+        action_row = PendingAgentAction.objects.filter(
+            pk=action_id, course=course).first()
+        if action_row is None:
+            return returnNotFound(message="No such pending action")
+        PendingAgentAction.objects.filter(
+            pk=action_row.pk, denied_at=None).update(denied_at=timezone.now())
+        self._audit_agent_action(request, course, action_row, approved=False)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=None, responses={204: None})
+    @action(detail=True, methods=["POST"],
+            url_path=r"pendingAgentActions/(?P<action_id>\d+)/approve")
+    def approvePendingAgentAction(self, request, pk=None, action_id=None):
+        """Approve a pending agent action — the agent's next retry executes it.
+
+        The conditional update makes approve-vs-deny and double-click races
+        resolve deterministically: whoever flips the row first wins, everyone
+        else gets 409.
+        """
+        from django.utils import timezone
+
+        from core.models import PendingAgentAction
+
+        course = self.get_object()
+        if get_course_scope_id(request) is not None:
+            return Response(
+                {"detail": "Only a signed-in course admin may approve agent "
+                           "actions, never a course-scoped credential."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
+            return returnForbidden()
+
+        action_row = PendingAgentAction.objects.filter(
+            pk=action_id, course=course).first()
+        if action_row is None:
+            return returnNotFound(message="No such pending action")
+        flipped = PendingAgentAction.objects.filter(
+            pk=action_row.pk, denied_at=None, approved_at=None,
+            redeemed_at=None, expires_at__gt=timezone.now(),
+        ).update(approved_at=timezone.now(), approved_by=request.user)
+        if not flipped:
+            return Response(
+                {"detail": "This action can no longer be approved (already "
+                           "decided, consumed, or expired)."},
+                status=status.HTTP_409_CONFLICT)
+        self._audit_agent_action(request, course, action_row, approved=True)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _audit_agent_action(self, request, course, action_row, *, approved):
+        from core.services.audit import record_audit_event
+
+        record_audit_event(
+            course=course,
+            event_type="agent_action_approved" if approved
+                       else "agent_action_denied",
+            user=request.user,
+            meta={"tool": action_row.tool, "planHash": action_row.plan_hash,
+                  "actionId": action_row.pk, "origin": "dashboard"})
 
     @extend_schema(responses=QuestionBankSerializer(many=True))
     @action(detail=True, methods=["GET"], url_path="questionBanks")
@@ -898,7 +1105,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return returnForbidden()
         rows = course.quizAccommodations.select_related('student').order_by('student__email')
         return Response(QuizAccommodationRowSerializer(
-            [{'student': a.student.email, 'timeMultiplier': a.timeMultiplier} for a in rows],
+            [{'student': a.student.email, 'timeMultiplier': a.timeMultiplier,
+              'sebExempt': a.sebExempt} for a in rows],
             many=True).data)
 
     @extend_schema(
@@ -925,11 +1133,17 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if student is None:
             return Response({'detail': 'No such student in this course.'},
                             status=status.HTTP_400_BAD_REQUEST)
-        if multiplier == 1:
+        # An omitted sebExempt preserves the student's current exemption, so the roster's
+        # time-multiplier control can keep sending {student, timeMultiplier} alone.
+        existing = QuizAccommodation.objects.filter(course=course, student=student).first()
+        seb_exempt = ser.validated_data.get(
+            'sebExempt', existing.sebExempt if existing else False)
+        if multiplier == 1 and not seb_exempt:
             QuizAccommodation.objects.filter(course=course, student=student).delete()
         else:
             QuizAccommodation.objects.update_or_create(
-                course=course, student=student, defaults={'timeMultiplier': multiplier})
+                course=course, student=student,
+                defaults={'timeMultiplier': multiplier, 'sebExempt': seb_exempt})
         # Reflect the new multiplier onto the student's in-progress attempts — deadlines are
         # stored at start, so without this an accommodation granted mid-quiz would do nothing.
         from core.services import quiz_grading
@@ -941,7 +1155,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
                 attempt.deadline = deadline
                 attempt.save()
         return Response(QuizAccommodationRowSerializer(
-            {'student': student.email, 'timeMultiplier': multiplier}).data)
+            {'student': student.email, 'timeMultiplier': multiplier,
+             'sebExempt': seb_exempt}).data)
 
     @extend_schema(responses=GradebookResponseSerializer)
     @action(detail=True, methods=["GET"])
@@ -953,6 +1168,73 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
             return returnForbidden()
         return Response(GradebookResponseSerializer(build_gradebook(course)).data)
+
+    @extend_schema(responses=AssignmentSerializer(many=True))
+    @action(detail=True, methods=["GET"])
+    def assignments(self, request, pk=None):
+        """Every assignment in the course the caller may see, each serialized exactly as
+        GET /assignments/{id}/ would serialize it for this caller. Replaces the client-side
+        per-id fan-out (the course detail returns ids only, and list endpoints are blocked).
+
+        The visible set mirrors AssignmentPermissions.has_object_permission, NOT the course
+        serializer's id list: staff and superusers see everything; students see
+        STUDENT_VISIBLE_STATES minus section-hidden assignments; anyone else who can read
+        the course (org staff of the org who is not a member) gets an empty list, because
+        every per-id retrieve 403s for them today."""
+        from django.db.models import Avg, Count, Max, Min, Q
+        from core.models import STUDENT_VISIBLE_STATES
+        from core.permissions.helpers import assignmentFeedbackOpen, isGrader, isStudent
+        from core.serializers.assignment import (
+            AssignmentSerializerWithStatisticsAndSummary,
+            AssignmentStudentSerializer,
+            AssignmentStudentSerializerNoStats,
+            AssignmentStudentSerializerWithStats,
+        )
+
+        course = self.get_object()
+        user = request.user
+
+        if user.is_superuser or isCourseStaff(user, course):
+            qs = course.assignments.all()
+        elif isStudent(user, course):
+            qs = (course.assignments
+                  .filter(state__in=STUDENT_VISIBLE_STATES)
+                  .exclude(hideFrom__students=user))
+        else:
+            return Response([])
+
+        qs = qs.prefetch_related('files', 'rubricCategories', 'testCategories', 'dataSets')
+        context = {'request': request}
+
+        # Serializer choice replicates AssignmentViewSet.get_serializer_class for retrieve —
+        # including the quirk that a superuser who is not a course member falls through to
+        # the student serializers, exactly as the per-id endpoint does.
+        if isCourseAdmin(user, course):
+            # Same annotations retrieve uses; without them the stats/summary fields
+            # recompute per object (~8 queries × N assignments).
+            qs = qs.annotate(
+                submissions_count_anno=Count('submissions', distinct=True),
+                submissions_finalized_count_anno=Count('submissions', filter=Q(submissions__isFinalized=True), distinct=True),
+                submissions_inprogress_count_anno=Count('submissions', filter=Q(submissions__isFinalized=False) & ~Q(submissions__grader=None), distinct=True),
+                submissions_unclaimed_count_anno=Count('submissions', filter=Q(submissions__grader=None), distinct=True),
+                stats_max_anno=Max('submissions__grade', filter=Q(submissions__isFinalized=True)),
+                stats_min_anno=Min('submissions__grade', filter=Q(submissions__isFinalized=True)),
+                stats_mean_anno=Avg('submissions__grade', filter=Q(submissions__isFinalized=True)),
+            )
+            return Response(AssignmentSerializerWithStatisticsAndSummary(qs, many=True, context=context).data)
+        if isGrader(user, course):
+            return Response(AssignmentSerializer(qs, many=True, context=context).data)
+
+        data = []
+        for assignment in qs:
+            if not assignmentFeedbackOpen(assignment, user):
+                serializer_class = AssignmentStudentSerializer
+            elif not course.showStudentsStatistics:
+                serializer_class = AssignmentStudentSerializerNoStats
+            else:
+                serializer_class = AssignmentStudentSerializerWithStats
+            data.append(serializer_class(assignment, context=context).data)
+        return Response(data)
 
     @extend_schema(
         responses={(200, 'text/csv'): OpenApiTypes.STR},

@@ -6,7 +6,9 @@ Covers:
 - Key CRUD (create / list / update / revoke)
 - CourseAPIKeyAuthentication backend
 - CourseScopedJWTAuthentication backend
-- CourseScopePermission enforcement
+- Cross-course isolation (enforced by each viewset's TemplatePermission subclass:
+  the service account is a courseAdmin of exactly one course, so membership
+  checks fail for any other course)
 - OTT → course-scoped JWT propagation
 - Impersonate → course-scoped JWT propagation
 """
@@ -54,6 +56,16 @@ def student_of_a(course_a):
 @pytest.fixture
 def admin_of_b(course_b):
     return course_b.courseAdmins.first()
+
+
+@pytest.fixture
+def plain_admin_of_a(course_a):
+    """Course admin whose profile lacks the org-level canCreateCourses flag."""
+    from core.tests.factories import UserFactory
+    with factory.django.mute_signals(post_save):
+        user = UserFactory(course=course_a.name, organization=course_a.organization, count=10)
+    course_a.courseAdmins.add(user)
+    return user
 
 
 @pytest.fixture
@@ -155,6 +167,44 @@ class TestCourseAPIKeyCRUD:
         )
         assert resp.status_code == status.HTTP_403_FORBIDDEN
 
+    def test_admin_without_course_creation_flag_can_create_key(self, course_a, plain_admin_of_a, api_client):
+        """Regression: minting a key must not require the org-level canCreateCourses flag."""
+        assert plain_admin_of_a.profile.canCreateCourses is False
+        api_client.force_authenticate(user=plain_admin_of_a)
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "no-flag-key"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_201_CREATED, resp.data
+        assert resp.data["key"].startswith(f"cpk_{course_a.id}_")
+
+    def test_admin_without_course_creation_flag_can_list_keys(self, course_a, plain_admin_of_a, api_client):
+        api_client.force_authenticate(user=plain_admin_of_a)
+        resp = api_client.get(f"/courses/{course_a.id}/apiKeys/")
+        assert resp.status_code == status.HTTP_200_OK
+
+    def test_grader_cannot_create_or_list_keys(self, course_a, api_client):
+        grader = course_a.graders.first()
+        api_client.force_authenticate(user=grader)
+        assert api_client.get(f"/courses/{course_a.id}/apiKeys/").status_code == status.HTTP_403_FORBIDDEN
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "grader-key"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_non_member_cannot_create_or_list_keys(self, course_a, admin_of_b, api_client):
+        api_client.force_authenticate(user=admin_of_b)
+        assert api_client.get(f"/courses/{course_a.id}/apiKeys/").status_code == status.HTTP_403_FORBIDDEN
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "outsider-key"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
 
 # ---------------------------------------------------------------------------
 # Authentication via CourseKey header
@@ -198,6 +248,57 @@ class TestCourseScopeEnforcement:
     def test_scoped_key_cannot_access_other_course(self, course_a, course_b, api_client, raw_key_a):
         api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
         resp = api_client.get(f"/courses/{course_b.id}/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+
+# ---------------------------------------------------------------------------
+# Scoped requests cannot manage keys (COURSE_SCOPED_BLOCKED_CAPABILITIES)
+# ---------------------------------------------------------------------------
+
+class TestScopedRequestCannotManageKeys:
+    """A course API key (or course-scoped JWT) must not manage keys — a leaked
+    key must not be able to mint or revoke credentials for its course."""
+
+    def test_scoped_key_cannot_list_keys(self, course_a, api_client, raw_key_a):
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.get(f"/courses/{course_a.id}/apiKeys/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_scoped_key_cannot_create_key(self, course_a, api_client, raw_key_a):
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "escalated"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert CourseAPIKey.objects.filter(course=course_a).count() == 1
+
+    def test_scoped_key_cannot_patch_or_delete_key(self, course_a, api_client, raw_key_a):
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        patch = api_client.patch(
+            f"/courses/{course_a.id}/apiKeys/{key_obj.id}/",
+            {"isActive": False},
+            format="json",
+        )
+        assert patch.status_code == status.HTTP_403_FORBIDDEN
+        key_obj.refresh_from_db()
+        assert key_obj.is_active is True
+        delete = api_client.delete(f"/courses/{course_a.id}/apiKeys/{key_obj.id}/")
+        assert delete.status_code == status.HTTP_403_FORBIDDEN
+        assert CourseAPIKey.objects.filter(pk=key_obj.pk).exists()
+
+    def test_scoped_jwt_cannot_manage_keys(self, course_a, admin_of_a, api_client):
+        """Even a real admin's course-scoped JWT is blocked from key management."""
+        from core.views.auth import access_token_for_user
+        jwt_str = access_token_for_user(admin_of_a, course_id=course_a.id)
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {jwt_str}")
+        resp = api_client.post(
+            f"/courses/{course_a.id}/apiKeys/",
+            {"name": "scoped-jwt-key"},
+            format="json",
+        )
         assert resp.status_code == status.HTTP_403_FORBIDDEN
 
 

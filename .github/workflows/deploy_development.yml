@@ -1,7 +1,9 @@
 # Deploy to Development Server (API)
 #
 # Triggers automatically on every push to main. Deploys the latest commit
-# to the development environment (data, api, and worker runners).
+# to the development environment (data, api, and worker runners), in that
+# order — the API runs migrations against the freshly deployed database and
+# the workers must not pick up new task code before those migrations land.
 #
 # Related workflows:
 #   - test_codepost.yml runs CI on the same branches
@@ -47,13 +49,14 @@ jobs:
             - name: Deploy docker containers for database, redis, adminer, and flower
               run: |
                   docker compose -f docker-compose-data.yml build
-                  docker compose -f docker-compose-data.yml up -d --remove-orphans
+                  docker compose -f docker-compose-data.yml up -d --remove-orphans --wait --wait-timeout 180
             - name: Remove docker artifacts
               run: |
                   docker system prune -f
             - name: Notify database deployment success
               run: echo "Database deployment to development server successful!"
     deploy:
+        needs: [deploy_data]
         environment: development
         runs-on: development-api
         env:
@@ -88,7 +91,7 @@ jobs:
                   API_URL=${{ vars.API_URL }}
                   CLIENT_URL=${{ vars.CLIENT_URL }}
                   SECRET_KEY=${{ secrets.SECRET_KEY }}
-                  FIELD_ENCRYPTION_KEY= ${{secrets.FIELD_ENCRYPTION_KEY}}
+                  FIELD_ENCRYPTION_KEY=${{ secrets.FIELD_ENCRYPTION_KEY }}
                   DB_HOSTNAME=${{ vars.DB_HOSTNAME }}
                   DB_PASSWORD=${{ secrets.DB_PASSWORD }}
                   API_USER=${{ vars.API_USER }}
@@ -103,9 +106,25 @@ jobs:
             - name: Build and deploy
               run: |
                   docker compose build
-                  docker compose up -d --remove-orphans
-                  # Restart the nginx container due to 502 Bad Gateway errors
-                  docker restart codepost-entry
+                  docker compose up -d --remove-orphans --wait --wait-timeout 180
+
+            - name: Restart nginx (picks up nginx.conf and renewed certs)
+              # nginx.conf and certs/ are bind mounts by path. The checkout replaces them
+              # with new inodes, so the running container keeps stale copies (nginx serves
+              # the certs it loaded at boot, but `exec nginx -t` cannot even see them) and
+              # compose never recreates codepost-entry for a mount-content change. Validate
+              # the new config against the new certs first, then restart to re-bind.
+              run: |
+                  docker run --rm -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$PWD/certs:/etc/ssl/certs:ro" nginx:latest nginx -t
+                  docker compose restart codepost-entry
+
+            - name: Verify API readiness
+              run: |
+                  for i in $(seq 1 18); do
+                      if curl -fsS --max-time 10 "${API_URL}/health-check/ready/"; then echo; exit 0; fi
+                      echo "API not ready yet ($i/18)"; sleep 10
+                  done
+                  echo "::error::API did not report ready at ${API_URL}/health-check/ready/"; exit 1
 
             - name: Remove docker artifacts
               run: |
@@ -114,6 +133,7 @@ jobs:
             - name: Notify deployment success
               run: echo "Deployment to development server successful!"
     deploy_workers:
+        needs: [deploy]
         environment: development
         runs-on: development-workers
         env:
@@ -124,6 +144,7 @@ jobs:
             DB_HOSTNAME: ${{ vars.DB_HOSTNAME }}
             DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
             ROOT_DATABASE_PASSWORD: ${{ secrets.ROOT_DATABASE_PASSWORD }}
+            FIELD_ENCRYPTION_KEY: ${{ secrets.FIELD_ENCRYPTION_KEY }}
             EMAIL_HOST: ${{ vars.EMAIL_HOST }}
             DEFAULT_EMAIL_FROM: ${{ vars.DEFAULT_EMAIL_FROM }}
             NFS_SERVER_IP: ${{ vars.NFS_SERVER_IP }}
@@ -158,7 +179,7 @@ jobs:
             - name: Build and deploy workers only
               run: |
                   docker compose -f docker-compose-worker.yml build
-                  docker compose -f docker-compose-worker.yml up -d --remove-orphans
+                  docker compose -f docker-compose-worker.yml up -d --remove-orphans --wait --wait-timeout 180
 
             - name: Remove docker artifacts
               run: |

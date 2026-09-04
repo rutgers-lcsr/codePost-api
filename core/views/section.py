@@ -62,7 +62,13 @@ class SectionViewSet(ListProtectedViewSet):
     except Assignment.DoesNotExist:
         return returnForbidden()
 
-    submissions = Submission.objects.filter(students__in=section.students.all(), assignment=assignment)
+    # select_related/prefetch_related mirror the assignment submissions action: the serializer
+    # walks grader, assignment->course, students, files (+ per-file comments/edit), and tests.
+    submissions = (
+        Submission.objects.filter(students__in=section.students.all(), assignment=assignment)
+        .select_related('grader', 'assignment__course')
+        .prefetch_related('students', 'files', 'files__comments', 'files__edit', 'tests')
+    )
 
     if assignment.anonymousGrading and not canViewUnanonymizedSubmissions(user, course):
         serializer = AnonymousSubmissionSerializer(submissions, many=True, context={'request': request})

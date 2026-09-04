@@ -243,6 +243,154 @@ class TestAIServiceConfigResolution(TestCase):
         self.assertEqual(svc.model, 'gpt-4o')
         self.assertTrue(svc.is_configured)
 
+    def test_portkey_blank_base_url_is_configured(self):
+        """Portkey with a blank base URL (official Portkey API) is a supported
+        config — _call_portkey falls back to DEFAULT_PORTKEY_URL — so
+        is_configured and feature resolution must treat it as configured."""
+        course = _make_course(
+            ai_use_own_settings=True,
+            ai_provider='portkey',
+            ai_api_key='pk-key',
+            ai_base_url=None,
+            ai_model='@gcp/gemini-2.5-flash',
+        )
+        svc = AIService(cast(Course, course))
+        self.assertTrue(svc.is_configured)
+        self.assertTrue(svc.is_feature_enabled('quiz_generation'))
+        # default-off feature turns on once the course opts in
+        course.ai_feature_config = {'personalized_quiz_generation': True}
+        self.assertTrue(svc.is_feature_enabled('personalized_quiz_generation'))
+
+    def test_undecrypted_api_key_produces_actionable_error(self):
+        """An EncryptedCharField read with the wrong FIELD_ENCRYPTION_KEY silently
+        yields Fernet ciphertext; the provider then rejects it as an invalid key.
+        The friendly error must name the real cause instead of blaming the key."""
+        course = _make_course(
+            ai_use_own_settings=True,
+            ai_provider='gemini',
+            ai_api_key='gAAAAABoffFakeCiphertextValue',
+        )
+        svc = AIService(cast(Course, course))
+        self.assertTrue(svc.api_key_looks_undecrypted)
+        msg = svc._parse_error(Exception('API key not valid. Please pass a valid API key.'))
+        self.assertIn('FIELD_ENCRYPTION_KEY', msg)
+
+        # A normal key keeps the standard message.
+        course.ai_api_key = 'AIzaRealLookingKey'
+        svc = AIService(cast(Course, course))
+        self.assertFalse(svc.api_key_looks_undecrypted)
+        msg = svc._parse_error(Exception('API key not valid. Please pass a valid API key.'))
+        self.assertIn('Invalid API key', msg)
+
+    def test_ollama_blank_base_url_is_configured(self):
+        """Ollama with a blank base URL falls back to DEFAULT_OLLAMA_URL in
+        _call_ollama, so provider alone counts as configured."""
+        course = _make_course(
+            ai_use_own_settings=True,
+            ai_provider='ollama',
+            ai_api_key=None,
+            ai_base_url=None,
+            ai_model='llama3',
+        )
+        svc = AIService(cast(Course, course))
+        self.assertTrue(svc.is_configured)
+
+
+class TestForConfigConnectionTest(TestCase):
+    """AIService.for_config + test_connection (course-less instances)."""
+
+    def test_for_config_portkey_blank_base_url_is_testable(self):
+        # _call_portkey falls back to DEFAULT_PORTKEY_URL when base_url is
+        # blank — test_connection must accept this config.
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key', base_url='', model='')
+        self.assertEqual(svc.model, 'default')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)()
+        self.assertTrue(result['success'])
+        self.assertEqual(result['response'], 'OK')
+        self.assertIsNotNone(result['latencyMs'])
+        self.assertIsNone(result['reportedModel'])
+        self.assertEqual(result['requestUserPrompt'], 'Reply with exactly: OK')
+        self.assertTrue(result['requestSystemPrompt'])
+
+    def test_custom_prompt_used_and_clamped(self):
+        captured = {}
+
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            captured['user_prompt'] = user_prompt
+            return ('4', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key')
+        long_prompt = 'y' * 600
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)(prompt=long_prompt)
+        self.assertTrue(result['success'])
+        self.assertEqual(len(captured['user_prompt']), AIService.TEST_PROMPT_MAX_CHARS)
+        self.assertEqual(result['requestUserPrompt'], captured['user_prompt'])
+
+    def test_system_prompt_differs_for_custom_prompt(self):
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            default_run = async_to_sync(svc.test_connection)()
+            custom_run = async_to_sync(svc.test_connection)(prompt='What is 2+2?')
+        self.assertIn('connectivity test', default_run['requestSystemPrompt'])
+        self.assertIn('helpful assistant', custom_run['requestSystemPrompt'])
+
+    def test_whitespace_prompt_falls_back_to_default_ping(self):
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)(prompt='   ')
+        self.assertEqual(result['requestUserPrompt'], 'Reply with exactly: OK')
+        self.assertIn('connectivity test', result['requestSystemPrompt'])
+
+    def test_model_override_applies_to_request_and_result(self):
+        captured = {}
+
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            captured['model'] = self.model
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key', model='default')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)(model='gpt-4o')
+        self.assertEqual(captured['model'], 'gpt-4o')
+        self.assertEqual(result['model'], 'gpt-4o')
+
+    def test_reported_model_surfaced_from_provider_meta(self):
+        async def fake_dispatch(self, system_prompt, user_prompt):
+            self._last_provider_meta = {'model': 'gemini-3-flash-preview-001'}
+            return ('OK', 3, 1, 4, 0)
+
+        svc = AIService.for_config('portkey', api_key='pk-key', model='default')
+        with patch('core.services.ai_service.AIService._dispatch_provider', new=fake_dispatch):
+            result = async_to_sync(svc.test_connection)()
+        self.assertTrue(result['success'])
+        self.assertEqual(result['reportedModel'], 'gemini-3-flash-preview-001')
+
+    def test_unconfigured_provider_fails_without_calling_provider(self):
+        svc = AIService.for_config('')
+        result = async_to_sync(svc.test_connection)()
+        self.assertFalse(result['success'])
+        self.assertIn('No AI provider', result['error'])
+        # No request was attempted, so no request prompts are reported
+        self.assertIsNone(result['requestSystemPrompt'])
+        self.assertIsNone(result['requestUserPrompt'])
+
+    def test_openai_without_key_fails_without_calling_provider(self):
+        svc = AIService.for_config('openai')
+        result = async_to_sync(svc.test_connection)()
+        self.assertFalse(result['success'])
+        self.assertIn('No API key', result['error'])
+
 
 # ===========================================================================
 # Per-feature model resolution
@@ -359,6 +507,23 @@ class TestEstimateCost(TestCase):
         expected = (100_000 / 1_000_000) * 0.15 + (50_000 / 1_000_000) * 0.60
         self.assertAlmostEqual(cost, expected, places=6)
 
+    def test_gateway_model_falls_back_to_basename_default(self):
+        # Portkey-style slash-prefixed id should match the bare TOKEN_RATES entry
+        cost = AIService.estimate_cost('portkey', 'some-gateway/gemini-2.5-flash', 1_000_000, 1_000_000)
+        self.assertAlmostEqual(cost, 0.15 + 0.60, places=4)
+
+    def test_gateway_model_exact_custom_rate_wins_over_basename(self):
+        custom = {'some-gateway/gemini-2.5-flash': {'input': 1.0, 'output': 2.0}}
+        cost = AIService.estimate_cost(
+            'portkey', 'some-gateway/gemini-2.5-flash', 1_000_000, 1_000_000, custom_rates=custom)
+        self.assertAlmostEqual(cost, 3.0, places=4)
+
+    def test_gateway_model_basename_custom_rate_matches(self):
+        custom = {'gemini-2.5-flash': {'input': 1.0, 'output': 2.0}}
+        cost = AIService.estimate_cost(
+            'portkey', 'some-gateway/gemini-2.5-flash', 1_000_000, 1_000_000, custom_rates=custom)
+        self.assertAlmostEqual(cost, 3.0, places=4)
+
 
 # ===========================================================================
 # Usage recording (requires DB)
@@ -427,6 +592,55 @@ class TestRecordUsage(TestCase):
         self.assertEqual(record.status, 'error')
         self.assertEqual(record.error_message, 'API rate limit exceeded')
         self.assertEqual(record.request_type, 'test_generation')
+
+    def test_org_token_rates_produce_nonzero_course_cost(self):
+        self.org.ai_token_rates = {'my-custom-model': {'input': 1.0, 'output': 2.0}}
+        self.org.save()
+        self.course.ai_model = 'my-custom-model'
+        self.course.save()
+
+        svc = AIService(self.course)
+        result = GenerationResult(
+            text='x', success=True,
+            input_tokens=1_000_000, output_tokens=1_000_000, total_tokens=2_000_000,
+        )
+        svc.record_usage(result, self.user)
+
+        record = AIUsageRecord.objects.filter(course=self.course).first()
+        self.assertEqual(record.estimated_cost, Decimal('3.000000'))
+
+    def test_course_token_rates_override_org(self):
+        self.org.ai_token_rates = {'my-custom-model': {'input': 1.0, 'output': 2.0}}
+        self.org.save()
+        self.course.ai_model = 'my-custom-model'
+        self.course.ai_token_rates = {'my-custom-model': {'input': 2.0, 'output': 4.0}}
+        self.course.save()
+
+        svc = AIService(self.course)
+        result = GenerationResult(
+            text='x', success=True,
+            input_tokens=1_000_000, output_tokens=1_000_000, total_tokens=2_000_000,
+        )
+        svc.record_usage(result, self.user)
+
+        record = AIUsageRecord.objects.filter(course=self.course).first()
+        self.assertEqual(record.estimated_cost, Decimal('6.000000'))
+
+    def test_for_config_uses_explicit_organization_rates(self):
+        # Regression: org-scoped (course-less) usage must see the org's rates.
+        self.org.ai_token_rates = {'org-only-model': {'input': 1.0, 'output': 2.0}}
+        self.org.save()
+
+        svc = AIService.for_config('openai', api_key='k', model='org-only-model')
+        result = GenerationResult(
+            text='x', success=True,
+            input_tokens=1_000_000, output_tokens=1_000_000, total_tokens=2_000_000,
+        )
+        svc.record_usage(result, self.user, organization=self.org)
+
+        record = AIUsageRecord.objects.filter(organization=self.org, course=None).first()
+        self.assertIsNotNone(record)
+        self.assertEqual(record.estimated_cost, Decimal('3.000000'))
 
     def test_record_usage_multiple_creates_multiple_records(self):
         svc = AIService(self.course)

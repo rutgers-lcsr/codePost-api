@@ -48,7 +48,7 @@ class TestConsoleDataEndpoint(APITestCase):
         resp = self.client.post('/assignments/', {
             "name": "HW Console",
             "points": 100,
-            "isReleased": True,
+            "state": "published",
             "allowStudentUpload": True,
             "course": self.course_id,
         })
@@ -206,7 +206,7 @@ class TestConsoleDataEndpoint(APITestCase):
 
         from core.models import Assignment
         assignment = Assignment.objects.get(id=self.assignment_id)
-        assignment.feedbackReleased = True
+        assignment.feedbackStatus = 'released'
         assignment.save()
 
         # Finalize the submission via grader

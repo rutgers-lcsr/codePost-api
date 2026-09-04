@@ -164,9 +164,8 @@ class Command(BaseCommand):
                     course=course,
                     name=assignment_name,
                     points=100,
-                    isVisible=True,
-                    isReleased=True,
-                    feedbackReleased=True,
+                    state='published',
+                    feedbackStatus='released',
                     allowStudentUpload=False,
                     sortKey=Assignment.objects.filter(course=course).count(),
                 )
