@@ -66,6 +66,8 @@ class SSOTest(SimpleTestCase):
             
             self.assertEqual(response.status_code, 302)
             self.assertTrue("token=fake_token" in response.url)
+            # userinfo lookups must be bounded so a slow IdP cannot hang the request thread
+            self.assertEqual(mock_requests_get.call_args.kwargs['timeout'], 10)
 
     @patch('core.views.sso.get_or_create_user')
     @patch('core.views.sso.requests.get')
@@ -138,6 +140,8 @@ class SSOTest(SimpleTestCase):
             
             self.assertEqual(response.status_code, 302)
             self.assertTrue("token=fake_token" in response.url)
+            # userinfo lookups must be bounded so a slow IdP cannot hang the request thread
+            self.assertEqual(mock_requests_get.call_args.kwargs['timeout'], 10)
 
     @patch('core.views.sso.get_or_create_user')
     @patch('core.views.sso.requests.post')
@@ -173,6 +177,8 @@ class SSOTest(SimpleTestCase):
             
             self.assertEqual(response.status_code, 302)
             self.assertTrue("token=fake_token" in response.url)
+            # userinfo lookups must be bounded so a slow IdP cannot hang the request thread
+            self.assertEqual(mock_requests_get.call_args.kwargs['timeout'], 10)
 
 
 class GetOrganizationByEmailDomainTest(SimpleTestCase):

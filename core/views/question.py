@@ -147,15 +147,21 @@ class QuestionViewSet(ListProtectedViewSet):
     job = QuizSuggestionJob.objects.create(
         course=question.course, sourceQuestion=question,
         assignment_id=assignment_id, requestedBy=request.user)
-    task = generate_quiz_question_suggestions.delay(
-        requested_by_id=request.user.id,
-        source_question_id=question.id,
-        assignment_id=assignment_id,
-        num_questions=request.data.get('num_questions', 1),
-        question_types=request.data.get('question_types') or [question.questionType],
-        instructions=request.data.get('instructions', '') or '',
-        job_id=job.id,
-    )
+    try:
+      task = generate_quiz_question_suggestions.delay(
+          requested_by_id=request.user.id,
+          source_question_id=question.id,
+          assignment_id=assignment_id,
+          num_questions=request.data.get('num_questions', 1),
+          question_types=request.data.get('question_types') or [question.questionType],
+          instructions=request.data.get('instructions', '') or '',
+          job_id=job.id,
+      )
+    except Exception:
+      # Broker down: nothing references the job yet, so drop the 'pending' row nobody
+      # would ever advance; DependencyUnavailableMiddleware answers 503.
+      job.delete()
+      raise
     # Queryset update (not job.save): under eager Celery the task may have already
     # advanced the DB row, and BaseModel.save would clobber it from a stale instance.
     QuizSuggestionJob.objects.filter(pk=job.pk).update(taskId=task.id)

@@ -129,6 +129,10 @@ class EnvironmentViewSet(ListProtectedViewSet):
             )
             return Response(resp_ser.data)
         except Exception as e:
+            # Broker down: nothing would ever advance 'Building', so fail it explicitly.
+            environment.build_status = 3
+            environment.build_logs += f"Could not queue build: {e}\n"
+            environment.save()
             resp_ser = EnvironmentBuildResponseSerializer(
                 instance={"task": "async_failed", "error": str(e)}
             )

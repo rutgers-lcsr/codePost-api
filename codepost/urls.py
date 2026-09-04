@@ -69,7 +69,7 @@ from webhooks.view import WebhookViewSet
 
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
-from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView
+from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView, readiness_check
 from oauth2_provider import views as oauth2_views
 from oauth2_provider.urls import metadata_urlpatterns as oauth2_metadata_urlpatterns
 
@@ -83,6 +83,10 @@ from django.http import HttpResponse
 
 
 def health_check(request):
+    # Liveness only, deliberately dependency-free: the compose healthchecks and
+    # autoheal act on this, and a DB/Redis outage must NOT make them restart the
+    # API (it would only crash-loop into wait_for_db). Dependency status is at
+    # /health-check/ready/ (core.views.system.readiness_check).
     return HttpResponse(status=200)
 
 class RedirectToAdminViewSet(ViewSet):
@@ -189,6 +193,8 @@ urlpatterns = [
     path('auth/sso/', include(('core.sso_urls', 'core'), namespace='sso')),
     re_path('logs/', include(('core.logging_urls', 'core'), namespace='logging')),
     re_path('autograder/', include(('autograder.urls', 'autograder'), namespace="autograder")),
+    # Must precede the unanchored re_path below, which would swallow it.
+    path('health-check/ready/', readiness_check, name='readiness_check'),
     re_path('health-check/', health_check),
     path('system/health/', SystemHealthView.as_view(), name='system_health'),
     path('system/activity/', SystemActivityView.as_view(), name='system_activity'),

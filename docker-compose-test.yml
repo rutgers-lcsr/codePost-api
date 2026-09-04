@@ -3,7 +3,7 @@ version: "3.8"
 services:
   # Redis for Celery
   codepost-redis:
-    image: redis:latest
+    image: redis:8
     container_name: codepost-redis-test
     ports:
       - "6380:6379" # Map to different port to avoid conflict with dev
@@ -13,7 +13,7 @@ services:
 
   # Database
   codepost-database:
-    image: mariadb:latest
+    image: mariadb:12
     container_name: codepost-database-test
     ports:
       - "3307:3306" # Map to different port
@@ -73,6 +73,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 330s
 
   # Celery Worker
   codepost-worker:
@@ -94,7 +95,7 @@ services:
       - SECRET_KEY=insecure_test_key
     # Single-worker stack: also consume the routed ai-tasks queue so AI tasks
     # don't sit unconsumed (they fail fast here — no FIELD_ENCRYPTION_KEY).
-    command: ["sh", "-c", "celery --app autograder worker -Q celery,ai-tasks --loglevel info --concurrency $${CELERY_CONCURRENCY:-4} --task-events"]
+    command: ["sh", "-c", "python manage.py wait_for_db && celery --app autograder worker -Q celery,ai-tasks --loglevel info --concurrency $${CELERY_CONCURRENCY:-4} --task-events"]
     volumes:
       - datasets-test:/assignment_datasets
       - /var/run/docker.sock:/var/run/docker.sock

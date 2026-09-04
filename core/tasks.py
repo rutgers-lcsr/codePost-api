@@ -40,6 +40,35 @@ def finalize_expired_quiz_attempts():
     return count
 
 @shared_task
+def reap_stale_autograder_state(build_minutes: int = 30, code_run_minutes: int = 10):
+    """Beat sweep: reset async markers that only a worker clears, after that worker died
+    mid-flight (OOM, docker restart, SIGKILL) or the broker lost the task. The Builder saves
+    build_logs as the image builds, so `modified` is a heartbeat: 'Building' untouched for
+    30 min is dead. RunQuizResponseCode has a 240 s hard time_limit, so a codeExecution still
+    'running' after 10 min will never be written back.
+    """
+    from core.models import Environment, QuizResponse
+
+    now = timezone.now()
+    builds = 0
+    for env in Environment.objects.filter(build_status=1, modified__lt=now - timedelta(minutes=build_minutes)):
+        env.build_status = 3
+        env.build_logs += f"\nMarked failed: no build progress for {build_minutes} min (worker lost?).\n"
+        env.save(update_fields=['build_status', 'build_logs'])
+        builds += 1
+    runs = 0
+    for resp in QuizResponse.objects.filter(codeExecution__status='running',
+                                            modified__lt=now - timedelta(minutes=code_run_minutes)):
+        resp.codeExecution = {**resp.codeExecution, 'status': 'error',
+                              'error': 'Execution did not complete (worker unavailable).',
+                              'finishedAt': now.isoformat()}
+        resp.save(update_fields=['codeExecution'])
+        runs += 1
+    if builds or runs:
+        logger.info(f"reap_stale_autograder_state: reset {builds} build(s), {runs} code run(s)")
+    return {"builds": builds, "code_runs": runs}
+
+@shared_task
 def run_scheduled_assignment_publish():
     """One-shot scheduled publish for assignments: when a visible/preview assignment's
     publishAt arrives, transition it to published. scheduledPublishRanAt makes the run

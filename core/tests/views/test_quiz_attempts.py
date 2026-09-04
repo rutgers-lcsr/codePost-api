@@ -1544,6 +1544,27 @@ class TestRunCode:
         code_resp = next(r for r in resp.data['responses'] if r['id'] == code_id)
         assert code_resp['codeExecution']['status'] == 'running'
 
+    def test_broker_outage_is_503_and_clears_the_running_marker(self, api_client, taking_setup, monkeypatch):
+        """Redis down at dispatch time must not strand the answer at 'running' (nothing would
+        ever write it back) — the row is restored and DependencyUnavailableMiddleware answers 503."""
+        import kombu.exceptions
+        from core.models import QuizResponse
+
+        def broker_down(*a, **kw):
+            raise kombu.exceptions.OperationalError('Error 111 connecting to redis:6379')
+        monkeypatch.setattr('autograder.run.RunQuizResponseCode.delay', broker_down)
+        quiz = self._code_quiz(taking_setup)
+        attempt_id, code_id = self._submitted_with_code(api_client, taking_setup, quiz)
+
+        grader = taking_setup['course'].graders.first()
+        taking_setup['course'].quizGraders.add(grader)
+        api_client.force_authenticate(user=grader)
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/runCode/',
+                               {'response': code_id}, format='json')
+        assert resp.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert resp['Retry-After'] == '10'
+        assert QuizResponse.objects.get(pk=code_id).codeExecution is None
+
     def test_student_cannot_run_code(self, api_client, taking_setup, monkeypatch):
         self._mock_dispatch(monkeypatch)
         quiz = self._code_quiz(taking_setup)

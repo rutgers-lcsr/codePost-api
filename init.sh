@@ -11,6 +11,10 @@ if [ -f .env ]; then
 fi
 
 
+# Wait (bounded) for the database first: a DB that comes up after this container
+# is a delay, not a migrate failure + restart-policy crash loop.
+python manage.py wait_for_db
+
 # Run migrations
 python manage.py migrate --noinput
 

@@ -379,20 +379,20 @@ def sso_callback(request, provider):
             # Extract Email logic ...
             if provider == 'GOOGLE':
                  userinfo_resp = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', 
-                                    headers={'Authorization': f'Bearer {access_token}'})
+                                    headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
                  if userinfo_resp.status_code == 200:
                      email = userinfo_resp.json().get('email')
                      
             elif provider == 'AZURE':
                  graph_resp = requests.get('https://graph.microsoft.com/v1.0/me',
-                                    headers={'Authorization': f'Bearer {access_token}'})
+                                    headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
                  if graph_resp.status_code == 200:
                      data = graph_resp.json()
                      email = data.get('mail') or data.get('userPrincipalName')
 
             elif provider == 'OIDC':
                  if userinfo_endpoint:
-                     u_resp = requests.get(userinfo_endpoint, headers={'Authorization': f'Bearer {access_token}'})
+                     u_resp = requests.get(userinfo_endpoint, headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
                      if u_resp.status_code == 200:
                          email = u_resp.json().get('email')
             

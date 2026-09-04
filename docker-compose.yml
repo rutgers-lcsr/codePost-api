@@ -57,6 +57,7 @@ services:
             interval: 30s
             timeout: 10s
             retries: 5
+            start_period: 330s
         volumes:
             - ${HOST_DATASET_ROOT:-/mnt/datasets}:/assignment_datasets
             - /tmp/codepost-staging:/staging

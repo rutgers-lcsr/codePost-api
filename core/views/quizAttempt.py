@@ -373,6 +373,7 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
         return Response({'detail': 'This answer is already running.'},
                         status=status.HTTP_409_CONFLICT)
 
+    previous = response.codeExecution
     response.codeExecution = {
         'status': 'running',
         'requestedBy': request.user.email,
@@ -381,7 +382,14 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     response.save(update_fields=['codeExecution', 'modified'])
 
     from autograder.run import RunQuizResponseCode
-    RunQuizResponseCode.delay(response.id)
+    try:
+      RunQuizResponseCode.delay(response.id)
+    except Exception:
+      # Broker down: undo the 'running' marker (queryset update — under eager Celery the
+      # task may already have written the row, and save() from this instance would
+      # clobber it) and let DependencyUnavailableMiddleware answer 503.
+      QuizResponse.objects.filter(pk=response.pk).update(codeExecution=previous)
+      raise
     return Response(StaffQuizAttemptSerializer(
         attempt, context=staff_reveal_context(request)).data)
 

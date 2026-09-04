@@ -566,6 +566,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "core.middleware.csp_frame_ancestors_middleware",
     "core.middleware.no_cache_middleware",
+    # Innermost: CorsMiddleware / no_cache still decorate the 503 it returns.
+    "core.middleware.DependencyUnavailableMiddleware",
 ]
 if DEBUG:
     MIDDLEWARE.append("core.middleware.dev_cors_middleware")
@@ -741,7 +743,16 @@ CELERY_TASK_ROUTES = {
 
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     "priority_steps": list(range(10)),
+    # Bound the TCP connect so a request-path .delay() against an unreachable Redis
+    # fails in seconds (-> 503 via DependencyUnavailableMiddleware) instead of blocking
+    # on the kernel SYN timeout for each publish retry. Connect-only: the consumer's
+    # BRPOP path is unaffected.
+    "socket_connect_timeout": 5,
 }
+# Celery 5.x falls back to broker_connection_retry (True) when this is unset, with a
+# pending-deprecation warning; Celery 6 drops the fallback. Pin the behaviour we rely
+# on: a worker/beat started before Redis waits for it instead of exiting.
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 DJANGO_CELERY_RESULTS_TASK_ID_MAX_LENGTH = 191
 CELERY_ACCEPT_CONTENT = ["application/json"]
@@ -768,6 +779,10 @@ CELERY_BEAT_SCHEDULE = {
     "finalize-expired-quiz-attempts": {
         "task": "core.tasks.finalize_expired_quiz_attempts",
         "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "reap-stale-autograder-state": {
+        "task": "core.tasks.reap_stale_autograder_state",
+        "schedule": crontab(minute="*/10"),  # Every 10 minutes
     },
     "run-scheduled-quiz-generation": {
         "task": "core.tasks.run_scheduled_quiz_generation",

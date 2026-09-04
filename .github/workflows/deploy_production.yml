@@ -151,6 +151,14 @@ jobs:
                   docker compose -f docker-compose-prod.yml build 
                   docker compose -f docker-compose-prod.yml up -d --remove-orphans --wait --wait-timeout 180
 
+            - name: Verify API readiness
+              run: |
+                  for i in $(seq 1 18); do
+                      if curl -fsS --max-time 10 "${API_URL}/health-check/ready/"; then echo; exit 0; fi
+                      echo "API not ready yet ($i/18)"; sleep 10
+                  done
+                  echo "::error::API did not report ready at ${API_URL}/health-check/ready/"; exit 1
+
             - name: Remove docker artifacts
               run: |
                   docker system prune -f

@@ -13,7 +13,7 @@ from webhooks.utils import get_hook_model
 
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, soft_time_limit=60, time_limit=90)
 def deliver_hook(self, target, payload, instance=None, hook_id=None, **kwargs):
     """
     target:     the url to receive the payload.
@@ -29,6 +29,8 @@ def deliver_hook(self, target, payload, instance=None, hook_id=None, **kwargs):
             url=target,
             data=json.dumps(payload, cls=DjangoJSONEncoder),
             headers={"Content-Type": "application/json"},
+            # (connect, read): a hung receiver must not pin a worker slot indefinitely.
+            timeout=(5, 30),
         )
         if response.status_code >= 500:
             hook.last_triggered_status = response.status_code
@@ -41,7 +43,7 @@ def deliver_hook(self, target, payload, instance=None, hook_id=None, **kwargs):
         else:
             hook.last_triggered_status = response.status_code
             hook.save()
-    except requests.ConnectionError:
+    except (requests.ConnectionError, requests.Timeout):
         delay_in_seconds = 2**self.request.retries
         try:
             self.retry(countdown=delay_in_seconds)

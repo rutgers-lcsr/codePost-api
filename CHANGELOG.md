@@ -12,6 +12,54 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ---
 
+## [Unreleased] — Outage robustness
+
+### Added
+
+- **`manage.py wait_for_db`**: bounded wait (default 300 s, exponential backoff) for the
+  database. `init.sh` runs it before `migrate`, and the worker / AI worker / beat commands run
+  it before `celery` — a database that comes up *after* the API or workers (host reboot order,
+  a data-host redeploy) is now a delay instead of a restart-policy crash loop. The compose
+  healthchecks gained `start_period: 330s` so autoheal does not restart a container mid-wait.
+- **`GET /health-check/ready/`**: unauthenticated readiness probe — 200 when the database and
+  the Celery broker answer, 503 + `Retry-After` otherwise. `/health-check/` stays an
+  unconditional liveness 200 on purpose (compose and autoheal act on it, and a dependency
+  outage must not trigger API restarts). Both deploy workflows now verify readiness after
+  `docker compose up`.
+- **`DependencyUnavailableMiddleware`**: a database or broker outage inside any view (DRF or
+  plain Django) answers a JSON 503 + `Retry-After` instead of a bare 500, so the UI can tell
+  "codePost is down" from "no network".
+- **nginx JSON 503 fallback**: when the API container is down or restarting, `codepost-entry`
+  (and the self-hosted installer's proxy) answers 502/503/504 with a JSON body, `Retry-After`
+  and CORS headers instead of nginx's HTML page, which the cross-origin SPA could not read.
+- **`reap_stale_autograder_state`** beat sweep (every 10 min): environments stuck at
+  *Building* with no build progress for 30 min and quiz code runs stuck at *running* for
+  10 min (a worker died mid-flight) are marked failed instead of hanging forever.
+
+### Changed
+
+- `RunSubmission`, `RunSubmissionVariant` and `RunQuizResponseCode` use
+  `acks_late` + `reject_on_worker_lost`: a worker killed mid-run (OOM, docker restart) re-queues
+  the task instead of dropping it. Deliberately not applied to unbounded or paid tasks.
+- `CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True` (pins the Celery 5 behaviour Celery 6
+  drops) and a 5 s broker `socket_connect_timeout`, so a request-path `.delay()` against an
+  unreachable Redis fails fast into the 503 path.
+- The development deploy workflow now deploys data → API → workers in order with
+  `--wait`, like production, instead of all three hosts in parallel; the
+  `docker restart codepost-entry` workaround is gone (nginx already re-resolves upstreams).
+- Webhook delivery has connect/read timeouts (5 s / 30 s) and hard task time limits; SSO
+  userinfo lookups have a 10 s timeout.
+
+### Fixed
+
+- A broker outage while queueing a quiz code run, a question-suggestion job or an
+  environment build no longer strands the row at *running* / *pending* / *Building*.
+- The autograder executor re-checks its Docker client on every acquisition and drops a dead
+  one, so a Docker daemon restart on a worker no longer fails every later run with a message
+  blaming the assignment's mounts.
+- `logEvent` no longer tries to email the admins once per request for the whole length of a
+  database outage.
+
 ## [4.3.0] — Instructor Agents, Quiz Workflow & Section Staffing
 
 ### Added — MCP endpoint for instructor agents
