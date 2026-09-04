@@ -46,9 +46,11 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
   unreachable Redis fails fast into the 503 path.
 - The development deploy workflow now deploys data → API → workers in order with
   `--wait`, like production, instead of all three hosts in parallel. The
-  `docker restart codepost-entry` workaround is replaced by a validated `nginx -s reload`
-  in both workflows — compose never recreates `codepost-entry` for a change to the
-  bind-mounted `nginx.conf`, so without it config edits only took effect on a manual restart.
+  `docker restart codepost-entry` step is now in both workflows, preceded by an `nginx -t`
+  of the new config in a throwaway container: `nginx.conf` and `certs/` are bind mounts by
+  path and the checkout replaces them, so the running proxy keeps stale copies until
+  restarted (production previously never restarted it, so config and renewed certs only
+  took effect when the container happened to be recreated).
 - `codepost-mcp` in the dev compose file now receives `DEV_DOCKER` like `codepost-api`; without
   it the container crash-looped at import under `DEBUG=true` (pre-existing, surfaced by `--wait`).
 - Webhook delivery has connect/read timeouts (5 s / 30 s) and hard task time limits; SSO

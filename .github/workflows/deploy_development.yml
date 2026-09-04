@@ -108,12 +108,15 @@ jobs:
                   docker compose build
                   docker compose up -d --remove-orphans --wait --wait-timeout 180
 
-            - name: Reload nginx config
-              # nginx.conf is a bind mount; compose does not recreate codepost-entry when
-              # only that file changes. Validate, then graceful reload (no dropped requests).
+            - name: Restart nginx (picks up nginx.conf and renewed certs)
+              # nginx.conf and certs/ are bind mounts by path. The checkout replaces them
+              # with new inodes, so the running container keeps stale copies (nginx serves
+              # the certs it loaded at boot, but `exec nginx -t` cannot even see them) and
+              # compose never recreates codepost-entry for a mount-content change. Validate
+              # the new config against the new certs first, then restart to re-bind.
               run: |
-                  docker compose exec -T codepost-entry nginx -t
-                  docker compose exec -T codepost-entry nginx -s reload
+                  docker run --rm -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$PWD/certs:/etc/ssl/certs:ro" nginx:latest nginx -t
+                  docker compose restart codepost-entry
 
             - name: Verify API readiness
               run: |
