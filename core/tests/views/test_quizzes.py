@@ -1039,6 +1039,24 @@ class TestAISuggestions:
         assert poll.data['status'] == 'completed'
         assert poll.data['createdCount'] == 1
 
+    def test_regenerate_broker_outage_is_503_and_drops_the_job(self, api_client, quiz_setup, monkeypatch):
+        """Redis down at dispatch time: no orphaned 'pending' job row nobody would ever advance,
+        and a 503 (DependencyUnavailableMiddleware) instead of a 500."""
+        import kombu.exceptions
+        from core.models import QuizSuggestionJob
+
+        _mock_ai(monkeypatch, '[]')
+
+        def broker_down(*a, **kw):
+            raise kombu.exceptions.OperationalError('Error 111 connecting to redis:6379')
+        monkeypatch.setattr('core.tasks.generate_quiz_question_suggestions.delay', broker_down)
+        question = _mc_question(quiz_setup['course'])
+
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post(f'/questions/{question.id}/regenerateSuggestion/', format='json')
+        assert resp.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert not QuizSuggestionJob.objects.filter(sourceQuestion=question).exists()
+
     def test_generate_endpoints_403_when_feature_disabled(self, api_client, quiz_setup, monkeypatch):
         """The quiz_generation toggle is a capability, so the endpoints reject the request
         instead of queueing a task the worker silently drops."""

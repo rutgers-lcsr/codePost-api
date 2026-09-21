@@ -151,6 +151,24 @@ jobs:
                   docker compose -f docker-compose-prod.yml build 
                   docker compose -f docker-compose-prod.yml up -d --remove-orphans --wait --wait-timeout 180
 
+            - name: Restart nginx (picks up nginx.conf and renewed certs)
+              # nginx.conf and certs/ are bind mounts by path. The checkout replaces them
+              # with new inodes, so the running container keeps stale copies (nginx serves
+              # the certs it loaded at boot, but `exec nginx -t` cannot even see them) and
+              # compose never recreates codepost-entry for a mount-content change. Validate
+              # the new config against the new certs first, then restart to re-bind.
+              run: |
+                  docker run --rm -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$PWD/certs:/etc/ssl/certs:ro" nginx:latest nginx -t
+                  docker compose -f docker-compose-prod.yml restart codepost-entry
+
+            - name: Verify API readiness
+              run: |
+                  for i in $(seq 1 18); do
+                      if curl -fsS --max-time 10 "${API_URL}/health-check/ready/"; then echo; exit 0; fi
+                      echo "API not ready yet ($i/18)"; sleep 10
+                  done
+                  echo "::error::API did not report ready at ${API_URL}/health-check/ready/"; exit 1
+
             - name: Remove docker artifacts
               run: |
                   docker system prune -f

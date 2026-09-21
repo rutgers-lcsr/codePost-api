@@ -44,7 +44,9 @@ RUN pip install celery
 COPY . .
 
 # Worker runs as root — requires Docker socket access for autograder containers
-CMD ["sh", "-c", "celery --app autograder worker --loglevel info --concurrency ${CELERY_CONCURRENCY:-4} --task-events"]
+# wait_for_db first: celery's Django fixup runs the system checks at boot, and Django 6.1's
+# checks open a DB connection — a DB that is still starting would crash-loop the worker.
+CMD ["sh", "-c", "python manage.py wait_for_db && celery --app autograder worker --loglevel info --concurrency ${CELERY_CONCURRENCY:-4} --task-events"]
 
 FROM python:3.12 AS flower
 COPY --from=api /opt/app /opt/app

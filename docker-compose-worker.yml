@@ -45,6 +45,7 @@ services:
             interval: 30s
             timeout: 10s
             retries: 5
+            start_period: 330s
         logging:
             driver: json-file
             options:
@@ -75,7 +76,7 @@ services:
         build:
             context: .
             target: worker
-        command: ["sh", "-c", "celery --app autograder beat --loglevel info --schedule /tmp/celerybeat-schedule"]
+        command: ["sh", "-c", "python manage.py wait_for_db && celery --app autograder beat --loglevel info --schedule /tmp/celerybeat-schedule"]
         restart: always
         logging:
             driver: json-file
@@ -111,7 +112,7 @@ services:
         build:
             context: .
             target: worker
-        command: ["sh", "-c", "celery --app autograder worker -n ai-worker@%h -Q ai-tasks --loglevel info --concurrency $${AI_CELERY_CONCURRENCY:-2} --task-events"]
+        command: ["sh", "-c", "python manage.py wait_for_db && celery --app autograder worker -n ai-worker@%h -Q ai-tasks --loglevel info --concurrency $${AI_CELERY_CONCURRENCY:-2} --task-events"]
         labels:
             - "autoheal=true"
         restart: always
@@ -120,6 +121,7 @@ services:
             interval: 30s
             timeout: 10s
             retries: 5
+            start_period: 330s
         logging:
             driver: json-file
             options:

@@ -132,6 +132,7 @@ services:
             interval: 30s
             timeout: 10s
             retries: 5
+            start_period: 330s
         depends_on:
             codepost-database:
                 condition: service_healthy
@@ -176,7 +177,7 @@ services:
             - WORKER_SHELL_SHARED_SECRET=${WORKER_SHELL_SHARED_SECRET}
         # Single-worker stack: consume the default queue AND ai-tasks (the
         # routed AI generation tasks) — the key is in .env here anyway.
-        command: ["sh", "-c", "celery --app autograder worker -Q celery,ai-tasks --loglevel info --concurrency $${CELERY_CONCURRENCY:-4} --task-events"]
+        command: ["sh", "-c", "python manage.py wait_for_db && celery --app autograder worker -Q celery,ai-tasks --loglevel info --concurrency $${CELERY_CONCURRENCY:-4} --task-events"]
         volumes:
             - datasets:/assignment_datasets
             - staging:/staging
@@ -188,6 +189,7 @@ services:
             interval: 30s
             timeout: 10s
             retries: 5
+            start_period: 330s
         depends_on:
             codepost-database:
                 condition: service_healthy
@@ -222,7 +224,7 @@ services:
             - DB_USERNAME=codepost_user
             - DB_PASSWORD=${DB_PASSWORD}
             - SECRET_KEY=${SECRET_KEY}
-        command: ["sh", "-c", "celery --app autograder beat --loglevel info --schedule /tmp/celerybeat-schedule"]
+        command: ["sh", "-c", "python manage.py wait_for_db && celery --app autograder beat --loglevel info --schedule /tmp/celerybeat-schedule"]
         depends_on:
             codepost-database:
                 condition: service_healthy

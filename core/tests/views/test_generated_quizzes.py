@@ -81,6 +81,26 @@ def _mock_ai(monkeypatch, json_text=QUESTIONS_JSON, success=True, side_effect=No
     _enable_ai(monkeypatch)
 
 
+def _mock_ai_sequence(monkeypatch, texts):
+    """Like ``_mock_ai`` but answers each call with the next entry of ``texts`` (``None``
+    = provider failure). Returns the list of calls made, for asserting retry counts."""
+    from core.services.ai_service import GenerationResult
+    calls = []
+
+    async def mock_generate(self, section, submission, demo_files=None):
+        text = texts[len(calls)]
+        calls.append(section.id)
+        if text is None:
+            return GenerationResult(text='', success=False, error='model unavailable')
+        return GenerationResult(text=text, success=True, input_tokens=10, output_tokens=20,
+                                resolved_prompt=f'resolved prompt for section {section.id}')
+
+    monkeypatch.setattr(
+        'core.services.ai_service.AIService.generate_personalized_quiz_questions', mock_generate)
+    _enable_ai(monkeypatch)
+    return calls
+
+
 def _run_task(submission, **kwargs):
     from core.tasks import generate_personalized_quiz_sets
     generate_personalized_quiz_sets(submission.id, **kwargs)
@@ -344,6 +364,28 @@ class TestSectionCreatedSignal:
 # Generation task
 # --------------------------------------------------------------------------- #
 
+class TestParseJsonQuestions:
+    """The model is asked for a bare JSON array; the parser tolerates the usual ways that
+    contract gets broken so a run isn't failed over formatting."""
+
+    @pytest.mark.parametrize('text', [
+        QUESTIONS_JSON,
+        f'```json\n{QUESTIONS_JSON}\n```',
+        f'Here are the questions:\n\n```json\n{QUESTIONS_JSON}\n```\n\nLet me know if you need more.',
+        f'Here are the questions: {QUESTIONS_JSON} Let me know.',
+        json.dumps({'questions': json.loads(QUESTIONS_JSON)}),
+    ], ids=['bare', 'fenced', 'prose+fenced', 'prose+inline', 'object-wrapper'])
+    def test_tolerated_shapes(self, text):
+        from core.tasks import _parse_json_questions
+        assert _parse_json_questions(text) == json.loads(QUESTIONS_JSON)
+
+    @pytest.mark.parametrize('text', ['', 'Sorry, I cannot help with that.', '```json\n[oops\n```'])
+    def test_no_json_raises(self, text):
+        from core.tasks import _parse_json_questions
+        with pytest.raises(ValueError):
+            _parse_json_questions(text)
+
+
 class TestGenerationTask:
     def test_generates_ready_set(self, gen_setup, monkeypatch):
         _mock_ai(monkeypatch)
@@ -483,6 +525,58 @@ class TestGenerationTask:
         assert gen_set.status == 'ready'    # back to review, never silently re-approved
         assert 'model unavailable' in gen_set.errorMessage
         assert set(gen_set.questions.values_list('id', flat=True)) == old_ids
+
+    def test_unparseable_output_is_retried(self, gen_setup, monkeypatch):
+        """A malformed model output is re-asked before the set fails; the successful
+        retry leaves no raw_output behind."""
+        calls = _mock_ai_sequence(monkeypatch, ['Sorry, I cannot do that.', QUESTIONS_JSON])
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'ready'
+        assert len(calls) == 2
+        assert gen_set.questions.count() == 2
+        assert gen_set.errorMessage == ''
+        assert 'raw_output' not in gen_set.generationMetadata
+        # The resolved prompt is recorded once per section, not once per attempt.
+        assert len(gen_set.generationMetadata['sections']) == 1
+
+    def test_unparseable_output_after_retries_fails_with_raw_output(self, gen_setup, monkeypatch):
+        """When every attempt is unusable the set fails, the error says how many times it
+        was tried, and the last model output is kept on the set for inspection."""
+        from core.tasks import _GENERATION_ATTEMPTS
+        calls = _mock_ai_sequence(monkeypatch, ['not json at all'] * _GENERATION_ATTEMPTS)
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'failed'
+        assert len(calls) == _GENERATION_ATTEMPTS
+        assert 'Could not parse' in gen_set.errorMessage
+        assert f'{_GENERATION_ATTEMPTS} attempts' in gen_set.errorMessage
+        assert gen_set.generationMetadata['raw_output'] == 'not json at all'
+
+    def test_no_usable_questions_is_retried(self, gen_setup, monkeypatch):
+        """Valid JSON with nothing usable (e.g. only keyless choice questions) counts as an
+        output problem too — re-asked, and the last output kept on failure."""
+        from core.tasks import _GENERATION_ATTEMPTS
+        keyless = json.dumps([{'type': 'multiple_choice', 'text': 'Keyless?',
+                               'choices': [{'text': 'a'}, {'text': 'b'}]}])
+        calls = _mock_ai_sequence(monkeypatch, [keyless] * _GENERATION_ATTEMPTS)
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'failed'
+        assert len(calls) == _GENERATION_ATTEMPTS
+        assert 'no usable questions' in gen_set.errorMessage
+        assert gen_set.generationMetadata['raw_output'] == keyless
+
+    def test_provider_failure_is_not_retried(self, gen_setup, monkeypatch):
+        """Provider errors (rate limit, auth, outage) aren't re-asked here — the SDK
+        clients retry transient failures themselves — and leave no raw_output."""
+        calls = _mock_ai_sequence(monkeypatch, [None, QUESTIONS_JSON])
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'failed'
+        assert len(calls) == 1
+        assert 'model unavailable' in gen_set.errorMessage
+        assert 'raw_output' not in gen_set.generationMetadata
 
     def test_stale_batch_discards_results(self, gen_setup, monkeypatch):
         from core.models import GeneratedQuestionSet

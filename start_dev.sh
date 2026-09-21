@@ -70,7 +70,17 @@ else
 	fi
 fi
 
-source .venv/bin/activate
+# Prefer an in-project .venv, but fall back to the venv poetry made: poetry only
+# creates .venv here when virtualenvs.in-project is set, and a fresh clone has not
+# set it. CI keeps its venv in the poetry cache on purpose, so this stays opt-in.
+if [[ -f ".venv/bin/activate" ]]; then
+	source .venv/bin/activate
+elif VENV_PATH=$(poetry env info --path 2>/dev/null) && [[ -n "$VENV_PATH" ]]; then
+	source "$VENV_PATH/bin/activate"
+else
+	echo "[dev] No virtualenv found. Run 'poetry install' first."
+	exit 1
+fi
 
 PIDS=()
 cleanup() {

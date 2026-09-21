@@ -3,9 +3,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from drf_spectacular.utils import extend_schema, OpenApiParameter
+from django.conf import settings
 from django.db import connection
+from django.http import JsonResponse
 from log.models import Event
 from django.core.paginator import Paginator
+import logging
 import time
 import shutil
 
@@ -15,6 +18,8 @@ from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModels
 
 from djangorestframework_camel_case.render import CamelCaseJSONRenderer
 from djangorestframework_camel_case.parser import CamelCaseJSONParser
+
+logger = logging.getLogger(__name__)
 
 
 def _check_database() -> dict:
@@ -63,6 +68,45 @@ def _check_database() -> dict:
             "connections_max_used": None,
             "connections_limit": None,
         }
+
+
+def _check_redis() -> str:
+    """PING the Celery broker with tight timeouts; 'ok' or 'error'."""
+    import redis
+    try:
+        client = redis.Redis.from_url(settings.CELERY_BROKER_URL, socket_connect_timeout=2, socket_timeout=2)
+        try:
+            client.ping()
+        finally:
+            client.close()
+        return "ok"
+    except Exception as exc:
+        logger.warning("readiness: redis unreachable: %s", exc)
+        return "error"
+
+
+def readiness_check(request):
+    """Unauthenticated readiness probe: 200 when the database and the Celery broker
+    answer, 503 (+ Retry-After) otherwise. For deploy verification, external
+    monitors and the UI's outage-recovery poll.
+
+    Deliberately separate from /health-check/ (liveness): the compose healthchecks
+    and autoheal act on that one, and a dependency outage must not make them
+    restart the API. Plain Django view, so it stays out of the OpenAPI schema.
+    Only ok/error is exposed — no driver error text to anonymous callers. Not
+    throttled on purpose: behind nginx every caller shares one REMOTE_ADDR, and a
+    429 during an outage would read as "back up" to the browsers polling this.
+    """
+    db = "error" if _check_database()["status"] == "error" else "ok"
+    broker = _check_redis()
+    ok = db == "ok" and broker == "ok"
+    response = JsonResponse(
+        {"status": "ok" if ok else "unavailable", "database": db, "redis": broker},
+        status=200 if ok else 503,
+    )
+    if not ok:
+        response["Retry-After"] = "10"
+    return response
 
 
 def _check_celery() -> dict:
