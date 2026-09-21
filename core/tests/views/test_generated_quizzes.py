@@ -376,14 +376,31 @@ class TestParseJsonQuestions:
         json.dumps({'questions': json.loads(QUESTIONS_JSON)}),
     ], ids=['bare', 'fenced', 'prose+fenced', 'prose+inline', 'object-wrapper'])
     def test_tolerated_shapes(self, text):
-        from core.tasks import _parse_json_questions
-        assert _parse_json_questions(text) == json.loads(QUESTIONS_JSON)
+        from core.services.ai_json import parse_json_questions
+        assert parse_json_questions(text) == json.loads(QUESTIONS_JSON)
+
+    def test_unescaped_quotes_inside_strings(self):
+        """Real failure seen in production: the model left the quotes in a code snippet
+        unescaped inside a description string (invalid JSON); the repair keeps them."""
+        from core.services.ai_json import parse_json_questions
+        text = ('```json\n[\n  {\n    "type": "code",\n    "text": "Filter it.",\n'
+                '    "description": "You wrote:\\n\\n```python\\nresult = baby_names[(baby_names["Year"] == 2000) & \\n'
+                '        (baby_names["Count"] > 3000)]\\n```",\n'
+                '    "reference_solution": "pa = baby_names[(baby_names[\\"State\\"] == \\"PA\\")]"\n  }\n]\n```')
+        [q] = parse_json_questions(text)
+        assert 'baby_names["Year"] == 2000' in q['description']
+        assert q['reference_solution'] == 'pa = baby_names[(baby_names["State"] == "PA")]'
+
+    def test_literal_newline_inside_string(self):
+        from core.services.ai_json import parse_json_questions
+        assert parse_json_questions('[{"type": "essay", "text": "Line one\nline two"}]') == [
+            {'type': 'essay', 'text': 'Line one\nline two'}]
 
     @pytest.mark.parametrize('text', ['', 'Sorry, I cannot help with that.', '```json\n[oops\n```'])
     def test_no_json_raises(self, text):
-        from core.tasks import _parse_json_questions
+        from core.services.ai_json import parse_json_questions
         with pytest.raises(ValueError):
-            _parse_json_questions(text)
+            parse_json_questions(text)
 
 
 class TestGenerationTask:

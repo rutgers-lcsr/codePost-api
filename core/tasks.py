@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from celery import shared_task
 from core.models import Course
+from core.services.ai_json import parse_json_questions
 from datetime import timedelta
 from django.utils import timezone
 import logging
@@ -481,51 +482,6 @@ def auto_improve_prompt_threshold(prompt_type: str):
 # Quizzes
 # --------------------------------------------------------------------------- #
 
-def _json_candidates(text: str):
-    """Yield the substrings of a model output that may hold its JSON payload, most
-    literal first: the whole text, the body of a wrapping ```json fence, any fenced
-    block, and finally the outermost bracketed span (prose around the JSON)."""
-    import re
-    cleaned = (text or '').strip()
-    yield cleaned
-    if cleaned.startswith('```'):
-        # Strip a leading ```json / ``` fence and trailing ```.
-        body = cleaned.split('\n', 1)[-1] if '\n' in cleaned else cleaned
-        if body.endswith('```'):
-            body = body[:-3]
-        yield body.strip()
-    for fenced in re.finditer(r'```(?:json)?[ \t]*\n(.*?)```', cleaned, re.DOTALL):
-        yield fenced.group(1).strip()
-    starts = [i for i in (cleaned.find('['), cleaned.find('{')) if i >= 0]
-    end = max(cleaned.rfind(']'), cleaned.rfind('}'))
-    if starts and end > min(starts):
-        yield cleaned[min(starts):end + 1]
-
-
-def _parse_json_questions(text: str) -> list:
-    """Parse a model's JSON array of questions.
-
-    Tolerates the usual ways models break the bare-JSON-array contract: ```json fences,
-    prose before/after the JSON, and an object wrapper ({"questions": [...]}). Raises
-    ``ValueError`` when no candidate parses."""
-    import json
-    data = None
-    for candidate in _json_candidates(text):
-        try:
-            data = json.loads(candidate)
-            break
-        except json.JSONDecodeError:
-            continue
-    else:
-        raise ValueError('The model output contains no JSON.')
-    if isinstance(data, dict):
-        # {"questions": [...]} — or any single list-valued key.
-        lists = [v for v in data.values() if isinstance(v, list)]
-        data = data['questions'] if isinstance(data.get('questions'), list) else (
-            lists[0] if len(lists) == 1 else [])
-    return data if isinstance(data, list) else []
-
-
 def _normalize_choices(raw_choices) -> list:
     """Normalize AI choice entries to the {text, isCorrect, feedback} shape.
 
@@ -641,7 +597,7 @@ def generate_quiz_question_suggestions(
         return
 
     try:
-        questions = _parse_json_questions(result.text)
+        questions = parse_json_questions(result.text)
     except Exception as e:
         logger.error(f"[QuizGen] Could not parse model output as JSON: {e}", exc_info=True)
         service.record_usage(result, user=user, request_type='quiz_generation')
@@ -888,7 +844,7 @@ def _usable_question_rows(text, section, env_language, quiz):
     """Parse one model output into ``(section, fields)`` rows. Returns ``(rows, error)``;
     ``error`` is set when the output is unparseable or yields nothing usable."""
     try:
-        parsed = _parse_json_questions(text)
+        parsed = parse_json_questions(text)
     except Exception as e:
         logger.warning(f"[PersonalQuizGen] Could not parse model output as JSON (quiz {quiz.id}): {e}")
         return [], 'Could not parse the model output as questions.'
@@ -1118,7 +1074,7 @@ def preview_generated_section(
                                errorMessage=(result.error or 'The AI provider returned no output.')[:500])
         return
     try:
-        parsed = _parse_json_questions(result.text)
+        parsed = parse_json_questions(result.text)
     except Exception as e:
         logger.error(f"[QuizPreview] Could not parse model output as JSON: {e}", exc_info=True)
         _update_suggestion_job(job_id, status='failed', resultData=result_data,
