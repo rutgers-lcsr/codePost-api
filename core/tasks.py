@@ -481,17 +481,48 @@ def auto_improve_prompt_threshold(prompt_type: str):
 # Quizzes
 # --------------------------------------------------------------------------- #
 
-def _parse_json_questions(text: str) -> list:
-    """Parse a model's JSON array of questions, tolerating ```json fences."""
-    import json
+def _json_candidates(text: str):
+    """Yield the substrings of a model output that may hold its JSON payload, most
+    literal first: the whole text, the body of a wrapping ```json fence, any fenced
+    block, and finally the outermost bracketed span (prose around the JSON)."""
+    import re
     cleaned = (text or '').strip()
+    yield cleaned
     if cleaned.startswith('```'):
         # Strip a leading ```json / ``` fence and trailing ```.
-        cleaned = cleaned.split('\n', 1)[-1] if '\n' in cleaned else cleaned
-        if cleaned.endswith('```'):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-    data = json.loads(cleaned)
+        body = cleaned.split('\n', 1)[-1] if '\n' in cleaned else cleaned
+        if body.endswith('```'):
+            body = body[:-3]
+        yield body.strip()
+    for fenced in re.finditer(r'```(?:json)?[ \t]*\n(.*?)```', cleaned, re.DOTALL):
+        yield fenced.group(1).strip()
+    starts = [i for i in (cleaned.find('['), cleaned.find('{')) if i >= 0]
+    end = max(cleaned.rfind(']'), cleaned.rfind('}'))
+    if starts and end > min(starts):
+        yield cleaned[min(starts):end + 1]
+
+
+def _parse_json_questions(text: str) -> list:
+    """Parse a model's JSON array of questions.
+
+    Tolerates the usual ways models break the bare-JSON-array contract: ```json fences,
+    prose before/after the JSON, and an object wrapper ({"questions": [...]}). Raises
+    ``ValueError`` when no candidate parses."""
+    import json
+    data = None
+    for candidate in _json_candidates(text):
+        try:
+            data = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    else:
+        raise ValueError('The model output contains no JSON.')
+    if isinstance(data, dict):
+        # {"questions": [...]} — or any single list-valued key.
+        lists = [v for v in data.values() if isinstance(v, list)]
+        data = data['questions'] if isinstance(data.get('questions'), list) else (
+            lists[0] if len(lists) == 1 else [])
     return data if isinstance(data, list) else []
 
 
@@ -845,60 +876,93 @@ def _claim_generation_sets(quiz, students, submission, force, batch):
     return claimed_ids
 
 
+# Attempts per section before the set fails: model output is nondeterministic, so one
+# re-ask recovers most malformed or unusable outputs without anyone regenerating by hand.
+_GENERATION_ATTEMPTS = 2
+# How much of a rejected model output is kept on the set (generationMetadata.raw_output)
+# so a developer can see what the model actually returned.
+_RAW_OUTPUT_KEEP = 20_000
+
+
+def _usable_question_rows(text, section, env_language, quiz):
+    """Parse one model output into ``(section, fields)`` rows. Returns ``(rows, error)``;
+    ``error`` is set when the output is unparseable or yields nothing usable."""
+    try:
+        parsed = _parse_json_questions(text)
+    except Exception as e:
+        logger.warning(f"[PersonalQuizGen] Could not parse model output as JSON (quiz {quiz.id}): {e}")
+        return [], 'Could not parse the model output as questions.'
+    rows = []
+    for q in parsed:
+        fields = _normalize_generated_question(q, env_language)
+        if fields is None:
+            if isinstance(q, dict) and q.get('text'):
+                # Keyless skips are worth a trace (worse under autoPublishGenerated,
+                # where no human reviews the set before students are scored).
+                logger.warning(
+                    f"[PersonalQuizGen] Skipping a '{q.get('type', 'multiple_choice')}' question "
+                    f"with no correct choice (quiz {quiz.id}). "
+                    f"Raw output (truncated): {(text or '')[:1500]}")
+            continue
+        rows.append((section, fields))
+    if not rows:
+        return [], 'The model returned no usable questions.'
+    return rows, ''
+
+
 def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
     """Run one AI call per section and normalize the output into question rows.
 
+    A section whose output can't be parsed or yields no usable questions is re-asked
+    (``_GENERATION_ATTEMPTS`` calls in total); the last rejected output is returned in
+    the metadata as ``raw_output`` so a developer can see what the model produced.
     Returns ``(question_rows, error, variant_id, metadata)`` — any failure fails the
     whole set (no partial sets), reported through ``error``."""
     from asgiref.sync import async_to_sync
 
     question_rows: list[tuple] = []  # (section, normalized question dict)
     error = ''
+    raw_output = None  # the model output behind an output-problem ``error``
     variant_id = None
     input_tokens = output_tokens = 0
     section_prompts = []  # what the model actually saw, for staff review on the set
     for section in quiz.generatedSections.all():
-        try:
-            result = async_to_sync(service.generate_personalized_quiz_questions)(section, submission)
-        except Exception as e:
-            logger.error(f"[PersonalQuizGen] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
-            error = f"Generation failed: {e}"
-            break
-        service.record_usage(result, user=user, request_type='personalized_quiz_generation')
-        variant_id = result.variant_id or variant_id
-        input_tokens += result.input_tokens
-        output_tokens += result.output_tokens
-        if result.resolved_prompt:
-            section_prompts.append({
-                'sectionId': section.id,
-                'sectionName': section.name or '',
-                # Bounded: a prompt embedding large submission files could be huge.
-                'prompt': result.resolved_prompt[:100_000],
-            })
-        if not result.success or not result.text:
-            error = result.error or 'Empty model response.'
-            break
-        try:
-            parsed = _parse_json_questions(result.text)
-        except Exception as e:
-            logger.error(f"[PersonalQuizGen] Could not parse model output as JSON: {e}", exc_info=True)
-            error = 'Could not parse the model output.'
-            break
-        section_rows = []
-        for q in parsed:
-            fields = _normalize_generated_question(q, env_language)
-            if fields is None:
-                if isinstance(q, dict) and q.get('text'):
-                    # Keyless skips are worth a trace (worse under autoPublishGenerated,
-                    # where no human reviews the set before students are scored).
-                    logger.warning(
-                        f"[PersonalQuizGen] Skipping a '{q.get('type', 'multiple_choice')}' question "
-                        f"with no correct choice (quiz {quiz.id}). "
-                        f"Raw output (truncated): {(result.text or '')[:1500]}")
-                continue
-            section_rows.append((section, fields))
-        if not section_rows:
-            error = 'The model returned no usable questions.'
+        section_rows: list[tuple] = []
+        for attempt in range(1, _GENERATION_ATTEMPTS + 1):
+            raw_output = None
+            try:
+                result = async_to_sync(service.generate_personalized_quiz_questions)(section, submission)
+            except Exception as e:
+                logger.error(f"[PersonalQuizGen] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
+                error = f"Generation failed: {e}"
+                break
+            service.record_usage(result, user=user, request_type='personalized_quiz_generation')
+            variant_id = result.variant_id or variant_id
+            input_tokens += result.input_tokens
+            output_tokens += result.output_tokens
+            if result.resolved_prompt and attempt == 1:
+                section_prompts.append({
+                    'sectionId': section.id,
+                    'sectionName': section.name or '',
+                    # Bounded: a prompt embedding large submission files could be huge.
+                    'prompt': result.resolved_prompt[:100_000],
+                })
+            if not result.success or not result.text:
+                error = result.error or 'Empty model response.'
+                break
+            section_rows, error = _usable_question_rows(result.text, section, env_language, quiz)
+            if not error:
+                break
+            # An output problem (not a provider failure): keep what the model returned
+            # and re-ask — the next sample usually follows the format.
+            raw_output = result.text[:_RAW_OUTPUT_KEEP]
+            logger.warning(
+                f"[PersonalQuizGen] Quiz {quiz.id} section {section.id}, attempt "
+                f"{attempt}/{_GENERATION_ATTEMPTS}: {error} Raw output (truncated): "
+                f"{result.text[:1500]}")
+        if error:
+            if raw_output is not None:
+                error = f"{error.rstrip('.')} (after {_GENERATION_ATTEMPTS} attempts)."
             break
         question_rows.extend(section_rows[:section.numQuestions])
 
@@ -909,6 +973,8 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
         'output_tokens': output_tokens,
         'sections': section_prompts,
     }
+    if raw_output is not None:
+        metadata['raw_output'] = raw_output
     return question_rows, error, variant_id, metadata
 
 
