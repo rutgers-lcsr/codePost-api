@@ -65,6 +65,20 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
   blaming the assignment's mounts.
 - `logEvent` no longer tries to email the admins once per request for the whole length of a
   database outage.
+- Python notebook autograding no longer fails a cell on IPython syntax. Before, a cell
+  containing `%matplotlib inline` raised `SyntaxError`, and because the imports usually sit
+  in that same cell every later cell failed with `NameError`. Line magics such as
+  `%matplotlib`/`%load_ext` are now dropped, `%time`/`%%time` run their code, `!cmd` and
+  `%%bash` run inside the sandbox with their output captured, `%%writefile` writes the file,
+  and `%pip`/`!pip install` lines are skipped with a note (packages are already installed
+  from the notebook's imports). Unsupported cell magics (`%%html`, `%%javascript`, …) skip
+  the cell with a note, and `display()` is available as it is in Jupyter. The source shown
+  in the graded notebook is unchanged.
+- Java notebooks get the same treatment for IJava magics: `%jars` / `%classpath` (and their
+  `%%` forms) add the jars to the JShell classpath, `%maven` / `%%loadFromPOM` are skipped
+  with a note pointing at `%jars`, and any other `%magic` is dropped with a note. C++ notebooks
+  comment out xeus-cling magics (`%timeit`, `%%file`, …) before the cells are handed to g++.
+  The R, JavaScript, Ruby and PHP kernels have no magic syntax, so nothing changes there.
 
 ## [4.3.0] — Instructor Agents, Quiz Workflow & Section Staffing
 

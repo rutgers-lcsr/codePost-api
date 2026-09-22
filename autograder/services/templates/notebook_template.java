@@ -190,7 +190,8 @@ public class notebook_template {
                         boolean[] successRef = new boolean[] { success };
                         String[] errorMsgRef = new String[] { errorMsg };
 
-                        evaluateCellSource(jshell, cellSource, psErr, evalResult, successRef, errorMsgRef);
+                        String execSource = prepareCellSource(jshell, cellSource, psErr);
+                        evaluateCellSource(jshell, execSource, psErr, evalResult, successRef, errorMsgRef);
                         success = successRef[0];
                         errorMsg = errorMsgRef[0];
 
@@ -555,6 +556,106 @@ public class notebook_template {
         if (logWriter != null) {
             logWriter.close();
         }
+    }
+
+    // ==========================================
+    // IJAVA MAGICS
+    // ==========================================
+    // Cells run through JShell, not the IJava kernel, so `%magic` and
+    // `%%cellmagic` lines are rewritten here before evaluation. The original
+    // cell source is still echoed untouched in the results.
+
+    private static final String MAVEN_HINT =
+            " (no network in the sandbox; add the jar to the assignment's files and load it with %jars)";
+
+    private static boolean isMagicLine(String trimmed, String prefix) {
+        // `%jars …` is a magic; `% 3;` (a wrapped modulo expression) is Java.
+        String body = trimmed.replaceFirst("^%+", "");
+        return trimmed.startsWith(prefix) && !body.isEmpty() && Character.isLetter(body.charAt(0));
+    }
+
+    private static String magicName(String trimmed) {
+        String body = trimmed.replaceFirst("^%+", "");
+        int end = 0;
+        while (end < body.length() && !Character.isWhitespace(body.charAt(end))) {
+            end++;
+        }
+        return body.substring(0, end);
+    }
+
+    private static String magicArgs(String trimmed) {
+        return trimmed.replaceFirst("^%+\\S*", "").trim();
+    }
+
+    private static void addToClasspath(JShell jshell, String entry, PrintStream psErr) {
+        try {
+            if (entry.contains("*")) {
+                Path path = Paths.get(entry);
+                Path dir = path.getParent() == null ? Paths.get(".") : path.getParent();
+                try (DirectoryStream<Path> matches = Files.newDirectoryStream(dir, path.getFileName().toString())) {
+                    for (Path match : matches) {
+                        jshell.addToClasspath(match.toString());
+                    }
+                }
+            } else {
+                jshell.addToClasspath(entry);
+            }
+        } catch (Exception e) {
+            psErr.println("[codepost] Could not add " + entry + " to the classpath: " + e.getMessage());
+        }
+    }
+
+    private static String prepareCellSource(JShell jshell, String cellSource, PrintStream psErr) {
+        if (cellSource == null) {
+            return "";
+        }
+        String[] lines = cellSource.split("\n", -1);
+        int first = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if (!lines[i].trim().isEmpty()) {
+                first = i;
+                break;
+            }
+        }
+        if (first >= 0 && isMagicLine(lines[first].trim(), "%%")) {
+            String name = magicName(lines[first].trim());
+            if (name.equals("jars") || name.equals("classpath")) {
+                for (int i = first + 1; i < lines.length; i++) {
+                    if (!lines[i].trim().isEmpty()) {
+                        addToClasspath(jshell, lines[i].trim(), psErr);
+                    }
+                }
+            } else {
+                psErr.println("[codepost] Skipped cell: %%" + name + " is not supported outside Jupyter"
+                        + (name.equals("loadFromPOM") ? MAVEN_HINT : ""));
+            }
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmed = line.trim();
+            if (isMagicLine(trimmed, "%")) {
+                String name = magicName(trimmed);
+                if (name.equals("jars") || name.equals("classpath")) {
+                    for (String entry : magicArgs(trimmed).split("\\s+")) {
+                        if (!entry.isEmpty()) {
+                            addToClasspath(jshell, entry, psErr);
+                        }
+                    }
+                } else if (name.equals("maven") || name.equals("addMavenRepo")) {
+                    psErr.println("[codepost] Skipped " + trimmed + MAVEN_HINT);
+                } else {
+                    psErr.println("[codepost] Ignored IJava magic (not supported outside Jupyter): " + trimmed);
+                }
+                line = ""; // keep line numbers
+            }
+            out.append(line);
+            if (i < lines.length - 1) {
+                out.append('\n');
+            }
+        }
+        return out.toString();
     }
 
     private static void evaluateCellSource(

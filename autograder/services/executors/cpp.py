@@ -1,5 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 import os
+import re
 import logging
 import base64
 import json
@@ -9,6 +10,25 @@ from typing import Optional, List
 from .base import Executor, NotebookExecutor, ExecutionResult
 
 logger = logging.getLogger(__name__)
+
+# `%timeit …` / `%%file …` are magics; `% 3;` (a wrapped modulo expression) is C++.
+_CLING_MAGIC_RE = re.compile(r'%+[A-Za-z]')
+
+
+def _strip_cling_magics(cell_source: str) -> str:
+    """
+    xeus-cling magics (`%timeit …`, `%%file …`) are not C++: comment them out so
+    the concatenated notebook still compiles. Line numbers are preserved.
+    """
+    lines = cell_source.split('\n')
+    first = next((i for i, l in enumerate(lines) if l.strip()), None)
+    if first is not None and lines[first].lstrip().startswith('%%') and _CLING_MAGIC_RE.match(lines[first].lstrip()):
+        if lines[first].split()[0] != '%%timeit':
+            return '\n'.join('// [codepost] skipped cell magic: ' + l for l in lines)
+    return '\n'.join(
+        '// [codepost] ignored magic: ' + l.strip() if _CLING_MAGIC_RE.match(l.lstrip()) else l
+        for l in lines
+    )
 
 class CPPExecutor(Executor):
     LANGUAGE = "c_cpp"
@@ -179,6 +199,7 @@ class CPPNotebookExecutor(NotebookExecutor):
                       
                  if cell_type == 'code':
                      cell_source = "".join(cell.get('source', [])) if isinstance(cell.get('source'), list) else cell.get('source', "")
+                     cell_source = _strip_cling_magics(cell_source)
                      source_code += f"\n// Cell\n{cell_source}\n"
              
              if not source_code:

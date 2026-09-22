@@ -51,11 +51,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from typing import Any, Dict, List, cast
 
 from django.test import SimpleTestCase
 
 from autograder.services.executors.base import Executor
+from autograder.services.executors.cpp import _strip_cling_magics
 from autograder.services.TestService import TestService
 
 # ---------------------------------------------------------------------------
@@ -398,6 +400,52 @@ def _exec_java_template(student_code: str, test_code: str, timeout: int = 30) ->
         result = subprocess.run(
             [java, "-cp", tmpdir, "TestRunner"],
             capture_output=True, text=True, timeout=timeout,
+        )
+        return result.stdout, result.stderr
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _fill_notebook_java_template(cells: List[Dict[str, Any]], test_code: str) -> str:
+    """Fill the Java notebook template exactly as JavaNotebookExecutor._get_code_template does."""
+    template = _read_template("notebook_template.java")
+    cells_b64 = base64.b64encode(json.dumps(cells).encode("utf-8")).decode("utf-8")
+    test_b64 = base64.b64encode(test_code.encode("utf-8")).decode("utf-8") if test_code else ""
+    template = template.replace("{cells_b64}", cells_b64)
+    template = template.replace("{test_code_b64}", test_b64)
+    template = template.replace("package autograder.services.templates;", "")
+    template = template.replace("public class notebook_template", "public class NotebookRunner")
+    template = template.replace("class notebook_template", "class NotebookRunner")
+    return template
+
+
+def _exec_notebook_java_template(cells: List[Dict[str, Any]], test_code: str, timeout: int = 120) -> tuple:
+    """
+    Compile and run the Java notebook template with javac/java (the same
+    commands the executor runs in the container). Returns (stdout, stderr).
+    """
+    javac = shutil.which("javac")
+    java = shutil.which("java")
+    if not javac or not java:
+        from unittest import SkipTest
+        raise SkipTest("javac/java not available — skipping Java notebook template test")
+    tmpdir = tempfile.mkdtemp()
+    try:
+        runner_path = os.path.join(tmpdir, "NotebookRunner.java")
+        filled = _fill_notebook_java_template(cells, test_code)
+        # The runner exits unless /work (the container mount) exists; point it at the temp dir.
+        filled = filled.replace('"/work"', json.dumps(tmpdir))
+        with open(runner_path, "w") as f:
+            f.write(filled)
+        compile_result = subprocess.run(
+            [javac, "-d", tmpdir, runner_path],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        if compile_result.returncode != 0:
+            return "", compile_result.stderr
+        result = subprocess.run(
+            [java, "-cp", tmpdir, "NotebookRunner"],
+            capture_output=True, text=True, timeout=timeout, cwd=tmpdir,
         )
         return result.stdout, result.stderr
     finally:
@@ -1163,6 +1211,150 @@ def partial():
         results_json = json.loads(m.group(1))
         cell_types = [c["cell_type"] for c in results_json["output_data"]["cells"]]
         self.assertEqual(cell_types, ["markdown", "code"])
+
+    # -- IPython magics and shell escapes -----------------------------------
+
+    @staticmethod
+    def _cell_stream(results_json, idx: int, name: str) -> str:
+        """Concatenated text of the 'stdout'/'stderr' stream outputs on code cell *idx*."""
+        cell = results_json["output_data"]["cells"][idx]
+        return "".join(
+            o.get("text", "")
+            for o in cell["outputs"]
+            if o.get("output_type") == "stream" and o.get("name") == name
+        )
+
+    @staticmethod
+    def _cell_has_error(results_json, idx: int) -> bool:
+        cell = results_json["output_data"]["cells"][idx]
+        return any(o.get("output_type") == "error" for o in cell["outputs"])
+
+    def test_matplotlib_inline_magic_does_not_break_cell(self):
+        """`%matplotlib inline` is dropped silently; imports in the same cell still run."""
+        cells = ["import math\n%matplotlib inline\nroot = math.sqrt(16)"]
+        tests = """
+@test(name="root", points=1)
+def root_test():
+    assert root == 4
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+        self.assertFalse(self._cell_has_error(results_json, 0))
+        self.assertEqual(self._cell_stream(results_json, 0, "stderr"), "")
+
+    def test_unknown_line_magic_dropped_with_note(self):
+        cells = ["%who\ny = 2"]
+        tests = """
+@test(name="y", points=1)
+def y_test():
+    assert y == 2
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+        self.assertIn("Ignored IPython magic", self._cell_stream(results_json, 0, "stderr"))
+
+    def test_time_line_magic_runs_statement(self):
+        cells = ["%time total = sum(range(10))"]
+        tests = """
+@test(name="total", points=1)
+def total_test():
+    assert total == 45
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+
+    def test_pip_install_lines_skipped(self):
+        cells = ["%pip install somepkg\n!pip install otherpkg\nw = 1"]
+        tests = """
+@test(name="w", points=1)
+def w_test():
+    assert w == 1
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+        self.assertFalse(self._cell_has_error(results_json, 0))
+        stderr = self._cell_stream(results_json, 0, "stderr")
+        self.assertIn("Skipped package install magic", stderr)
+        self.assertIn("Skipped package install command", stderr)
+
+    def test_shell_escape_runs_and_captures_output(self):
+        cells = ["!echo hello-from-shell\nv = 3"]
+        tests = """
+@test(name="v", points=1)
+def v_test():
+    assert v == 3
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+        self.assertIn("hello-from-shell", self._cell_stream(results_json, 0, "stdout"))
+
+    def test_writefile_cell_magic_creates_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "helper.py")
+            cells = [
+                f"%%writefile {path}\ndef helper():\n    return 'from-file'",
+                f"content = open({path!r}).read()",
+            ]
+            tests = """
+@test(name="content", points=1)
+def content_test():
+    assert "def helper" in content
+"""
+            results_json, _, _, _ = self._run_and_parse(cells, tests)
+            self.assertTrue(results_json["tests"][0]["passed"])
+            self.assertIn("Writing", self._cell_stream(results_json, 0, "stdout"))
+
+    def test_bash_cell_magic_runs_body(self):
+        cells = ["%%bash\necho from-bash\necho second-line"]
+        results_json, _, _, _ = self._run_and_parse(cells, "")
+        out = self._cell_stream(results_json, 0, "stdout")
+        self.assertIn("from-bash", out)
+        self.assertIn("second-line", out)
+        self.assertFalse(self._cell_has_error(results_json, 0))
+
+    def test_time_cell_magic_runs_body(self):
+        cells = ["%%time\nt = 5 * 5"]
+        tests = """
+@test(name="t", points=1)
+def t_test():
+    assert t == 25
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+
+    def test_unsupported_cell_magic_skips_cell(self):
+        cells = ["%%html\n<b>hi</b>", "u = 9"]
+        tests = """
+@test(name="u", points=1)
+def u_test():
+    assert u == 9
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+        self.assertFalse(self._cell_has_error(results_json, 0))
+        self.assertIn("Skipped cell", self._cell_stream(results_json, 0, "stderr"))
+
+    def test_display_shim_prints_repr(self):
+        cells = ["display(42)"]
+        results_json, _, _, _ = self._run_and_parse(cells, "")
+        self.assertIn("42", self._cell_stream(results_json, 0, "stdout"))
+
+    def test_percent_inside_string_literal_untouched(self):
+        """Valid Python is never rewritten, even if a line starts with % or !."""
+        cells = ["s = '''\n%not a magic\n!not a shell\n'''"]
+        tests = """
+@test(name="s", points=1)
+def s_test():
+    assert "%not a magic" in s and "!not a shell" in s
+"""
+        results_json, _, _, _ = self._run_and_parse(cells, tests)
+        self.assertTrue(results_json["tests"][0]["passed"])
+        self.assertEqual(self._cell_stream(results_json, 0, "stderr"), "")
+
+    def test_real_syntax_error_alongside_magic_still_reported(self):
+        cells = ["%matplotlib inline\ndef broken(:\n    pass"]
+        results_json, _, _, _ = self._run_and_parse(cells, "")
+        self.assertTrue(self._cell_has_error(results_json, 0))
 
     # -- Target function filtering ------------------------------------------
 
@@ -2136,6 +2328,120 @@ Tester::test("double works", 10, null, function() {
         v = TestService.verify_script_test(cast(Any, None), exec_result)
         self.assertTrue(v["passed"])
         self.assertEqual(v["score"], 10)
+
+
+# ###################################################################
+# PART B9b — Java notebook template: IJava magics
+# ###################################################################
+
+class NotebookJavaTemplateMagicTests(SimpleTestCase):
+    """
+    Compiles and runs the real ``notebook_template.java`` with javac/java and
+    verifies IJava magics (`%maven`, `%jars`, `%%loadFromPOM`) are rewritten
+    instead of erroring the cell.
+    """
+
+    TEST_CODE = """
+class Tests {
+    @Test(name = "check", points = 1)
+    public void check() {
+        assertTrue(CHECK, "check failed");
+    }
+}
+"""
+
+    def _run(self, cell_sources: List[str], check_expr: str):
+        cells = [{"type": "code", "source": s, "idx": i} for i, s in enumerate(cell_sources)]
+        stdout, stderr = _exec_notebook_java_template(cells, self.TEST_CODE.replace("CHECK", check_expr))
+        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        if m is None:
+            self.fail(f"no results block.\nstdout: {stdout}\nstderr: {stderr}")
+        # Per-test results are stdout markers parsed host-side, not part of the results JSON.
+        _, _, per_test = Executor.parse_test_results(stdout, stderr)
+        return json.loads(m.group(1)), per_test
+
+    @staticmethod
+    def _outputs(results_json, idx: int):
+        return results_json["output_data"]["cells"][idx]["outputs"]
+
+    def _stderr_text(self, results_json, idx: int) -> str:
+        return "".join(o.get("text", "") for o in self._outputs(results_json, idx) if o.get("name") == "stderr")
+
+    def _has_error(self, results_json, idx: int) -> bool:
+        return any(o.get("output_type") == "error" for o in self._outputs(results_json, idx))
+
+    def test_maven_magic_dropped_with_note(self):
+        results, per_test = self._run(["%maven org.apache.commons:commons-lang3:3.12.0\nint x = 40 + 2;"], "x == 42")
+        self.assertFalse(self._has_error(results, 0))
+        self.assertIn("Skipped %maven", self._stderr_text(results, 0))
+        self.assertTrue(per_test and per_test[0]["passed"], per_test)
+
+    def test_load_from_pom_cell_skipped(self):
+        results, per_test = self._run(
+            ["%%loadFromPOM\n<dependency><groupId>x</groupId></dependency>", "int y = 7;"],
+            "y == 7",
+        )
+        self.assertFalse(self._has_error(results, 0))
+        self.assertIn("Skipped cell", self._stderr_text(results, 0))
+        self.assertTrue(per_test and per_test[0]["passed"], per_test)
+
+    def test_jars_magic_adds_jar_to_classpath(self):
+        javac = shutil.which("javac")
+        if not javac:
+            from unittest import SkipTest
+            raise SkipTest("javac not available")
+        tmpdir = tempfile.mkdtemp()
+        try:
+            # JShell snippets live in their own package, so the class must not be in the default package.
+            src = os.path.join(tmpdir, "Hello.java")
+            with open(src, "w") as f:
+                f.write('package lib; public class Hello { public static String greet() { return "hi-from-jar"; } }')
+            subprocess.run([javac, "-d", tmpdir, src], check=True, capture_output=True)
+            with zipfile.ZipFile(os.path.join(tmpdir, "hello.jar"), "w") as zf:
+                zf.write(os.path.join(tmpdir, "lib", "Hello.class"), "lib/Hello.class")
+            results, per_test = self._run(
+                [f"%jars {tmpdir}/*.jar", "String g = lib.Hello.greet();"],
+                'g.equals("hi-from-jar")',
+            )
+            self.assertFalse(self._has_error(results, 0))
+            self.assertFalse(self._has_error(results, 1))
+            self.assertTrue(per_test and per_test[0]["passed"], per_test)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_modulo_continuation_line_untouched(self):
+        """A line starting with `% 3` is Java, not a magic."""
+        results, per_test = self._run(["int r = 7\n    % 3;"], "r == 1")
+        self.assertFalse(self._has_error(results, 0))
+        self.assertTrue(per_test and per_test[0]["passed"], per_test)
+
+
+# ###################################################################
+# PART B9c — C++ notebook: xeus-cling magics
+# ###################################################################
+
+class CppNotebookMagicStripTests(SimpleTestCase):
+    """xeus-cling magics are commented out before the notebook is handed to g++."""
+
+    def test_line_magic_commented_out(self):
+        lines = _strip_cling_magics("int a = 1;\n%timeit a + 1\nint b = 2;").split("\n")
+        self.assertEqual(lines[0], "int a = 1;")
+        self.assertTrue(lines[1].startswith("//"))
+        self.assertEqual(lines[2], "int b = 2;")
+
+    def test_cell_magic_comments_out_whole_cell(self):
+        lines = _strip_cling_magics("%%file data.txt\nnot c++\nat all").split("\n")
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(all(l.startswith("//") for l in lines))
+
+    def test_timeit_cell_magic_keeps_body(self):
+        lines = _strip_cling_magics("%%timeit\nint c = 3;").split("\n")
+        self.assertTrue(lines[0].startswith("//"))
+        self.assertEqual(lines[1], "int c = 3;")
+
+    def test_modulo_continuation_untouched(self):
+        src = "int r = 7\n    % 3;"
+        self.assertEqual(_strip_cling_magics(src), src)
 
 
 # ###################################################################
