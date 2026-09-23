@@ -16,6 +16,8 @@ import base64
 import ast
 from typing import List, Dict, Any, Optional, Callable
 import signal
+import re
+import shutil
 
 # Set environment for pip
 os.environ['PIP_ROOT_USER_ACTION'] = 'ignore'
@@ -279,6 +281,116 @@ if os.path.exists('/work'):
 else:
     template_log(f"/work does not exist, staying in {os.getcwd()}", "DEBUG")
 
+# ==========================================
+# IPYTHON MAGICS AND SHELL ESCAPES
+# ==========================================
+# Cells run through plain exec(), not IPython, so `%magic`, `%%cellmagic` and
+# `!shell` lines are rewritten here before execution. The original cell source
+# is still echoed untouched in the results.
+
+_SHELL_TIMEOUT = 60
+# `!pip install …` / `%pip install …` are skipped: packages are already installed
+# from the notebook's imports, and the container usually has no network anyway.
+_INSTALLER_RE = re.compile(r'^\s*(?:python3?\s+-m\s+)?(?:pip3?|conda|mamba|apt(?:-get)?)\b')
+# Line magics that are meaningless outside Jupyter; dropped without a note.
+_QUIET_LINE_MAGICS = {'matplotlib', 'load_ext', 'reload_ext', 'unload_ext', 'autoreload', 'config'}
+# Cell magics whose body is ordinary Python: drop the magic line, run the body.
+_BODY_ONLY_CELL_MAGICS = {'time', 'timeit', 'capture', 'prun'}
+
+
+def display(*objs, **kwargs):
+    """Stand-in for IPython.display.display, which Jupyter injects implicitly."""
+    for obj in objs:
+        print(repr(obj))
+
+
+def _run_shell(cmd: str) -> None:
+    """Run a `!cmd` line or `%%bash` body inside the sandbox and echo its output."""
+    if _INSTALLER_RE.match(cmd):
+        print(f"[codepost] Skipped package install command (packages are installed from the notebook's imports): {cmd.strip()}", file=sys.stderr)
+        return
+    try:
+        proc = subprocess.run(cmd, shell=True, executable=shutil.which('bash'),
+                              capture_output=True, text=True, timeout=_SHELL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print(f"[codepost] Shell command timed out after {_SHELL_TIMEOUT}s: {cmd.strip()}", file=sys.stderr)
+        return
+    if proc.stdout:
+        print(proc.stdout, end='')
+    if proc.stderr:
+        print(proc.stderr, end='', file=sys.stderr)
+
+
+def _write_cell_file(args: str, body: str) -> None:
+    """%%writefile [-a] <path>"""
+    parts = args.split()
+    append = '-a' in parts
+    names = [p for p in parts if p != '-a']
+    if not names:
+        print("[codepost] %%writefile needs a filename", file=sys.stderr)
+        return
+    path = names[0]
+    existed = os.path.exists(path)
+    with open(path, 'a' if append else 'w') as f:
+        f.write(body)
+    print(("Appending to " if append else "Overwriting " if existed else "Writing ") + path)
+
+
+def _split_magic(text: str):
+    """'%%time foo bar' -> ('time', 'foo bar')"""
+    parts = text.lstrip('%').split(None, 1)
+    return (parts[0] if parts else ''), (parts[1].strip() if len(parts) > 1 else '')
+
+
+def _rewrite_line(line: str) -> str:
+    """Rewrite one `%magic` / `!shell` line into plain Python, keeping its indentation."""
+    stripped = line.lstrip()
+    indent = line[:len(line) - len(stripped)]
+    if stripped.startswith('!'):
+        return f"{indent}_codepost_shell({stripped[1:].strip()!r})"
+    if stripped.startswith('%'):
+        name, rest = _split_magic(stripped)
+        if name in ('time', 'timeit') and rest:
+            return indent + rest
+        if name in ('pip', 'conda', 'mamba'):
+            print(f"[codepost] Skipped package install magic (packages are installed from the notebook's imports): {stripped.strip()}", file=sys.stderr)
+        elif name not in _QUIET_LINE_MAGICS:
+            print(f"[codepost] Ignored IPython magic (not supported outside Jupyter): {stripped.strip()}", file=sys.stderr)
+        return indent + 'pass'
+    return line
+
+
+def _prepare_cell_source(source: str) -> str:
+    """
+    Return the Python to execute for a cell. Plain Python comes back unchanged;
+    IPython syntax is rewritten line by line (line numbers are preserved), and
+    cells handled entirely here (%%writefile, %%bash, unsupported %%magics)
+    return '' so nothing further runs.
+    """
+    try:
+        ast.parse(source, mode='exec')
+        return source
+    except SyntaxError:
+        pass
+    lines = source.split('\n')
+    first = next((i for i, l in enumerate(lines) if l.strip()), None)
+    if first is not None and lines[first].lstrip().startswith('%%'):
+        name, args = _split_magic(lines[first].strip())
+        body = '\n'.join(lines[first + 1:])
+        if name in _BODY_ONLY_CELL_MAGICS:
+            lines[first] = ''
+        elif name == 'writefile':
+            _write_cell_file(args, body)
+            return ''
+        elif name in ('bash', 'sh'):
+            _run_shell(body)
+            return ''
+        else:
+            print(f"[codepost] Skipped cell: %%{name} is not supported outside Jupyter", file=sys.stderr)
+            return ''
+    return '\n'.join(_rewrite_line(l) for l in lines)
+
+
 # Decode cells
 cells_json = base64.b64decode('{cells_b64}').decode('utf-8')
 cells = json.loads(cells_json)
@@ -294,6 +406,8 @@ namespace = {
     'test': test,
     'assert_plots_generated': assert_plots_generated,
     'get_plots': get_plots,
+    'display': display,
+    '_codepost_shell': _run_shell,
     '_CAPTURED_PLOTS': _CAPTURED_PLOTS,
     'codepost_cells': cells # Provide access to all cells if needed
 }
@@ -327,8 +441,9 @@ else:
             
             try:
                 with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                    exec_source = _prepare_cell_source(cell_source)
                     try:
-                        parsed = ast.parse(cell_source, mode='exec')
+                        parsed = ast.parse(exec_source, mode='exec')
                         if parsed.body and isinstance(parsed.body[-1], ast.Expr):
                             setup_stmts = parsed.body[:-1]
                             last_expr = parsed.body[-1].value
@@ -339,9 +454,9 @@ else:
                             if result is not None:
                                 print(repr(result))
                         else:
-                            exec(cell_source, namespace)
+                            exec(exec_source, namespace)
                     except SyntaxError:
-                        exec(cell_source, namespace)
+                        exec(exec_source, namespace)
             except Exception as e:
                 success = False
                 error_msg = str(e)
