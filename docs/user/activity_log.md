@@ -57,7 +57,8 @@ Filters combine with AND semantics. Clear a filter by clicking its **×**.
 | `quiz_attempt_started_late`      | A student started **after the close** using an access code.          |
 | `quiz_attempt_submitted`         | A student submitted their attempt.                                   |
 | `quiz_attempt_autosubmitted`     | An attempt was auto-submitted (timer expiry or a hard close).        |
-| `quiz_attempts_reset`            | An admin deleted all attempts for a quiz.                            |
+| `quiz_attempts_reset`            | An admin deleted a student's — or every student's — attempts for a quiz. |
+| `quiz_attempt_deleted`           | An admin deleted one quiz attempt.                                   |
 | `quiz_response_graded` / `quiz_response_grade_reopened` | A grader saved or reopened a manual grade.    |
 | `quiz_generated_set_approved` / `_unapproved` / `_regenerated`, `quiz_generated_sets_published` | Staff actions on per-student AI-generated question sets. |
 

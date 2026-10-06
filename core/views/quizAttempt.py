@@ -2,14 +2,15 @@
 """Student-facing quiz taking: start/resume an attempt, autosave answers, submit + auto-grade.
 
 Kept separate from the staff-only QuizViewSet. Only the mixins students need are exposed
-(create + retrieve + a few actions) — no list/update/destroy.
+(create + retrieve + a few actions) — no list/update. ``destroy`` is the one staff write
+here: course admins may delete a single attempt so a student can retake.
 """
 import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Prefetch
+from django.db.models import Max, Prefetch
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
@@ -121,6 +122,26 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data)
 
   @extend_schema(
+      responses={204: None},
+      description="Delete one attempt (course admins only). The student's answers and any manual "
+                  "grading on it are removed, and they may retake if attempts remain. Irreversible.",
+  )
+  def destroy(self, request, *args, **kwargs):
+    attempt = self.get_object()
+    quiz = attempt.quiz
+    if quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+    # Snapshot before the delete; the actor is the admin, not the student (unlike
+    # _record_attempt_event).
+    meta = {'quizTitle': quiz.title, 'student': attempt.student.email,
+            'attemptNumber': attempt.attemptNumber, 'status': attempt.status,
+            'score': str(attempt.score) if attempt.score is not None else None}
+    attempt.delete()
+    record_audit_event(course=quiz.course, event_type='quiz_attempt_deleted', user=request.user,
+                       quiz=quiz, assignment=quiz.assignment, meta=meta)
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+  @extend_schema(
       request=inline_serializer('StartQuizAttemptRequest', {
           'quiz': serializers.IntegerField(),
           'accessCode': serializers.CharField(required=False, allow_blank=True),
@@ -176,10 +197,14 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
 
     started = timezone.now()
     deadline = quiz_grading.compute_attempt_deadline(quiz, user, started, bypass_close=bypass)
+    # Number past the highest existing attempt, not count+1: an admin may have deleted an
+    # earlier attempt, and count+1 would then collide with the (quiz, student, attemptNumber)
+    # unique constraint.
+    last_number = quiz.attempts.filter(student=user).aggregate(m=Max('attemptNumber'))['m'] or 0
     try:
       with transaction.atomic():
         attempt = QuizAttempt.objects.create(
-            quiz=quiz, student=user, attemptNumber=used + 1,
+            quiz=quiz, student=user, attemptNumber=last_number + 1,
             startedAt=started, deadline=deadline, status='in_progress',
             closeBypassed=bypass,
             # Reaching create on a SEB-required quiz means the permission layer verified

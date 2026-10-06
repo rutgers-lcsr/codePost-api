@@ -500,6 +500,18 @@ class CourseCloneQuizTests(TestCase):
         self.assertIsNone(cloned_standalone.availableFrom)
         self.assertIsNone(cloned_standalone.availableUntil)
 
+    def test_course_clone_keeps_fixed_date_trigger_but_clears_open_date(self):
+        # The open moment is semester-specific; the trigger (the instructor's intent) is not.
+        self.attached_quiz.assignmentTrigger = "fixed_date"
+        self.attached_quiz.availableFrom = timezone.now()
+        self.attached_quiz.save()
+
+        cloned_course = self._clone()
+
+        cloned_attached = cloned_course.quizzes.get(title="HW1 Quiz")
+        self.assertEqual(cloned_attached.assignmentTrigger, "fixed_date")
+        self.assertIsNone(cloned_attached.availableFrom)
+
     def test_course_clone_copies_generated_sections(self):
         QuizGeneratedSection.objects.create(
             quiz=self.attached_quiz,

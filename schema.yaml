@@ -8928,6 +8928,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/StaffQuizAttempt'
           description: ''
+    delete:
+      operationId: quizAttempts_destroy
+      description: Delete one attempt (course admins only). The student's answers
+        and any manual grading on it are removed, and they may retake if attempts
+        remain. Irreversible.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz attempt.
+        required: true
+      tags:
+      - quizAttempts
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /quizAttempts/{id}/gradeResponse/:
     post:
       operationId: quizAttempts_gradeResponseCreate
@@ -10730,9 +10752,11 @@ paths:
   /quizzes/{id}/resetAttempts/:
     post:
       operationId: quizzes_resetAttemptsCreate
-      description: Delete ALL student attempts for this quiz (course admins only).
-        Use after a substantive edit so students retake from scratch. Irreversible;
-        responses cascade.
+      description: 'Delete student attempts for this quiz (course admins only). With
+        no body, every student''s attempts — use after a substantive edit so everyone
+        retakes from scratch. With {student: <email>}, only that student''s, so one
+        student can start over. All statuses, including in-progress. Irreversible;
+        responses cascade. Returns the number of attempts deleted.'
       parameters:
       - in: path
         name: id
@@ -10742,6 +10766,17 @@ paths:
         required: true
       tags:
       - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetQuizAttemptsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ResetQuizAttemptsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ResetQuizAttemptsRequest'
       security:
       - courseKeyAuth: []
       - tokenAuth: []
@@ -10759,7 +10794,10 @@ paths:
       operationId: quizzes_resultsList
       description: |-
         Per-student official results (per this quiz's scoringPolicy) — quiz graders and
-        course admins only. Score is null until the student has a fully graded attempt.
+        course admins only. Score is null until the student has a fully graded attempt. Students
+        with only an in-progress attempt get a row too (hasInProgress), so a stuck attempt is
+        visible and can be reset; attemptsUsed counts every attempt, matching the student's view
+        and the attemptsAllowed check.
       parameters:
       - in: path
         name: id
@@ -22005,11 +22043,13 @@ components:
             * `after_submission` - After the student submits
             * `after_feedback` - After feedback is released (whole assignment)
             * `after_student_feedback` - After each student's feedback is ready (self-paced)
+            * `fixed_date` - At a fixed date & time
         availableFrom:
           type: string
           format: date-time
           nullable: true
-          description: 'Standalone quizzes: when the quiz opens.'
+          description: When the quiz opens — standalone quizzes, or attached quizzes
+            whose assignmentTrigger is 'fixed_date'.
         availableUntil:
           type: string
           format: date-time
@@ -23882,11 +23922,13 @@ components:
             * `after_submission` - After the student submits
             * `after_feedback` - After feedback is released (whole assignment)
             * `after_student_feedback` - After each student's feedback is ready (self-paced)
+            * `fixed_date` - At a fixed date & time
         availableFrom:
           type: string
           format: date-time
           nullable: true
-          description: 'Standalone quizzes: when the quiz opens.'
+          description: When the quiz opens — standalone quizzes, or attached quizzes
+            whose assignmentTrigger is 'fixed_date'.
         availableUntil:
           type: string
           format: date-time
@@ -24131,6 +24173,7 @@ components:
       - after_submission
       - after_feedback
       - after_student_feedback
+      - fixed_date
       type: string
       description: |-
         * `during` - During the assignment
@@ -24138,6 +24181,7 @@ components:
         * `after_submission` - After the student submits
         * `after_feedback` - After feedback is released (whole assignment)
         * `after_student_feedback` - After each student's feedback is ready (self-paced)
+        * `fixed_date` - At a fixed date & time
     QuizAttemptStatusEnum:
       enum:
       - in_progress
@@ -24525,8 +24569,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        hasInProgress:
+          type: boolean
       required:
       - attemptsUsed
+      - hasInProgress
       - lastSubmittedAt
       - maxScore
       - needsGrading
@@ -24724,6 +24771,12 @@ components:
       required:
       - isValid
       - success
+    ResetQuizAttemptsRequest:
+      type: object
+      properties:
+        student:
+          type: string
+          format: email
     ResetQuizAttemptsResponse:
       type: object
       properties:
@@ -25422,6 +25475,11 @@ components:
         hasSubmittedAttempt:
           type: boolean
           readOnly: true
+        openAt:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
         closeAt:
           type: string
           format: date-time
@@ -25468,6 +25526,7 @@ components:
       - myPassed
       - myScore
       - myScorePending
+      - openAt
       - questionCount
       - title
     StudentQuizAttempt:

@@ -444,6 +444,15 @@ def _generated_questions_ready(quiz, student):
   return quiz.generatedSets.filter(student=student, status='approved').exists()
 
 
+def quiz_open_time(quiz):
+  """When the quiz opens, or None when opening isn't a fixed moment (attached quizzes on a
+  lifecycle trigger). Standalone quizzes open at ``availableFrom``; attached quizzes only
+  when their trigger is ``fixed_date``."""
+  if quiz.assignment_id is None or quiz.assignmentTrigger == 'fixed_date':
+    return quiz.availableFrom
+  return None
+
+
 def quiz_close_time(quiz, student, now=None):
   """When the quiz stops being available, or None if it has no explicit close.
 
@@ -540,6 +549,11 @@ def quiz_availability(quiz, student, now=None):
   elif trigger == 'after_student_feedback':
     if not _student_feedback_visible(student, assignment):
       return (False, 'student_feedback_not_ready')
+  elif trigger == 'fixed_date':
+    # An explicit open time on an attached quiz. A missing date never opens (the serializer
+    # rejects it, but a clone clears availableFrom) rather than opening by surprise.
+    if quiz.availableFrom is None or now < quiz.availableFrom:
+      return (False, 'not_yet_open')
   else:
     return (False, 'unavailable')
 

@@ -2758,3 +2758,248 @@ class TestSebConfigKey:
 
         # encodeURIComponent: '/'→%2F, ' '→%20; !'()*-._~ stay literal.
         assert seb.quiz_take_path(_Q()) == "/student/cos%20333%2Fx/S(2026)!/quizzes/7/take"
+
+
+# --------------------------------------------------------------------------- #
+# Attached quizzes opening at a fixed date
+# --------------------------------------------------------------------------- #
+
+class TestFixedDateOpen:
+    """The 'fixed_date' trigger: an attached quiz that opens at availableFrom instead of on an
+    assignment lifecycle event. Still gated on the assignment being released."""
+
+    def _attached(self, taking_setup, **kwargs):
+        course, assignment = taking_setup['course'], taking_setup['assignment']
+        assignment.state = 'published'
+        assignment.save()
+        quiz = _quiz(course, assignment=assignment, assignmentTrigger='fixed_date', **kwargs)
+        _add(quiz, _mc(course, _bank(course)))
+        return quiz
+
+    def test_locked_before_open_date_then_opens(self, api_client, taking_setup):
+        from core.models import Quiz
+        from core.services.quiz_grading import quiz_availability
+        student = taking_setup['students'][0]
+        opens = timezone.now() + timedelta(hours=1)
+        quiz = self._attached(taking_setup, availableFrom=opens)
+        assert quiz_availability(quiz, student) == (False, 'not_yet_open')
+
+        api_client.force_authenticate(user=student)
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        # Listed locked on the assignment card, with the open time so the student knows when.
+        listed = api_client.get(f"/quizAttempts/availableQuizzes/?course={taking_setup['course'].id}")
+        row = {q['id']: q for q in listed.data}[quiz.id]
+        assert row['availability'] == {'isOpen': False, 'reason': 'not_yet_open'}
+        assert row['openAt'] is not None
+
+        Quiz.objects.filter(pk=quiz.id).update(availableFrom=timezone.now() - timedelta(minutes=1))
+        assert quiz_availability(Quiz.objects.get(pk=quiz.id), student) == (True, 'open')
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
+    def test_still_gated_on_assignment_release(self, taking_setup):
+        from core.services.quiz_grading import quiz_availability
+        quiz = self._attached(taking_setup, availableFrom=timezone.now() - timedelta(days=1))
+        quiz.assignment.state = 'preview'
+        quiz.assignment.save()
+        assert quiz_availability(quiz, taking_setup['students'][0]) == (False, 'assignment_not_released')
+
+    def test_missing_open_date_never_opens(self, taking_setup):
+        from core.services.quiz_grading import quiz_availability
+        quiz = self._attached(taking_setup, availableFrom=None)
+        assert quiz_availability(quiz, taking_setup['students'][0]) == (False, 'not_yet_open')
+
+    def test_open_at_only_for_fixed_moments(self, taking_setup):
+        from core.services.quiz_grading import quiz_open_time
+        course, assignment = taking_setup['course'], taking_setup['assignment']
+        opens = timezone.now()
+        assert quiz_open_time(_quiz(course, availableFrom=opens)) == opens  # standalone
+        assert quiz_open_time(_quiz(course, assignment=assignment, assignmentTrigger='fixed_date',
+                                    availableFrom=opens)) == opens
+        # A lifecycle trigger has no fixed open moment, even with a stale date stored.
+        assert quiz_open_time(_quiz(course, assignment=assignment, assignmentTrigger='during',
+                                    availableFrom=opens)) is None
+
+    def test_access_code_does_not_bypass_fixed_date_not_yet_open(self, api_client, taking_setup):
+        quiz = self._attached(taking_setup, availableFrom=timezone.now() + timedelta(days=1),
+                              accessCode='ABC123')
+        api_client.force_authenticate(user=taking_setup['students'][0])
+        resp = api_client.post('/quizAttempts/', {'quiz': quiz.id, 'accessCode': 'ABC123'}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert 'accessCodeRequired' not in resp.data
+
+
+# --------------------------------------------------------------------------- #
+# Resetting / deleting attempts (course admins)
+# --------------------------------------------------------------------------- #
+
+class TestAttemptResetAndDelete:
+    def _take(self, api_client, student, quiz, submit=True):
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        assert start.status_code == status.HTTP_201_CREATED
+        if submit:
+            done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+            assert done.status_code == status.HTTP_200_OK
+        return start.data
+
+    def _events(self, course, event_type):
+        from core.models import CourseAuditEvent
+        return CourseAuditEvent.objects.filter(course=course, event_type=event_type)
+
+    def test_reset_one_student_leaves_others_and_counts_attempts_only(self, api_client, taking_setup):
+        from core.models import QuizAttempt, QuizResponse
+        course = taking_setup['course']
+        alice, bob = taking_setup['students'][0], taking_setup['students'][1]
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, _mc(course, _bank(course)))
+        self._take(api_client, alice, quiz)
+        self._take(api_client, alice, quiz, submit=False)  # a stuck in-progress attempt too
+        self._take(api_client, bob, quiz)
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizzes/{quiz.id}/resetAttempts/',
+                               {'student': alice.email.upper()}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data == {'deleted': 2}  # attempts, not attempts + cascaded responses
+        assert not QuizAttempt.objects.filter(quiz=quiz, student=alice).exists()
+        assert not QuizResponse.objects.filter(attempt__quiz=quiz, attempt__student=alice).exists()
+        assert QuizAttempt.objects.filter(quiz=quiz, student=bob).count() == 1
+
+        event = self._events(course, 'quiz_attempts_reset').get()
+        assert event.user == taking_setup['admin']
+        assert event.meta['student'] == alice.email
+        assert event.meta['deleted'] == 2
+
+        # Alice can start over.
+        self._take(api_client, alice, quiz, submit=False)
+
+    def test_reset_unknown_student_is_400(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizzes/{quiz.id}/resetAttempts/',
+                               {'student': 'nobody@example.edu'}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'student' in resp.data
+
+    def test_reset_blocked_on_archived_course(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        self._take(api_client, taking_setup['students'][0], quiz)
+        course.archived = True
+        course.save()
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizzes/{quiz.id}/resetAttempts/', {}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert quiz.attempts.count() == 1
+
+    def test_admin_deletes_one_attempt(self, api_client, taking_setup):
+        from core.models import QuizAttempt, QuizResponse
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, _mc(course, _bank(course)))
+        first = self._take(api_client, student, quiz)
+        second = self._take(api_client, student, quiz)
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.delete(f"/quizAttempts/{first['id']}/")
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        assert not QuizAttempt.objects.filter(pk=first['id']).exists()
+        assert not QuizResponse.objects.filter(attempt_id=first['id']).exists()
+        assert QuizAttempt.objects.filter(pk=second['id']).exists()
+        assert api_client.delete(f"/quizAttempts/{first['id']}/").status_code == status.HTTP_404_NOT_FOUND
+
+        event = self._events(course, 'quiz_attempt_deleted').get()
+        assert event.user == taking_setup['admin']
+        assert event.meta['student'] == student.email
+        assert event.meta['attemptNumber'] == 1
+
+    def test_delete_is_admin_only(self, api_client, taking_setup):
+        from core.models import QuizAttempt
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        attempt = self._take(api_client, student, quiz)
+        # Neither the owner (who could otherwise free a retake) nor a grader may delete.
+        for user in (student, course.graders.first()):
+            api_client.force_authenticate(user=user)
+            assert api_client.delete(f"/quizAttempts/{attempt['id']}/").status_code == status.HTTP_403_FORBIDDEN
+        assert QuizAttempt.objects.filter(pk=attempt['id']).exists()
+
+    def test_delete_blocked_on_archived_course(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _mc(course, _bank(course)))
+        attempt = self._take(api_client, taking_setup['students'][0], quiz)
+        course.archived = True
+        course.save()
+        api_client.force_authenticate(user=taking_setup['admin'])
+        assert api_client.delete(f"/quizAttempts/{attempt['id']}/").status_code == status.HTTP_403_FORBIDDEN
+
+    def test_new_attempt_numbers_past_a_deleted_gap(self, api_client, taking_setup):
+        """Deleting attempt #1 of 2 must not make the next start collide with #2 (500)."""
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, _mc(course, _bank(course)))
+        first = self._take(api_client, student, quiz)
+        self._take(api_client, student, quiz)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        assert api_client.delete(f"/quizAttempts/{first['id']}/").status_code == status.HTTP_204_NO_CONTENT
+        third = self._take(api_client, student, quiz, submit=False)
+        assert third['attemptNumber'] == 3
+
+    def test_delete_frees_an_attempt_slot(self, api_client, taking_setup):
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        quiz = _quiz(course, attemptsAllowed=1)
+        _add(quiz, _mc(course, _bank(course)))
+        attempt = self._take(api_client, student, quiz)
+        api_client.force_authenticate(user=student)
+        assert api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json').status_code == status.HTTP_403_FORBIDDEN
+        api_client.force_authenticate(user=taking_setup['admin'])
+        api_client.delete(f"/quizAttempts/{attempt['id']}/")
+        self._take(api_client, student, quiz, submit=False)
+
+    def test_deleting_pinned_attempt_falls_back_to_policy(self, api_client, taking_setup):
+        from core.services.quiz_grading import official_score
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        quiz = _quiz(course, attemptsAllowed=0, scoringPolicy='latest')
+        _add(quiz, _mc(course, _bank(course)))
+        first = self._take(api_client, student, quiz)
+        second = self._take(api_client, student, quiz)
+        api_client.force_authenticate(user=taking_setup['admin'])
+        assert api_client.post(f"/quizAttempts/{first['id']}/setOfficial/", {}, format='json').status_code == status.HTTP_200_OK
+        api_client.delete(f"/quizAttempts/{first['id']}/")
+        # The pin is gone with the attempt; 'latest' picks the remaining attempt.
+        assert official_score(quiz, student) is not None
+        results = api_client.get(f'/quizzes/{quiz.id}/results/')
+        assert results.data[0]['attemptsUsed'] == 1
+        assert results.data[0]['lastSubmittedAt'] is not None
+        assert str(second['id'])  # still present
+        api_client.delete(f"/quizAttempts/{second['id']}/")
+        assert official_score(quiz, student) is None
+
+    def test_results_show_in_progress_students(self, api_client, taking_setup):
+        course = taking_setup['course']
+        alice, bob = taking_setup['students'][0], taking_setup['students'][1]
+        quiz = _quiz(course, attemptsAllowed=0)
+        _add(quiz, _mc(course, _bank(course)))
+        self._take(api_client, alice, quiz)
+        self._take(api_client, alice, quiz, submit=False)
+        self._take(api_client, bob, quiz, submit=False)  # never submitted → previously invisible
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        rows = {r['student']: r for r in api_client.get(f'/quizzes/{quiz.id}/results/').data}
+        assert rows[alice.email]['attemptsUsed'] == 2
+        assert rows[alice.email]['hasInProgress'] is True
+        assert rows[alice.email]['score'] is not None  # official score from the submitted one
+        assert rows[bob.email]['attemptsUsed'] == 1
+        assert rows[bob.email]['hasInProgress'] is True
+        assert rows[bob.email]['score'] is None
+        assert rows[bob.email]['lastSubmittedAt'] is None
+        # The grading list stays submitted-only.
+        attempts = api_client.get(f'/quizzes/{quiz.id}/attempts/').data
+        assert {a['student'] for a in attempts} == {alice.email}
+        assert len(attempts) == 1

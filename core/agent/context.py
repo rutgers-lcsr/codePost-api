@@ -30,9 +30,10 @@ class AgentContext:
     def require_writable(self) -> None:
         """Pre-flight the archived check every write tool needs.
 
-        Stricter than the API on purpose: `changeInviteCode`, `notifyStudents`
-        and `resetAttempts` all bypass the serializer guard and would succeed
-        on an archived course.
+        Stricter than the API on purpose: `changeInviteCode` and
+        `notifyStudents` bypass the serializer guard and would succeed on an
+        archived course (`resetAttempts` guards itself, but the pre-flight
+        gives a consistent error before any plan is built).
         """
         if self.course.archived:
             raise errors.course_archived(self.course)

@@ -2700,6 +2700,7 @@ class CourseAuditEvent(BaseModel):
       ('quiz_attempt_autosubmitted', 'Quiz Attempt Auto-Submitted'),
       ('quiz_attempt_seb_blocked', 'Quiz Attempt SEB Blocked'),
       ('quiz_attempts_reset', 'Quiz Attempts Reset'),
+      ('quiz_attempt_deleted', 'Quiz Attempt Deleted'),
       ('quiz_response_graded', 'Quiz Response Graded'),
       ('quiz_response_grade_reopened', 'Quiz Response Grade Reopened'),
       ('quiz_generated_set_approved', 'Generated Question Set Approved'),
@@ -3324,6 +3325,7 @@ class Quiz(BaseModel):
       ('after_submission', 'After the student submits'),
       ('after_feedback', 'After feedback is released (whole assignment)'),
       ('after_student_feedback', "After each student's feedback is ready (self-paced)"),
+      ('fixed_date', 'At a fixed date & time'),
   ]
   PASSING_SCORE_UNIT_CHOICES = [
       ('percent', 'Percent'),
@@ -3370,7 +3372,8 @@ class Quiz(BaseModel):
       help_text=("When an attached quiz becomes available, relative to the assignment lifecycle. "
                  "Ignored for standalone quizzes."))
   availableFrom = models.DateTimeField(null=True, blank=True,
-      help_text=("Standalone quizzes: when the quiz opens."))
+      help_text=("When the quiz opens — standalone quizzes, or attached quizzes whose "
+                 "assignmentTrigger is 'fixed_date'."))
   availableUntil = models.DateTimeField(null=True, blank=True,
       help_text=("Standalone quizzes: when the quiz closes / is due. Also the close time when "
                  "an attached quiz's closeEvent is 'fixed_date'."))

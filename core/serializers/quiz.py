@@ -99,6 +99,12 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
     available_until = proposed.get('availableUntil')
     if available_from and available_until and available_from >= available_until:
       raise serializers.ValidationError("availableUntil must be after availableFrom.")
+    # The fixed-date trigger is the one attached-quiz open that reads availableFrom — without a
+    # date the quiz would never open.
+    if proposed.get('assignment') is not None and proposed.get('assignmentTrigger') == 'fixed_date' \
+        and available_from is None:
+      raise serializers.ValidationError(
+          {'availableFrom': "Pick when the quiz opens — the fixed-date trigger needs an open date & time."})
     # A scheduled generation time only means anything in manual-generation mode — in
     # automatic mode sets generate on submission and the date would silently do nothing.
     # Enforce only when THIS change introduces the pairing (matches the seal check below):
