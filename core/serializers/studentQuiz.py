@@ -181,6 +181,7 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   attemptsUsed = serializers.SerializerMethodField()
   hasOpenAttempt = serializers.SerializerMethodField()
   hasSubmittedAttempt = serializers.SerializerMethodField()
+  openAt = serializers.SerializerMethodField()
   closeAt = serializers.SerializerMethodField()
   hasAccessCode = serializers.SerializerMethodField()
   myScore = serializers.SerializerMethodField()
@@ -194,7 +195,7 @@ class StudentQuizSerializer(serializers.ModelSerializer):
               'attemptsAllowed', 'scoringPolicy', 'passingScore', 'passingScoreUnit',
               'showCorrectAnswers', 'allowSubmissionReview', 'requireSebBrowser',
               'questionCount', 'availability', 'attemptsUsed',
-              'hasOpenAttempt', 'hasSubmittedAttempt', 'closeAt', 'hasAccessCode',
+              'hasOpenAttempt', 'hasSubmittedAttempt', 'openAt', 'closeAt', 'hasAccessCode',
               'myScore', 'myMaxScore', 'myPassed', 'myScorePending')
 
   @extend_schema_field(serializers.IntegerField())
@@ -252,6 +253,12 @@ class StudentQuizSerializer(serializers.ModelSerializer):
   @extend_schema_field(serializers.BooleanField())
   def get_hasSubmittedAttempt(self, obj):
     return any(a.status == 'submitted' for a in self._cached_attempts(obj))
+
+  @extend_schema_field(serializers.DateTimeField(allow_null=True))
+  def get_openAt(self, obj):
+    """The fixed open time (standalone, or attached with the fixed-date trigger); null when the
+    quiz opens on an assignment lifecycle event instead."""
+    return quiz_grading.quiz_open_time(obj)
 
   @extend_schema_field(serializers.DateTimeField(allow_null=True))
   def get_closeAt(self, obj):

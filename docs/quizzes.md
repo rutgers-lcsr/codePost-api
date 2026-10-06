@@ -67,7 +67,7 @@ API, list endpoints are superuser-only — users reach resources through parent 
 | `/suggestedQuizQuestions/` | `core/views/suggestedQuizQuestion.py` | `POST accept`, `POST reject` |
 | `/quizImportJobs/` | `core/views/quizImportJob.py` | `create` (multipart upload → 202, enqueues import task) |
 | `/quizImages/` | `core/views/quizImage.py` | `create` (upload); public raw serving at `quizImages/raw/<token>/` |
-| `/quizAttempts/` | `core/views/quizAttempt.py` | `PATCH saveAnswer`, `POST submit`, `POST gradeResponse`, `POST reopenResponse`, `POST runCode`, `POST setOfficial`, `GET myAttempts`, `GET availableQuizzes` |
+| `/quizAttempts/` | `core/views/quizAttempt.py` | `DELETE` (course admins), `PATCH saveAnswer`, `POST submit`, `POST gradeResponse`, `POST reopenResponse`, `POST runCode`, `POST setOfficial`, `GET myAttempts`, `GET availableQuizzes` |
 | `/quizGeneratedSections/` | `core/views/generatedQuestions.py` | plain CRUD |
 | `/generatedQuestionSets/` | `core/views/generatedQuestions.py` | retrieve-only + `POST approve`, `POST unapprove`, `POST regenerate` |
 | `/generatedQuizQuestions/` | `core/views/generatedQuestions.py` | retrieve/update/destroy |

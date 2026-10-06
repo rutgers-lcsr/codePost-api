@@ -113,7 +113,9 @@ After creating the quiz, work through the quiz builder's four tabs: **Settings**
 
 - **Attach to an assignment** (optional) and choose the **open trigger** — when an attached quiz
   becomes available: *during the assignment*, *after the assignment closes*, *after the student
-  submits*, *after feedback is released*, or *after each student's feedback is released*.
+  submits*, *after feedback is released*, *after each student's feedback is released*, or *at a
+  fixed date & time* (you pick the open time; the assignment must still be published for students
+  to see the quiz — they see the open time on the assignment card until then).
 - **Close event** — when the quiz closes: *never*, *at the assignment due date*, *after submission*,
   *when feedback is released*, or a *fixed date* — with an optional **offset** (e.g. "a week after
   feedback"). **End attempts at close** makes the close a hard deadline that auto-submits any
@@ -339,7 +341,15 @@ graded (essay/code) responses.
 - **Results** — a per-student table of official scores and pass/fail, exportable to **CSV**.
 - **Item analysis** — per-question statistics (average score, how often each choice was picked, how
   many responses are still pending) to spot confusing questions.
-- **Reset attempts** — deletes **all** attempts for the quiz. **Course admins only.**
+- **In progress** — a student whose attempt is still open shows an *In progress* tag in Results,
+  so a stuck attempt (lost connection, wrong browser) is visible before anything is submitted.
+- **Reset attempts** (**course admins only**; every reset is recorded in the Activity Log):
+  - **Reset** on a Results row deletes **that student's** attempts — including one in progress —
+    so they can start the quiz again from scratch.
+  - **Delete** on an attempt in the **Grade** list removes just that one attempt and frees one
+    attempt slot; the student's other attempts stay.
+  - **Reset all attempts** (above the Results table) deletes **every** student's attempts across
+    all sections. Use after a substantive edit so everyone retakes from scratch.
 
 Quiz activity is recorded in the course [Activity Log](/docs/activity-log): attempt starts
 (including **late starts** via access code), submissions and auto-submissions, grading actions,

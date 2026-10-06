@@ -58,11 +58,15 @@ _QUIZ_SETTINGS = {
     'scoringPolicy': {'enum': ['highest', 'latest', 'average']},
     'assignmentTrigger': {
         'enum': ['during', 'after_assignment', 'after_submission',
-                 'after_feedback', 'after_student_feedback'],
+                 'after_feedback', 'after_student_feedback', 'fixed_date'],
         'description': 'Attached quizzes: when the quiz opens relative to the '
-                       'assignment lifecycle. Ignored for standalone quizzes.'},
+                       'assignment lifecycle. fixed_date opens at availableFrom '
+                       '(the assignment must still be released). Ignored for '
+                       'standalone quizzes.'},
     'availableFrom': {'type': 'string',
-                      'description': 'Standalone quizzes: ISO open time.'},
+                      'description': 'ISO open time — standalone quizzes, or attached '
+                                     'quizzes with assignmentTrigger=fixed_date '
+                                     '(required then).'},
     'availableUntil': {'type': 'string',
                        'description': 'Standalone quizzes: ISO close time.'},
 }

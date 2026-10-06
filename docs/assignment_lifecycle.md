@@ -73,7 +73,7 @@ Every internal gate now reads `state` or `feedbackReleased` directly:
 | Gate | Axis |
 |---|---|
 | Students list their own submissions | `state in (published, closed)` or `liveFeedbackMode` |
-| Attached quiz availability + student quiz list | `state in (published, closed)` — closed included so `after_assignment`/`after_feedback` triggers open once the assignment is done |
+| Attached quiz availability + student quiz list | `state in (published, closed)` — closed included so `after_assignment`/`after_feedback` triggers open once the assignment is done; the `fixed_date` trigger (opens at `availableFrom`) is gated the same way |
 | Rubric categories (structure) | `feedbackReleased` or `liveFeedbackMode` — unified with rubric comments |
 | Full test-case list (finalized submission) | `feedbackReleased` |
 | Opening a finalized submission's tests/results | `feedbackReleased` + `isFinalized`, or `liveFeedbackMode` |

@@ -190,6 +190,7 @@ def reset_quiz_attempts(ctx, quizId: int):
                  'isPublished': quiz.get('isPublished')},
         'studentsWithAttempts': len(rows),
         'attemptsUsed': sum(r.get('attemptsUsed') or 0 for r in rows),
+        'inProgress': sum(1 for r in rows if r.get('hasInProgress')),
         'gradedWorkDiscarded': sum(1 for r in rows if r.get('score') is not None),
     }
     args = {'quizId': quizId}
@@ -199,7 +200,8 @@ def reset_quiz_attempts(ctx, quizId: int):
         message=f"This deletes {plan['attemptsUsed']} attempts from "
                 f"{plan['studentsWithAttempts']} students on "
                 f"'{quiz.get('title')}', including "
-                f"{plan['gradedWorkDiscarded']} graded results.")
+                f"{plan['gradedWorkDiscarded']} graded results and "
+                f"{plan['inProgress']} in progress right now.")
 
     result = ctx.dispatch.require(
         QuizViewSet, {'post': 'resetAttempts'},

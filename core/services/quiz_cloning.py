@@ -239,6 +239,8 @@ def copy_quiz(quiz: Quiz, destination_course: Course, *,
       manualGeneration=quiz.manualGeneration,
       # Draft reset: nothing goes live in the destination course by accident, and the
       # availability window is semester-specific (mirrors copy_assignment's date resets).
+      # A fixed_date-trigger quiz keeps its trigger but stays 'not_yet_open' until the
+      # instructor picks a new date (the settings form requires one on save).
       isPublished=False,
       availableFrom=None,
       availableUntil=None,

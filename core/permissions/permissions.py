@@ -818,6 +818,10 @@ class QuizAttemptPermissions(TemplatePermission):
         # writes on someone else's attempt.
         if action in ('gradeResponse', 'reopenResponse', 'setOfficial', 'runCode'):
             return canGradeQuiz(user, obj.quiz.course)
+        # Deleting an attempt is a course-admin action — checked before the owner branch so a
+        # student can never delete (and retake) their own.
+        if action == 'destroy':
+            return user.is_superuser or isCourseAdmin(user, obj.quiz.course)
         if user == obj.student:
             if action in ('saveAnswer', 'submit') or (action == 'retrieve' and obj.status == 'in_progress'):
                 self._check_seb(request, obj.quiz)

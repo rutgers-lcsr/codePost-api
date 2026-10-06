@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from django.db.models import Prefetch
 
-from core.models import Quiz, QuizResponse
+from core.models import Quiz, QuizResponse, User
 from core.serializers.quiz import QuizSerializer, QuizQuestionSerializer
 from core.serializers.generatedQuiz import (
     GeneratedQuestionSetListSerializer, GeneratedQuestionSetSerializer,
@@ -170,41 +170,51 @@ class QuizViewSet(ListProtectedViewSet):
           'passed': serializers.BooleanField(allow_null=True),
           'needsGrading': serializers.BooleanField(),
           'lastSubmittedAt': serializers.DateTimeField(allow_null=True),
+          'hasInProgress': serializers.BooleanField(),
       }, many=True),
   )
   @action(detail=True, methods=['GET'])
   def results(self, request, pk=None):
     """Per-student official results (per this quiz's scoringPolicy) — quiz graders and
-    course admins only. Score is null until the student has a fully graded attempt."""
+    course admins only. Score is null until the student has a fully graded attempt. Students
+    with only an in-progress attempt get a row too (hasInProgress), so a stuck attempt is
+    visible and can be reset; attemptsUsed counts every attempt, matching the student's view
+    and the attemptsAllowed check."""
     quiz = self.get_object()
     denied = _grading_guard(request.user, quiz,
                             'Only quiz graders and course admins can view quiz results.')
     if denied:
       return denied
     by_student = {}
-    for attempt in quiz.attempts.filter(status='submitted').select_related('student').order_by(
-        'student__email', 'attemptNumber'):
+    for attempt in quiz.attempts.select_related('student').order_by('student__email', 'attemptNumber'):
       by_student.setdefault(attempt.student, []).append(attempt)
     rows = []
     for student, attempts in by_student.items():
+      submitted = [a for a in attempts if a.status == 'submitted']
       # The attempts are already in hand — no per-student re-query.
-      official = quiz_grading.official_score(quiz, student, attempts=attempts)
+      official = quiz_grading.official_score(quiz, student, attempts=submitted) if submitted else None
       rows.append({
           'student': student.email,
           'attemptsUsed': len(attempts),
           'score': serialize_score(official[0]) if official else None,
           'maxScore': serialize_score(official[1]) if official else None,
           'passed': quiz_grading.official_passed(quiz, student, official=official) if official else None,
-          'needsGrading': any(a.needsManualGrading for a in attempts),
-          'lastSubmittedAt': max((a.submittedAt for a in attempts if a.submittedAt), default=None),
+          'needsGrading': any(a.needsManualGrading for a in submitted),
+          'lastSubmittedAt': max((a.submittedAt for a in submitted if a.submittedAt), default=None),
+          'hasInProgress': len(submitted) < len(attempts),
       })
     return Response(rows)
 
   @extend_schema(
-      request=None,
+      request=inline_serializer('ResetQuizAttemptsRequest', {
+          'student': serializers.EmailField(required=False),
+      }),
       responses=inline_serializer('ResetQuizAttemptsResponse', {'deleted': serializers.IntegerField()}),
-      description="Delete ALL student attempts for this quiz (course admins only). Use after a "
-                  "substantive edit so students retake from scratch. Irreversible; responses cascade.",
+      description="Delete student attempts for this quiz (course admins only). With no body, "
+                  "every student's attempts — use after a substantive edit so everyone retakes "
+                  "from scratch. With {student: <email>}, only that student's, so one student "
+                  "can start over. All statuses, including in-progress. Irreversible; responses "
+                  "cascade. Returns the number of attempts deleted.",
   )
   @action(detail=True, methods=['POST'])
   def resetAttempts(self, request, pk=None):
@@ -212,9 +222,26 @@ class QuizViewSet(ListProtectedViewSet):
     denied = _admin_guard(request.user, quiz, 'Only course admins can reset attempts.')
     if denied:
       return denied
-    deleted, _ = quiz.attempts.all().delete()
+    if quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+    attempts = quiz.attempts.all()
+    meta = {'title': quiz.title}
+    email = request.data.get('student')
+    if email not in (None, ''):
+      if not isinstance(email, str):
+        return Response({'student': 'Enter a student email.'}, status=status.HTTP_400_BAD_REQUEST)
+      # By email rather than enrollment, so a dropped student's attempts can still be cleared.
+      student = User.objects.filter(email__iexact=email.strip()).first()
+      if student is None:
+        return Response({'student': 'No user with that email.'}, status=status.HTTP_400_BAD_REQUEST)
+      attempts = attempts.filter(student=student)
+      meta['student'] = student.email
+    # Count attempts before deleting — the delete() total would include cascaded responses.
+    deleted = attempts.count()
+    attempts.delete()
+    meta['deleted'] = deleted
     record_audit_event(course=quiz.course, event_type='quiz_attempts_reset', user=request.user,
-                       quiz=quiz, assignment=quiz.assignment, meta={'title': quiz.title})
+                       quiz=quiz, assignment=quiz.assignment, meta=meta)
     return Response({'deleted': deleted}, status=status.HTTP_200_OK)
 
   @extend_schema(

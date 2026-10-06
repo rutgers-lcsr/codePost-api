@@ -562,6 +562,32 @@ class TestQuizAuthoring:
         }, format='json')
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
 
+    def test_fixed_date_trigger_requires_open_date_when_attached(self, api_client, quiz_setup):
+        from core.models import Quiz
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        quiz = Quiz.objects.create(course=quiz_setup['course'], title='Dated',
+                                   assignment=quiz_setup['assignment'])
+
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {'assignmentTrigger': 'fixed_date'}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'availableFrom' in resp.data
+
+        resp = api_client.patch(f'/quizzes/{quiz.id}/', {
+            'assignmentTrigger': 'fixed_date', 'availableFrom': '2026-09-01T09:00:00Z',
+        }, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['assignmentTrigger'] == 'fixed_date'
+        quiz.refresh_from_db()
+        assert quiz.availableFrom is not None
+
+    def test_fixed_date_trigger_ignored_for_standalone(self, api_client, quiz_setup):
+        # The trigger only means something when attached; a standalone quiz needs no date.
+        api_client.force_authenticate(user=quiz_setup['admin'])
+        resp = api_client.post('/quizzes/', {
+            'course': quiz_setup['course'].id, 'title': 'Loose', 'assignmentTrigger': 'fixed_date',
+        }, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+
     def test_quiz_questions_action_lists_memberships_in_order(self, api_client, quiz_setup):
         from core.models import Quiz
         api_client.force_authenticate(user=quiz_setup['admin'])
