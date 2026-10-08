@@ -148,6 +148,12 @@ if DEBUG:
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 
+# Submission uploads (assignments/{id}/studentUpload/) and course files arrive as JSON
+# with file contents inline, so the whole body counts against this cap (Django's
+# default is 2.5 MB, which 400s multi-file submissions well under the 10 MB per-file
+# limit in core/constants.py). Keep in sync with client_max_body_size in nginx.conf.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
+
 if DOCKER:
     # If running in Docker, we assume that the API is behind a reverse proxy
     # that handles SSL termination and forwards the request to the API.
