@@ -2,7 +2,7 @@
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 from core.logging import logEvent
-from core.constants import MAX_FILE_SIZE
+from core.constants import MAX_FILE_SIZE, MAX_SUBMISSION_TOTAL_SIZE
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile, LearningObjective
 from rest_framework import serializers
 from rest_framework.request import Request
@@ -20,11 +20,12 @@ from core.serializers.comment import CommentSerializer
 from core.serializers.testCase import TestCaseStudentSerializer
 from core.serializers.testCategory import TestCategorySerializer
 from core.serializers.learningObjective import LearningObjectiveSerializer
-from core.serializers.file import FileValidationSerializerWithoutSubmission, SubmissionFileStudentUploadSerializer
+from core.serializers.file import FileValidationSerializerWithoutSubmission, SubmissionFileStudentUploadSerializer, check_file_size, content_size_bytes
 
 
 from core.models import User
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
 
 from core.models import Section, SubmissionHistory, Comment
 
@@ -869,8 +870,8 @@ class AssignmentViewSet(ListProtectedViewSet):
     """
     Upload of submission to an assignment
 
-
-    TODO: add file limits to 10mb
+    Files travel inline in the JSON body. Each file is capped at MAX_FILE_SIZE and the
+    whole submission at MAX_SUBMISSION_TOTAL_SIZE (decoded bytes, see core/constants.py).
     """
     user = self.request.user
     # get_object() runs AssignmentPermissions (lifecycle state + hideFrom); the
@@ -884,7 +885,8 @@ class AssignmentViewSet(ListProtectedViewSet):
     require_capability(user, 'upload_submission', assignment)
 
     if request.method == "PATCH" or request.method == "POST":
-      if 'files' not in request.data or len(request.data['files']) == 0:
+      files = request.data.get('files') if isinstance(request.data, dict) else None
+      if not isinstance(files, list) or len(files) == 0:
         raise serializers.ValidationError("No files provided")
 
 
@@ -904,29 +906,34 @@ class AssignmentViewSet(ListProtectedViewSet):
 
       # Check to make sure the files are valid before we create the submission
       uploaded_filenames = set()
+      validated_files = []
+      total_bytes = 0
 
-      for f in request.data['files']:
+      for f in files:
         serializer = FileValidationSerializerWithoutSubmission(data=f)
+        name = f.get('name') if isinstance(f, dict) else None
 
         try:
           serializer.is_valid(raise_exception=True)
-          
-          # Check file size (10MB limit)
-          # 'data' field is the string content, but for size we might want bytes.
-          # Assuming 'data' is text or base64? The model says "should be utf-8 encoded text".
-          # A strict 10MB limit on text length is a fair approximation for now.
-          if len(f.get('data', '')) > MAX_FILE_SIZE:
-             raise ValidationError(f"File '{f['name']}' exceeds the 10MB size limit.")
+          clean = serializer.validated_data
 
-          uploaded_filenames.add(f['name'])
+          check_file_size(clean['name'], clean['data'], MAX_FILE_SIZE)
+          total_bytes += content_size_bytes(clean['data'])
+
+          uploaded_filenames.add(clean['name'])
+          validated_files.append(clean)
 
         except ValidationError as e:
           if isinstance(e.detail, dict):
-            e.detail['file'] = f['name']
+            e.detail['file'] = name
           else:
              # If it's a list or string, wrap it
-             e = ValidationError({'file': f['name'], 'error': e.detail})
+             e = ValidationError({'file': name, 'error': e.detail})
           raise e
+
+      if total_bytes > MAX_SUBMISSION_TOTAL_SIZE:
+        raise serializers.ValidationError(
+          f"Submission exceeds the {MAX_SUBMISSION_TOTAL_SIZE // (1024 * 1024)}MB total size limit.")
 
       # Check for required files
       required_files = assignment.files.filter(required=True)
@@ -956,19 +963,17 @@ class AssignmentViewSet(ListProtectedViewSet):
       if submission.isFinalized and assignment.feedbackStatus != 'live':
         raise serializers.ValidationError("Cannot edit this submission, grading has started.")
 
-      oldFiles = submission.files.all()
-      print(oldFiles)
-      if (request.method == "POST"):
-        # Only if the request is a post do we replace all the submissions
-        for f in oldFiles:
-          print(f)
-          f.delete()
-          
-          
-      for f in request.data['files']:
-        # Create new submission file
-        SubmissionFile.objects.create(name=f['name'], data=f['data'], submission=submission, extension=f[
-                                   'extension'], path=f['path'] if f['path'] else None)
+      # Replace-or-add is all-or-nothing: a failure part-way must not leave the student
+      # with their old files deleted and half the new ones saved.
+      with transaction.atomic():
+        if (request.method == "POST"):
+          # Only if the request is a post do we replace all the submissions
+          for f in submission.files.all():
+            f.delete()
+
+        for f in validated_files:
+          SubmissionFile.objects.create(name=f['name'], data=f['data'], submission=submission,
+                                        extension=f['extension'], path=f.get('path') or None)
 
       # Update submission date once files have been uploaded, triggers auto-execution celery task
       submission.dateUploaded = timezone.now()
@@ -1244,11 +1249,13 @@ class AssignmentViewSet(ListProtectedViewSet):
         if result.success:
             return Response({'script': result.text})
         else:
-            return Response({'error': result.error}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            # The AI provider failed, not codePost: 502 keeps it distinct from our own bugs.
+            return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_502_BAD_GATEWAY)
 
     except Exception as e:
-        logger.error(f"AI Generation failed: {e}")
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f"AI Generation failed: {e}", exc_info=True)
+        return Response({'error': 'An internal error occurred while generating the test.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
   @extend_schema(request=AssignmentCloneSerializer, responses=AssignmentSerializer)
   @action(detail=True, methods=["POST"])
@@ -1261,7 +1268,10 @@ class AssignmentViewSet(ListProtectedViewSet):
     course = assignment.course
 
     destination_course_id = request.data.get('course', course.id)
-    destination_course = Course.objects.get(id=destination_course_id)
+    try:
+      destination_course = Course.objects.get(id=destination_course_id)
+    except (Course.DoesNotExist, ValueError, TypeError):
+      return returnNotFound("Destination course not found.")
 
     if not isCourseAdmin(user, destination_course):
       return returnForbidden()
@@ -1272,7 +1282,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     copied_assignment = copy_assignment(assignment, destination_course)
 
     if copied_assignment is None:
-      return returnInvalid()
+      return returnInvalid("Could not pick a unique name for the copy: rename or delete the existing copies and try again.")
 
     # Return the newly created assignment data so frontend can navigate to it
     serializer = AssignmentSerializer(copied_assignment, context={'request': request})
@@ -1315,7 +1325,7 @@ class AssignmentViewSet(ListProtectedViewSet):
       result = async_to_sync(service.generate_assignment_description)(assignment)
 
       if not result.success:
-        return Response({'error': result.error}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_502_BAD_GATEWAY)
 
       assignment.ai_description = result.text
       assignment.save(update_fields=['ai_description', 'modified'])

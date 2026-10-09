@@ -8,6 +8,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.constants import MAX_QUIZ_IMAGE_SIZE
 from core.models import Course, QuizImage
 from core.serializers.quizImage import QuizImageSerializer
 from core.views.template import ListProtectedViewSet
@@ -16,7 +17,7 @@ from core.permissions.helpers import isCourseStaff, returnForbidden
 
 # Raster formats only — SVG is excluded to avoid script-bearing images.
 ALLOWED_IMAGE_TYPES = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
-MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_IMAGE_BYTES = MAX_QUIZ_IMAGE_SIZE
 
 
 class QuizImageViewSet(ListProtectedViewSet):

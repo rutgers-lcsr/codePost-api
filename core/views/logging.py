@@ -118,10 +118,9 @@ def logDump(request):
 
   attachments = []
   heading = str(request.user)
-  if request.data['attachments']:
-    attachments = request.data['attachments']
-    if len(attachments) > 0 and attachments[0]['title']:
-      heading = "{} | {}".format(attachments[0]['title'], str(request.user))
+  attachments = request.data.get('attachments') or []
+  if isinstance(attachments, list) and attachments and isinstance(attachments[0], dict) and attachments[0].get('title'):
+    heading = "{} | {}".format(attachments[0]['title'], str(request.user))
 
   description = heading.split('|')[0].strip()
   courseID = request.data.get('courseID', 0)

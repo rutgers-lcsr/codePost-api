@@ -12,7 +12,7 @@ from core.models import User
 from core.serializers.user import UserSerializer
 from rest_framework.decorators import action
 
-from core.permissions.helpers import returnNotAuthorized, returnForbidden
+from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound
 
 from rest_framework.authtoken.models import Token
 
@@ -90,11 +90,14 @@ class UserViewSet(SuperUserListProtectedViewSet):
     courseID = request.data.get('course', None)
     try:
         course = Course.objects.get(id=courseID)
-    except Course.DoesNotExist:
+    except (Course.DoesNotExist, ValueError, TypeError):
         return returnForbidden()
 
     # bypass object-level permissions
-    user_to_email = User.objects.get(email=email)
+    try:
+        user_to_email = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return returnNotFound("No user with that email address.")
 
     # does requestor have the authority to email this user?
     if not isCourseMember(user_to_email, course):

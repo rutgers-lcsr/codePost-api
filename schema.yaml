@@ -1462,8 +1462,8 @@ paths:
       description: |-
         Upload of submission to an assignment
 
-
-        TODO: add file limits to 10mb
+        Files travel inline in the JSON body. Each file is capped at MAX_FILE_SIZE and the
+        whole submission at MAX_SUBMISSION_TOTAL_SIZE (decoded bytes, see core/constants.py).
       parameters:
       - in: path
         name: id
@@ -1490,8 +1490,8 @@ paths:
       description: |-
         Upload of submission to an assignment
 
-
-        TODO: add file limits to 10mb
+        Files travel inline in the JSON body. Each file is capped at MAX_FILE_SIZE and the
+        whole submission at MAX_SUBMISSION_TOTAL_SIZE (decoded bytes, see core/constants.py).
       parameters:
       - in: path
         name: id
@@ -1530,8 +1530,8 @@ paths:
       description: |-
         Upload of submission to an assignment
 
-
-        TODO: add file limits to 10mb
+        Files travel inline in the JSON body. Each file is capped at MAX_FILE_SIZE and the
+        whole submission at MAX_SUBMISSION_TOTAL_SIZE (decoded bytes, see core/constants.py).
       parameters:
       - in: path
         name: id
@@ -5209,12 +5209,87 @@ paths:
               schema:
                 $ref: '#/components/schemas/PendingAdminActionResponse'
           description: ''
+  /dashboard/autograding_failures/:
+    get:
+      operationId: dashboard_autogradingFailuresRetrieve
+      description: |-
+        Returns failed autograder executions, newest first, with the course,
+        assignment, submission, file, image, Celery task id and full error
+        output needed to isolate each failure.
+      parameters:
+      - in: query
+        name: assignmentId
+        schema:
+          type: integer
+      - in: query
+        name: category
+        schema:
+          type: string
+        description: Error category (timeout, missing_dependency, compile_error, runtime_error,
+          marker_extraction, infra, unknown).
+      - in: query
+        name: courseId
+        schema:
+          type: integer
+      - in: query
+        name: dateFrom
+        schema:
+          type: string
+        description: Start of range (ISO 8601 datetime or date). Defaults to 30 days
+          ago.
+      - in: query
+        name: dateTo
+        schema:
+          type: string
+        description: End of range (ISO 8601 datetime or date, exclusive). Defaults
+          to now.
+      - in: query
+        name: language
+        schema:
+          type: string
+        description: Environment language snapshot; 'unknown' matches events with
+          no language.
+      - in: query
+        name: page
+        schema:
+          type: integer
+        description: 1-based page number.
+      - in: query
+        name: pageSize
+        schema:
+          type: integer
+        description: Rows per page (default 25, max 100).
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Case-insensitive substring match on the error message/detail.
+      - in: query
+        name: trigger
+        schema:
+          type: string
+        description: Execution path (file_run, submission_run, test_run).
+      tags:
+      - dashboard
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutogradingFailureList'
+          description: ''
   /dashboard/autograding_stats/:
     get:
       operationId: dashboard_autogradingStatsRetrieve
       description: |-
         Returns platform-wide autograder execution statistics: cache-hit rate,
-        failure counts, language usage, failures per language, and top errors.
+        failure counts, language usage, failures per language, top errors, and
+        the assignments with the most failures.
       parameters:
       - in: query
         name: dateFrom
@@ -14622,6 +14697,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/SystemHealthResponse'
           description: ''
+  /system/uploadLimits/:
+    get:
+      operationId: system_uploadLimitsRetrieve
+      description: Upload size limits enforced by the server, in bytes. Per-file limits
+        are measured on the decoded file, not the base64 wire form.
+      tags:
+      - system
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadLimits'
+          description: ''
   /testCases/:
     get:
       operationId: testCases_list
@@ -17622,6 +17716,132 @@ components:
       required:
       - status
       - task_id
+    AutogradingAssignmentFailure:
+      type: object
+      properties:
+        courseId:
+          type: integer
+          nullable: true
+        courseName:
+          type: string
+          nullable: true
+        coursePeriod:
+          type: string
+          nullable: true
+        assignmentId:
+          type: integer
+        assignmentName:
+          type: string
+        failures:
+          type: integer
+        topCategory:
+          type: string
+      required:
+      - assignmentId
+      - assignmentName
+      - courseId
+      - courseName
+      - coursePeriod
+      - failures
+      - topCategory
+    AutogradingFailure:
+      type: object
+      description: |-
+        One failed autograder execution with everything needed to isolate it.
+        Plain Serializer (not ModelSerializer) so no enum lands in the schema.
+      properties:
+        id:
+          type: integer
+        created:
+          type: string
+          format: date-time
+        trigger:
+          type: string
+        language:
+          type: string
+        category:
+          type: string
+        errorMessage:
+          type: string
+        errorDetail:
+          type: string
+        courseId:
+          type: integer
+          nullable: true
+        courseName:
+          type: string
+          nullable: true
+          readOnly: true
+        coursePeriod:
+          type: string
+          nullable: true
+          readOnly: true
+        assignmentId:
+          type: integer
+          nullable: true
+        assignmentName:
+          type: string
+          nullable: true
+          readOnly: true
+        submissionId:
+          type: integer
+          nullable: true
+        fileId:
+          type: integer
+          nullable: true
+        fileName:
+          type: string
+        triggeredBy:
+          type: string
+          format: email
+          nullable: true
+          readOnly: true
+        imageName:
+          type: string
+        taskId:
+          type: string
+        executionTime:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - assignmentId
+      - assignmentName
+      - category
+      - courseId
+      - courseName
+      - coursePeriod
+      - created
+      - errorDetail
+      - errorMessage
+      - executionTime
+      - fileId
+      - fileName
+      - id
+      - imageName
+      - language
+      - submissionId
+      - taskId
+      - trigger
+      - triggeredBy
+    AutogradingFailureList:
+      type: object
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutogradingFailure'
+      required:
+      - count
+      - page
+      - pageSize
+      - results
     AutogradingLanguageFailure:
       type: object
       properties:
@@ -17681,6 +17901,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AutogradingTopError'
+        failuresByAssignment:
+          type: array
+          items:
+            $ref: '#/components/schemas/AutogradingAssignmentFailure'
       required:
       - actualExecutions
       - cacheHitRate
@@ -17688,6 +17912,7 @@ components:
       - dateFrom
       - dateTo
       - failedExecutions
+      - failuresByAssignment
       - failuresPerLanguage
       - languageUsage
       - topErrors
@@ -27317,6 +27542,33 @@ components:
         * `file` - file
         * `external` - external
         * `script` - script
+    UploadLimits:
+      type: object
+      description: Server-side upload caps (bytes) so clients pre-check with the same
+        numbers.
+      properties:
+        maxSubmissionFileBytes:
+          type: integer
+        maxSubmissionTotalBytes:
+          type: integer
+        maxAssignmentFileBytes:
+          type: integer
+        maxCourseFileBytes:
+          type: integer
+        maxDatasetBytes:
+          type: integer
+        maxQuizImageBytes:
+          type: integer
+        maxRequestBodyBytes:
+          type: integer
+      required:
+      - maxAssignmentFileBytes
+      - maxCourseFileBytes
+      - maxDatasetBytes
+      - maxQuizImageBytes
+      - maxRequestBodyBytes
+      - maxSubmissionFileBytes
+      - maxSubmissionTotalBytes
     User:
       type: object
       properties:

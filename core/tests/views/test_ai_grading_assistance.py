@@ -391,7 +391,8 @@ class TestGenerateSummaryEndpoint:
         api_client.force_authenticate(user=grading_setup['grader'])
         url = f"/submissions/{grading_setup['submission'].id}/generateSummary/"
         response = api_client.post(url, format='json')
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        # Provider failure, not ours: 502 so the client can tell it from a codePost bug.
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
 
 
 class TestAssignmentAIDescriptionEndpoints:

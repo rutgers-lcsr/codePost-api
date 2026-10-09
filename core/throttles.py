@@ -17,6 +17,25 @@ class AuthAnonRateThrottle(AnonRateThrottle):
         return super().allow_request(request, view)
 
 
+# One bucket per flow: all of these inherit AnonRateThrottle's scope='anon', so
+# without distinct scopes login, one-time tokens, registration and SSO would share a
+# single 10/min-per-IP counter — and a whole lab behind campus NAT hits it together.
+
+class LoginRateThrottle(AuthAnonRateThrottle):
+    scope = 'auth_login'
+    rate = '10/minute'
+
+
+class OneTimeTokenRateThrottle(AuthAnonRateThrottle):
+    scope = 'auth_ott'
+    rate = '10/minute'
+
+
+class SSORateThrottle(AuthAnonRateThrottle):
+    scope = 'auth_sso'
+    rate = '20/minute'
+
+
 class AuthUserRateThrottle(UserRateThrottle):
     """Rate limit for authenticated auth endpoints (impersonation, token generation)."""
     rate = '20/minute'
@@ -89,7 +108,12 @@ def rate_limited(scope: str, rate: str):
             added = cache.add(key, 1, timeout=seconds)
             count = 1 if added else cache.incr(key)
             if count > limit:
-                return JsonResponse({'error': 'rate_limited'}, status=429)
+                response = JsonResponse({
+                    'error': 'rate_limited',
+                    'detail': f'Too many requests. Try again in {seconds} seconds.',
+                }, status=429)
+                response['Retry-After'] = str(seconds)
+                return response
             return view(request, *args, **kwargs)
         return wrapped
     return deco

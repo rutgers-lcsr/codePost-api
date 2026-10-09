@@ -2003,6 +2003,36 @@ class AutograderExecutionEvent(BaseModel):
                                     help_text="Classified error category for failed executions")
   error_message = models.CharField(max_length=500, blank=True, default='',
                                    help_text="Truncated sample of the error output")
+  # Diagnostics for isolating a failure: what ran, for whom, and the full error.
+  # All nullable/blank so historical rows and non-file paths stay valid.
+  submission = models.ForeignKey(
+      'Submission', on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='autograder_execution_events',
+      help_text="The submission this execution belonged to, if any",
+  )
+  file = models.ForeignKey(
+      'File', on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='autograder_execution_events',
+      help_text="The file that was executed, if any",
+  )
+  file_name = models.CharField(max_length=250, blank=True, default='',
+                               help_text="Snapshot of the executed file's name")
+  triggered_by = models.ForeignKey(
+      User, on_delete=models.SET_NULL,
+      null=True, blank=True,
+      related_name='+',
+      help_text="The user whose request triggered this execution, if known",
+  )
+  image_name = models.CharField(max_length=255, blank=True, default='',
+                                help_text="Snapshot of the environment's Docker image at execution time")
+  task_id = models.CharField(max_length=64, blank=True, default='',
+                             help_text="Celery task id, for correlating with worker logs")
+  execution_time = models.FloatField(null=True, blank=True,
+                                     help_text="Execution time in seconds, when reported by the executor")
+  error_detail = models.TextField(blank=True, default='',
+                                  help_text="Full error output (stderr / executor error), truncated")
 
   class Meta:
     indexes = [

@@ -11,6 +11,7 @@ import logging
 from typing import Any, List, Optional, Set, cast
 
 import redis
+import redis.exceptions
 from django.conf import settings
 from django.http import JsonResponse
 from rest_framework.permissions import IsAuthenticated
@@ -105,6 +106,9 @@ class ShellMetricsView(GenericAPIView):
                 "sessions": sessions,
             }
             return JsonResponse(payload)
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
+            # Redis outage: DependencyUnavailableMiddleware answers with a JSON 503.
+            raise
         except Exception as e:
             logger.error(f"Failed to read shell metrics: {e}")
             return JsonResponse({"error": "Failed to read metrics"}, status=500)

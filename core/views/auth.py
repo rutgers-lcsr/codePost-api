@@ -16,7 +16,7 @@ from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt import serializers, views
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from codepost.settings import DEBUG
-from core.throttles import AuthAnonRateThrottle, AuthUserRateThrottle
+from core.throttles import LoginRateThrottle, OneTimeTokenRateThrottle, AuthUserRateThrottle
 from core.serializers.auth import (
   GenerateOTTRequestSerializer,
   GenerateOTTResponseSerializer,
@@ -140,7 +140,7 @@ class JWTSerializer(serializers.TokenObtainPairSerializer):
 
 class AccountLoginAPIView(views.TokenObtainPairView):
   serializer_class = JWTSerializer
-  throttle_classes = [AuthAnonRateThrottle]
+  throttle_classes = [LoginRateThrottle]
 
 obtain_jwt_token = AccountLoginAPIView.as_view()
 
@@ -308,7 +308,7 @@ def generate_one_time_token(request):
 @extend_schema(request=ValidateOTTRequestSerializer, responses={200: UserSerializer})
 @api_view(['GET', 'POST'])
 @permission_classes([])
-@throttle_classes([AuthAnonRateThrottle])
+@throttle_classes([OneTimeTokenRateThrottle])
 def validate_one_time_token(request):
   """
   Validate a one-time token and return the associated user data. 
@@ -352,7 +352,7 @@ def validate_one_time_token(request):
 @extend_schema(request=ExchangeOTTRequestSerializer, responses={200: ExchangeOTTResponseSerializer})
 @api_view(['POST'])
 @permission_classes([])
-@throttle_classes([AuthAnonRateThrottle])
+@throttle_classes([OneTimeTokenRateThrottle])
 def exchange_one_time_token(request):
   """
   Consume a one-time token and issue a normal interactive access + refresh pair.

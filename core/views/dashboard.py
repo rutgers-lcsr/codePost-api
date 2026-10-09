@@ -16,8 +16,50 @@ from django.utils.dateparse import parse_datetime, parse_date
 from datetime import datetime, time, timedelta
 
 from core.models import Organization, Course, Assignment, Section
-from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer, AutogradingStatsSerializer
+from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer, AutogradingStatsSerializer, AutogradingFailureListSerializer
 from core.serializers.user import UserSerializer
+
+
+FAILURES_PAGE_SIZE_DEFAULT = 25
+FAILURES_PAGE_SIZE_MAX = 100
+
+_DATE_RANGE_PARAMS = [
+    OpenApiParameter(name='dateFrom', required=False, type=str,
+                     description="Start of range (ISO 8601 datetime or date). Defaults to 30 days ago."),
+    OpenApiParameter(name='dateTo', required=False, type=str,
+                     description="End of range (ISO 8601 datetime or date, exclusive). Defaults to now."),
+]
+
+
+def _parse_datetime_param(value):
+    if not value:
+        return None
+    parsed = parse_datetime(value)
+    if parsed is None:
+        as_date = parse_date(value)
+        if as_date is not None:
+            parsed = datetime.combine(as_date, time.min)
+    if parsed is not None and timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed)
+    return parsed
+
+
+def _parse_date_range(query_params):
+    """Returns (date_from, date_to); raises ValueError when the range is inverted."""
+    date_to = _parse_datetime_param(query_params.get('dateTo')) or timezone.now()
+    date_from = _parse_datetime_param(query_params.get('dateFrom')) or (date_to - timedelta(days=30))
+    if date_from >= date_to:
+        raise ValueError('dateFrom must be before dateTo')
+    return date_from, date_to
+
+
+def _parse_int_param(value, default, minimum=1, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    parsed = max(parsed, minimum)
+    return min(parsed, maximum) if maximum else parsed
 
 
 class DashboardViewSet(viewsets.ViewSet):
@@ -88,42 +130,76 @@ class DashboardViewSet(viewsets.ViewSet):
             'activeUsers30d': active_users,
         })
 
-    @extend_schema(
-        responses={200: AutogradingStatsSerializer},
-        parameters=[
-            OpenApiParameter(name='dateFrom', required=False, type=str,
-                             description="Start of range (ISO 8601 datetime or date). Defaults to 30 days ago."),
-            OpenApiParameter(name='dateTo', required=False, type=str,
-                             description="End of range (ISO 8601 datetime or date, exclusive). Defaults to now."),
-        ],
-    )
+    @extend_schema(responses={200: AutogradingStatsSerializer}, parameters=_DATE_RANGE_PARAMS)
     @action(detail=False, methods=['GET'])
     def autograding_stats(self, request):
         """
         Returns platform-wide autograder execution statistics: cache-hit rate,
-        failure counts, language usage, failures per language, and top errors.
+        failure counts, language usage, failures per language, top errors, and
+        the assignments with the most failures.
         """
         from core.services.autograder_stats import get_autograding_stats
 
-        def parse_param(value):
-            if not value:
-                return None
-            parsed = parse_datetime(value)
-            if parsed is None:
-                as_date = parse_date(value)
-                if as_date is not None:
-                    parsed = datetime.combine(as_date, time.min)
-            if parsed is not None and timezone.is_naive(parsed):
-                parsed = timezone.make_aware(parsed)
-            return parsed
-
-        date_to = parse_param(request.query_params.get('dateTo')) or timezone.now()
-        date_from = parse_param(request.query_params.get('dateFrom')) or (date_to - timedelta(days=30))
-        if date_from >= date_to:
-            return Response({'error': 'dateFrom must be before dateTo'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            date_from, date_to = _parse_date_range(request.query_params)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         stats = get_autograding_stats(date_from, date_to)
         return Response(AutogradingStatsSerializer(stats).data)
+
+    @extend_schema(
+        responses={200: AutogradingFailureListSerializer},
+        parameters=_DATE_RANGE_PARAMS + [
+            OpenApiParameter(name='category', required=False, type=str,
+                             description="Error category (timeout, missing_dependency, compile_error, runtime_error, marker_extraction, infra, unknown)."),
+            OpenApiParameter(name='trigger', required=False, type=str,
+                             description="Execution path (file_run, submission_run, test_run)."),
+            OpenApiParameter(name='language', required=False, type=str,
+                             description="Environment language snapshot; 'unknown' matches events with no language."),
+            OpenApiParameter(name='courseId', required=False, type=int),
+            OpenApiParameter(name='assignmentId', required=False, type=int),
+            OpenApiParameter(name='q', required=False, type=str,
+                             description="Case-insensitive substring match on the error message/detail."),
+            OpenApiParameter(name='page', required=False, type=int, description="1-based page number."),
+            OpenApiParameter(name='pageSize', required=False, type=int,
+                             description=f"Rows per page (default {FAILURES_PAGE_SIZE_DEFAULT}, max {FAILURES_PAGE_SIZE_MAX})."),
+        ],
+    )
+    @action(detail=False, methods=['GET'])
+    def autograding_failures(self, request):
+        """
+        Returns failed autograder executions, newest first, with the course,
+        assignment, submission, file, image, Celery task id and full error
+        output needed to isolate each failure.
+        """
+        from core.services.autograder_stats import get_autograding_failures
+
+        try:
+            date_from, date_to = _parse_date_range(request.query_params)
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        params = request.query_params
+        qs = get_autograding_failures(
+            date_from, date_to,
+            category=params.get('category'),
+            trigger=params.get('trigger'),
+            language=params.get('language'),
+            course_id=_parse_int_param(params.get('courseId'), None),
+            assignment_id=_parse_int_param(params.get('assignmentId'), None),
+            q=params.get('q'),
+        )
+        page = _parse_int_param(params.get('page'), 1)
+        page_size = _parse_int_param(params.get('pageSize'), FAILURES_PAGE_SIZE_DEFAULT,
+                                     maximum=FAILURES_PAGE_SIZE_MAX)
+        offset = (page - 1) * page_size
+        return Response(AutogradingFailureListSerializer({
+            'count': qs.count(),
+            'page': page,
+            'pageSize': page_size,
+            'results': qs[offset:offset + page_size],
+        }).data)
 
     @extend_schema(responses={200: AssignmentDeadlineSerializer(many=True)})
     @action(detail=False, methods=['GET'])

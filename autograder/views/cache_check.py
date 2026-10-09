@@ -83,11 +83,10 @@ class CheckExecutionCache(GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        file_obj, _, _, _ = File.get_file_obj(file_id)
-        
-        
-        # File not found in any table
-        if not file_obj:
+        # get_file_obj raises rather than returning None for an unknown id
+        try:
+            file_obj, _, _, _ = File.get_file_obj(file_id)
+        except (File.DoesNotExist, ValueError):
             return JsonResponse(
                 {"error": "File not found"},
                 status=status.HTTP_404_NOT_FOUND

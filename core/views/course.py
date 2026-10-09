@@ -18,6 +18,7 @@ from core.serializers.question import QuestionSerializer
 from core.serializers.quiz import QuizSerializer
 from core.views.template import SuperUserListProtectedViewSet
 
+from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiParameter
@@ -651,13 +652,16 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         form = IDForm(request.data)
         if form.is_valid():
-            course = Course.objects.get(id=pk)
+            course = get_object_or_404(Course, id=pk)
 
             require_capability(user, 'edit_rubric', course)
 
+            # Scoped to this course: an admin of course A must not reach course B's categories.
             try:
-                category = RubricCategory.objects.get(id=form.cleaned_data["id"])
-            except:
+                category = RubricCategory.objects.get(
+                    id=form.cleaned_data["id"], assignment__course=course
+                )
+            except (RubricCategory.DoesNotExist, ValueError):
                 return returnNotFound(message="Category doesn't exist")
 
             category.delete()
@@ -957,7 +961,13 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         # PATCH
         if "name" in request.data:
-            api_key.name = request.data["name"]
+            name = request.data["name"]
+            if CourseAPIKey.objects.filter(course=course, name=name).exclude(pk=api_key.pk).exists():
+                return Response(
+                    {"error": f"A key named '{name}' already exists for this course."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            api_key.name = name
         if "isActive" in request.data:
             api_key.is_active = request.data["isActive"]
 

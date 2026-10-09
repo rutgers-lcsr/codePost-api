@@ -69,7 +69,7 @@ from webhooks.view import WebhookViewSet
 
 from core.views.emailList import subscribeToEmailList
 from core.views.tmp import activate_cip
-from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView, readiness_check
+from core.views.system import SystemHealthView, SystemActivityView, SystemBannerView, SystemAIUsageView, SystemAIModelsView, SystemUploadLimitsView, readiness_check
 from oauth2_provider import views as oauth2_views
 from oauth2_provider.urls import metadata_urlpatterns as oauth2_metadata_urlpatterns
 
@@ -201,6 +201,7 @@ urlpatterns = [
     path('system/banner/', SystemBannerView.as_view(), name='system_banner'),
     path('system/aiUsage/', SystemAIUsageView.as_view(), name='system_ai_usage'),
     path('system/aiModels/', SystemAIModelsView.as_view(), name='system_ai_models'),
+    path('system/uploadLimits/', SystemUploadLimitsView.as_view(), name='system_upload_limits'),
     path('subscribe/', subscribeToEmailList),
     path('tmp-script/', activate_cip),
     path('impersonate/', ImpersonateView.as_view(), name='impersonate'),
@@ -251,3 +252,10 @@ urlpatterns += [
     # Redirect old /docs/ URL to swagger UI
     path('docs/', RedirectView.as_view(url='/api/schema/swagger-ui/', permanent=True), name='docs-redirect'),
 ]
+
+# Errors that never reach a DRF view (unknown routes, crashes in plain Django views)
+# still answer as JSON with a `detail` the SPA can show. See core/exceptions.py.
+handler400 = 'core.exceptions.handler_400'
+handler403 = 'core.exceptions.handler_403'
+handler404 = 'core.exceptions.handler_404'
+handler500 = 'core.exceptions.handler_500'

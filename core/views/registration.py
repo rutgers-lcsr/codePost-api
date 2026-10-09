@@ -6,6 +6,8 @@ from rest_framework.decorators import api_view, permission_classes, throttle_cla
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils.http import urlsafe_base64_decode
 from django.contrib.auth.tokens import default_token_generator
 
@@ -56,6 +58,11 @@ from log.models import Event
 import json
 
 import logging
+
+# A mangled uid in an emailed link is an invalid link, not a server error — same
+# set Django's PasswordResetConfirmView.get_user treats as "no such user".
+_INVALID_UID_ERRORS = (TypeError, ValueError, OverflowError, UnicodeDecodeError, User.DoesNotExist)
+
 ##########################################################################
 #####################################     JOIN FLOW     ##################
 #####################################                   ##################
@@ -178,8 +185,8 @@ def verifyRegistrationToken(request):
     """
     form = ValidateTokenForm(request.data)
     if form.is_valid():
-        uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
         try:
+            uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
             user = User.objects.get(id=uid_int)
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
@@ -187,7 +194,7 @@ def verifyRegistrationToken(request):
             return Response(
                 {"isValid": isValid, "email": user.email}, status=status.HTTP_200_OK
             )
-        except User.DoesNotExist:
+        except _INVALID_UID_ERRORS:
             return Response({"isValid": False}, status=status.HTTP_200_OK)
     else:
         return Response(
@@ -214,8 +221,8 @@ def registerAndSetPassword(request):
     """
     form = SetPasswordFromTokenForm(request.data)
     if form.is_valid():
-        uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
         try:
+            uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
             user = User.objects.get(id=uid_int)
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
@@ -231,7 +238,7 @@ def registerAndSetPassword(request):
                     {"isValid": False, "errors": {"token": "invalid token"}},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        except User.DoesNotExist:
+        except _INVALID_UID_ERRORS:
             return Response(
                 {"isValid": False, "errors": {"token": "invalid token"}},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -270,10 +277,24 @@ def setCredentials(request):
     form = SetCredentialsForm(request.data)
     if form.is_valid():
         org_name = form.cleaned_data["organization"]
-        try:
-            org = Organization.objects.get(shortname=org_name)
-        except Organization.DoesNotExist:
-            org = Organization.objects.create(name=org_name, shortname=org_name)
+        org = Organization.objects.filter(Q(shortname=org_name) | Q(name=org_name)).first()
+        if org is None:
+            # The name doubles as the shortname here, so the shorter limit applies.
+            if len(org_name) > 12:
+                return Response(
+                    {"isValid": False, "errors": {"organization": [
+                        "Organization name must be 12 characters or fewer."]}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                with transaction.atomic():
+                    org = Organization.objects.create(name=org_name, shortname=org_name)
+            except IntegrityError:
+                return Response(
+                    {"isValid": False, "errors": {"organization": [
+                        f"An organization named '{org_name}' already exists."]}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         user.is_active = True
         user.set_password(form.cleaned_data["password1"])
@@ -340,6 +361,15 @@ def validateNewAdminUser(request):
     if form.is_valid():
         rawName = form.cleaned_data["organization"]
         shortnameFromForm = rawName.replace(" ", "").lower()[0 : min(12, len(rawName))]
+        if len(rawName) > 64:
+            return Response(
+                {
+                    "success": False,
+                    "action_id": ".".join(map(str, action_id)),
+                    "errors": {"organization": ["Organization name must be 64 characters or fewer."]},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Case 1: user exists
         try:
@@ -391,6 +421,33 @@ def validateNewAdminUser(request):
         # Case 2: user does not exist, so create them
         except User.DoesNotExist:
             action_id.append(2)
+
+            # Resolve the organization before creating the user so an organization
+            # conflict leaves no orphaned, inactive user behind.
+            # Case 2a: the organization the user is trying to join already exists.
+            org = Organization.objects.filter(
+                Q(shortname=shortnameFromForm) | Q(name=rawName)
+            ).first()
+            # Case 2b: the organization the user is trying to join does not exist, so
+            # create it
+            if org is None:
+                try:
+                    with transaction.atomic():
+                        org = Organization.objects.create(
+                            name=rawName, shortname=shortnameFromForm
+                        )
+                except IntegrityError:
+                    return Response(
+                        {
+                            "success": False,
+                            "action_id": ".".join(map(str, action_id)),
+                            "errors": {"organization": [
+                                f"An organization named '{rawName}' already exists."]},
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                is_new_org = True
+
             # If they don't, create them
             user = User.objects.create(
                 username=form.cleaned_data["email"], email=form.cleaned_data["email"]
@@ -399,24 +456,9 @@ def validateNewAdminUser(request):
             _is_student_or_grader = (user.student_courses.count() > 0) or (
                 user.grader_courses.count() > 0
             )
-
-            # Case 2a: the organization the user is trying to join already exists.
-            try:
-                org = Organization.objects.get(shortname=shortnameFromForm)
-                user.profile.organization = org
-                user.save()
-                action_id.append(1)
-
-            # Case 2b: the organization the user is trying to join does not exist, so
-            # create it
-            except Organization.DoesNotExist:
-                org = Organization.objects.create(
-                    name=rawName, shortname=shortnameFromForm
-                )
-                user.profile.organization = org
-                user.save()
-                action_id.append(2)
-                is_new_org = True
+            user.profile.organization = org
+            user.save()
+            action_id.append(2 if is_new_org else 1)
 
         # From now on, we can assume user exists and organization matches specified org
 
@@ -535,8 +577,8 @@ def handleValidationResponse(request):
     """
     form = ValidationResponseForm(request.query_params)
     if form.is_valid():
-        uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
         try:
+            uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
             user = User.objects.get(id=uid_int)
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
@@ -583,7 +625,7 @@ def handleValidationResponse(request):
                     },
                     status=status.HTTP_200_OK,
                 )
-        except User.DoesNotExist:
+        except _INVALID_UID_ERRORS:
             return Response({"isValid": False}, status=status.HTTP_200_OK)
     else:
         return Response({"errors": form.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -715,8 +757,8 @@ def verifyResetToken(request):
     """
     form = ValidateTokenForm(request.data)
     if form.is_valid():
-        uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
         try:
+            uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
             user = User.objects.get(id=uid_int)
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
@@ -724,7 +766,7 @@ def verifyResetToken(request):
             return Response(
                 {"isValid": isValid, "email": user.email}, status=status.HTTP_200_OK
             )
-        except User.ObjectDoesNotExist:
+        except _INVALID_UID_ERRORS:
             return Response({"isValid": False}, status=status.HTTP_200_OK)
     else:
         return Response({"isValid": False}, status=status.HTTP_200_OK)
@@ -740,8 +782,8 @@ def verifyResetToken(request):
 def resetPassword(request):
     form = ChangePasswordForm(request.data)
     if form.is_valid():
-        uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
         try:
+            uid_int = urlsafe_base64_decode(form.cleaned_data["uid"]).decode()
             user = User.objects.get(id=uid_int)
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
@@ -756,7 +798,7 @@ def resetPassword(request):
             return Response(
                 {"isValid": isValid, "success": True}, status=status.HTTP_200_OK
             )
-        except User.DoesNotExist:
+        except _INVALID_UID_ERRORS:
             return Response(
                 {"isValid": False, "success": False}, status=status.HTTP_200_OK
             )

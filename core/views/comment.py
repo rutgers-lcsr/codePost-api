@@ -12,6 +12,7 @@ from rest_framework.decorators import action
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub
 
 from core.permissions.helpers import returnNotAuthorized, returnForbidden
+from django.shortcuts import get_object_or_404
 from core.services.audit import record_audit_event
 
 from rest_framework import serializers
@@ -79,7 +80,7 @@ class CommentViewSet(ListProtectedViewSet):
         user = request.user
 
         # hack: avoid triggering PATCH permissions for Comment object
-        comment = Comment.objects.get(id=pk)
+        comment = get_object_or_404(Comment, id=pk)
 
         # only students of this submission's pareant comment should be able to leave
         # feedback on a comment
@@ -87,8 +88,11 @@ class CommentViewSet(ListProtectedViewSet):
             return returnForbidden()
 
         # manually validate feedback body
-        feedback = int(request.data['feedback'])
         ALLOWED_FEEDBACK_VALUES = [-1, 0, 1]
+        try:
+            feedback = int(request.data['feedback'])
+        except (KeyError, TypeError, ValueError):
+            raise serializers.ValidationError("Feedback must be in " + str(ALLOWED_FEEDBACK_VALUES))
         if feedback not in ALLOWED_FEEDBACK_VALUES:
             raise serializers.ValidationError("Feedback must be in " + str(ALLOWED_FEEDBACK_VALUES))
         else:
@@ -172,7 +176,7 @@ class CommentViewSet(ListProtectedViewSet):
 
         try:
             file = SubmissionFile.objects.get(id=file_id)
-        except SubmissionFile.DoesNotExist:
+        except (SubmissionFile.DoesNotExist, ValueError, TypeError):
             return Response(
                 {'error': 'File not found'},
                 status=status.HTTP_404_NOT_FOUND
@@ -223,7 +227,7 @@ class CommentViewSet(ListProtectedViewSet):
                     f"Description: {rubric_comment.explanation}\n"
                     f"{points_str}"
                 )
-            except RubricComment.DoesNotExist:
+            except (RubricComment.DoesNotExist, ValueError, TypeError):
                 logger.warning(f"Rubric comment {rubric_comment_id} not found")
         elif points_override is not None:
             # Handle manual points without rubric
@@ -250,7 +254,8 @@ class CommentViewSet(ListProtectedViewSet):
         if result.success:
             return Response({'text': result.text})
         else:
+            # The AI provider failed, not codePost: 502 keeps it distinct from our own bugs.
             return Response(
                 {'error': result.error or 'Generation failed'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_502_BAD_GATEWAY
             )

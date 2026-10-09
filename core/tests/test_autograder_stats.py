@@ -13,9 +13,10 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.models import AutograderExecutionEvent, Course, Organization
-from core.tests.factories import AutograderExecutionEventFactory
+from core.tests.factories import AssignmentFactory, AutograderExecutionEventFactory
 
 STATS_URL = '/dashboard/autograding_stats/'
+FAILURES_URL = '/dashboard/autograding_failures/'
 
 
 class AutogradingStatsPermissionsTestCase(APITestCase):
@@ -39,6 +40,11 @@ class AutogradingStatsPermissionsTestCase(APITestCase):
         self.client.force_authenticate(user=self.superuser)
         response = self.client.get(STATS_URL)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_failures_regular_user_denied(self):
+        self.client.force_authenticate(user=self.regular_user)
+        response = self.client.get(FAILURES_URL)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class AutogradingStatsAggregationTestCase(APITestCase):
@@ -137,6 +143,120 @@ class AutogradingStatsAggregationTestCase(APITestCase):
 
         response = self.client.get(STATS_URL)
         self.assertEqual(response.json()['totalRequests'], 9)
+
+
+class AutogradingFailuresTestCase(APITestCase):
+
+    def setUp(self):
+        self.superuser = User.objects.create_superuser(
+            username='super@codepost.io', email='super@codepost.io', password='SuperPass1!')
+        self.client.force_authenticate(user=self.superuser)
+
+        self.assignment = AssignmentFactory()
+        self.course = self.assignment.course
+        self.submission = self.assignment.submissions.first()
+        self.file = self.submission.files.first()
+        self.runner = User.objects.create_user(
+            username='runner@rutgers.edu', email='runner@rutgers.edu', password='TestPass1!')
+
+        self.killed = AutograderExecutionEventFactory(
+            cached=False, success=False, trigger='submission_run', language='python-3.12',
+            course=self.course, assignment=self.assignment, submission=self.submission,
+            file=self.file, file_name=self.file.name, triggered_by=self.runner,
+            image_name='codepost/python:1', task_id='abc-123', execution_time=2.5,
+            error_category='marker_extraction', error_message='Killed',
+            error_detail='Killed\nFailed to extract results: missing markers.')
+        self.timeout = AutograderExecutionEventFactory(
+            cached=False, success=False, trigger='file_run', language='',
+            error_category='timeout', error_message='Execution timeout or incomplete',
+            error_detail='Execution timeout or incomplete')
+        # Not failures: a cache hit and a successful execution
+        AutograderExecutionEventFactory(cached=True, course=self.course, assignment=self.assignment)
+        AutograderExecutionEventFactory(cached=False, success=True)
+
+    def test_lists_failures_with_identifying_context(self):
+        response = self.client.get(FAILURES_URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(data['page'], 1)
+        self.assertEqual(data['pageSize'], 25)
+        self.assertEqual(len(data['results']), 2)
+
+        row = next(r for r in data['results'] if r['id'] == self.killed.id)
+        self.assertEqual(row['category'], 'marker_extraction')
+        self.assertEqual(row['trigger'], 'submission_run')
+        self.assertEqual(row['errorMessage'], 'Killed')
+        self.assertIn('missing markers', row['errorDetail'])
+        self.assertEqual(row['courseId'], self.course.id)
+        self.assertEqual(row['courseName'], self.course.name)
+        self.assertEqual(row['coursePeriod'], self.course.period)
+        self.assertEqual(row['assignmentId'], self.assignment.id)
+        self.assertEqual(row['assignmentName'], self.assignment.name)
+        self.assertEqual(row['submissionId'], self.submission.id)
+        self.assertEqual(row['fileId'], self.file.id)
+        self.assertEqual(row['fileName'], self.file.name)
+        self.assertEqual(row['triggeredBy'], 'runner@rutgers.edu')
+        self.assertEqual(row['imageName'], 'codepost/python:1')
+        self.assertEqual(row['taskId'], 'abc-123')
+        self.assertEqual(row['executionTime'], 2.5)
+
+        # Rows without attribution serialize as nulls, not 500s
+        bare = next(r for r in data['results'] if r['id'] == self.timeout.id)
+        self.assertIsNone(bare['courseName'])
+        self.assertIsNone(bare['submissionId'])
+        self.assertIsNone(bare['triggeredBy'])
+
+    def test_filters(self):
+        def ids(**params):
+            return {r['id'] for r in self.client.get(FAILURES_URL, params).json()['results']}
+
+        self.assertEqual(ids(category='timeout'), {self.timeout.id})
+        self.assertEqual(ids(trigger='submission_run'), {self.killed.id})
+        self.assertEqual(ids(language='unknown'), {self.timeout.id})
+        self.assertEqual(ids(language='python-3.12'), {self.killed.id})
+        self.assertEqual(ids(assignmentId=self.assignment.id), {self.killed.id})
+        self.assertEqual(ids(courseId=self.course.id), {self.killed.id})
+        self.assertEqual(ids(q='missing markers'), {self.killed.id})
+        self.assertEqual(ids(q='KILLED'), {self.killed.id})
+        self.assertEqual(ids(category='timeout', trigger='submission_run'), set())
+
+    def test_pagination(self):
+        response = self.client.get(FAILURES_URL, {'pageSize': 1, 'page': 2})
+        data = response.json()
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(data['page'], 2)
+        self.assertEqual(data['pageSize'], 1)
+        self.assertEqual(len(data['results']), 1)
+        # Newest first: page 1 is the most recently created row
+        first = self.client.get(FAILURES_URL, {'pageSize': 1}).json()['results'][0]
+        self.assertEqual(first['id'], self.timeout.id)
+        self.assertEqual(data['results'][0]['id'], self.killed.id)
+        # Oversized/invalid page params are clamped rather than rejected
+        data = self.client.get(FAILURES_URL, {'pageSize': 5000, 'page': 'x'}).json()
+        self.assertEqual(data['pageSize'], 100)
+        self.assertEqual(data['page'], 1)
+
+    def test_invalid_range_rejected(self):
+        response = self.client.get(FAILURES_URL, {
+            'dateFrom': timezone.now().isoformat(),
+            'dateTo': (timezone.now() - timedelta(days=1)).isoformat(),
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_stats_failures_by_assignment(self):
+        AutograderExecutionEventFactory(
+            cached=False, success=False, course=self.course, assignment=self.assignment,
+            error_category='timeout')
+        data = self.client.get(STATS_URL).json()
+        self.assertEqual(len(data['failuresByAssignment']), 1)
+        row = data['failuresByAssignment'][0]
+        self.assertEqual(row['assignmentId'], self.assignment.id)
+        self.assertEqual(row['assignmentName'], self.assignment.name)
+        self.assertEqual(row['courseId'], self.course.id)
+        self.assertEqual(row['courseName'], self.course.name)
+        self.assertEqual(row['failures'], 2)
+        self.assertIn(row['topCategory'], {'marker_extraction', 'timeout'})
 
 
 class ErrorClassifierTestCase(TestCase):

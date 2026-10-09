@@ -3,11 +3,45 @@ import base64
 from django.urls import reverse
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
-from core.constants import MAX_COURSE_FILE_SIZE
+from core.constants import MAX_COURSE_FILE_SIZE, MAX_FILE_SIZE, MAX_ASSIGNMENT_FILE_SIZE
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import File, SubmissionFile, AssignmentFile, CourseFile, SubmissionFileEdit
 from core.services.file_handlers.notebook import NotebookHandler
 from core.serializers.comment import CommentWithRubricSerializer
+
+
+def content_size_bytes(data: str) -> int:
+    """Decoded size of a file's `data` string: binaries arrive as base64 `data:` URIs,
+    so measure what the file really is rather than the ~4/3-inflated wire string."""
+    if data.startswith('data:'):
+        _, _, encoded = data.partition(',')
+        try:
+            return len(base64.b64decode(encoded))
+        except Exception:
+            pass
+    return len(data.encode('utf-8'))
+
+
+def check_file_size(name, data, limit, hint=''):
+    if content_size_bytes(data or '') > limit:
+        raise serializers.ValidationError(
+            f"File '{name}' exceeds the {limit // (1024 * 1024)}MB size limit.{hint}")
+
+
+DATASET_HINT = ' For large or binary inputs, upload it as an assignment dataset (up to 1 GB) instead.'
+
+
+class _FileSizeMixin:
+    """Per-file cap on writable `data`, measured in decoded bytes."""
+    size_limit = MAX_FILE_SIZE
+    size_hint = ''
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)  # type: ignore[misc]
+        if 'data' in attrs:
+            name = attrs.get('name') or (getattr(self, 'instance', None) and self.instance.name) or ''  # type: ignore[attr-defined]
+            check_file_size(name, attrs['data'], self.size_limit, self.size_hint)
+        return attrs
 
 
 class SubmissionFileEditSerializer(serializers.ModelSerializer):
@@ -24,7 +58,7 @@ class SubmissionFileEditSaveSerializer(serializers.Serializer):
     data = serializers.CharField(required=True, trim_whitespace=False, allow_blank=True)  # type: ignore[assignment]
 
 
-class FileSerializer(ModelSerializerWithPOSTCheck):
+class FileSerializer(_FileSizeMixin, ModelSerializerWithPOSTCheck):
     """
     Base serializer for File objects.
     """
@@ -54,7 +88,7 @@ class FileSerializer(ModelSerializerWithPOSTCheck):
         return super().update(instance, validated_data)
 
 
-class SubmissionFileSerializer(ModelSerializerWithPOSTCheck):
+class SubmissionFileSerializer(_FileSizeMixin, ModelSerializerWithPOSTCheck):
     """
     Serializer for SubmissionFile objects.
     These are files that belong to student submissions.
@@ -115,7 +149,7 @@ class SubmissionFileWithoutCommentsSerializer(ModelSerializerWithPOSTCheck):
         return SubmissionFileEditSerializer(edit).data
 
 
-class SubmissionFileStudentUploadSerializer(ModelSerializerWithPOSTCheck):
+class SubmissionFileStudentUploadSerializer(_FileSizeMixin, ModelSerializerWithPOSTCheck):
     """
     Simplified serializer for students uploading submission files.
     """
@@ -129,11 +163,13 @@ class SubmissionFileStudentUploadSerializer(ModelSerializerWithPOSTCheck):
         }
 
 
-class AssignmentFileSerializer(ModelSerializerWithPOSTCheck):
+class AssignmentFileSerializer(_FileSizeMixin, ModelSerializerWithPOSTCheck):
     """
     Serializer for AssignmentFile objects.
     These are files that belong to assignments (templates, instructions, etc.).
     """
+    size_limit = MAX_ASSIGNMENT_FILE_SIZE
+    size_hint = DATASET_HINT
 
     isTestResource = serializers.BooleanField(source='is_test_resource', required=False)
 
@@ -232,15 +268,7 @@ class CourseFileSerializer(ModelSerializerWithPOSTCheck):
         if raw is None:
             raw = (self.instance.content.data if self.instance is not None
                    and self.instance.content_id else '') or ''
-        if raw.startswith('data:'):
-            _, _, encoded = raw.partition(',')
-            try:
-                size = len(base64.b64decode(encoded))
-            except Exception:
-                size = len(raw.encode('utf-8'))
-        else:
-            size = len(raw.encode('utf-8'))
-        if size > MAX_COURSE_FILE_SIZE:
+        if content_size_bytes(raw) > MAX_COURSE_FILE_SIZE:
             raise serializers.ValidationError(
                 f"Course file too large (max {MAX_COURSE_FILE_SIZE // (1024 * 1024)} MB).")
         return data
@@ -276,4 +304,12 @@ class FileValidationSerializerWithoutSubmission(serializers.Serializer):
     path = serializers.CharField(max_length=500, allow_null=True, allow_blank=True, required=False)
 
     def validate(self, attrs):
+        # File.save() re-checks this and raises a Django ValidationError; catching it
+        # here keeps a mislabelled PDF a readable 400 instead of a crash mid-upload.
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from core.models import validate_data_uri_mime
+        try:
+            validate_data_uri_mime(attrs['name'], attrs.get('data') or '')
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(' '.join(e.messages))
         return attrs

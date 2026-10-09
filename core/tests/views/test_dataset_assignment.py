@@ -1082,6 +1082,30 @@ class TestDatasetUploadValidation:
 
 
 # --------------------------------------------------------------------------- #
+# Rename: (assignment, name) is unique_together, but the update serializer has no
+# 'assignment' field, so DRF never generated that validator and a collision 500'd
+# --------------------------------------------------------------------------- #
+
+class TestDatasetRename:
+    def test_rename_to_existing_name_is_a_400(self, api_client, variant_setup):
+        api_client.force_authenticate(user=variant_setup['admin'])
+        shared = variant_setup['shared']
+        resp = api_client.patch(f"/assignmentDataSets/{shared.id}/",
+                                {'name': variant_setup['hidden'].name}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'already exists' in resp.data['name'][0]
+        shared.refresh_from_db()
+        assert shared.name == 'readme.txt'
+
+    def test_rename_to_own_name_or_a_fresh_name_succeeds(self, api_client, variant_setup):
+        api_client.force_authenticate(user=variant_setup['admin'])
+        shared = variant_setup['shared']
+        resp = api_client.patch(f"/assignmentDataSets/{shared.id}/", {'name': shared.name}, format='json')
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        resp = api_client.patch(f"/assignmentDataSets/{shared.id}/", {'name': 'notes.txt'}, format='json')
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        shared.refresh_from_db()
+        assert shared.name == 'notes.txt'
 # Upload: files over FILE_UPLOAD_MAX_MEMORY_SIZE arrive as TemporaryUploadedFile
 # --------------------------------------------------------------------------- #
 

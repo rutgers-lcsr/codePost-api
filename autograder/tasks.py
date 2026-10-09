@@ -22,7 +22,7 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
         if not force_execute:
             cached = CachedExecutionResult.get_cached_result(file_obj)
             if cached:
-                record_execution_event(trigger='file_run', cached=True, success=True, file=file_obj)
+                record_execution_event(trigger='file_run', cached=True, success=True, file=file_obj, user=user)
                 return cached.get_cached_formated_response(file_obj)
 
         executor = Executor.factory(file_obj, content_override=code_override, test_code=test_code, example_code=example_code)
@@ -46,7 +46,8 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
         result.save_cache(file_obj, user)
 
         record_execution_event(trigger='file_run', cached=False, success=result.success,
-                               file=file_obj, error_text=result.err or result.stderr)
+                               file=file_obj, user=user, execution_time=result.execution_time,
+                               error_text=result.err or result.stderr)
 
         return {
             **result.to_dict(),
@@ -58,7 +59,8 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
         logger.error(f"Task failed: {e}", exc_info=True)
         # file_obj is unbound if the File lookup itself failed
         record_execution_event(trigger='file_run', cached=False, success=False,
-                               file=locals().get('file_obj'), error_text=str(e))
+                               file=locals().get('file_obj'), user=locals().get('user'),
+                               error_text=str(e))
         return {"error": str(e), "success": False}
 
 @shared_task(time_limit=600, soft_time_limit=550)  # Set time limits for the task
@@ -149,7 +151,8 @@ def run_file_streaming_task(
 
         if result is None:
             record_execution_event(trigger='file_run', cached=False, success=False,
-                                   file=file_obj, error_text="Execution failed: No result returned")
+                                   file=file_obj, user=user,
+                                   error_text="Execution failed: No result returned")
             _publish_sse(r, channel, "error", {"error": "Execution failed: No result returned"})
             _publish_sse(r, channel, "_done", {})
             return
@@ -166,7 +169,8 @@ def run_file_streaming_task(
         result.save_cache(file_obj, user)
 
         record_execution_event(trigger='file_run', cached=False, success=result.success,
-                               file=file_obj, error_text=result.err or result.stderr)
+                               file=file_obj, user=user, execution_time=result.execution_time,
+                               error_text=result.err or result.stderr)
 
         submission, _, _ = file_obj.get_file_info()
         response_data = {
@@ -181,7 +185,8 @@ def run_file_streaming_task(
         logger.error(f"Streaming task failed for file {file_id}: {e}", exc_info=True)
         # file_obj is unbound if the File lookup itself failed
         record_execution_event(trigger='file_run', cached=False, success=False,
-                               file=locals().get('file_obj'), error_text=str(e))
+                               file=locals().get('file_obj'), user=locals().get('user'),
+                               error_text=str(e))
         _publish_sse(r, channel, "error", {"error": f"Execution error: {str(e)}"})
     finally:
         _publish_sse(r, channel, "_done", {})

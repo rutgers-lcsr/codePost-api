@@ -18,8 +18,8 @@ from core.agent.registry import SCOPE_WRITE, tool
 from core.agent.tools._common import course_header, fetch_assignment
 from core.permissions.capabilities import Capability
 
-# Keep well under Django's 2.5MB request-body cap; anything bigger than this is
-# not something an agent should be writing inline anyway.
+# Keep well under the per-request body cap (core.constants.MAX_REQUEST_BODY_BYTES);
+# anything bigger than this is not something an agent should be writing inline anyway.
 _MAX_CONTENT_CHARS = 1_000_000
 
 
