@@ -47,6 +47,11 @@ class RunFileTaskEventsTestCase(ExecutionEventBaseTestCase):
         self.assertEqual(event.language, 'python-3.12')
         self.assertEqual(event.course_id, self.assignment.course_id)
         self.assertEqual(event.assignment_id, self.assignment.id)
+        # Identifying context for the failures view
+        self.assertEqual(event.submission_id, self.submission.id)
+        self.assertEqual(event.file_id, self.file.id)
+        self.assertEqual(event.file_name, self.file.name)
+        self.assertEqual(event.triggered_by_id, self.user.id)
 
     def test_cache_miss_failure_recorded_and_classified(self):
         from autograder import tasks
@@ -63,6 +68,24 @@ class RunFileTaskEventsTestCase(ExecutionEventBaseTestCase):
         self.assertFalse(event.success)
         self.assertEqual(event.error_category, 'missing_dependency')
         self.assertIn('numpy', event.error_message)
+        self.assertIn('numpy', event.error_detail)
+        self.assertEqual(event.triggered_by_id, self.user.id)
+        self.assertEqual(event.file_id, self.file.id)
+
+    def test_execution_time_and_image_recorded(self):
+        from autograder import tasks
+        self.environment.image_name = 'codepost/python-3.12:abc'
+        self.environment.save()
+        ok = ExecutionResult(success=True, stdout='ok', execution_time=1.25)
+        with mock.patch.object(tasks.Executor, 'factory',
+                               return_value=self._fake_executor(ok)):
+            tasks.run_file_task(self.file.id, self.user.id, force_execute=True)
+
+        event = AutograderExecutionEvent.objects.get()
+        self.assertTrue(event.success)
+        self.assertEqual(event.execution_time, 1.25)
+        self.assertEqual(event.image_name, 'codepost/python-3.12:abc')
+        self.assertEqual(event.error_detail, '')
 
     def test_task_exception_recorded_as_failure(self):
         from autograder import tasks
@@ -120,8 +143,34 @@ class RunSubmissionEventsTestCase(ExecutionEventBaseTestCase):
 
         events = AutograderExecutionEvent.objects.filter(trigger='submission_run')
         self.assertEqual(events.count(), self.submission.files.count())
+        file_ids = set(self.submission.files.values_list('id', flat=True))
         for event in events:
             self.assertFalse(event.cached)
             self.assertTrue(event.success)
             self.assertEqual(event.language, 'python-3.12')
             self.assertEqual(event.assignment_id, self.assignment.id)
+            self.assertEqual(event.submission_id, self.submission.id)
+            self.assertIn(event.file_id, file_ids)
+            self.assertTrue(event.file_name)
+
+    def test_failed_executor_result_recorded_as_failure(self):
+        """A result the executor reports as failed is a failed execution even
+        though its output was cached successfully."""
+        from autograder import run as run_module
+
+        failing = ExecutionResult(success=False, stdout='',
+                                  stderr='Killed',
+                                  err='Killed\nFailed to extract results: missing markers. Stdout preview:  Stderr tail: Killed')
+        with mock.patch.object(run_module.Executor, 'factory',
+                               return_value=self._fake_executor(failing)), \
+             mock.patch.object(run_module.TestService, 'run_suite', return_value=[]), \
+             mock.patch('autograder.services.autodetector.Autodetector.detect_and_update'):
+            run_module.RunSubmission(self.submission.id)
+
+        event = AutograderExecutionEvent.objects.filter(trigger='submission_run').first()
+        assert event is not None
+        self.assertFalse(event.success)
+        self.assertEqual(event.error_category, 'marker_extraction')
+        self.assertEqual(event.error_message, 'Killed')
+        self.assertIn('missing markers', event.error_detail)
+        self.assertEqual(event.submission_id, self.submission.id)

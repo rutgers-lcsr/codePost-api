@@ -1,5 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 
+import json
 import logging
 import os
 
@@ -116,3 +117,65 @@ class DependencyUnavailableMiddleware:
         response = JsonResponse({"detail": "codePost is temporarily unavailable. Please retry shortly."}, status=503)
         response["Retry-After"] = "10"
         return response
+
+
+_ERROR_BODY_MAX_BYTES = 64 * 1024
+
+
+class ErrorBodyShapeMiddleware:
+    """
+    Guarantees every JSON error body carries a string `detail`.
+
+    Views answer errors in several shapes — bare strings (the returnForbidden()
+    helpers, historically), `{"error": "..."}`, `{"message": "..."}`, Django form
+    `{"errors": {...}}`, and DRF's `["msg"]` for a non-field ValidationError. The
+    SPA (apiErrorMessage) and the agent layer both read `detail`, so this adds it
+    without rewriting ~300 call sites, and keeps the original keys so existing
+    clients keep working. Field-error dicts ({field: [...]}) are left alone: the
+    client renders those per field.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if response.status_code < 400 or response.streaming:
+            return response
+        if not response.get('Content-Type', '').startswith('application/json'):
+            return response
+        content = response.content
+        if not content or len(content) > _ERROR_BODY_MAX_BYTES:
+            return response
+        try:
+            body = json.loads(content)
+        except ValueError:
+            return response
+        shaped = self._with_detail(body)
+        if shaped is not None:
+            response.content = json.dumps(shaped).encode()
+        return response
+
+    @staticmethod
+    def _with_detail(body):
+        if isinstance(body, str):
+            return {'detail': body}
+        if isinstance(body, list):
+            strings = [b for b in body if isinstance(b, str)]
+            if strings:
+                return {'detail': ' '.join(strings), 'nonFieldErrors': body}
+            return None
+        if not isinstance(body, dict) or isinstance(body.get('detail'), str):
+            return None
+        for key in ('error', 'message'):
+            if isinstance(body.get(key), str) and body[key]:
+                # {'error': 'in_use', 'message': '...'} — the message is the readable one.
+                if key == 'error' and isinstance(body.get('message'), str) and body['message']:
+                    return {**body, 'detail': body['message']}
+                return {**body, 'detail': body[key]}
+        errors = body.get('errors')
+        if isinstance(errors, dict):
+            for messages in errors.values():
+                if isinstance(messages, list) and messages and isinstance(messages[0], str):
+                    return {**body, 'detail': messages[0]}
+        return None

@@ -66,7 +66,7 @@ To submit an assignment:
 - **Verification**: After uploading, you can download your files to ensure they are the correct versions and are not corrupted.
 
 > [!NOTE]
-> You can replace your submission as many times as you like before the deadline (or before grading begins, if the assignment has no deadline). Replacing a submission overwrites the previous files. Each file is capped at 10 MB.
+> You can replace your submission as many times as you like before the deadline (or before grading begins, if the assignment has no deadline). Replacing a submission overwrites the previous files. Each file is capped at 10 MB, and a whole submission at 30 MB.
 
 ## Viewing Feedback
 

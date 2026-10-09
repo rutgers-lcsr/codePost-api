@@ -29,6 +29,13 @@ from core.permissions.permissions import SubmissionPermissions
 from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from core.permissions.helpers import isStudent, isCourseStaff, isCourseAdmin, isStudentOfSub, isStaffOfSub, canViewUnanonymizedSubmissions, isSectionLeaderOfStudent, isSuperGrader
 from core.permissions.helpers import feedbackOpenForSubmission, testResultsVisibleForSubmission
+
+# Partner-link refusals. The "unusable" one is deliberately vague: it also covers an
+# assignment hidden from the invitee, whose existence must not leak.
+PARTNERS_DISABLED = "This assignment does not allow partners."
+PARTNER_TOKEN_MISSING = "A partner link token is required."
+PARTNER_LINK_UNUSABLE = "This partner link is invalid, has expired, or can't be used by you."
+PARTNER_ALREADY_SUBMITTED = "You already have a submission for this assignment, so you can't join another."
 from core.permissions.capabilities import Capability, check_capability, compute_submission_capabilities, require_capability
 from core.services.audit import record_audit_event
 
@@ -43,6 +50,7 @@ from core.permissions.tokens import submission_token_generator
 from core.emails import StudentFeedbackNotificationEmail, StudentPartnersAddedEmail
 from django.db.models import Q, F
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 
 def get_student_serializer_class(submission, files_only=False):
     """
@@ -160,7 +168,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   def checkPermission(self, request, pk=None):
     user = request.user
     try:
-      submission = Submission.objects.get(id=pk)
+      submission = get_object_or_404(Submission, id=pk)
     except Submission.DoesNotExist:
       return returnNotFound()
 
@@ -207,7 +215,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=['GET', 'PATCH'])
   def history(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
     course = submission.assignment.course
 
     student = self.request.query_params.get('student', None)
@@ -246,7 +254,10 @@ class SubmissionViewSet(ListProtectedViewSet):
     if (request.method == "PATCH") and 'hasViewed' in request.data:
         newFields = {"student": studentParam.email, "hasViewed": request.data['hasViewed']}  # type: ignore[union-attr]  # studentParam checked above
 
-        serializer = SubmissionHistorySerializer(histories[0], newFields, many=False, context={"request": request})
+        history = histories.first()
+        if history is None:
+          return returnNotFound("No view history exists for this student yet.")
+        serializer = SubmissionHistorySerializer(history, newFields, many=False, context={"request": request})
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
     else:
@@ -261,7 +272,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=['PATCH'])
   def submitRegrade(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
     course = submission.assignment.course
 
     require_capability(user, 'request_regrade', submission)
@@ -279,18 +290,13 @@ class SubmissionViewSet(ListProtectedViewSet):
     if submission.questionText:
       raise serializers.ValidationError("You have already submitted a regrade request for this submission.")
 
-    if 'questionText' not in request.data:
-      raise serializers.ValidationError("questionText field is not provided.")
-
-    if not request.data['questionText'].strip():
-      raise serializers.ValidationError("questionText cannot be empty.")
+    question_text = request.data.get('questionText')
+    if not isinstance(question_text, str) or not question_text.strip():
+      raise serializers.ValidationError("Please describe your regrade request.")
 
     submission.questionIsOpen = True
-    submission.questionText = request.data['questionText']
-    if(request.data['questionIsRegrade']):
-      submission.questionIsRegrade = True
-    else:
-      submission.questionIsRegrade = False
+    submission.questionText = question_text
+    submission.questionIsRegrade = bool(request.data.get('questionIsRegrade', True))
 
     submission.questionDate = now()
     submission.save()
@@ -312,7 +318,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=['PATCH'])
   def deleteRegrade(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
     course = submission.assignment.course
 
     require_capability(user, 'request_regrade', submission)
@@ -391,7 +397,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   def testResults(self, request, pk=None):
     #  Only accessed by students
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
     assignment = submission.assignment
     isStudentMode = self.request.query_params.get('isStudentMode', "False") == "True"
 
@@ -595,23 +601,23 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["GET"])
   def validatePartnerLink(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
     assignment = submission.assignment
     course = submission.assignment.course
     token = request.query_params.get('token', None)
 
     if not assignment.allowStudentUploadWithPartners:
-        return returnInvalid()
+        return returnInvalid(PARTNERS_DISABLED)
 
     if not token:
-        return returnInvalid()
+        return returnInvalid(PARTNER_TOKEN_MISSING)
 
     # The invitee must be a student who can submit to this assignment themselves:
     # assignment published and open, not hidden from their section. (isStudent excludes
-    # the capability's admin arm — staff are not partner material.) Opaque 406 (not 403)
+    # the capability's admin arm — staff are not partner material.) Opaque 400 (not 403)
     # so a hidden assignment's existence is not leaked.
     if not isStudent(user, course) or not check_capability(user, Capability.UPLOAD_SUBMISSION, assignment):
-        return returnInvalid()
+        return returnInvalid(PARTNER_LINK_UNUSABLE)
 
     is_valid = submission_token_generator.check_token(submission, token)
     if is_valid:
@@ -621,7 +627,7 @@ class SubmissionViewSet(ListProtectedViewSet):
             already = Submission.objects.filter(
                 assignment=submission.assignment, students__in=[user]).exists()
             if already:
-                return returnInvalid()
+                return returnInvalid(PARTNER_ALREADY_SUBMITTED)
             submission.students.add(user)
 
         for student in submission.students.all():
@@ -633,7 +639,7 @@ class SubmissionViewSet(ListProtectedViewSet):
 
         return Response("ok", status.HTTP_200_OK)
     else:
-        return returnInvalid()
+        return returnInvalid(PARTNER_LINK_UNUSABLE)
 
   @extend_schema(
     responses=StudentSubmissionSerializer,
@@ -649,32 +655,32 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["GET"])
   def validatePartnerLinkAndReturn(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
     assignment = submission.assignment
     course = submission.assignment.course
     token = request.query_params.get('token', None)
 
     if not assignment.allowStudentUploadWithPartners:
-        return returnInvalid()
+        return returnInvalid(PARTNERS_DISABLED)
 
     if not token:
-        return returnInvalid()
+        return returnInvalid(PARTNER_TOKEN_MISSING)
 
-    # Same invitee gate as validatePartnerLink (opaque 406 — see comment there).
+    # Same invitee gate as validatePartnerLink (opaque 400 — see comment there).
     if not isStudent(user, course) or not check_capability(user, Capability.UPLOAD_SUBMISSION, assignment):
-        return returnInvalid()
+        return returnInvalid(PARTNER_LINK_UNUSABLE)
 
     current_submission = Submission.objects.filter(assignment=submission.assignment, students__in=[user])
 
     if len(current_submission) > 0:
-        return returnInvalid()
+        return returnInvalid(PARTNER_ALREADY_SUBMITTED)
 
     is_valid = submission_token_generator.check_token(submission, token)
     if is_valid:
         serializer = StudentSubmissionSerializer(submission, many=False, context={"request": request})
         return Response(serializer.data)
     else:
-        return returnInvalid()
+        return returnInvalid(PARTNER_LINK_UNUSABLE)
 
   @extend_schema(responses=OpenApiTypes.STR)
   @action(detail=True, methods=["GET"])
@@ -693,15 +699,15 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["POST"])
   def notifyStudents(self, request, pk=None):
     user = request.user
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
 
     require_capability(user, 'notify_students_feedback', submission)
 
     if not feedbackOpenForSubmission(submission):
-        return Response('Feedback must be released', status.HTTP_406_NOT_ACCEPTABLE)
+        return returnInvalid('Feedback must be released before students can be notified.')
 
     if not submission.isFinalized:
-        return Response('Submission must be finalized', status.HTTP_406_NOT_ACCEPTABLE)
+        return returnInvalid('The submission must be finalized before students can be notified.')
 
     # QUESTION: We could make the setting a requirement. Or we could make this globally accessible for staff.
     # if not submission.assignment.course.enableStudentFeedbackNotifications:
@@ -868,7 +874,7 @@ class SubmissionViewSet(ListProtectedViewSet):
   @action(detail=True, methods=["POST"], permission_classes=[IsAuthenticated])
   def generateAIAssistance(self, request, pk=None):
     """Trigger AI grading assistance (summary + suggested comments) for this submission."""
-    submission = Submission.objects.get(id=pk)
+    submission = get_object_or_404(Submission, id=pk)
     user = request.user
 
     require_capability(user, 'trigger_ai_assistance', submission)
@@ -1005,7 +1011,7 @@ class SubmissionViewSet(ListProtectedViewSet):
                 ))
             service.record_usage(result, user, request_type='file_suggestions')
         elif not result.success:
-            return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_502_BAD_GATEWAY)
 
     # Include variant_id and custom-context flag in response metadata
     variant_id = None
@@ -1075,7 +1081,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     result = async_to_sync(service.generate_submission_summary)(submission)
 
     if not result.success:
-        return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': result.error or 'AI generation failed.'}, status=status.HTTP_502_BAD_GATEWAY)
 
     summary_obj, created = SubmissionSummary.objects.update_or_create(
         submission=submission,

@@ -43,8 +43,8 @@ class TestPartnerLinks(APITestCase):
       self.assignment.state = state
       self.assignment.save()
       response = self._validate(self.invitee)
-      self.assertEqual(response.status_code, status.HTTP_406_NOT_ACCEPTABLE,
-                       f"validatePartnerLink must 406 in state={state}")
+      self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST,
+                       f"validatePartnerLink must 400 in state={state}")
       self.assertNotIn(self.invitee, self.submission.students.all(),
                        f"invitee must not be attached in state={state}")
 
@@ -54,24 +54,24 @@ class TestPartnerLinks(APITestCase):
     self.assignment.hideFrom.add(section)
 
     response = self._validate(self.invitee)
-    self.assertEqual(response.status_code, status.HTTP_406_NOT_ACCEPTABLE)
+    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
     self.assertNotIn(self.invitee, self.submission.students.all())
 
   def test_denied_when_partners_disabled(self):
     self.assignment.allowStudentUploadWithPartners = False
     self.assignment.save()
     response = self._validate(self.invitee)
-    self.assertEqual(response.status_code, status.HTTP_406_NOT_ACCEPTABLE)
+    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
   def test_denied_with_garbage_token(self):
     response = self._validate(self.invitee, token='garbage')
-    self.assertEqual(response.status_code, status.HTTP_406_NOT_ACCEPTABLE)
+    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
     self.assertNotIn(self.invitee, self.submission.students.all())
 
   def test_denied_for_non_student(self):
     grader = Persona.GRADER_OF_COURSE(self)
     response = self._validate(grader)
-    self.assertEqual(response.status_code, status.HTTP_406_NOT_ACCEPTABLE)
+    self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
   def test_generatePartnerLink_denied_on_hidden_assignment(self):
     # The owner loses partner management once the assignment is no longer submittable.

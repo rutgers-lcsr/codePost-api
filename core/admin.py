@@ -2847,11 +2847,11 @@ class PendingAgentActionAdmin(admin.ModelAdmin):
 
 @admin.register(AutograderExecutionEvent)
 class AutograderExecutionEventAdmin(admin.ModelAdmin):
-    list_display = ("created", "course", "assignment", "success", "cached", "language", "trigger",
-                    "error_category", "error_message")
+    list_display = ("created", "course", "assignment", "submission", "file_name", "success", "cached",
+                    "language", "trigger", "error_category", "error_message")
     list_filter = ("success", "cached", "trigger", "error_category", "language", "created")
-    search_fields = ("course__name", "assignment__name", "error_message")
-    raw_id_fields = ("course", "assignment")
+    search_fields = ("course__name", "assignment__name", "file_name", "task_id", "error_message", "error_detail")
+    raw_id_fields = ("course", "assignment", "submission", "file", "triggered_by")
     readonly_fields = ("created", "modified")
     date_hierarchy = "created"
 

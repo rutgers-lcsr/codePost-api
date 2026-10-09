@@ -9,20 +9,22 @@ FORBIDDEN = "You do not have permission to perform this action."
 NOT_FOUND = "The object you requested could not be found."
 NOT_ACCEPTABLE = "The request is invalid."
 
+# Error bodies are {'detail': msg} — the one shape the SPA, the SDK and the agent
+# layer all read (see core/middleware.py ErrorBodyShapeMiddleware for the rest).
+
 def returnNotAuthorized():
-  return Response(NOT_AUTHORIZED, status.HTTP_401_UNAUTHORIZED)
+  return Response({'detail': NOT_AUTHORIZED}, status.HTTP_401_UNAUTHORIZED)
 
 def returnForbidden():
-  return Response(FORBIDDEN, status.HTTP_403_FORBIDDEN)
+  return Response({'detail': FORBIDDEN}, status.HTTP_403_FORBIDDEN)
 
-def returnInvalid():
-  return Response(NOT_ACCEPTABLE, status.HTTP_406_NOT_ACCEPTABLE);
+def returnInvalid(message=None):
+  """A request that is well-formed but cannot be honoured. Say why: callers should
+  pass a message instead of leaving the user with "The request is invalid."."""
+  return Response({'detail': message or NOT_ACCEPTABLE}, status.HTTP_400_BAD_REQUEST)
 
 def returnNotFound(message=None):
-  if message is None:
-    return Response(NOT_FOUND, status.HTTP_404_NOT_FOUND)
-  else:
-    return Response(message, status.HTTP_404_NOT_FOUND)
+  return Response({'detail': message or NOT_FOUND}, status.HTTP_404_NOT_FOUND)
 
 def isAuthenticated(user) -> bool:
   return user.is_authenticated

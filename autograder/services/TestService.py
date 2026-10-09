@@ -892,11 +892,20 @@ class TestService:
         Retrieves cached result or runs the executor.
         Returns a dict resembling ExecutionResult but with a 'cached' flag.
         """
+        # We need the user object if possible, but can be None
+        from core.models import User
+        user = None
+        if user_id:
+            try:
+                user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                pass
+
         # Check Cache
         cached = CachedExecutionResult.get_cached_result(file)
         if cached:
             from autograder.services.execution_events import record_execution_event
-            record_execution_event(trigger='test_run', cached=True, success=True, file=file)
+            record_execution_event(trigger='test_run', cached=True, success=True, file=file, user=user)
             return {
                 "success": True, # Cached results imply successful execution, usually
                 "stdout": cached.output_data.get('stdout', ''),
@@ -915,20 +924,12 @@ class TestService:
         result = executor.execute() # Synchronous execution
         
         # Save to Cache
-        # We need the user object if possible, but can be None
-        from core.models import User
-        user = None
-        if user_id:
-            try:
-                user = User.objects.get(id=user_id)
-            except User.DoesNotExist:
-                pass
-                
         result.save_cache(file, executed_by=user)
 
         from autograder.services.execution_events import record_execution_event
         record_execution_event(trigger='test_run', cached=False, success=result.success,
-                               file=file, error_text=result.err or result.stderr)
+                               file=file, user=user, execution_time=result.execution_time,
+                               error_text=result.err or result.stderr)
 
         return {
             "success": result.success,

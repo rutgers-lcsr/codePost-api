@@ -71,7 +71,7 @@ submissions.zip
 
 ### Troubleshooting Uploads
 
-- **File Size Limit**: Individual files are capped at **10 MB**. For larger files (e.g., datasets, reference inputs), use **Instructor Resources** or attach a [Data Set](/docs/instructor-environment-testing#data-sets) to the assignment.
+- **File Size Limit**: Individual files are capped at **10 MB**, and a whole submission at **30 MB**. For larger files (e.g., datasets, reference inputs), use **Instructor Resources** or attach a [Data Set](/docs/instructor-environment-testing#data-sets) to the assignment.
 - **Forbidden Extensions**: If a file fails, check if the assignment restriction excludes it (e.g., no `.exe`).
 - **Encoding Errors**: Ensure filenames use standard UTF-8 characters.
 

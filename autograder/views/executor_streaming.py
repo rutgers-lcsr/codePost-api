@@ -89,7 +89,13 @@ class ExecuteFileStreaming(GenericAPIView):
         file_id = validated["file_id"]
         
         # Check file permissions here instead of in the _execute_with_streaming method
-        file_obj, submission, assignment, _ = File.get_file_obj(file_id)
+        try:
+            file_obj, submission, assignment, _ = File.get_file_obj(file_id)
+        except (File.DoesNotExist, ValueError):
+            return JsonResponse(
+                {"error": "File not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
         
         file_permissions = FileExecutionPermissions()
         if not file_permissions.has_object_permission(request, self, file_obj):
@@ -158,7 +164,7 @@ class ExecuteFileStreaming(GenericAPIView):
                     # Return cached result
                     logger.info(f"[ExecuteFileStreaming] Cache HIT for file {file_obj.id}, returning cached result")
                     from autograder.services.execution_events import record_execution_event
-                    record_execution_event(trigger='file_run', cached=True, success=True, file=file_obj)
+                    record_execution_event(trigger='file_run', cached=True, success=True, file=file_obj, user=user)
                     yield self._sse_message("progress", {"status": "cached", "message": "Using cached execution result"})
 
                     response_data = cached_result.get_cached_formated_response(file_obj)

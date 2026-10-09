@@ -155,6 +155,17 @@ class AssignmentDataSetUpdateSerializer(serializers.ModelSerializer):
             'autogradeAllVariants',
         ]
 
+    def validate_name(self, value):
+        # 'assignment' is not a field here, so DRF never builds the (assignment, name)
+        # unique_together validator; without this a rename collides at the DB.
+        if self.instance is not None and AssignmentDataSet.objects.filter(
+            assignment=self.instance.assignment, name=value
+        ).exclude(pk=self.instance.pk).exists():
+            raise serializers.ValidationError(
+                f"A dataset named '{value}' already exists for this assignment."
+            )
+        return value
+
     def to_internal_value(self, data):
         data = data.copy()
         if 'mount_path' in data and 'mountPath' not in data:

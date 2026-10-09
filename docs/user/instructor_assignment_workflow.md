@@ -246,7 +246,7 @@ Assignment files are the starter code, helper libraries, and test resources you 
 
 ### Adding files
 
-- **Drag files onto the panel** (or click the drop zone) to add them. Drop several at once; a `.zip` is expanded into its folder structure, so you can upload a whole project in one go. Files up to 3 MB each.
+- **Drag files onto the panel** (or click the drop zone) to add them. Drop several at once; a `.zip` is expanded into its folder structure, so you can upload a whole project in one go. Files up to 10 MB each; for large or binary inputs (datasets, reference outputs, model weights) attach a [Data Set](/docs/instructor-environment-testing#data-sets) instead, which allows up to 1 GB per file.
 - **Add empty file** creates a named file with no content, for a stub students must complete. Enter a name (including extension, e.g., `main.py`) and an optional directory, then open **View** to write the content.
 - Use **Replace** on a row to swap in a different file, **Rename** to change its name or directory, and **View** to edit the content in place. For Jupyter notebooks (`.ipynb`), an embedded notebook editor opens automatically.
 
@@ -306,7 +306,7 @@ When **Allow student upload** is enabled, students submit through the Student Co
 
 **Constraints**:
 
-- Individual file size limit: 10 MB.
+- Individual file size limit: 10 MB. A whole submission is capped at 30 MB.
 - Required assignment files must be included.
 - Submissions after the due date follow the late policy (deductions, max late days).
 - Students can replace their submission by re-uploading before the deadline or before grading starts.

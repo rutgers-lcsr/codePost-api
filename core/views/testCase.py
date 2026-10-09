@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from core.permissions.permissions import TestCasePermissions
 from core.models import Submission
 from core.permissions.helpers import isStaffOfSub, returnNotAuthorized
+from django.shortcuts import get_object_or_404
 
 from rest_framework.decorators import action
 from drf_spectacular.utils import extend_schema
@@ -52,7 +53,7 @@ class TestCaseViewSet(ListProtectedViewSet):
     @action(detail=True, methods=["POST"])
     def run(self, request, pk=None):
         user = self.request.user
-        testCase = TestCase.objects.get(id=pk)
+        testCase = get_object_or_404(TestCase, id=pk)
         assignment = testCase.testCategory.assignment
         _course = assignment.course
 
@@ -61,7 +62,10 @@ class TestCaseViewSet(ListProtectedViewSet):
 
         require_capability(user, 'manage_test_cases', assignment)
 
-        if not assignment.environment or not assignment.environment.language:
+        # The reverse one-to-one raises RelatedObjectDoesNotExist when no Environment
+        # row exists yet (they are created lazily), so don't touch it directly.
+        environment = getattr(assignment, 'environment', None)
+        if not environment or not environment.language:
             raise serializers.ValidationError(
                 "Environment has not been created for this asignment."
             )

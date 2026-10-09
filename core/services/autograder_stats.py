@@ -7,6 +7,7 @@ from django.db.models import Count, Q
 from core.models import AutograderExecutionEvent
 
 TOP_ERRORS_LIMIT = 10
+TOP_ASSIGNMENTS_LIMIT = 10
 
 
 def _language_label(language):
@@ -59,6 +60,24 @@ def get_autograding_stats(date_from, date_to):
         'sampleMessage': sample,
     })
 
+  failures_by_assignment = []
+  for row in (failed_qs.filter(assignment__isnull=False)
+              .values('assignment_id', 'assignment__name',
+                      'course_id', 'course__name', 'course__period')
+              .annotate(failures=Count('id')).order_by('-failures')[:TOP_ASSIGNMENTS_LIMIT]):
+    top_category = (failed_qs.filter(assignment_id=row['assignment_id'])
+                    .values('error_category').annotate(count=Count('id'))
+                    .order_by('-count').values_list('error_category', flat=True).first())
+    failures_by_assignment.append({
+        'courseId': row['course_id'],
+        'courseName': row['course__name'],
+        'coursePeriod': row['course__period'],
+        'assignmentId': row['assignment_id'],
+        'assignmentName': row['assignment__name'],
+        'failures': row['failures'],
+        'topCategory': top_category or 'unknown',
+    })
+
   return {
       'dateFrom': date_from,
       'dateTo': date_to,
@@ -70,4 +89,30 @@ def get_autograding_stats(date_from, date_to):
       'languageUsage': language_usage,
       'failuresPerLanguage': failures_per_language,
       'topErrors': top_errors,
+      'failuresByAssignment': failures_by_assignment,
   }
+
+
+def get_autograding_failures(date_from, date_to, *, category=None, trigger=None, language=None,
+                             course_id=None, assignment_id=None, q=None):
+  """Failed (non-cached) executions in [date_from, date_to), newest first.
+
+  Filters are AND-ed; `language='unknown'` matches the empty snapshot and `q`
+  is a case-insensitive substring match on the error text.
+  """
+  qs = (AutograderExecutionEvent.objects
+        .filter(created__gte=date_from, created__lt=date_to, cached=False, success=False)
+        .select_related('course', 'assignment', 'triggered_by'))
+  if category:
+    qs = qs.filter(error_category=category)
+  if trigger:
+    qs = qs.filter(trigger=trigger)
+  if language:
+    qs = qs.filter(language='' if language == 'unknown' else language)
+  if course_id:
+    qs = qs.filter(course_id=course_id)
+  if assignment_id:
+    qs = qs.filter(assignment_id=assignment_id)
+  if q:
+    qs = qs.filter(Q(error_message__icontains=q) | Q(error_detail__icontains=q))
+  return qs.order_by('-created', '-id')

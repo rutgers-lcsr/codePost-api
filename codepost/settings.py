@@ -151,8 +151,10 @@ CSRF_COOKIE_SECURE = False
 # Submission uploads (assignments/{id}/studentUpload/) and course files arrive as JSON
 # with file contents inline, so the whole body counts against this cap (Django's
 # default is 2.5 MB, which 400s multi-file submissions well under the 10 MB per-file
-# limit in core/constants.py). Keep in sync with client_max_body_size in nginx.conf.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
+# limit). Single source of truth is core/constants.py; nginx's client_max_body_size
+# (nginx.conf here, deploy/proxy.conf.template in codePost) must match it.
+from core.constants import MAX_REQUEST_BODY_BYTES
+DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_REQUEST_BODY_BYTES
 
 if DOCKER:
     # If running in Docker, we assume that the API is behind a reverse proxy
@@ -176,6 +178,8 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # Turns Django's RequestDataTooBig (an HTML 400) into a JSON 413 the SPA can read.
+    'EXCEPTION_HANDLER': 'core.exceptions.exception_handler',
 }
 
 # ---------------------------------------------------------------------------
@@ -575,6 +579,8 @@ MIDDLEWARE = [
     "core.middleware.no_cache_middleware",
     # Innermost: CorsMiddleware / no_cache still decorate the 503 it returns.
     "core.middleware.DependencyUnavailableMiddleware",
+    # Every JSON error body gets a string `detail` (see core/middleware.py).
+    "core.middleware.ErrorBodyShapeMiddleware",
 ]
 if DEBUG:
     MIDDLEWARE.append("core.middleware.dev_cors_middleware")

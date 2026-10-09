@@ -12,7 +12,7 @@ import logging
 import time
 import shutil
 
-from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer, MaintenanceBannerSerializer, MaintenanceBannerResponseSerializer
+from core.serializers.system import SystemHealthResponseSerializer, SystemActivityResponseSerializer, MaintenanceBannerSerializer, MaintenanceBannerResponseSerializer, UploadLimitsSerializer
 from core.serializers.ai_usage import AIUsageSummarySerializer, AIProviderModelsListSerializer
 
 
@@ -507,3 +507,28 @@ class SystemAIModelsView(APIView):
 
         return Response({'providers': list(providers.values())})
 
+
+
+class SystemUploadLimitsView(APIView):
+    """
+    GET /system/uploadLimits/ — the upload size caps the server enforces, in bytes.
+    The UI reads these instead of hardcoding them (core/constants.py is the source).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        responses={200: UploadLimitsSerializer},
+        description="Upload size limits enforced by the server, in bytes. Per-file limits "
+                    "are measured on the decoded file, not the base64 wire form.",
+    )
+    def get(self, request):
+        from core import constants as c
+        return Response({
+            'maxSubmissionFileBytes': c.MAX_FILE_SIZE,
+            'maxSubmissionTotalBytes': c.MAX_SUBMISSION_TOTAL_SIZE,
+            'maxAssignmentFileBytes': c.MAX_ASSIGNMENT_FILE_SIZE,
+            'maxCourseFileBytes': c.MAX_COURSE_FILE_SIZE,
+            'maxDatasetBytes': c.MAX_DATASET_SIZE,
+            'maxQuizImageBytes': c.MAX_QUIZ_IMAGE_SIZE,
+            'maxRequestBodyBytes': c.MAX_REQUEST_BODY_BYTES,
+        })

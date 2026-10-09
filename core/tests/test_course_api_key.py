@@ -146,6 +146,22 @@ class TestCourseAPIKeyCRUD:
         key_obj.refresh_from_db()
         assert key_obj.name == "renamed-key"
 
+    def test_patch_key_name_to_existing_name_rejected(self, course_a, admin_of_a, api_client, raw_key_a):
+        """(course, name) is unique_together; a rename collision used to 500."""
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.post(f"/courses/{course_a.id}/apiKeys/", {"name": "other-key"}, format="json")
+        assert resp.status_code == status.HTTP_201_CREATED
+        other = CourseAPIKey.objects.get(course=course_a, name="other-key")
+        resp = api_client.patch(
+            f"/courses/{course_a.id}/apiKeys/{other.id}/",
+            {"name": "test-key"},  # raw_key_a's name
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert "already exists" in resp.data["error"]
+        other.refresh_from_db()
+        assert other.name == "other-key"
+
     def test_deactivate_key(self, course_a, admin_of_a, api_client, raw_key_a):
         key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
         api_client.force_authenticate(user=admin_of_a)

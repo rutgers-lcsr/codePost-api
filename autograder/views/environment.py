@@ -23,8 +23,22 @@ from autograder.tasks import run_test_task
 from autograder.testUtils.buildHelpers import createDockerFile
 
 import json
+import logging
 
 from typing import Any, cast
+
+import kombu.exceptions
+import redis.exceptions
+from django.shortcuts import get_object_or_404
+
+logger = logging.getLogger(__name__)
+
+# Broker/redis outages propagate so DependencyUnavailableMiddleware answers 503.
+_BROKER_ERRORS = (
+    kombu.exceptions.OperationalError,
+    redis.exceptions.ConnectionError,
+    redis.exceptions.TimeoutError,
+)
 
 
 from autograder.serializers.environment_actions import (
@@ -124,19 +138,22 @@ class EnvironmentViewSet(ListProtectedViewSet):
         # Run Builder asynchronously via Celery
         try:
             x = BuildEnvironment.delay(environment.id)
-            resp_ser = EnvironmentBuildResponseSerializer(
-                instance={"task": x.task_id, "status": "queued"}
-            )
-            return Response(resp_ser.data)
         except Exception as e:
-            # Broker down: nothing would ever advance 'Building', so fail it explicitly.
+            # Nothing would ever advance 'Building' now, so fail the build explicitly.
             environment.build_status = 3
             environment.build_logs += f"Could not queue build: {e}\n"
             environment.save()
-            resp_ser = EnvironmentBuildResponseSerializer(
-                instance={"task": "async_failed", "error": str(e)}
+            if isinstance(e, _BROKER_ERRORS):
+                raise
+            logger.exception("Could not queue build for environment %s", environment.id)
+            return Response(
+                {"detail": "Could not queue the build.", "error": "async_failed"},
+                status=500,
             )
-            return Response(resp_ser.data, status=500)
+        resp_ser = EnvironmentBuildResponseSerializer(
+            instance={"task": x.task_id, "status": "queued"}
+        )
+        return Response(resp_ser.data)
     @extend_schema(
         request=None,
         responses={
@@ -146,10 +163,11 @@ class EnvironmentViewSet(ListProtectedViewSet):
     )
     @action(detail=True, methods=["GET"])
     def build_status(self, request, pk=None):
+        # Http404 / PermissionDenied from get_object() propagate as 404 / 403.
+        environment = self.get_object()
+
+        # Helper to generate the full dockerfile content logic
         try:
-            environment = self.get_object()
-            
-            # Helper to generate the full dockerfile content logic
             full_date_dockerfile = createDockerFile(
                 environment.language,
                 environment.buildType,
@@ -157,27 +175,28 @@ class EnvironmentViewSet(ListProtectedViewSet):
                 environment.dockerRunInstructions,
                 environment.id,
             )
-
-            # Return status directly from the database fields we added
-            # Serialize status
+        except Exception:
+            logger.exception("Could not render the Dockerfile for environment %s", environment.id)
             data = {
-                "inProgress": bool(environment.build_status == 1),
-                "isSuccess": bool(environment.build_status == 2),
-                "logs": environment.build_logs or "",
-                "dockerfile": full_date_dockerfile or "",
-                "lastBuilt": environment.last_built
-            }
-            resp_ser = EnvironmentBuildStatusResponseSerializer(instance=data)
-            return Response(resp_ser.data)
-        except Exception as e:
-            data = {
-                "error": str(e),
+                "error": "Could not render the Dockerfile for this environment.",
                 "inProgress": False,
                 "isSuccess": False,
-                "logs": f"Error fetching status: {e}",
+                "logs": "Error fetching status: could not render the Dockerfile.",
             }
             resp_ser = EnvironmentBuildStatusErrorSerializer(instance=data)
             return Response(resp_ser.data, status=500)
+
+        # Return status directly from the database fields we added
+        # Serialize status
+        data = {
+            "inProgress": bool(environment.build_status == 1),
+            "isSuccess": bool(environment.build_status == 2),
+            "logs": environment.build_logs or "",
+            "dockerfile": full_date_dockerfile or "",
+            "lastBuilt": environment.last_built
+        }
+        resp_ser = EnvironmentBuildStatusResponseSerializer(instance=data)
+        return Response(resp_ser.data)
 
     #################################### Run ###############################################
     @extend_schema(
@@ -224,7 +243,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
         Dispatches run_test_task which calls TestService.run_suite().
         """
         user = self.request.user
-        environment = Environment.objects.get(id=pk)
+        environment = get_object_or_404(Environment, id=pk)
         assignment = environment.assignment
         course = assignment.course
         req_ser = EnvironmentRunRequestSerializer(data=request.data)
@@ -308,27 +327,28 @@ class EnvironmentViewSet(ListProtectedViewSet):
         Generate a preview of the Dockerfile based on provided parameters,
         without saving changes to the database.
         """
+        # Http404 / PermissionDenied / ValidationError propagate with their own status.
+        environment = self.get_object()
+
+        req_ser = EnvironmentPreviewRequestSerializer(data=request.data)
+        req_ser.is_valid(raise_exception=True)
+        vd = cast(dict[str, Any], req_ser.validated_data)
+
+        # Use provided data or fall back to current environment state
+        language = vd.get("language", environment.language)
+        build_type = vd.get("buildType", environment.buildType)
+        custom_dockerfile = vd.get("dockerfile", environment.dockerfile)
+
+        # dockerRunInstructions might be passed as a list of strings
+        # or we might need to parse them if passed differently.
+        # Assuming list of strings as per EnvironmentSerializer/frontend
+        docker_run_instructions = vd.get("dockerRunInstructions", [])
+        if not isinstance(docker_run_instructions, list):
+            docker_run_instructions = []
+
+        requirements_content = vd.get("requirements", environment.requirements)
+
         try:
-            environment = self.get_object()
-
-            req_ser = EnvironmentPreviewRequestSerializer(data=request.data)
-            req_ser.is_valid(raise_exception=True)
-            vd = cast(dict[str, Any], req_ser.validated_data)
-            
-            # Use provided data or fall back to current environment state
-            language = vd.get("language", environment.language)
-            build_type = vd.get("buildType", environment.buildType)
-            custom_dockerfile = vd.get("dockerfile", environment.dockerfile)
-            
-            # dockerRunInstructions might be passed as a list of strings
-            # or we might need to parse them if passed differently.
-            # Assuming list of strings as per EnvironmentSerializer/frontend
-            docker_run_instructions = vd.get("dockerRunInstructions", [])
-            if not isinstance(docker_run_instructions, list):
-                docker_run_instructions = []
-                
-            requirements_content = vd.get("requirements", environment.requirements)
-
             preview_content = createDockerFile(
                 language or "python-3.7",
                 build_type or "default",
@@ -337,11 +357,13 @@ class EnvironmentViewSet(ListProtectedViewSet):
                 environment.id,
                 dependencies_file_content=requirements_content or "",
             )
-            return Response(preview_content)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return Response(str(e), status=400)
+        except Exception:
+            logger.exception("Dockerfile preview failed for environment %s", environment.id)
+            return Response(
+                {"detail": "Could not generate a Dockerfile preview from these settings."},
+                status=400,
+            )
+        return Response(preview_content)
     @extend_schema(
         request=None,
         responses={
@@ -372,20 +394,27 @@ class EnvironmentViewSet(ListProtectedViewSet):
         testCase_types_to_exclude = ["file", "external"]
         tests_query = TestCase.objects.filter(testCategory__assignment=assignment).exclude(
             type__in=testCase_types_to_exclude
-        )
+        ).select_related("testCategory")
         
-        # Simple serialization for the kit
+        # Simple serialization for the kit (the fields TestCase actually has)
         tests_data = []
         for t in tests_query:
             tests_data.append({
                 "id": t.id,
                 "description": t.description,
                 "type": t.type,
-                "command": t.command,  # type: ignore[attr-defined]  # Django model fields
-                "input": t.input,  # type: ignore[attr-defined]  # Django model fields
-                "expectedOutput": t.expectedOutput,  # type: ignore[attr-defined]  # Django model fields
-                "fileName": t.fileName,  # type: ignore[attr-defined]  # Django model fields
-                # "targetCellId": t.targetCellId # Future: support notebook
+                "text": t.text,
+                "explanation": t.explanation,
+                "testCode": t.testCode,
+                "functionName": t.functionName,
+                "targetCellId": t.targetCellId,
+                "timeout": t.timeout,
+                "pointsPass": float(t.pointsPass),
+                "pointsFail": float(t.pointsFail),
+                "exposed": t.exposed,
+                "hidden": t.hidden,
+                # The runner script picks the file to execute from this.
+                "fileName": t.testCategory.targetFileName,
             })
 
         # 3. Runner Script (Python)

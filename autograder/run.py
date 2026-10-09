@@ -483,6 +483,18 @@ def RunSubmission(self, submissionID: int):
     except Exception:
         pass
     
+    # One execution event per file for the autograding stats dashboard.
+    # RunSubmission never consults the cache, so these are always cached=False.
+    from autograder.services.execution_events import record_execution_event
+
+    def record_event(f, success, error_text=None, execution_time=None):
+        record_execution_event(
+            trigger='submission_run', cached=False, success=success,
+            file=f, submission=submission, assignment=submission.assignment,
+            language=environment.language, image_name=environment.image_name,
+            execution_time=execution_time, error_text=error_text,
+        )
+
     if not run_files:
         logger.debug(f"[RunSubmission] runFilesOnSubmit disabled for assignment {submission.assignment.id}. Skipping file execution.")
     elif not files:
@@ -502,6 +514,7 @@ def RunSubmission(self, submissionID: int):
                 logger.info(f"File {f.id} has no executor, skipping.")
                 failed += 1
                 results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": "No executor available"})
+                record_event(f, False, "No executor available")
                 continue
             
             def execute_thread():
@@ -528,12 +541,14 @@ def RunSubmission(self, submissionID: int):
                 logger.error(f"[RunSubmission] Execution error for file {f.id}: {execution_error}", exc_info=True)
                 failed += 1
                 results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": str(execution_error)})
+                record_event(f, False, str(execution_error))
                 continue
 
             if result is None:
                 logger.warning(f"[RunSubmission] Execution did not complete for file {f.id}")
                 failed += 1
                 results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": "Execution timeout or incomplete"})
+                record_event(f, False, "Execution timeout or incomplete")
                 continue
             
             # Save the cached result
@@ -544,6 +559,9 @@ def RunSubmission(self, submissionID: int):
                 successful += 1
                 results.append({"file_id": f.id, "file_name": f.name, "success": True, "execution_time": result.execution_time})
                 logger.info(f"[RunSubmission] Successfully cached execution for file {f.id}")
+                # The stats event reflects the executor's own outcome (a cached
+                # failure is still a failed execution), not the cache-save result.
+                record_event(f, result.success, result.err or result.stderr, result.execution_time)
 
 
                 
@@ -585,6 +603,7 @@ def RunSubmission(self, submissionID: int):
                 logger.error(f"[RunSubmission] Failed to save cache for file {f.id}: {e}")
                 failed += 1
                 results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": f"Cache save failed: {str(e)}"})
+                record_event(f, False, f"Cache save failed: {str(e)}")
     
       except Exception as e:
         logger.error(f"[RunSubmission] Unexpected error processing submission {submissionID}: {e}", exc_info=True)
@@ -620,16 +639,6 @@ def RunSubmission(self, submissionID: int):
         logger.debug(f"[RunSubmission] runTestsOnSubmit disabled for assignment {submission.assignment.id}. Skipping tests.")
     # -----------------------------------------------
     
-    # Record one execution event per file for the autograding stats dashboard.
-    # RunSubmission never consults the cache, so these are always cached=False.
-    from autograder.services.execution_events import record_execution_event
-    for r in results:
-        record_execution_event(
-            trigger='submission_run', cached=False, success=r['success'],
-            assignment=submission.assignment, language=environment.language,
-            error_text=r.get('error'),
-        )
-
     summary = {
         "success": True,
         "submission_id": submissionID,

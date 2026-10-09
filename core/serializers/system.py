@@ -67,3 +67,14 @@ class MaintenanceBannerResponseSerializer(serializers.Serializer):
     severity = serializers.ChoiceField(choices=['info', 'warning', 'critical'])
     starts_at = serializers.DateTimeField(allow_null=True)
     ends_at = serializers.DateTimeField(allow_null=True)
+
+
+class UploadLimitsSerializer(serializers.Serializer):
+    """Server-side upload caps (bytes) so clients pre-check with the same numbers."""
+    maxSubmissionFileBytes = serializers.IntegerField()
+    maxSubmissionTotalBytes = serializers.IntegerField()
+    maxAssignmentFileBytes = serializers.IntegerField()
+    maxCourseFileBytes = serializers.IntegerField()
+    maxDatasetBytes = serializers.IntegerField()
+    maxQuizImageBytes = serializers.IntegerField()
+    maxRequestBodyBytes = serializers.IntegerField()
