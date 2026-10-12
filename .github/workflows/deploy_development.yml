@@ -176,10 +176,13 @@ jobs:
                   WORKER_SHELL_SHARED_SECRET=${{ secrets.WORKER_SHELL_SHARED_SECRET }}
                   EOF
 
+            # `--profile beat` starts codepost-beat (scheduled publish/feedback release,
+            # quiz sweeps, reaper). EXACTLY ONE beat may run deployment-wide — this is
+            # the only development worker node; a second one must not get the flag.
             - name: Build and deploy workers only
               run: |
-                  docker compose -f docker-compose-worker.yml build
-                  docker compose -f docker-compose-worker.yml up -d --remove-orphans --wait --wait-timeout 180
+                  docker compose -f docker-compose-worker.yml --profile beat build
+                  docker compose -f docker-compose-worker.yml --profile beat up -d --remove-orphans --wait --wait-timeout 180
 
             - name: Remove docker artifacts
               run: |
