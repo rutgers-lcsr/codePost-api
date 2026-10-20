@@ -14,13 +14,18 @@ class QuizGeneratedSectionSerializer(ModelSerializerWithPOSTCheck):
   (unknown {variables} are rejected with helpful messages)."""
 
   questionTypes = serializers.JSONField(required=False)
+  fallbackPrompt = serializers.CharField(required=False, allow_blank=True, allow_null=True)
   datasetTruncationWarning = serializers.SerializerMethodField()
 
   class Meta:
     model = QuizGeneratedSection
-    fields = ('id', 'quiz', 'name', 'systemPrompt', 'numQuestions', 'pointsPerQuestion',
-              'questionTypes', 'sortKey', 'datasetTruncationWarning')
+    fields = ('id', 'quiz', 'name', 'systemPrompt', 'fallbackPrompt', 'numQuestions',
+              'pointsPerQuestion', 'questionTypes', 'sortKey', 'datasetTruncationWarning')
     POST_permissions_fields = ('quiz',)
+
+  def validate_fallbackPrompt(self, value):
+    # null / whitespace mean "no fallback" — stored as '' so has_fallback is one check.
+    return (value or '').strip()
 
   def get_datasetTruncationWarning(self, obj) -> Optional[str]:
     """Non-blocking authoring hint: if the prompt pulls in {student_dataset} and any active
@@ -78,6 +83,20 @@ class QuizGeneratedSectionSerializer(ModelSerializerWithPOSTCheck):
           course=quiz.course, assignment=quiz.assignment))
       if errors:
         raise serializers.ValidationError({'systemPrompt': errors})
+    # The fallback stands in for students with no submission, so it is validated like the
+    # main prompt AND may not draw on submission data. (A fallback on a submission-free
+    # main prompt is allowed — it is simply never used.)
+    fallback = proposed.get('fallbackPrompt') or ''
+    if fallback and quiz is not None:
+      from core.prompts.variables import VariableContext, tokens_requiring, validate_template
+      errors = validate_template(fallback, VariableContext(
+          course=quiz.course, assignment=quiz.assignment))
+      bad = tokens_requiring(fallback, 'submission')
+      if bad:
+        errors.append("The fallback prompt is used for students who have no submission, so "
+                      f"it can't use {', '.join(bad)}.")
+      if errors:
+        raise serializers.ValidationError({'fallbackPrompt': errors})
     return data
 
 
@@ -115,6 +134,14 @@ class GeneratedQuizQuestionSerializer(ModelSerializerWithPOSTCheck):
     return data
 
 
+def used_fallback(gen_set) -> bool:
+  """Whether the set's latest run generated from a section's fallbackPrompt (the student
+  had no submission). Metadata-derived: every run rewrites generationMetadata, and a
+  submission nulled by a deletion carries no flag — so the two null-submission cases
+  stay distinct."""
+  return bool((gen_set.generationMetadata or {}).get('fallback'))
+
+
 class GeneratedQuestionSetSerializer(serializers.ModelSerializer):
   """A student's generated question set with its questions — the review payload.
   Staff-only (never exposed to students)."""
@@ -123,13 +150,17 @@ class GeneratedQuestionSetSerializer(serializers.ModelSerializer):
   approvedByEmail = serializers.EmailField(source='approvedBy.email', read_only=True,
                                            allow_null=True)
   questions = GeneratedQuizQuestionSerializer(many=True, read_only=True)
+  usedFallback = serializers.SerializerMethodField()
 
   class Meta:
     model = GeneratedQuestionSet
     fields = ('id', 'quiz', 'student', 'studentEmail', 'submission', 'status',
               'approvedBy', 'approvedByEmail', 'approvedAt', 'errorMessage',
-              'generationMetadata', 'questions', 'created', 'modified')
+              'generationMetadata', 'questions', 'usedFallback', 'created', 'modified')
     read_only_fields = fields
+
+  def get_usedFallback(self, obj) -> bool:
+    return used_fallback(obj)
 
 
 class GeneratedQuestionSetListSerializer(serializers.ModelSerializer):
@@ -137,12 +168,17 @@ class GeneratedQuestionSetListSerializer(serializers.ModelSerializer):
 
   studentEmail = serializers.EmailField(source='student.email', read_only=True)
   questionCount = serializers.SerializerMethodField()
+  usedFallback = serializers.SerializerMethodField()
 
   class Meta:
     model = GeneratedQuestionSet
     fields = ('id', 'quiz', 'student', 'studentEmail', 'submission', 'status',
-              'approvedAt', 'errorMessage', 'questionCount', 'created', 'modified')
+              'approvedAt', 'errorMessage', 'questionCount', 'usedFallback', 'created',
+              'modified')
     read_only_fields = fields
 
   def get_questionCount(self, obj) -> int:
     return obj.questions.count()
+
+  def get_usedFallback(self, obj) -> bool:
+    return used_fallback(obj)

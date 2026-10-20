@@ -722,11 +722,15 @@ def generate_personalized_quiz_sets(
 
     With ``submission_id=None`` (``quiz_id`` + ``student_id`` required) the run is
     submission-less: the eager path for quizzes whose prompts don't draw on submission
-    data — including standalone quizzes with no assignment at all.
+    data — including standalone quizzes with no assignment at all — and the fallback
+    path for a student with no submission on a submission-seeded quiz (each section's
+    ``fallbackPrompt``). If such a student turns out to have a submission after all
+    (uploaded since the enqueue, or the set's link was nulled by a deletion), the run
+    seeds from it instead, so fallback questions never shadow real ones.
     """
     import uuid
     from core.models import Quiz, Submission, User
-    from core.services.quiz_grading import generation_needs_submission
+    from core.services.quiz_grading import generation_needs_submission, latest_submission_for
 
     if submission_id is None:
         # Submission-less (eager) generation: one student on one quiz.
@@ -740,6 +744,8 @@ def generate_personalized_quiz_sets(
         if quiz is None or quiz.course.archived or student is None:
             return
         submission = None
+        if quiz.assignment_id is not None and generation_needs_submission(quiz):
+            submission = latest_submission_for(student, quiz.assignment)
         assignment = quiz.assignment
         course = quiz.course
         students = [student]
@@ -896,8 +902,14 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
     (``_GENERATION_ATTEMPTS`` calls in total); the last rejected output is returned in
     the metadata as ``raw_output`` so a developer can see what the model produced.
     Returns ``(question_rows, error, variant_id, metadata)`` — any failure fails the
-    whole set (no partial sets), reported through ``error``."""
+    whole set (no partial sets), reported through ``error``.
+
+    With no ``submission``, a section whose prompt draws on one is generated from its
+    ``fallbackPrompt`` (recorded as ``metadata['fallback']``); a section with neither
+    fails the set with a clear message rather than sending ``(unavailable: …)`` markers
+    to the model."""
     from asgiref.sync import async_to_sync
+    from core.prompts.variables import template_requires_submission
 
     question_rows: list[tuple] = []  # (section, normalized question dict)
     error = ''
@@ -905,14 +917,21 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
     variant_id = None
     input_tokens = output_tokens = 0
     section_prompts = []  # what the model actually saw, for staff review on the set
+    used_fallback = False
     for section in quiz.generatedSections.all():
         section_rows: list[tuple] = []
         prior_error = ''
+        use_fallback = submission is None and template_requires_submission(section.systemPrompt)
+        if use_fallback and not section.has_fallback:
+            error = (f"Section '{section.name or section.id}' needs the student's submission "
+                     "and has no fallback prompt, and this student has no submission.")
+            break
+        used_fallback = used_fallback or use_fallback
         for attempt in range(1, _GENERATION_ATTEMPTS + 1):
             raw_output = None
             try:
                 result = async_to_sync(service.generate_personalized_quiz_questions)(
-                    section, submission, prior_error=prior_error)
+                    section, submission, prior_error=prior_error, use_fallback=use_fallback)
             except Exception as e:
                 logger.error(f"[PersonalQuizGen] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
                 error = f"Generation failed: {e}"
@@ -927,6 +946,7 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
                     'sectionName': section.name or '',
                     # Bounded: a prompt embedding large submission files could be huge.
                     'prompt': result.resolved_prompt[:100_000],
+                    'fallback': use_fallback,
                 })
             if not result.success or not result.text:
                 error = result.error or 'Empty model response.'
@@ -954,6 +974,7 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
         'input_tokens': input_tokens,
         'output_tokens': output_tokens,
         'sections': section_prompts,
+        'fallback': used_fallback,
     }
     if raw_output is not None:
         metadata['raw_output'] = raw_output
@@ -1126,8 +1147,30 @@ def preview_generated_section(
                            resultData=result_data)
 
 
+def _backfill_skip_ids(quiz, missing_only: bool) -> set[int]:
+    """Students a backfill must not touch: anyone with a set (``missing_only``), else
+    only those whose set is approved (non-approved sets regenerate)."""
+    from core.models import GeneratedQuestionSet
+
+    protected = GeneratedQuestionSet.objects.filter(quiz=quiz)
+    if not missing_only:
+        protected = protected.filter(status='approved')
+    return set(protected.values_list('student_id', flat=True))
+
+
+def students_without_submission(quiz, missing_only: bool = True):
+    """Enrolled students with no submission on the attached assignment and no set the
+    backfill would protect — the students a submission-seeded backfill skips unless every
+    section has a fallback prompt. Empty for unattached quizzes."""
+    if quiz.assignment_id is None:
+        return quiz.course.students.none()
+    return (quiz.course.students.exclude(student_submissions__assignment=quiz.assignment)
+            .exclude(id__in=_backfill_skip_ids(quiz, missing_only)).order_by('email'))
+
+
 def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
-                                  missing_only: bool = False, dry_run: bool = False) -> int:
+                                  missing_only: bool = False, dry_run: bool = False,
+                                  include_without_submission: bool = False) -> int:
     """Enqueue per-student question generation for everyone who already submitted to the
     quiz's attached assignment. Returns the number of students queued.
 
@@ -1143,12 +1186,18 @@ def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
     instead (no submission needed) — the eager path, which also covers standalone
     quizzes with no assignment at all.
 
+    ``include_without_submission`` (the explicit Generate-missing action and the
+    scheduled generationDate run only — never the section-created or publish
+    backfills) also enqueues students with NO submission, generated from the sections'
+    fallback prompts, provided every submission-seeded section has one
+    (``fallback_covers_non_submitters``); otherwise they stay skipped.
+
     Cheap to call inline (DB reads + .delay()s); the actual generation runs in the
     per-submission tasks. Group submissions are enqueued once (one shared AI call per
     section) unless only some members need generating.
     """
-    from core.models import GeneratedQuestionSet
-    from core.services.quiz_grading import LATEST_SUBMISSION_ORDERING, generation_needs_submission
+    from core.services.quiz_grading import (
+        LATEST_SUBMISSION_ORDERING, fallback_covers_non_submitters, generation_needs_submission)
 
     assignment = quiz.assignment
     has_sections = quiz.generatedSections.exists()
@@ -1159,11 +1208,7 @@ def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
     needs_submission = generation_needs_submission(quiz) if has_sections else True
     if assignment is None and needs_submission:
         return 0
-    approved_or_all = GeneratedQuestionSet.objects.filter(quiz=quiz)
-    if not missing_only:
-        # Non-approved sets regenerate; only approved ones are protected.
-        approved_or_all = approved_or_all.filter(status='approved')
-    skip_ids = set(approved_or_all.values_list('student_id', flat=True))
+    skip_ids = _backfill_skip_ids(quiz, missing_only)
 
     if not needs_submission:
         # Submission-free prompts: generate for every enrolled student, one task each.
@@ -1199,23 +1244,35 @@ def enqueue_personalized_backfill(quiz, requested_by_id: int | None = None,
                         submission.id, quiz_id=quiz.id, requested_by_id=requested_by_id,
                         student_id=s.id)
         queued += len(targets)
+
+    if include_without_submission and fallback_covers_non_submitters(quiz):
+        # ``covered`` is now skip_ids ∪ every submitter: what's left of the roster has no
+        # submission at all — one submission-less (fallback) task each.
+        for student in quiz.course.students.exclude(id__in=covered).order_by('id'):
+            if not dry_run:
+                generate_personalized_quiz_sets.delay(
+                    quiz_id=quiz.id, student_id=student.id, requested_by_id=requested_by_id)
+            queued += 1
     return queued
 
 
 @shared_task
 def backfill_personalized_quiz_sets(quiz_id: int, requested_by_id: int | None = None,
-                                    missing_only: bool = False):
+                                    missing_only: bool = False,
+                                    include_without_submission: bool = False):
     """Async wrapper around enqueue_personalized_backfill for signal-triggered backfills
-    (a QuizGeneratedSection created after students already submitted) and the publish
+    (a QuizGeneratedSection created after students already submitted), the publish
     catch-up (``missing_only=True`` — only students with no set, so a republish never
-    regenerates sets a reviewer may have edited)."""
+    regenerates sets a reviewer may have edited) and the scheduled generationDate run
+    (which alone passes ``include_without_submission``)."""
     from core.models import Quiz
 
     quiz = Quiz.objects.filter(id=quiz_id).select_related('assignment').first()
     if quiz is None:
         return
     queued = enqueue_personalized_backfill(quiz, requested_by_id=requested_by_id,
-                                           missing_only=missing_only)
+                                           missing_only=missing_only,
+                                           include_without_submission=include_without_submission)
     if queued:
         logger.info(f"[PersonalQuizGen] Backfill for quiz {quiz_id}: queued {queued} student(s).")
 
@@ -1224,7 +1281,9 @@ def backfill_personalized_quiz_sets(quiz_id: int, requested_by_id: int | None = 
 def run_scheduled_quiz_generation():
     """One-shot scheduled generation for manual-generation quizzes: when a quiz's
     generationDate arrives, backfill question sets for students who have a submission but
-    no set yet (missing_only — existing sets, possibly staff-edited, are never touched).
+    no set yet (missing_only — existing sets, possibly staff-edited, are never touched),
+    plus students with no submission when every submission-seeded section has a fallback
+    prompt (an explicit, instructor-scheduled moment — like Generate missing).
     scheduledGenerationRanAt makes the run one-shot; moving generationDate forward past
     the stamp re-arms it. Late submitters after the run stay manual (the review panel's
     missing count / Generate missing). Only published quizzes with generated sections
@@ -1251,7 +1310,8 @@ def run_scheduled_quiz_generation():
             # Stamp BEFORE enqueueing so a crash can't re-fire the backfill every tick.
             quiz.scheduledGenerationRanAt = now
             quiz.save()
-            backfill_personalized_quiz_sets.delay(quiz_id, missing_only=True)
+            backfill_personalized_quiz_sets.delay(quiz_id, missing_only=True,
+                                                  include_without_submission=True)
             count += 1
         except Quiz.DoesNotExist:
             continue

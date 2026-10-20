@@ -348,7 +348,8 @@ class QuizViewSet(ListProtectedViewSet):
       }),
       responses=GeneratedQuestionSetSerializer,
       description="Generate (or regenerate) this quiz's AI questions for one student from "
-                  "their latest submission — useful for testing a prompt or backfilling after "
+                  "their latest submission — or, if they have none, from the sections' "
+                  "fallback prompts — useful for testing a prompt or backfilling after "
                   "enabling the feature. An approved set is only regenerated with force=true "
                   "(it becomes un-published until re-approved).",
   )
@@ -369,12 +370,16 @@ class QuizViewSet(ListProtectedViewSet):
       return Response({'error': 'No student with that email is enrolled in this course.'},
                       status=status.HTTP_400_BAD_REQUEST)
     # Submission-free prompts generate without one (the eager path); otherwise the
-    # student's latest submission seeds the run.
+    # student's latest submission seeds the run — or the sections' fallback prompts when
+    # they have none and every submission-seeded section carries one.
     submission = (quiz_grading.latest_submission_for(student, quiz.assignment)
                   if quiz.assignment_id is not None else None)
-    if submission is None and quiz_grading.generation_needs_submission(quiz):
+    if submission is None and quiz_grading.generation_needs_submission(quiz) \
+        and not quiz_grading.fallback_covers_non_submitters(quiz):
       return Response({'error': 'The student has no submission for this assignment to '
-                                'generate from.'}, status=status.HTTP_400_BAD_REQUEST)
+                                'generate from. Add a fallback prompt to every AI section '
+                                'that uses submission variables to generate for students '
+                                'without one.'}, status=status.HTTP_400_BAD_REQUEST)
 
     force = bool(request.data.get('force'))
     gen_set, _ = GeneratedQuestionSet.objects.get_or_create(quiz=quiz, student=student)
@@ -535,6 +540,10 @@ class QuizViewSet(ListProtectedViewSet):
           'wouldGenerate': serializers.IntegerField(),
           'missing': serializers.IntegerField(),
           'needsSubmission': serializers.BooleanField(),
+          'missingWithoutSubmission': serializers.IntegerField(),
+          'missingWithoutSubmissionStudents': serializers.ListField(
+              child=serializers.EmailField()),
+          'fallbackCovers': serializers.BooleanField(),
       }),
   )
   @action(detail=True, methods=['GET'])
@@ -543,18 +552,28 @@ class QuizViewSet(ListProtectedViewSet):
     save a new AI section (``wouldGenerate``: the section-create backfill) and on the
     review drawer's Generate-missing button (``missing``: targets without any set).
     Submission-seeded quizzes count submitters; submission-free ones count every
-    enrolled student (``needsSubmission`` says which applies)."""
+    enrolled student (``needsSubmission`` says which applies).
+
+    ``missingWithoutSubmission`` / ``missingWithoutSubmissionStudents``: enrolled students
+    with no submission and no set. They are part of ``missing`` (what Generate missing
+    queues) only when ``fallbackCovers`` — every submission-seeded section has a fallback
+    prompt; otherwise they are skipped. Never part of ``wouldGenerate``."""
     quiz = self.get_object()
     denied = _review_guard(request.user, quiz)
     if denied:
       return denied
-    from core.tasks import enqueue_personalized_backfill
+    from core.tasks import enqueue_personalized_backfill, students_without_submission
     needs_submission = (quiz_grading.generation_needs_submission(quiz)
                         if quiz.generatedSections.exists() else True)
+    without = list(students_without_submission(quiz)) if needs_submission else []
     return Response({
         'wouldGenerate': enqueue_personalized_backfill(quiz, dry_run=True),
-        'missing': enqueue_personalized_backfill(quiz, dry_run=True, missing_only=True),
+        'missing': enqueue_personalized_backfill(quiz, dry_run=True, missing_only=True,
+                                                 include_without_submission=True),
         'needsSubmission': needs_submission,
+        'missingWithoutSubmission': len(without),
+        'missingWithoutSubmissionStudents': [s.email for s in without],
+        'fallbackCovers': quiz_grading.fallback_covers_non_submitters(quiz),
     })
 
   @extend_schema(
@@ -565,7 +584,9 @@ class QuizViewSet(ListProtectedViewSet):
   def generateMissing(self, request, pk=None):
     """Queue question generation for every student who has a submission on the attached
     assignment but no question set yet — e.g. they submitted before the AI section
-    existed, or the feature was off / generation failed at the time."""
+    existed, or the feature was off / generation failed at the time. When every
+    submission-seeded section has a fallback prompt, students with no submission are
+    included too (generated from the fallback)."""
     quiz = self.get_object()
     # Generation spends AI credits: admins always; graders only when the instructor turned
     # on gradersCanGenerate (missing_only never touches existing sets, so the blast radius
@@ -576,7 +597,7 @@ class QuizViewSet(ListProtectedViewSet):
 
     from core.tasks import enqueue_personalized_backfill
     queued = enqueue_personalized_backfill(quiz, requested_by_id=request.user.id,
-                                           missing_only=True)
+                                           missing_only=True, include_without_submission=True)
     if queued:
       record_audit_event(course=quiz.course, event_type='quiz_generated_set_regenerated',
                          user=request.user, quiz=quiz, assignment=quiz.assignment,
@@ -587,7 +608,10 @@ class QuizViewSet(ListProtectedViewSet):
       responses=inline_serializer('PromptVariable', {
           'token': serializers.CharField(), 'name': serializers.CharField(),
           'argument': serializers.CharField(allow_null=True), 'label': serializers.CharField(),
-          'description': serializers.CharField(), 'kind': serializers.CharField()},
+          'description': serializers.CharField(), 'kind': serializers.CharField(),
+          # Identical to the PromptTypeView component of the same name (drf-spectacular
+          # keeps one definition per name) — required=False there, so here too.
+          'requiresSubmission': serializers.BooleanField(required=False)},
           many=True),
       description="The {variables} usable in this quiz's AI-generated section prompts "
                   "(powers the prompt editor's autocomplete).",
@@ -607,7 +631,7 @@ class QuizViewSet(ListProtectedViewSet):
           'key': serializers.CharField(), 'label': serializers.CharField(),
           'description': serializers.CharField(), 'attachedOnly': serializers.BooleanField(),
           'questionTypes': serializers.ListField(child=serializers.CharField()),
-          'text': serializers.CharField()},
+          'text': serializers.CharField(), 'forFallback': serializers.BooleanField()},
           many=True),
       description="Starter templates for this quiz's AI-generated section prompts "
                   "(powers the prompt editor's 'start from a template' picker).",

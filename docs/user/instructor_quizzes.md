@@ -212,6 +212,14 @@ submits, generate questions from *their* code to confirm they understand what th
 - On the **Review** tab, review each student's set: edit questions inline, **regenerate**, or
   **approve**. A student's quiz only opens for them once their set is approved — until then they see
   a neutral **"Your quiz is being prepared."**
+- **Students who never submit.** A prompt that uses submission variables waits for a submission, so
+  a student who never submits gets no set — the Review tab lists them under **Students without a
+  submission**. To include them, give the section a **fallback prompt** (assignment and course
+  variables only, e.g. `{assignment_description}` and `{assignment_files}`; **Insert starter text**
+  offers one). **Generate missing**, the scheduled run, and per-student **Generate** then create
+  their set from it, marked **Fallback** on the Review tab; if they submit later, a set that isn't
+  approved yet is regenerated from their submission. Without a fallback, those students see
+  **"Requires an assignment submission"** instead of "being prepared."
 - **Answer keys.** Each generated question carries a grader-only **answer key** (the correct
   answer/working code, plus worked steps for hand-computation questions). It's shown — and is
   editable — on the Review tab and again while grading. **Students never see it.**

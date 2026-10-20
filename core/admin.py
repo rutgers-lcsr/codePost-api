@@ -2619,10 +2619,18 @@ class GeneratedQuestionSetAdmin(admin.ModelAdmin):
         'regenerate' button. A set whose student already attempted the quiz is skipped
         (reset their attempts first), so an in-progress attempt is never disturbed."""
         from core.tasks import generate_personalized_quiz_sets
-        started = skipped = 0
+        from core.services.quiz_grading import (
+            fallback_covers_non_submitters, generation_needs_submission)
+        started = skipped = no_seed = 0
         for gen_set in queryset.select_related("quiz"):
             if gen_set.questions.exists() and gen_set.quiz.attempts.filter(student_id=gen_set.student_id).exists():
                 skipped += 1
+                continue
+            # No submission and nothing to fall back on: the task would fail the set.
+            # (The task itself re-resolves a submission the student made since.)
+            if gen_set.submission_id is None and generation_needs_submission(gen_set.quiz) \
+                    and not fallback_covers_non_submitters(gen_set.quiz):
+                no_seed += 1
                 continue
             GeneratedQuestionSet.objects.filter(pk=gen_set.pk).update(
                 status="pending", approvedBy=None, approvedAt=None)
@@ -2633,7 +2641,10 @@ class GeneratedQuestionSetAdmin(admin.ModelAdmin):
         msg = f"Queued regeneration for {started} set(s)."
         if skipped:
             msg += f" Skipped {skipped} whose student has already attempted the quiz."
-        self.message_user(request, msg, level=messages.WARNING if skipped else messages.SUCCESS)
+        if no_seed:
+            msg += f" Skipped {no_seed} with no submission and no fallback prompt."
+        self.message_user(request, msg,
+                          level=messages.WARNING if (skipped or no_seed) else messages.SUCCESS)
 
     def section_prompts(self, obj: GeneratedQuestionSet) -> str:
         return _pretty_json((obj.generationMetadata or {}).get("sections"))

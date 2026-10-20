@@ -433,6 +433,17 @@ def generation_needs_submission(quiz):
              for s in quiz.generatedSections.all())
 
 
+def fallback_covers_non_submitters(quiz):
+  """Whether a submission-less run can generate every section for a student with no
+  submission: each section whose prompt draws on the submission has a fallbackPrompt.
+  All-or-nothing on purpose (a half-generated set would be a broken quiz). False with
+  no sections."""
+  from core.prompts.variables import template_requires_submission
+  sections = list(quiz.generatedSections.all())
+  return bool(sections) and all(
+      s.has_fallback for s in sections if template_requires_submission(s.systemPrompt))
+
+
 def _generated_questions_ready(quiz, student):
   """Whether this student may take a quiz with generated sections: True when the quiz has
   none, or when the student's set is approved. Staff previews (student=None) never pass —
@@ -561,6 +572,12 @@ def quiz_availability(quiz, student, now=None):
   # student (after the trigger checks, so more actionable reasons like
   # 'no_submission_yet' surface first).
   if not _generated_questions_ready(quiz, student):
+    # Nothing will ever be prepared for a student with no submission when the prompts
+    # need one and no fallback covers them — say so instead of "being prepared".
+    if (student is not None and generation_needs_submission(quiz)
+        and not fallback_covers_non_submitters(quiz)
+        and not student.student_submissions.filter(assignment=assignment).exists()):
+      return (False, 'submission_required')
     return (False, 'questions_not_ready')
 
   # Open per the trigger — now apply the explicit close.

@@ -253,6 +253,17 @@ def template_requires_submission(template: str) -> bool:
     return 'submission' in template_requirements(template)
 
 
+def tokens_requiring(template: str, requirement: str) -> list[str]:
+    """The distinct tokens in ``template`` whose variable needs ``requirement`` (e.g.
+    'submission'), in order of first appearance — for precise validation messages."""
+    tokens: list[str] = []
+    for m in TOKEN_RE.finditer(template):
+        variable = prompt_variable_registry.get(m.group(1))
+        if variable is not None and requirement in variable.requires and m.group(0) not in tokens:
+            tokens.append(m.group(0))
+    return tokens
+
+
 def referenced_course_files(template: str) -> set[str]:
     """The set of course-file names a template references via ``{course_file:name}``.
     Used by cross-course cloning to carry along only the course files a prompt needs."""
@@ -281,6 +292,7 @@ def describe_available_variables(context: VariableContext) -> list[dict]:
                 'label': variable.label,
                 'description': variable.description,
                 'kind': 'static',
+                'requiresSubmission': 'submission' in variable.requires,
             })
         elif variable.list_arguments is not None:
             for arg in variable.list_arguments(context):
@@ -291,6 +303,7 @@ def describe_available_variables(context: VariableContext) -> list[dict]:
                     'label': f'{variable.label}: {arg.get("label", arg["argument"])}',
                     'description': variable.description,
                     'kind': 'file',
+                    'requiresSubmission': 'submission' in variable.requires,
                 })
     return entries
 

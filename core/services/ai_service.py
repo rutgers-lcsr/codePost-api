@@ -2269,9 +2269,11 @@ Provide a concise markdown summary following the guidelines in your instructions
 
     async def generate_personalized_quiz_questions(self, section, submission,
                                                    demo_files=None,
-                                                   prior_error: str = '') -> GenerationResult:
+                                                   prior_error: str = '',
+                                                   use_fallback: bool = False) -> GenerationResult:
         """Generate per-student quiz questions for one QuizGeneratedSection from the
-        student's submission.
+        student's submission. With ``use_fallback`` the section's ``fallbackPrompt`` is
+        resolved instead of ``systemPrompt`` (a student with no submission).
 
         The instructor's section prompt is resolved first ({variables} substituted per
         student — see core/prompts/variables.py), then embedded in the platform-level
@@ -2294,7 +2296,8 @@ Provide a concise markdown summary following the guidelines in your instructions
             ctx = VariableContext(course=self.course, assignment=assignment,
                                   submission=submission, section=section,
                                   demo_files=demo_files)
-            resolved = resolve_template(section.systemPrompt, ctx)
+            template = section.fallbackPrompt if use_fallback else section.systemPrompt
+            resolved = resolve_template(template, ctx)
             try:
                 language = (assignment.environment.language or '') if assignment else ''
             except Exception:

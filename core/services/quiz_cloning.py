@@ -275,6 +275,7 @@ def copy_quiz(quiz: Quiz, destination_course: Course, *,
   for section in quiz.generatedSections.all():
     QuizGeneratedSection.objects.create(quiz=new_quiz, name=section.name,
                                         systemPrompt=rw(section.systemPrompt),
+                                        fallbackPrompt=rw(section.fallbackPrompt or ''),
                                         numQuestions=section.numQuestions,
                                         pointsPerQuestion=section.pointsPerQuestion,
                                         questionTypes=list(section.questionTypes or []),
@@ -364,6 +365,7 @@ def clone_quizzes_for_assignment(source_assignment: Assignment,
       referenced_banks[group.bank_id] = group.bank
     for section in quiz.generatedSections.all():
       referenced_files |= referenced_course_files(section.systemPrompt)
+      referenced_files |= referenced_course_files(section.fallbackPrompt or '')
 
   # Carry along the course files the cloned prompts reference so {course_file:name} still
   # resolves in the destination course.

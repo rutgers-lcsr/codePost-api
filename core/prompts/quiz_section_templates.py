@@ -26,6 +26,9 @@ class QuizSectionTemplate:
     attached_only: bool
     question_types: tuple[str, ...]
     text: str
+    # True for the starter text of a section's fallbackPrompt (students with no
+    # submission) — hidden from the main prompt picker.
+    for_fallback: bool = False
 
 
 QUIZ_SECTION_TEMPLATES: list[QuizSectionTemplate] = [
@@ -115,6 +118,22 @@ Their submission:
 Their submission:
 {submission_files}""",
     ),
+    QuizSectionTemplate(
+        'fallback-assignment',
+        'Fallback — no submission (assignment only)',
+        "Starter text for the fallback prompt: questions about the assignment itself, from "
+        "its description and provided files, for students who have no submission.",
+        attached_only=True,
+        question_types=(),
+        text="""This student has not submitted the assignment. Ask questions that check they understand what the assignment asks for and the concepts it exercises, based only on the assignment itself. Vary the questions between students.
+
+Assignment: {assignment_name}
+{assignment_description}
+
+Assignment files:
+{assignment_files}""",
+        for_fallback=True,
+    ),
 ]
 
 
@@ -129,6 +148,7 @@ def describe_quiz_section_templates() -> list[dict]:
             'attachedOnly': t.attached_only,
             'questionTypes': list(t.question_types),
             'text': t.text,
+            'forFallback': t.for_fallback,
         }
         for t in QUIZ_SECTION_TEMPLATES
     ]

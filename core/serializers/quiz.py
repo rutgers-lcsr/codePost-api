@@ -177,7 +177,8 @@ class QuizSerializer(ModelSerializerWithPOSTCheck):
         and data.get('assignment') != self.instance.assignment \
         and self.instance.generatedSections.exists():
       from core.prompts.variables import template_requirements
-      if any('assignment' in template_requirements(s.systemPrompt)
+      if any('assignment' in (template_requirements(s.systemPrompt)
+                              | template_requirements(s.fallbackPrompt or ''))
              for s in self.instance.generatedSections.all()):
         raise serializers.ValidationError(
             "This quiz has personalized question sections whose prompts use assignment or "
