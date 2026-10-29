@@ -1212,6 +1212,22 @@ def partial():
         cell_types = [c["cell_type"] for c in results_json["output_data"]["cells"]]
         self.assertEqual(cell_types, ["markdown", "code"])
 
+    def test_raw_cells_preserved_at_original_index(self):
+        """Raw cells pass through unexecuted and every cell keeps its notebook index, so the
+        executed view lines up with the stored file (comments anchor by cell position)."""
+        cells_list = [
+            {"type": "markdown", "source": "### Task 4.10", "idx": 0},
+            {"type": "raw", "source": "From the heatmap we can see...", "idx": 1},
+            {"type": "code", "source": "x = 1", "idx": 2},
+        ]
+        stdout, stderr = _exec_notebook_python_template(cells_list, "")
+        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        results_json = json.loads(m.group(1))
+        out = results_json["output_data"]["cells"]
+        self.assertEqual([c["cell_type"] for c in out], ["markdown", "raw", "code"])
+        self.assertEqual(out[1]["source"], "From the heatmap we can see...")
+        self.assertEqual([c["idx"] for c in out], [0, 1, 2])
+
     # -- IPython magics and shell escapes -----------------------------------
 
     @staticmethod
@@ -1650,6 +1666,20 @@ test("wrong", 3, function() {
         results_json = json.loads(m.group(1))
         cell_types = [c["cell_type"] for c in results_json["output_data"]["cells"]]
         self.assertEqual(cell_types, ["markdown", "code"])
+
+    def test_raw_cells_preserved(self):
+        """Raw cells pass through unexecuted, keeping the cell order intact."""
+        cells_list = [
+            {"type": "markdown", "source": "# Title", "idx": 0},
+            {"type": "raw", "source": "plain notes", "idx": 1},
+            {"type": "code", "source": "var x = 1;", "idx": 2},
+        ]
+        stdout, stderr = _exec_notebook_js_template(cells_list, "")
+        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        results_json = json.loads(m.group(1))
+        out = results_json["output_data"]["cells"]
+        self.assertEqual([c["cell_type"] for c in out], ["markdown", "raw", "code"])
+        self.assertEqual(out[1]["source"], "plain notes")
 
     # -- Test script crash --------------------------------------------------
 

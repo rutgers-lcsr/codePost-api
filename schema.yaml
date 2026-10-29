@@ -9030,8 +9030,9 @@ paths:
     post:
       operationId: quizAttempts_gradeResponseCreate
       description: |-
-        Manually grade one essay/code response (quiz graders and course admins only —
-        gated by QuizAttemptPermissions). Recomputes the attempt's score and pass state.
+        Manually grade one response (quiz graders and course admins only — gated by
+        QuizAttemptPermissions): the essay/code grading path, and the override for an
+        auto-graded answer. Recomputes the attempt's score and pass state.
       parameters:
       - in: path
         name: id
@@ -9069,8 +9070,9 @@ paths:
     post:
       operationId: quizAttempts_reopenResponseCreate
       description: |-
-        Send a manually graded essay/code response back to the grading queue (undo the
-        grade). The feedback text is kept as a draft; the attempt's totals are refreshed.
+        Send a graded response back to the manual grading queue (undo the grade). For an
+        auto-graded response this is how a grader takes over an individual answer. The
+        feedback text is kept as a draft; the attempt's totals are refreshed.
       parameters:
       - in: path
         name: id
@@ -10832,6 +10834,48 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+  /quizzes/{id}/requeueQuestion/:
+    post:
+      operationId: quizzes_requeueQuestionCreate
+      description: Send every submitted response to one question back to the manual
+        grading queue (course admins only). The recovery when an auto-graded answer
+        key was wrong for the question — e.g. an exact-match short answer that asked
+        for an explanation, so every paraphrase scored 0. Auto-graded points are removed
+        and graders award them by hand; responses already awaiting a grade are untouched.
+        Returns the number of responses requeued.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequeueQuizQuestionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RequeueQuizQuestionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RequeueQuizQuestionRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequeueQuizQuestionResponse'
           description: ''
   /quizzes/{id}/resetAttempts/:
     post:
@@ -25015,6 +25059,20 @@ components:
           type: integer
       required:
       - response
+    RequeueQuizQuestionRequest:
+      type: object
+      properties:
+        question:
+          type: integer
+      required:
+      - question
+    RequeueQuizQuestionResponse:
+      type: object
+      properties:
+        requeued:
+          type: integer
+      required:
+      - requeued
     ResetPasswordRequest:
       type: object
       properties:

@@ -1447,10 +1447,13 @@ class NotebookExecutor(Executor):
         """
         cells_data = []
         for idx, cell in enumerate(nb.cells):
-            if cell.cell_type == "markdown":
+            # Raw cells ride along untouched (templates echo them like markdown) so the
+            # executed notebook keeps every cell at its original index — the UI anchors
+            # comments by cell position, and students do put answers in raw cells.
+            if cell.cell_type in ("markdown", "raw"):
                 cells_data.append({
                     "idx": idx,
-                    "type": "markdown",
+                    "type": cell.cell_type,
                     "source": cell.source
                 })
             elif cell.cell_type == "code":

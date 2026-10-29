@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from django.db.models import Prefetch
 
-from core.models import Quiz, QuizResponse, User
+from core.models import Question, Quiz, QuizResponse, User
 from core.serializers.quiz import QuizSerializer, QuizQuestionSerializer
 from core.serializers.generatedQuiz import (
     GeneratedQuestionSetListSerializer, GeneratedQuestionSetSerializer,
@@ -243,6 +243,40 @@ class QuizViewSet(ListProtectedViewSet):
     record_audit_event(course=quiz.course, event_type='quiz_attempts_reset', user=request.user,
                        quiz=quiz, assignment=quiz.assignment, meta=meta)
     return Response({'deleted': deleted}, status=status.HTTP_200_OK)
+
+  @extend_schema(
+      request=inline_serializer('RequeueQuizQuestionRequest', {
+          'question': serializers.IntegerField(),
+      }),
+      responses=inline_serializer('RequeueQuizQuestionResponse', {'requeued': serializers.IntegerField()}),
+      description="Send every submitted response to one question back to the manual grading "
+                  "queue (course admins only). The recovery when an auto-graded answer key was "
+                  "wrong for the question — e.g. an exact-match short answer that asked for an "
+                  "explanation, so every paraphrase scored 0. Auto-graded points are removed "
+                  "and graders award them by hand; responses already awaiting a grade are "
+                  "untouched. Returns the number of responses requeued.",
+  )
+  @action(detail=True, methods=['POST'])
+  def requeueQuestion(self, request, pk=None):
+    quiz = self.get_object()
+    denied = _admin_guard(request.user, quiz, 'Only course admins can send a question to manual grading.')
+    if denied:
+      return denied
+    if quiz.course.archived:
+      return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
+    qid = request.data.get('question')
+    if not isinstance(qid, int) or isinstance(qid, bool):
+      return Response({'detail': 'A valid question id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    # Any question of this course's banks — a random-draw question is never in quizQuestions.
+    question = Question.objects.filter(pk=qid, course=quiz.course).first()
+    if question is None:
+      return Response({'detail': 'No such question in this course.'}, status=status.HTTP_404_NOT_FOUND)
+    requeued = quiz_grading.requeue_question_for_manual_grading(quiz, question)
+    record_audit_event(course=quiz.course, event_type='quiz_response_grade_reopened', user=request.user,
+                       quiz=quiz, assignment=quiz.assignment,
+                       meta={'quizTitle': quiz.title, 'question': question.id,
+                             'questionText': question.text[:120], 'requeued': requeued})
+    return Response({'requeued': requeued}, status=status.HTTP_200_OK)
 
   @extend_schema(
       request=inline_serializer('GenerateQuizAccessCodeRequest',

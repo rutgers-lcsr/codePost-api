@@ -64,7 +64,7 @@ draw on the right submissions.
 | Multiple Choice (one correct) | Automatic | Exactly one correct option. |
 | Multiple Answers (several correct) | Automatic | All-or-nothing, or partial credit if enabled. |
 | True / False | Automatic | |
-| Short Answer | Automatic | Case-insensitive, trimmed match against accepted answers. |
+| Short Answer | Automatic | Exact text match (case-insensitive, trimmed) against the accepted answers — for a word, identifier or short fixed phrase, not an explanation. Use Essay for anything answered in the student's own words. |
 | Numerical | Automatic | Parsed value within an optional ± tolerance. |
 | Essay | Manual | Free-text response, graded by a person. |
 | Code | Manual | Written in a code editor, graded by a person. |
@@ -283,7 +283,8 @@ The roster is also where you mark a student **SEB exempt** for
 
 Auto-graded questions (multiple choice, true/false, short answer, numerical) are scored the moment a
 student submits. **Essay** and **Code** questions need a human — grade them on the quiz builder's
-**Grading** tab:
+**Grading** tab. An auto-graded response can be overridden there too (see
+[Fix a mis-keyed auto-graded question](#fix-a-mis-keyed-auto-graded-question)):
 
 1. Open the **Grading** tab (its label shows a count of responses awaiting grading).
 2. If the course has sections, use the **section filter** to narrow the queue to your own
@@ -328,6 +329,24 @@ Inside the focused grader:
 > To restrict it, turn off **Graders Can Grade Quizzes** in Course Settings → Behavior; a **Quiz
 > Grader** column then appears in Roster → Graders so you can grant quiz grading one grader at a
 > time. Course admins can always grade quizzes. See the [Grader Guide](/docs/grader).
+
+## Fix a mis-keyed auto-graded question
+
+Short-answer questions match the student's text exactly (ignoring case and surrounding spaces), so a
+question that really asked for an explanation — "Why was `np.outer` needed here?" — scores 0 for
+every correct answer written in different words. Two ways to recover:
+
+- **One student:** open their attempt in the focused grader, step to the response, and change the
+  points. Auto-graded responses show the same points-and-feedback editor as essays, with an
+  "Auto-graded — change the points to override" note; **Reopen** instead hands the answer to the
+  grading queue.
+- **Everyone:** on the **Questions** tab, click the question's **Send answers to manual grading**
+  button (course admins only). Every submitted answer to that question loses its auto-graded
+  points and joins the grading queue; graders then award points by hand. Other questions keep
+  their grades. This cannot be undone.
+
+Editing the question's accepted answers does **not** re-grade attempts that are already submitted —
+each attempt keeps the answer key it was taken with.
 
 ## Track grading progress
 

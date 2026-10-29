@@ -1196,6 +1196,105 @@ class TestManualGrading:
         _add(quiz, _essay(course, bank), sortKey=1)        # 5 pts manual
         return quiz
 
+    def _short_answer_attempt(self, api_client, taking_setup, quiz, answer):
+        """Student types ``answer`` for the quiz's single short-answer question and submits.
+        Returns (attempt id, response id)."""
+        student = taking_setup['students'][0]
+        api_client.force_authenticate(user=student)
+        start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+        rid = start.data['responses'][0]['id']
+        api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                         {'response': rid, 'answerText': answer}, format='json')
+        done = api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        assert done.status_code == status.HTTP_200_OK
+        return start.data['id'], rid
+
+    def test_auto_graded_response_can_be_overridden(self, api_client, taking_setup):
+        """An exact-match short answer rejects a correct paraphrase; a grader overrides it
+        through the same gradeResponse path essay/code use."""
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _short(course, _bank(course)))  # key 'Paris', 2 pts
+        attempt_id, rid = self._short_answer_attempt(api_client, taking_setup, quiz, 'Paris, France')
+        from core.models import QuizAttempt
+        assert _dec(QuizAttempt.objects.get(pk=attempt_id).score) == _dec('0')
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/gradeResponse/',
+                               {'response': rid, 'pointsEarned': '2', 'graderFeedback': 'Accepted.'},
+                               format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert _dec(resp.data['score']) == _dec('2.00')
+        graded = next(r for r in resp.data['responses'] if r['id'] == rid)
+        assert graded['isCorrect'] is None  # no longer the key's verdict
+        assert graded['needsManualGrading'] is False
+        assert graded['graderFeedback'] == 'Accepted.'
+
+    def test_auto_graded_response_can_be_reopened_for_manual_grading(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        _add(quiz, _short(course, _bank(course)))
+        attempt_id, rid = self._short_answer_attempt(api_client, taking_setup, quiz, 'Paris, France')
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizAttempts/{attempt_id}/reopenResponse/',
+                               {'response': rid}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['needsManualGrading'] is True
+        reopened = next(r for r in resp.data['responses'] if r['id'] == rid)
+        assert reopened['needsManualGrading'] is True
+        assert reopened['pointsEarned'] is None
+
+    def test_requeue_question_sends_every_response_to_manual_grading(self, api_client, taking_setup):
+        """The bulk recovery for a mis-keyed auto-graded question: every submitted
+        response to it goes to the manual queue; ones already pending are untouched."""
+        from core.models import QuizAttempt, QuizResponse
+        course = taking_setup['course']
+        bank = _bank(course)
+        quiz = _quiz(course)
+        short = _short(course, bank)
+        _add(quiz, short, sortKey=0)
+        _add(quiz, _mc(course, bank), sortKey=1)
+        s1, s2 = taking_setup['students'][:2]
+        for student in (s1, s2):
+            api_client.force_authenticate(user=student)
+            start = api_client.post('/quizAttempts/', {'quiz': quiz.id}, format='json')
+            api_client.patch(f"/quizAttempts/{start.data['id']}/saveAnswer/",
+                             {'response': start.data['responses'][0]['id'], 'answerText': 'paris!'},
+                             format='json')
+            api_client.post(f"/quizAttempts/{start.data['id']}/submit/", {}, format='json')
+        assert not QuizAttempt.objects.filter(quiz=quiz, needsManualGrading=True).exists()
+
+        api_client.force_authenticate(user=taking_setup['admin'])
+        resp = api_client.post(f'/quizzes/{quiz.id}/requeueQuestion/', {'question': short.id}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data == {'requeued': 2}
+        short_responses = QuizResponse.objects.filter(attempt__quiz=quiz, question=short)
+        assert all(r.needsManualGrading and r.pointsEarned is None for r in short_responses)
+        # The MC responses keep their auto grades; the attempts now wait on a grader.
+        assert all(not r.needsManualGrading
+                   for r in QuizResponse.objects.filter(attempt__quiz=quiz).exclude(question=short))
+        assert QuizAttempt.objects.filter(quiz=quiz, needsManualGrading=True).count() == 2
+        # Idempotent: nothing left to requeue.
+        again = api_client.post(f'/quizzes/{quiz.id}/requeueQuestion/', {'question': short.id}, format='json')
+        assert again.data == {'requeued': 0}
+
+    def test_requeue_question_is_admin_only_and_scoped_to_course(self, api_client, taking_setup):
+        course = taking_setup['course']
+        quiz = _quiz(course)
+        short = _short(course, _bank(course))
+        _add(quiz, short)
+        self._short_answer_attempt(api_client, taking_setup, quiz, 'nope')
+        for user in (course.graders.first(), taking_setup['students'][0]):
+            api_client.force_authenticate(user=user)
+            resp = api_client.post(f'/quizzes/{quiz.id}/requeueQuestion/', {'question': short.id}, format='json')
+            assert resp.status_code == status.HTTP_403_FORBIDDEN
+        api_client.force_authenticate(user=taking_setup['admin'])
+        assert api_client.post(f'/quizzes/{quiz.id}/requeueQuestion/', {'question': 999999},
+                               format='json').status_code == status.HTTP_404_NOT_FOUND
+        assert api_client.post(f'/quizzes/{quiz.id}/requeueQuestion/', {'question': 'x'},
+                               format='json').status_code == status.HTTP_400_BAD_REQUEST
+
     def test_graders_grade_by_default_and_flag_restricts(self, api_client, taking_setup):
         course = taking_setup['course']
         grader = course.graders.first()

@@ -258,7 +258,9 @@ def grade_attempt(attempt):
 
 
 def apply_manual_grade(response, points_earned, grader, feedback=''):
-  """Record a manual grade on one (essay/code) response and refresh the attempt's totals.
+  """Record a manual grade on one response and refresh the attempt's totals. The normal
+  path for essay/code; for an auto-graded response it is a staff override (isCorrect is
+  cleared — the grade is no longer the key's verdict).
 
   Clamps points to [0, response.points]. Unlike grade_attempt, this never re-runs
   auto-grading, so existing scores are preserved.
@@ -275,7 +277,7 @@ def apply_manual_grade(response, points_earned, grader, feedback=''):
 
 
 def reopen_manual_grade(response):
-  """Send a manually graded (essay/code) response back to the grading queue.
+  """Send a graded response (manual or auto-graded) back to the manual grading queue.
 
   Keeps graderFeedback as a draft for the next grader; refreshes the attempt's totals
   (score drops the reopened points and needsManualGrading/passed reset accordingly)."""
@@ -286,6 +288,21 @@ def reopen_manual_grade(response):
   response.gradedAt = None
   response.save()
   recompute_attempt_totals(response.attempt)
+
+
+def requeue_question_for_manual_grading(quiz, question):
+  """Send every submitted attempt's response to ``question`` back to the manual grading
+  queue — the recovery when an auto-graded key turns out wrong for the question (an
+  exact-match short answer that asked for an explanation, so every paraphrase scored 0).
+  Responses already awaiting a grade are left alone. Returns the number requeued."""
+  responses = QuizResponse.objects.filter(
+      attempt__quiz=quiz, attempt__status='submitted', question=question,
+      needsManualGrading=False).select_related('attempt')
+  count = 0
+  for response in responses:
+    reopen_manual_grade(response)
+    count += 1
+  return count
 
 
 def recompute_attempt_totals(attempt):
