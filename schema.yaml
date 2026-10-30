@@ -5784,9 +5784,10 @@ paths:
     post:
       operationId: generatedQuestionSets_regenerateCreate
       description: Discard this set's questions and generate new ones from the student's
-        submission. An approved set becomes un-published until re-approved. Blocked
-        once the student has attempted the quiz — their responses reference these
-        questions (the grading answer key).
+        latest submission — or, if they have none, from the sections' fallback prompts.
+        An approved set becomes un-published until re-approved. Blocked once the student
+        has attempted the quiz — their responses reference these questions (the grading
+        answer key).
       parameters:
       - in: path
         name: id
@@ -9029,8 +9030,9 @@ paths:
     post:
       operationId: quizAttempts_gradeResponseCreate
       description: |-
-        Manually grade one essay/code response (quiz graders and course admins only —
-        gated by QuizAttemptPermissions). Recomputes the attempt's score and pass state.
+        Manually grade one response (quiz graders and course admins only — gated by
+        QuizAttemptPermissions): the essay/code grading path, and the override for an
+        auto-graded answer. Recomputes the attempt's score and pass state.
       parameters:
       - in: path
         name: id
@@ -9068,8 +9070,9 @@ paths:
     post:
       operationId: quizAttempts_reopenResponseCreate
       description: |-
-        Send a manually graded essay/code response back to the grading queue (undo the
-        grade). The feedback text is kept as a draft; the attempt's totals are refreshed.
+        Send a graded response back to the manual grading queue (undo the grade). For an
+        auto-graded response this is how a grader takes over an individual answer. The
+        feedback text is kept as a draft; the attempt's totals are refreshed.
       parameters:
       - in: path
         name: id
@@ -10516,6 +10519,11 @@ paths:
         review drawer's Generate-missing button (``missing``: targets without any set).
         Submission-seeded quizzes count submitters; submission-free ones count every
         enrolled student (``needsSubmission`` says which applies).
+
+        ``missingWithoutSubmission`` / ``missingWithoutSubmissionStudents``: enrolled students
+        with no submission and no set. They are part of ``missing`` (what Generate missing
+        queues) only when ``fallbackCovers`` — every submission-seeded section has a fallback
+        prompt; otherwise they are skipped. Never part of ``wouldGenerate``.
       parameters:
       - in: path
         name: id
@@ -10580,9 +10588,10 @@ paths:
     post:
       operationId: quizzes_generateForStudentCreate
       description: Generate (or regenerate) this quiz's AI questions for one student
-        from their latest submission — useful for testing a prompt or backfilling
-        after enabling the feature. An approved set is only regenerated with force=true
-        (it becomes un-published until re-approved).
+        from their latest submission — or, if they have none, from the sections' fallback
+        prompts — useful for testing a prompt or backfilling after enabling the feature.
+        An approved set is only regenerated with force=true (it becomes un-published
+        until re-approved).
       parameters:
       - in: path
         name: id
@@ -10622,7 +10631,9 @@ paths:
       description: |-
         Queue question generation for every student who has a submission on the attached
         assignment but no question set yet — e.g. they submitted before the AI section
-        existed, or the feature was off / generation failed at the time.
+        existed, or the feature was off / generation failed at the time. When every
+        submission-seeded section has a fallback prompt, students with no submission are
+        included too (generated from the fallback).
       parameters:
       - in: path
         name: id
@@ -10823,6 +10834,48 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/QuizQuestion'
+          description: ''
+  /quizzes/{id}/requeueQuestion/:
+    post:
+      operationId: quizzes_requeueQuestionCreate
+      description: Send every submitted response to one question back to the manual
+        grading queue (course admins only). The recovery when an auto-graded answer
+        key was wrong for the question — e.g. an exact-match short answer that asked
+        for an explanation, so every paraphrase scored 0. Auto-graded points are removed
+        and graders award them by hand; responses already awaiting a grade are untouched.
+        Returns the number of responses requeued.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this quiz.
+        required: true
+      tags:
+      - quizzes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequeueQuizQuestionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RequeueQuizQuestionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RequeueQuizQuestionRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequeueQuizQuestionResponse'
           description: ''
   /quizzes/{id}/resetAttempts/:
     post:
@@ -17939,8 +17992,20 @@ components:
           type: integer
         needsSubmission:
           type: boolean
+        missingWithoutSubmission:
+          type: integer
+        missingWithoutSubmissionStudents:
+          type: array
+          items:
+            type: string
+            format: email
+        fallbackCovers:
+          type: boolean
       required:
+      - fallbackCovers
       - missing
+      - missingWithoutSubmission
+      - missingWithoutSubmissionStudents
       - needsSubmission
       - wouldGenerate
     BankCopyRequest:
@@ -19820,7 +19885,8 @@ components:
           readOnly: true
           nullable: true
           description: The submission this set was generated from (seed). Null if
-            the submission was later deleted; regeneration then requires a new submission.
+            the submission was later deleted, or when the set was generated from a
+            section's fallbackPrompt (generationMetadata['fallback'] is then true).
         status:
           allOf:
           - $ref: '#/components/schemas/GeneratedQuestionSetStatusEnum'
@@ -19863,6 +19929,9 @@ components:
           items:
             $ref: '#/components/schemas/GeneratedQuizQuestion'
           readOnly: true
+        usedFallback:
+          type: boolean
+          readOnly: true
         created:
           type: string
           format: date-time
@@ -19886,6 +19955,7 @@ components:
       - student
       - studentEmail
       - submission
+      - usedFallback
     GeneratedQuestionSetList:
       type: object
       description: Summary row for the per-quiz review table (no question payload).
@@ -19910,7 +19980,8 @@ components:
           readOnly: true
           nullable: true
           description: The submission this set was generated from (seed). Null if
-            the submission was later deleted; regeneration then requires a new submission.
+            the submission was later deleted, or when the set was generated from a
+            section's fallbackPrompt (generationMetadata['fallback'] is then true).
         status:
           allOf:
           - $ref: '#/components/schemas/GeneratedQuestionSetStatusEnum'
@@ -19936,6 +20007,9 @@ components:
         questionCount:
           type: integer
           readOnly: true
+        usedFallback:
+          type: boolean
+          readOnly: true
         created:
           type: string
           format: date-time
@@ -19956,6 +20030,7 @@ components:
       - student
       - studentEmail
       - submission
+      - usedFallback
     GeneratedQuestionSetStatusEnum:
       enum:
       - pending
@@ -22512,6 +22587,9 @@ components:
           description: Instructor-authored prompt template. May contain {variables}
             such as {assignment_file:name} or {submission_files}, resolved per student
             at generation time.
+        fallbackPrompt:
+          type: string
+          nullable: true
         numQuestions:
           type: integer
           maximum: 9223372036854775807
@@ -23900,6 +23978,8 @@ components:
           type: string
         kind:
           type: string
+        requiresSubmission:
+          type: boolean
       required:
       - argument
       - description
@@ -24464,6 +24544,9 @@ components:
           description: Instructor-authored prompt template. May contain {variables}
             such as {assignment_file:name} or {submission_files}, resolved per student
             at generation time.
+        fallbackPrompt:
+          type: string
+          nullable: true
         numQuestions:
           type: integer
           maximum: 9223372036854775807
@@ -24832,9 +24915,12 @@ components:
             type: string
         text:
           type: string
+        forFallback:
+          type: boolean
       required:
       - attachedOnly
       - description
+      - forFallback
       - key
       - label
       - questionTypes
@@ -24973,6 +25059,20 @@ components:
           type: integer
       required:
       - response
+    RequeueQuizQuestionRequest:
+      type: object
+      properties:
+        question:
+          type: integer
+      required:
+      - question
+    RequeueQuizQuestionResponse:
+      type: object
+      properties:
+        requeued:
+          type: integer
+      required:
+      - requeued
     ResetPasswordRequest:
       type: object
       properties:

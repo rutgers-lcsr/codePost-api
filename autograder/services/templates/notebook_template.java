@@ -160,9 +160,9 @@ public class notebook_template {
             for (Map<String, Object> cell : cells) {
                 String cellType = (String) cell.get("type");
 
-                if ("markdown".equals(cellType)) {
+                if ("markdown".equals(cellType) || "raw".equals(cellType)) {
                     Map<String, Object> result = new LinkedHashMap<>();
-                    result.put("cell_type", "markdown");
+                    result.put("cell_type", cellType);
                     result.put("source", cell.get("source"));
                     results.add(result);
                 } else if ("code".equals(cellType)) {

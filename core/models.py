@@ -4017,8 +4017,10 @@ GENERATED_SET_STATUS_CHOICES = [
 class QuizGeneratedSection(BaseModel):
   """A per-student generation config on a quiz: generate ``numQuestions`` questions per
   student from the instructor's ``systemPrompt`` template (may contain {variables} — see
-  core/prompts/variables.py), each worth ``pointsPerQuestion``. Requires the quiz to be
-  attached to an assignment (the student's submission is the generation seed)."""
+  core/prompts/variables.py), each worth ``pointsPerQuestion``. A prompt that draws on the
+  student's submission waits for one; ``fallbackPrompt`` (assignment/course variables only)
+  optionally covers students who never submit. Submission-free prompts generate eagerly,
+  including on standalone quizzes."""
   if TYPE_CHECKING:
     id: int
     quiz: Quiz
@@ -4032,6 +4034,11 @@ class QuizGeneratedSection(BaseModel):
       help_text=("Instructor-authored prompt template. May contain {variables} such as "
                  "{assignment_file:name} or {submission_files}, resolved per student at "
                  "generation time."))
+  fallbackPrompt = models.TextField(blank=True, default='',
+      help_text=("Optional prompt used instead of systemPrompt for students who have no "
+                 "submission on the attached assignment (only via the explicit generate "
+                 "actions). Must not reference submission {variables}. Empty = students "
+                 "without a submission are skipped."))
   numQuestions = models.PositiveIntegerField(default=3,
       help_text=("How many questions to generate per student."))
   pointsPerQuestion = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('1'),
@@ -4042,6 +4049,10 @@ class QuizGeneratedSection(BaseModel):
   sortKey = models.IntegerField(default=0, help_text=("Order of this section within the quiz."))
 
   course = property(lambda self: self.quiz.course)
+
+  @property
+  def has_fallback(self) -> bool:
+    return bool((self.fallbackPrompt or '').strip())
 
   class Meta:
     ordering = ('sortKey', 'id')
@@ -4070,7 +4081,8 @@ class GeneratedQuestionSet(BaseModel):
   submission: Submission | None = models.ForeignKey(Submission, null=True, blank=True,  # type: ignore[assignment]
       on_delete=models.SET_NULL, related_name="generated_question_sets",
       help_text=("The submission this set was generated from (seed). Null if the submission "
-                 "was later deleted; regeneration then requires a new submission."))
+                 "was later deleted, or when the set was generated from a section's "
+                 "fallbackPrompt (generationMetadata['fallback'] is then true)."))
   status = models.CharField(max_length=12, choices=GENERATED_SET_STATUS_CHOICES, default='pending',
       help_text=("Lifecycle: pending -> generating -> ready (awaiting review) -> approved; "
                  "or failed."))

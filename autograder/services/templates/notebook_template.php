@@ -132,9 +132,9 @@ $results = [];
 $execution_count = 0;
 
 foreach ($cells as $cell) {
-    if ($cell['type'] === 'markdown') {
+    if ($cell['type'] === 'markdown' || $cell['type'] === 'raw') {
         $results[] = [
-            "cell_type" => "markdown",
+            "cell_type" => $cell['type'],
             "source" => $cell['source']
         ];
     } elseif ($cell['type'] === 'code') {

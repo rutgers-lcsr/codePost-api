@@ -110,17 +110,30 @@ class GeneratedQuestionSetViewSet(mixins.RetrieveModelMixin, viewsets.GenericVie
   @extend_schema(
       request=None, responses=GeneratedQuestionSetSerializer,
       description="Discard this set's questions and generate new ones from the student's "
-                  "submission. An approved set becomes un-published until re-approved. "
+                  "latest submission — or, if they have none, from the sections' fallback "
+                  "prompts. An approved set becomes un-published until re-approved. "
                   "Blocked once the student has attempted the quiz — their responses "
                   "reference these questions (the grading answer key).",
   )
   @action(detail=True, methods=['POST'])
   def regenerate(self, request, pk=None):
-    from core.services.quiz_grading import generation_needs_submission
+    from core.services.quiz_grading import (
+        fallback_covers_non_submitters, generation_needs_submission, latest_submission_for)
     gen_set = self.get_object()
-    # Submission-free prompts regenerate without a seed submission (the eager path).
-    if gen_set.submission_id is None and generation_needs_submission(gen_set.quiz):
-      return Response({'error': 'The set has no submission to regenerate from.'},
+    quiz = gen_set.quiz
+    submission_id = gen_set.submission_id
+    if submission_id is None and quiz.assignment_id is not None:
+      # The FK is nulled when a submission is deleted (and a fallback set never had one):
+      # regenerate from whatever the student has now.
+      latest = latest_submission_for(gen_set.student, quiz.assignment)
+      submission_id = latest.id if latest is not None else None
+    # Submission-free prompts regenerate without a seed submission (the eager path); so
+    # does a submission-seeded quiz whose sections all carry a fallback prompt.
+    if submission_id is None and generation_needs_submission(quiz) \
+        and not fallback_covers_non_submitters(quiz):
+      return Response({'error': 'The set has no submission to regenerate from, and the '
+                                "quiz's AI sections have no fallback prompt for students "
+                                'without one.'},
                       status=status.HTTP_400_BAD_REQUEST)
     if gen_set.status == 'generating' and not generating_is_stale(gen_set):
       return Response({'error': 'The set is already generating.'},
@@ -137,9 +150,9 @@ class GeneratedQuestionSetViewSet(mixins.RetrieveModelMixin, viewsets.GenericVie
     gen_set.approvedAt = None
     gen_set.save(update_fields=['status', 'approvedBy', 'approvedAt', 'modified'])
     from core.tasks import generate_personalized_quiz_sets
-    if gen_set.submission_id is not None:
+    if submission_id is not None:
       generate_personalized_quiz_sets.delay(
-          gen_set.submission_id, quiz_id=gen_set.quiz_id, force=True,
+          submission_id, quiz_id=gen_set.quiz_id, force=True,
           requested_by_id=request.user.id, student_id=gen_set.student_id)
     else:
       generate_personalized_quiz_sets.delay(

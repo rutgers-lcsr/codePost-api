@@ -81,8 +81,8 @@ def validate_notebook_cell_schema(cell: Dict[str, Any], idx: int) -> List[str]:
     cell_type = cell.get("cell_type") or cell.get("type")
     if not cell_type:
         errors.append(f"Cell {idx}: Missing 'cell_type' or 'type'")
-    elif cell_type not in ["markdown", "code"]:
-        errors.append(f"Cell {idx}: Invalid cell_type '{cell_type}', expected 'markdown' or 'code'")
+    elif cell_type not in ["markdown", "code", "raw"]:
+        errors.append(f"Cell {idx}: Invalid cell_type '{cell_type}', expected 'markdown', 'code' or 'raw'")
     
     # Check source
     if "source" not in cell:

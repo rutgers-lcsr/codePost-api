@@ -141,7 +141,8 @@ Quizzes show up in three places:
   courses.
 
 If a quiz isn't open yet, it shows a **locked** state with a plain-language reason, such as "Opens
-after you submit," "Opens after the assignment closes," or "Your quiz is being prepared."
+after you submit," "Opens after the assignment closes," "Your quiz is being prepared," or "Requires an
+assignment submission" (the quiz needs your submission on the attached assignment to be prepared).
 
 ### Missed the deadline?
 

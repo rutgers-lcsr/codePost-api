@@ -181,6 +181,7 @@ class QuizCloneTests(TestCase):
                                          pickCount=2, pointsPerQuestion=Decimal("1.5"), sortKey=1)
         QuizGeneratedSection.objects.create(quiz=quiz, name="About your code",
                                             systemPrompt="Ask about {submission_files}",
+                                            fallbackPrompt="Ask about {assignment_name}",
                                             numQuestions=4, pointsPerQuestion=Decimal("2"),
                                             questionTypes=["multiple_choice"], sortKey=2)
 
@@ -201,6 +202,7 @@ class QuizCloneTests(TestCase):
 
         section = new_quiz.generatedSections.get()
         self.assertEqual(section.systemPrompt, "Ask about {submission_files}")
+        self.assertEqual(section.fallbackPrompt, "Ask about {assignment_name}")
         self.assertEqual(section.numQuestions, 4)
         self.assertEqual(section.pointsPerQuestion, Decimal("2"))
         self.assertEqual(section.questionTypes, ["multiple_choice"])
@@ -517,6 +519,7 @@ class CourseCloneQuizTests(TestCase):
             quiz=self.attached_quiz,
             name="About your code",
             systemPrompt="Ask about {submission_files}",
+            fallbackPrompt="Ask about {assignment_name}",
             numQuestions=3,
             pointsPerQuestion=Decimal("2"),
             questionTypes=["short_answer"],
@@ -527,6 +530,7 @@ class CourseCloneQuizTests(TestCase):
         cloned_attached = cloned_course.quizzes.get(title="HW1 Quiz")
         cloned_section = cloned_attached.generatedSections.get()
         self.assertEqual(cloned_section.systemPrompt, "Ask about {submission_files}")
+        self.assertEqual(cloned_section.fallbackPrompt, "Ask about {assignment_name}")
         self.assertEqual(cloned_section.numQuestions, 3)
         self.assertEqual(cloned_section.questionTypes, ["short_answer"])
         # The backfill signal fired for the cloned section must not create any

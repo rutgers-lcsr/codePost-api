@@ -68,7 +68,8 @@ def _mock_ai(monkeypatch, json_text=QUESTIONS_JSON, success=True, side_effect=No
     from asgiref.sync import sync_to_async
     from core.services.ai_service import GenerationResult
 
-    async def mock_generate(self, section, submission, demo_files=None, prior_error=''):
+    async def mock_generate(self, section, submission, demo_files=None, prior_error='',
+                            use_fallback=False):
         if side_effect is not None:
             await sync_to_async(side_effect)(section, submission)
         if not success:
@@ -88,7 +89,8 @@ def _mock_ai_sequence(monkeypatch, texts, feedback=None):
     from core.services.ai_service import GenerationResult
     calls = []
 
-    async def mock_generate(self, section, submission, demo_files=None, prior_error=''):
+    async def mock_generate(self, section, submission, demo_files=None, prior_error='',
+                            use_fallback=False):
         text = texts[len(calls)]
         calls.append(section.id)
         if feedback is not None:
@@ -443,7 +445,9 @@ class TestGenerationTask:
             'sectionId': section.id,
             'sectionName': section.name or '',
             'prompt': f'resolved prompt for section {section.id}',
+            'fallback': False,
         }]
+        assert gen_set.generationMetadata['fallback'] is False
 
     def test_missing_reference_solution_does_not_fail_generation(self, gen_setup, monkeypatch):
         # A stale prompt variant (or a model that ignores the instruction) that omits
@@ -1011,10 +1015,14 @@ class TestReviewAPI:
             .status_code == status.HTTP_403_FORBIDDEN
 
     def test_regenerate_requires_submission(self, api_client, gen_setup):
-        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0], submission=None)
+        # students[1] never submitted and the section has no fallback prompt — nothing to
+        # generate from. (A set whose submission was deleted re-resolves the student's
+        # latest submission first: see TestFallbackPrompt.)
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][1], submission=None)
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/")
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'fallback prompt' in str(resp.data)
 
     def test_regenerate_blocked_after_attempt(self, api_client, gen_setup):
         """Regenerating deletes the questions a submitted attempt's grading key lives on
@@ -1334,7 +1342,9 @@ class TestBackfill:
         api_client.force_authenticate(user=gen_setup['admin'])
         resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/")
         assert resp.status_code == status.HTTP_200_OK
-        assert resp.data == {'wouldGenerate': 1, 'missing': 1, 'needsSubmission': True}
+        assert resp.data == {'wouldGenerate': 1, 'missing': 1, 'needsSubmission': True,
+                             'missingWithoutSubmission': 0,
+                             'missingWithoutSubmissionStudents': [], 'fallbackCovers': False}
         # Pure preview: nothing was queued or created.
         assert GeneratedQuestionSet.objects.filter(quiz=gen_setup['quiz']).count() == 1
 
@@ -1343,7 +1353,9 @@ class TestBackfill:
         _make_set(gen_setup['quiz'], gen_setup['students'][1], submission=sub2,
                   status='ready', questions=False)
         resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/backfillPreview/")
-        assert resp.data == {'wouldGenerate': 1, 'missing': 0, 'needsSubmission': True}
+        assert resp.data == {'wouldGenerate': 1, 'missing': 0, 'needsSubmission': True,
+                             'missingWithoutSubmission': 0,
+                             'missingWithoutSubmissionStudents': [], 'fallbackCovers': False}
 
         # Graders without the review flag can't peek.
         api_client.force_authenticate(user=gen_setup['grader'])
@@ -1373,7 +1385,10 @@ class TestScheduledGeneration:
         self._arm(gen_setup['quiz'])
         count, calls = self._run(monkeypatch)
         assert count == 1
-        assert calls == [((gen_setup['quiz'].id,), {'missing_only': True})]
+        # include_without_submission: the scheduled moment is one of the explicit actions
+        # that may generate fallback sets for students with no submission.
+        assert calls == [((gen_setup['quiz'].id,),
+                          {'missing_only': True, 'include_without_submission': True})]
         gen_setup['quiz'].refresh_from_db()
         assert gen_setup['quiz'].scheduledGenerationRanAt is not None
 
@@ -1613,3 +1628,341 @@ class TestPreviewGeneratedSection:
         # The instructor can still inspect what the model was given.
         assert poll.data['resultData']['resolvedPrompt'] == 'the resolved prompt'
         assert poll.data['resultData']['questions'] == []
+
+
+# --------------------------------------------------------------------------- #
+# Fallback prompt — students with no submission
+# --------------------------------------------------------------------------- #
+
+FALLBACK_PROMPT = 'Ask about {assignment_name}.'
+
+
+def _set_fallback(section, text=FALLBACK_PROMPT):
+    section.fallbackPrompt = text
+    section.save()
+    return section
+
+
+def _mock_ai_recording(monkeypatch):
+    """``_mock_ai`` that also records ``(submission_id, use_fallback)`` per model call."""
+    from core.services.ai_service import GenerationResult
+    calls = []
+
+    async def mock_generate(self, section, submission, demo_files=None, prior_error='',
+                            use_fallback=False):
+        calls.append((submission.id if submission is not None else None, use_fallback))
+        return GenerationResult(text=QUESTIONS_JSON, success=True, input_tokens=10, output_tokens=20,
+                                resolved_prompt=f'resolved prompt for section {section.id}')
+
+    monkeypatch.setattr(
+        'core.services.ai_service.AIService.generate_personalized_quiz_questions', mock_generate)
+    _enable_ai(monkeypatch)
+    return calls
+
+
+class TestFallbackPrompt:
+    """A section's ``fallbackPrompt`` (assignment/course variables only) generates for
+    students who have no submission — but only through the explicit actions (Generate
+    missing, the scheduled generationDate run, Generate for a student), never the
+    automatic section-created / publish backfills. ``gen_setup``: students[0] submitted,
+    students[1] never did."""
+
+    def _eager_tasks(self, monkeypatch):
+        from core.tasks import backfill_personalized_quiz_sets, generate_personalized_quiz_sets
+        monkeypatch.setattr('core.tasks.generate_personalized_quiz_sets.delay',
+                            lambda *a, **kw: generate_personalized_quiz_sets(*a, **kw))
+        monkeypatch.setattr('core.tasks.backfill_personalized_quiz_sets.delay',
+                            lambda *a, **kw: backfill_personalized_quiz_sets(*a, **kw))
+
+    def _patch_section(self, api_client, gen_setup, **fields):
+        api_client.force_authenticate(user=gen_setup['admin'])
+        return api_client.patch(f"/quizGeneratedSections/{gen_setup['section'].id}/",
+                                fields, format='json')
+
+    # --- authoring -------------------------------------------------------------
+
+    def test_fallback_rejects_submission_variables(self, api_client, gen_setup):
+        resp = self._patch_section(api_client, gen_setup,
+                                   fallbackPrompt='Use {submission_files} and {assignment_name}.')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        errors = str(resp.data['fallbackPrompt'])
+        assert '{submission_files}' in errors
+        assert 'no submission' in errors
+        assert '{assignment_name}' not in errors
+
+    def test_fallback_validated_like_main_prompt(self, api_client, gen_setup):
+        resp = self._patch_section(api_client, gen_setup, fallbackPrompt='Use {nope}.')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'Unknown variable' in str(resp.data['fallbackPrompt'])
+
+    def test_fallback_null_and_blank_normalize_to_empty(self, api_client, gen_setup):
+        resp = self._patch_section(api_client, gen_setup, fallbackPrompt=FALLBACK_PROMPT)
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data['fallbackPrompt'] == FALLBACK_PROMPT
+        for blank in (None, '   '):
+            resp = self._patch_section(api_client, gen_setup, fallbackPrompt=blank)
+            assert resp.status_code == status.HTTP_200_OK
+            assert resp.data['fallbackPrompt'] == ''
+            gen_setup['section'].refresh_from_db()
+            assert gen_setup['section'].has_fallback is False
+
+    def test_prompt_variables_flag_submission_requirement(self, api_client, gen_setup):
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/promptVariables/")
+        by_token = {e['token']: e for e in resp.data}
+        assert by_token['{submission_files}']['requiresSubmission'] is True
+        assert by_token['{assignment_name}']['requiresSubmission'] is False
+
+    def test_prompt_templates_include_one_fallback_starter(self, api_client, gen_setup):
+        from core.prompts.variables import template_requires_submission
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/promptTemplates/")
+        fallbacks = [t for t in resp.data if t['forFallback']]
+        assert [t['key'] for t in fallbacks] == ['fallback-assignment']
+        assert template_requires_submission(fallbacks[0]['text']) is False
+
+    # --- the generation task ---------------------------------------------------
+
+    def test_submissionless_run_uses_fallback_and_marks_the_set(self, gen_setup, monkeypatch):
+        from core.tasks import generate_personalized_quiz_sets
+        calls = _mock_ai_recording(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        student = gen_setup['students'][1]
+        generate_personalized_quiz_sets(quiz_id=gen_setup['quiz'].id, student_id=student.id)
+        gen_set = gen_setup['quiz'].generatedSets.get(student=student)
+        assert gen_set.status == 'ready'
+        assert gen_set.submission_id is None
+        assert gen_set.questions.count() == 2
+        assert gen_set.generationMetadata['fallback'] is True
+        assert gen_set.generationMetadata['sections'][0]['fallback'] is True
+        assert calls == [(None, True)]
+
+    def test_submissionless_run_without_fallback_fails_clearly(self, gen_setup, monkeypatch):
+        from core.tasks import generate_personalized_quiz_sets
+        calls = _mock_ai_recording(monkeypatch)
+        student = gen_setup['students'][1]
+        generate_personalized_quiz_sets(quiz_id=gen_setup['quiz'].id, student_id=student.id)
+        gen_set = gen_setup['quiz'].generatedSets.get(student=student)
+        assert gen_set.status == 'failed'
+        assert 'no fallback prompt' in gen_set.errorMessage
+        assert gen_set.generationMetadata['fallback'] is False
+        # The model is never asked with "(unavailable: …)" markers in place of the code.
+        assert calls == []
+
+    def test_submissionless_run_reseeds_from_an_existing_submission(self, gen_setup, monkeypatch):
+        """A fallback run must never shadow real questions: if the student has a
+        submission by the time the task runs, it seeds from that instead."""
+        from core.tasks import generate_personalized_quiz_sets
+        calls = _mock_ai_recording(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        student = gen_setup['students'][0]
+        generate_personalized_quiz_sets(quiz_id=gen_setup['quiz'].id, student_id=student.id)
+        gen_set = gen_setup['quiz'].generatedSets.get(student=student)
+        assert gen_set.submission_id == gen_setup['submission'].id
+        assert gen_set.generationMetadata['fallback'] is False
+        assert calls == [(gen_setup['submission'].id, False)]
+
+    def test_fallback_ignored_on_a_submission_free_section(self, gen_setup, monkeypatch):
+        from core.tasks import generate_personalized_quiz_sets
+        calls = _mock_ai_recording(monkeypatch)
+        section = gen_setup['section']
+        section.systemPrompt = 'Ask about {assignment_name}.'
+        section.save()
+        _set_fallback(section, 'Something else about {assignment_name}.')
+        student = gen_setup['students'][1]
+        generate_personalized_quiz_sets(quiz_id=gen_setup['quiz'].id, student_id=student.id)
+        assert gen_setup['quiz'].generatedSets.get(student=student).generationMetadata['fallback'] is False
+        assert calls == [(None, False)]
+
+    # --- generate for a student / regenerate ----------------------------------
+
+    def test_generate_for_student_uses_fallback(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        student = gen_setup['students'][1]
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateForStudent/",
+                               {'student': student.email}, format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        gen_set = gen_setup['quiz'].generatedSets.get(student=student)
+        assert gen_set.status == 'ready'
+        detail = api_client.get(f"/generatedQuestionSets/{gen_set.id}/")
+        assert detail.data['usedFallback'] is True
+        assert detail.data['submission'] is None
+        listed = api_client.get(f"/quizzes/{gen_setup['quiz'].id}/generatedSets/")
+        assert [s['usedFallback'] for s in listed.data if s['id'] == gen_set.id] == [True]
+
+    def test_generate_for_student_without_fallback_names_the_fix(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateForStudent/",
+                               {'student': gen_setup['students'][1].email}, format='json')
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert 'fallback prompt' in str(resp.data)
+
+    def test_regenerate_uses_fallback_when_covered(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][1], submission=None,
+                            status='approved')
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/")
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        gen_set.refresh_from_db()
+        assert gen_set.status == 'ready'
+        assert gen_set.generationMetadata['fallback'] is True
+
+    def test_regenerate_reresolves_latest_submission_after_set_null(self, api_client, gen_setup, monkeypatch):
+        """The set's submission FK is nulled when a submission is deleted; regenerating
+        reads the student's current latest submission rather than failing or falling back."""
+        calls = _mock_ai_recording(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][0], submission=None)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/generatedQuestionSets/{gen_set.id}/regenerate/")
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        gen_set.refresh_from_db()
+        assert gen_set.submission_id == gen_setup['submission'].id
+        assert calls == [(gen_setup['submission'].id, False)]
+
+    def test_set_null_without_fallback_reports_used_fallback_false(self, api_client, gen_setup):
+        gen_set = _make_set(gen_setup['quiz'], gen_setup['students'][1], submission=None)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        assert api_client.get(f"/generatedQuestionSets/{gen_set.id}/").data['usedFallback'] is False
+
+    # --- backfills: explicit actions only --------------------------------------
+
+    def test_section_create_backfill_never_includes_non_submitters(self, api_client, gen_setup, monkeypatch):
+        from core.models import GeneratedQuestionSet, Quiz
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        late_quiz = Quiz.objects.create(course=gen_setup['course'], title='Late quiz',
+                                        assignment=gen_setup['assignment'], isPublished=True,
+                                        manualGeneration=False)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post('/quizGeneratedSections/', {
+            'quiz': late_quiz.id, 'systemPrompt': 'Ask about {submission_files}.',
+            'fallbackPrompt': FALLBACK_PROMPT, 'numQuestions': 2, 'pointsPerQuestion': '3.00',
+        }, format='json')
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert resp.data['fallbackPrompt'] == FALLBACK_PROMPT
+        assert GeneratedQuestionSet.objects.get(quiz=late_quiz, student=gen_setup['students'][0]) \
+            .status == 'ready'
+        # The automatic backfill still skips them even with a fallback — the instructor
+        # chooses the moment via Generate missing / the scheduled run.
+        assert not GeneratedQuestionSet.objects.filter(
+            quiz=late_quiz, student=gen_setup['students'][1]).exists()
+
+    def test_publish_catch_up_never_includes_non_submitters(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        quiz = gen_setup['quiz']
+        quiz.isPublished = False
+        quiz.save()
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.patch(f"/quizzes/{quiz.id}/", {'isPublished': True}, format='json')
+        assert resp.status_code == status.HTTP_200_OK
+        assert quiz.generatedSets.filter(student=gen_setup['students'][0]).exists()
+        assert not quiz.generatedSets.filter(student=gen_setup['students'][1]).exists()
+
+    def test_generate_missing_includes_non_submitters_when_covered(self, api_client, gen_setup, monkeypatch):
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {}, format='json')
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        assert resp.data['queued'] == 2
+        sets = {s.student_id: s for s in gen_setup['quiz'].generatedSets.all()}
+        assert sets[gen_setup['students'][0].id].generationMetadata['fallback'] is False
+        assert sets[gen_setup['students'][1].id].generationMetadata['fallback'] is True
+        assert sets[gen_setup['students'][1].id].status == 'ready'
+        # Idempotent: everyone now has a set.
+        resp = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {}, format='json')
+        assert resp.data['queued'] == 0
+
+    def test_generate_missing_skips_non_submitters_when_any_section_lacks_fallback(self, api_client, gen_setup, monkeypatch):
+        from core.models import QuizGeneratedSection
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        # Muted: creating a section fires the automatic backfill, which is not under test.
+        with factory.django.mute_signals(post_save):
+            QuizGeneratedSection.objects.create(
+                quiz=gen_setup['quiz'], name='Tests',
+                systemPrompt='Ask about {submission_test_results}.',
+                numQuestions=1, pointsPerQuestion=Decimal('1'), sortKey=1)
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.post(f"/quizzes/{gen_setup['quiz'].id}/generateMissing/", {}, format='json')
+        assert resp.data['queued'] == 1
+        assert not gen_setup['quiz'].generatedSets.filter(student=gen_setup['students'][1]).exists()
+
+    def test_backfill_preview_reports_students_without_submission(self, api_client, gen_setup):
+        quiz, missing_student = gen_setup['quiz'], gen_setup['students'][1]
+        api_client.force_authenticate(user=gen_setup['admin'])
+        resp = api_client.get(f"/quizzes/{quiz.id}/backfillPreview/").data
+        assert (resp['missingWithoutSubmission'], resp['missingWithoutSubmissionStudents']) \
+            == (1, [missing_student.email])
+        assert resp['fallbackCovers'] is False
+        assert (resp['wouldGenerate'], resp['missing']) == (1, 1)
+
+        _set_fallback(gen_setup['section'])
+        resp = api_client.get(f"/quizzes/{quiz.id}/backfillPreview/").data
+        assert resp['fallbackCovers'] is True
+        assert resp['missingWithoutSubmission'] == 1
+        # Generate missing would now reach them; the section-create backfill still would not.
+        assert (resp['wouldGenerate'], resp['missing']) == (1, 2)
+
+        # Once they have a set they are no longer "missing".
+        _make_set(quiz, missing_student, submission=None)
+        resp = api_client.get(f"/quizzes/{quiz.id}/backfillPreview/").data
+        assert (resp['missingWithoutSubmission'], resp['missing']) == (0, 1)
+
+    def test_scheduled_run_generates_fallback_sets(self, gen_setup, monkeypatch):
+        from core.tasks import run_scheduled_quiz_generation
+        _mock_ai(monkeypatch)
+        self._eager_tasks(monkeypatch)
+        _set_fallback(gen_setup['section'])
+        quiz = gen_setup['quiz']
+        quiz.manualGeneration = True
+        quiz.generationDate = timezone.now() - timedelta(minutes=5)
+        quiz.save()
+        assert run_scheduled_quiz_generation() == 1
+        gen_set = quiz.generatedSets.get(student=gen_setup['students'][1])
+        assert gen_set.status == 'ready'
+        assert gen_set.generationMetadata['fallback'] is True
+
+    # --- what the student sees -------------------------------------------------
+
+    def _open_after_assignment(self, gen_setup):
+        quiz, assignment = gen_setup['quiz'], gen_setup['assignment']
+        quiz.assignmentTrigger = 'after_assignment'
+        quiz.save()
+        assignment.uploadDueDate = timezone.now() - timedelta(hours=1)
+        assignment.save()
+
+    def _reason(self, api_client, gen_setup, student):
+        api_client.force_authenticate(user=student)
+        resp = api_client.get(f"/quizAttempts/availableQuizzes/?course={gen_setup['course'].id}")
+        assert resp.status_code == status.HTTP_200_OK
+        return {q['id']: q for q in resp.data}[gen_setup['quiz'].id]['availability']['reason']
+
+    def test_non_submitter_sees_submission_required_without_fallback(self, api_client, gen_setup):
+        self._open_after_assignment(gen_setup)
+        # Nothing will ever be prepared for them — not "being prepared".
+        assert self._reason(api_client, gen_setup, gen_setup['students'][1]) == 'submission_required'
+        resp = api_client.post('/quizAttempts/', {'quiz': gen_setup['quiz'].id}, format='json')
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        # A submitter still waits on their set as before.
+        assert self._reason(api_client, gen_setup, gen_setup['students'][0]) == 'questions_not_ready'
+
+    def test_non_submitter_sees_questions_not_ready_with_fallback(self, api_client, gen_setup):
+        self._open_after_assignment(gen_setup)
+        _set_fallback(gen_setup['section'])
+        assert self._reason(api_client, gen_setup, gen_setup['students'][1]) == 'questions_not_ready'
+
+    def test_after_submission_trigger_still_reports_no_submission_yet(self, api_client, gen_setup):
+        assert self._reason(api_client, gen_setup, gen_setup['students'][1]) == 'no_submission_yet'

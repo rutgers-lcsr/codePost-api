@@ -461,9 +461,9 @@ if len(cells) > MAX_CELLS:
 else:
     # Execute each code cell
     for cell_idx, cell in enumerate(cells):
-        if cell['type'] == 'markdown':
+        if cell['type'] in ('markdown', 'raw'):
             results.append({
-            'cell_type': 'markdown',
+            'cell_type': cell['type'],
             'source': cell['source'],
             'idx': cell['idx']
         })
@@ -549,7 +549,7 @@ else:
                 'source': cell_source,
                 'outputs': outputs,
                 'execution_count': sum(1 for r in results if r.get('cell_type') == 'code') + 1,
-                'idx': cell_idx
+                'idx': cell['idx']
             })
 
 # ==========================================

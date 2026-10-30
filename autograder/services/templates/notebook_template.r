@@ -116,9 +116,9 @@ if (length(notebook_json) > MAX_CELLS) {
     execution_count <- 0
     
     for (cell in notebook_json) {
-        if (cell$type == "markdown") {
+        if (cell$type == "markdown" || cell$type == "raw") {
             results <- c(results, list(list(
-                cell_type = 'markdown',
+                cell_type = cell$type,
                 source = cell$source
             )))
         }

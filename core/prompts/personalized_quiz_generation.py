@@ -43,6 +43,10 @@ CHOICES ARE REQUIRED for these types — never return them with an empty `choice
 - `multiple_answers`: 3-5 choices; one OR MORE have "is_correct": true.
 - `true_false`: exactly two choices, {{"text": "True", ...}} and {{"text": "False", ...}}, one correct.
 - `short_answer` / `numerical`: each acceptable answer is a choice with "is_correct": true.
+  `short_answer` is auto-graded by EXACT text match (case-insensitive), so use it only when the
+  answer is a single word, identifier, or short fixed phrase (e.g. a function name, a value) and
+  list every acceptable spelling. Anything a student would explain in their own words — "why",
+  "describe", "what do you conclude" — must be `essay`, which staff grade by hand.
 ONLY these types have no choices (use an empty array): `essay`, `code`.
 For `code` questions, write the prompt in the language: {language}; you may include `starter_code`.
 

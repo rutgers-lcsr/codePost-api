@@ -36,6 +36,9 @@ class PromptTypeListView(APIView):
                 'label': serializers.CharField(),
                 'description': serializers.CharField(),
                 'kind': serializers.CharField(),
+                # Shared component with QuizViewSet.promptVariables (same editor renders
+                # both); only quiz variables report whether they need a submission.
+                'requiresSubmission': serializers.BooleanField(required=False),
             }, many=True),
             'templates': inline_serializer('PromptTemplate', {
                 'key': serializers.CharField(),

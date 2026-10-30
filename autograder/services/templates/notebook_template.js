@@ -151,9 +151,9 @@ let executionCount = 0;
 async function run() {
     for (let i = 0; i < cells.length; i++) {
         const cell = cells[i];
-        if (cell.type === "markdown") {
+        if (cell.type === "markdown" || cell.type === "raw") {
             results.push({
-                cell_type: "markdown",
+                cell_type: cell.type,
                 source: cell.source,
             });
         } else if (cell.type === "code") {

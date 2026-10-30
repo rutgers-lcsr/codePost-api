@@ -258,7 +258,9 @@ def grade_attempt(attempt):
 
 
 def apply_manual_grade(response, points_earned, grader, feedback=''):
-  """Record a manual grade on one (essay/code) response and refresh the attempt's totals.
+  """Record a manual grade on one response and refresh the attempt's totals. The normal
+  path for essay/code; for an auto-graded response it is a staff override (isCorrect is
+  cleared — the grade is no longer the key's verdict).
 
   Clamps points to [0, response.points]. Unlike grade_attempt, this never re-runs
   auto-grading, so existing scores are preserved.
@@ -275,7 +277,7 @@ def apply_manual_grade(response, points_earned, grader, feedback=''):
 
 
 def reopen_manual_grade(response):
-  """Send a manually graded (essay/code) response back to the grading queue.
+  """Send a graded response (manual or auto-graded) back to the manual grading queue.
 
   Keeps graderFeedback as a draft for the next grader; refreshes the attempt's totals
   (score drops the reopened points and needsManualGrading/passed reset accordingly)."""
@@ -286,6 +288,21 @@ def reopen_manual_grade(response):
   response.gradedAt = None
   response.save()
   recompute_attempt_totals(response.attempt)
+
+
+def requeue_question_for_manual_grading(quiz, question):
+  """Send every submitted attempt's response to ``question`` back to the manual grading
+  queue — the recovery when an auto-graded key turns out wrong for the question (an
+  exact-match short answer that asked for an explanation, so every paraphrase scored 0).
+  Responses already awaiting a grade are left alone. Returns the number requeued."""
+  responses = QuizResponse.objects.filter(
+      attempt__quiz=quiz, attempt__status='submitted', question=question,
+      needsManualGrading=False).select_related('attempt')
+  count = 0
+  for response in responses:
+    reopen_manual_grade(response)
+    count += 1
+  return count
 
 
 def recompute_attempt_totals(attempt):
@@ -433,6 +450,17 @@ def generation_needs_submission(quiz):
              for s in quiz.generatedSections.all())
 
 
+def fallback_covers_non_submitters(quiz):
+  """Whether a submission-less run can generate every section for a student with no
+  submission: each section whose prompt draws on the submission has a fallbackPrompt.
+  All-or-nothing on purpose (a half-generated set would be a broken quiz). False with
+  no sections."""
+  from core.prompts.variables import template_requires_submission
+  sections = list(quiz.generatedSections.all())
+  return bool(sections) and all(
+      s.has_fallback for s in sections if template_requires_submission(s.systemPrompt))
+
+
 def _generated_questions_ready(quiz, student):
   """Whether this student may take a quiz with generated sections: True when the quiz has
   none, or when the student's set is approved. Staff previews (student=None) never pass —
@@ -561,6 +589,12 @@ def quiz_availability(quiz, student, now=None):
   # student (after the trigger checks, so more actionable reasons like
   # 'no_submission_yet' surface first).
   if not _generated_questions_ready(quiz, student):
+    # Nothing will ever be prepared for a student with no submission when the prompts
+    # need one and no fallback covers them — say so instead of "being prepared".
+    if (student is not None and generation_needs_submission(quiz)
+        and not fallback_covers_non_submitters(quiz)
+        and not student.student_submissions.filter(assignment=assignment).exists()):
+      return (False, 'submission_required')
     return (False, 'questions_not_ready')
 
   # Open per the trigger — now apply the explicit close.

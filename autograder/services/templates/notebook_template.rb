@@ -42,9 +42,9 @@ $STUDENT_CODE_SYNTAX_INVALID = false
 $STUDENT_CODE_SYNTAX_ERROR_MSG = ""
 
 cells.each do |cell|
-  if cell['type'] == 'markdown'
+  if cell['type'] == 'markdown' || cell['type'] == 'raw'
     results << {
-      "cell_type" => "markdown",
+      "cell_type" => cell['type'],
       "source" => cell['source']
     }
   elsif cell['type'] == 'code'

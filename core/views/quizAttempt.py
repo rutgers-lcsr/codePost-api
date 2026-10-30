@@ -287,14 +287,15 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
     return Response(StudentQuizAttemptSerializer(attempt, context=self._attempt_context(attempt)).data)
 
   def _manual_grading_guard(self, attempt, response):
-    """Shared preconditions for grading/reopening a response, or None when allowed."""
+    """Shared preconditions for grading/reopening a response, or None when allowed.
+
+    Any response type qualifies: essay/code are always graded here, and an auto-graded
+    response (e.g. an exact-match short answer that rejected a correct paraphrase) can be
+    overridden the same way."""
     if attempt.quiz.course.archived:
       return Response({'detail': 'This course is archived.'}, status=status.HTTP_403_FORBIDDEN)
     if attempt.status != 'submitted':
       return Response({'detail': 'Only submitted attempts can be graded.'},
-                      status=status.HTTP_400_BAD_REQUEST)
-    if (response.questionSnapshot or {}).get('type') not in quiz_grading.MANUAL_TYPES:
-      return Response({'detail': 'Only essay/code responses are graded manually.'},
                       status=status.HTTP_400_BAD_REQUEST)
     return None
 
@@ -308,8 +309,9 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   )
   @action(detail=True, methods=['POST'])
   def gradeResponse(self, request, pk=None):
-    """Manually grade one essay/code response (quiz graders and course admins only —
-    gated by QuizAttemptPermissions). Recomputes the attempt's score and pass state."""
+    """Manually grade one response (quiz graders and course admins only — gated by
+    QuizAttemptPermissions): the essay/code grading path, and the override for an
+    auto-graded answer. Recomputes the attempt's score and pass state."""
     attempt = self.get_object()
     rid = _require_int(request.data.get('response'))
     if rid is None:
@@ -338,8 +340,9 @@ class QuizAttemptViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, vie
   )
   @action(detail=True, methods=['POST'])
   def reopenResponse(self, request, pk=None):
-    """Send a manually graded essay/code response back to the grading queue (undo the
-    grade). The feedback text is kept as a draft; the attempt's totals are refreshed."""
+    """Send a graded response back to the manual grading queue (undo the grade). For an
+    auto-graded response this is how a grader takes over an individual answer. The
+    feedback text is kept as a draft; the attempt's totals are refreshed."""
     attempt = self.get_object()
     rid = _require_int(request.data.get('response'))
     if rid is None:
