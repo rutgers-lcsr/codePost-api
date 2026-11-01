@@ -17,6 +17,8 @@ from rest_framework_simplejwt import serializers, views
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from codepost.settings import DEBUG
 from core.throttles import LoginRateThrottle, OneTimeTokenRateThrottle, AuthUserRateThrottle
+from core.permissions.course_scope import get_course_scope_id
+from core.permissions.helpers import canImpersonate
 from core.serializers.auth import (
   GenerateOTTRequestSerializer,
   GenerateOTTResponseSerializer,
@@ -39,6 +41,15 @@ NON_COURSE_KEY_AUTH = (
     BasicAuthentication,
     SessionAuthentication,
 )
+
+
+def _course_key_scope(request):
+  """The scope ('read'/'write'/'admin') of the course API key that authenticated
+  ``request``, or None when it wasn't a course API key."""
+  auth = request.auth
+  if isinstance(auth, dict) and 'api_key_id' in auth:
+    return auth.get('scope')
+  return None
 
 
 # ---------------------------------------------------------------------------
@@ -173,33 +184,20 @@ class ImpersonateView(APIView):
     except User.DoesNotExist:
       return Response({"error": "User does not exist"}, status=404)
     
-    # Determine if the request is course-scoped (via course API key or scoped JWT)
-    course_scope_id = getattr(request, 'course_scope_id', None)
-    if course_scope_id is None:
-      auth = getattr(request, 'auth', None)
-      if isinstance(auth, dict):
-        course_scope_id = auth.get('course_scope_id')
-      elif hasattr(auth, 'course_scope_id'):
-        course_scope_id = auth.course_scope_id
+    # Course-scoped requests (course API key or scoped JWT) get course rules.
+    course_scope_id = get_course_scope_id(request)
 
-    # Authorization: staff/superusers can impersonate anyone.
-    # Course admins can only impersonate students/graders in their courses.
-    # Course-scoped requests can only impersonate members of the scoped course.
-    if course_scope_id is not None:
-      from core.permissions.helpers import isCourseMember
-      try:
-        scoped_course = Course.objects.get(pk=course_scope_id)
-      except Course.DoesNotExist:
-        return Response({"error": "Scoped course does not exist."}, status=400)
-      if not isCourseMember(user, scoped_course):
-        return Response({"error": "Target user is not a member of the scoped course."}, status=403)
-    elif not (request.user.is_staff or request.user.is_superuser):
-      sharded_course = Course.objects.filter(courseAdmins=request.user, students=user) | Course.objects.filter(courseAdmins=request.user, graders=user)
-      if not sharded_course.exists():
-        return Response({"error": "You do not have permission to impersonate this user."}, status=403)
+    # Authorization: superusers can impersonate anyone, staff anyone but superusers.
+    # Course admins and read/write course keys can only impersonate unprivileged
+    # students/graders of courses they administer. Admin-scope course keys (JupyterHub)
+    # can become any member of their course, instructors included.
+    is_admin_key = _course_key_scope(request) == 'admin'
+    if not canImpersonate(request.user, user, course_scope_id=course_scope_id,
+                          allowCourseAdminTargets=is_admin_key, trustedCourseKey=is_admin_key):
+      return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
     # Only superusers can create long-lived impersonation tokens
-    should_expire = request.data.get('never_expire', False) and request.user.is_superuser
+    never_expire = request.data.get('never_expire') in (True, 'true', 'True', '1', 1) and request.user.is_superuser
     
     # Log the impersonation event
     logEvent(
@@ -216,7 +214,7 @@ class ImpersonateView(APIView):
     # Generate a token for the user — propagate course scope if present.
     serializer = UserSerializer(request.user, context={'request': request})
     data = serializer.data
-    if should_expire:
+    if never_expire:
       # Superuser long-lived impersonation token (used directly, not refreshed).
       data['token'] = access_token_for_user(request.user, course_id=course_scope_id, lifetime=timedelta(days=365))
     else:
@@ -257,20 +255,16 @@ def generate_one_time_token(request):
   except User.DoesNotExist:
     return Response({"error": "User does not exist"}, status=404)
   
+  # Determine if the request is course-scoped (CourseKey or course-scoped JWT).
+  course_scope_id = get_course_scope_id(request)
+
   # Ensure the requestee user is a course admin and that target user is a student/grader/instructor
-  from django.db.models import Q
-
-  # Use chained .filter() calls so Django creates separate M2M JOINs.
-  # A single filter(Q(courseAdmins=request.user) & Q(courseAdmins=user)) would
-  # resolve both lookups to the same JOIN alias, making the AND impossible when
-  # request.user != user.
-  sharded_course = Course.objects.filter(courseAdmins=request.user).filter(
-      Q(students=user) |
-      Q(graders=user) |
-      Q(courseAdmins=user)
-  )
-
-  if not sharded_course.exists() and not request.user.username == username:
+  # with no privilege beyond the requestee's. Read/write course keys only reach students/graders;
+  # admin-scope keys (JupyterHub logins) reach any member of their course.
+  key_scope = _course_key_scope(request)
+  if not canImpersonate(request.user, user, course_scope_id=course_scope_id,
+                        allowCourseAdminTargets=key_scope in (None, 'admin'), allowSiteStaff=False,
+                        trustedCourseKey=key_scope == 'admin'):
     return Response({"error": "You do not have permission to generate a one-time token for this user."}, status=403)
 
   
@@ -281,15 +275,6 @@ def generate_one_time_token(request):
       level=logging.INFO,
       event_type='audit'
   )
-
-  # Determine if the request is course-scoped (CourseKey or course-scoped JWT).
-  course_scope_id = getattr(request, 'course_scope_id', None)
-  if course_scope_id is None:
-    auth = getattr(request, 'auth', None)
-    if isinstance(auth, dict):
-      course_scope_id = auth.get('course_scope_id')
-    elif hasattr(auth, 'course_scope_id'):
-      course_scope_id = auth.course_scope_id
 
   # remove previous tokens
   OneTimeToken.objects.filter(user=user).delete()

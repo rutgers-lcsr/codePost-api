@@ -1,5 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from core.models import Course, Section, STUDENT_DOWNLOAD_STATES, STUDENT_VISIBLE_STATES
+from django.db.models import Q
 
 from rest_framework.response import Response
 from rest_framework import status
@@ -214,3 +215,54 @@ def should_use_student_captions(user, course):
 def can_elevate_permissions(user):
     code_in_place = Course.objects.get(id=925) # NOTE: unlikely to work when testing locally
     return code_in_place in user.grader_courses.all()
+
+def canImpersonate(requester, target, *, course_scope_id=None, allowCourseAdminTargets=False,
+                   allowSiteStaff=True, trustedCourseKey=False):
+  """Whether ``requester`` may obtain credentials for ``target`` (impersonation, OTTs).
+
+  A credential for ``target`` carries everything ``target`` can do, everywhere —
+  the ``course_id`` claim on a course-scoped JWT is informational, not enforced,
+  and /ott/ and /registration/current_user/ drop it — so the rule is "never hand
+  out more privilege than the requester already has", except that
+  ``trustedCourseKey`` (admin-scope course keys, which log users into codePost
+  from JupyterHub; instructors are trusted with them) waives the org-staff and
+  other-courses checks below:
+
+  - Superusers may become anyone; staff may become anyone but a superuser.
+    Both only when unscoped (a course-pinned credential gets course rules) and
+    ``allowSiteStaff`` (off for long-lived OTTs, which only course rules grant).
+  - Everyone else must administer a course in which ``target`` is a student or
+    grader (or instructor, with ``allowCourseAdminTargets``), restricted to the
+    scoped course for a course-pinned credential. Students holding a scoped JWT
+    therefore get nothing.
+  - ``target`` must not be a superuser, staff or a service account. Unless
+    ``trustedCourseKey``, ``target`` also must not be org staff or administer
+    any course the requester doesn't also administer.
+  """
+  if requester.pk == target.pk:
+    return True
+  siteStaffRules = allowSiteStaff and course_scope_id is None
+  if siteStaffRules and requester.is_superuser:
+    return True
+  if target.is_superuser:
+    return False
+  if siteStaffRules and requester.is_staff:
+    return True
+
+  profile = getattr(target, 'profile', None)
+  if target.is_staff or (profile is not None and profile.isServiceAccount):
+    return False
+  if not trustedCourseKey and profile is not None and profile.isOrgStaff:
+    return False
+
+  # Chained .filter() calls so the courseAdmins and role lookups get separate JOINs.
+  roles = Q(students=target) | Q(graders=target)
+  if allowCourseAdminTargets:
+    roles |= Q(courseAdmins=target)
+  administered = Course.objects.filter(courseAdmins=requester)
+  if course_scope_id is not None:
+    administered = administered.filter(pk=course_scope_id)
+  if not administered.filter(roles).exists():
+    return False
+
+  return trustedCourseKey or not Course.objects.filter(courseAdmins=target).exclude(courseAdmins=requester).exists()
