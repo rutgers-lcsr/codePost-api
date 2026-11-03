@@ -85,8 +85,10 @@ class SubmissionShareTokenGenerator:
         """
         # Truncate microseconds so that tokens are consistent even if the
         # database doesn't support microseconds.
-        timestamp = submission.created.replace(microsecond=0, tzinfo=None)
-        return str(submission.id) + str(timestamp)
+        created = submission.created.replace(microsecond=0, tzinfo=None)
+        # The token's own timestamp must be covered by the HMAC, otherwise a
+        # holder can swap in a fresh timestamp and the token never expires.
+        return str(submission.id) + str(created) + str(timestamp)
 
     def _num_seconds(self, dt):
         return int((dt - datetime(2001, 1, 1)).total_seconds())

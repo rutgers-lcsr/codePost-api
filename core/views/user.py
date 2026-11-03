@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework import serializers
 
 from core.permissions.permissions import UserPermissions
+from core.permissions.template import SuperuserPermission
 from core.models import User
 from core.serializers.user import UserSerializer
 from rest_framework.decorators import action
@@ -50,7 +51,10 @@ class UserViewSet(SuperUserListProtectedViewSet):
   # but list() uses full UserSerializer for backward compatibility with UsersTable
 
 
-  @action(detail=False, methods=['POST'])
+  # Superuser-only, enforced here: this mints tokens for an arbitrary user, and
+  # UserPermissions alone never runs for a detail=False action with an invalid
+  # body (TemplatePermission.has_permission falls through to True).
+  @action(detail=False, methods=['POST'], permission_classes=[IsAuthenticated, SuperuserPermission])
   def user(self, request):
     """
     Given an email address as a query parameter, return the user object

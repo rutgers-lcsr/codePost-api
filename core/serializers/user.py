@@ -68,7 +68,19 @@ class UserSerializer(ModelSerializerWithPOSTCheck):
     # Access token only: this runs on every user serialization, so it must not
     # mint a refresh token or write an OutstandingToken row.
     return access_token_for_user(obj)
-  
+
+  def to_representation(self, instance):
+    data = super().to_representation(instance)
+    # api_token renders the raw DRF Token key (its primary key), so it gets the
+    # same audience as `token`: the user themselves or a superuser. Lists like
+    # organizations/{id}/users/ serialize other people.
+    request = self.context.get('request', None)
+    requester = getattr(request, 'user', None)
+    if not (requester is not None and requester.is_authenticated
+            and (requester.is_superuser or requester.id == instance.id)):
+      data['api_token'] = None
+    return data
+
   def create(self, validated_data):
     # Extract parameters that can't be used in User constructor
     profile = validated_data.pop('profile')
