@@ -217,7 +217,7 @@ def can_elevate_permissions(user):
     return code_in_place in user.grader_courses.all()
 
 def canImpersonate(requester, target, *, course_scope_id=None, allowCourseAdminTargets=False,
-                   allowSiteStaff=True, trustedCourseKey=False):
+                   allowSiteStaff=True, trustedCourseKey=False, allowPrivilegedTargets=False):
   """Whether ``requester`` may obtain credentials for ``target`` (impersonation, OTTs).
 
   A credential for ``target`` carries everything ``target`` can do, everywhere —
@@ -238,19 +238,25 @@ def canImpersonate(requester, target, *, course_scope_id=None, allowCourseAdminT
   - ``target`` must not be a superuser, staff or a service account. Unless
     ``trustedCourseKey``, ``target`` also must not be org staff or administer
     any course the requester doesn't also administer.
+  - ``allowPrivilegedTargets`` lifts the superuser/staff ban (never the
+    service-account one, nor the course-membership requirement). Only for an
+    admin-scope course key created by a current superuser: its creator could
+    already become anyone, so the key hands out nothing new.
   """
   if requester.pk == target.pk:
     return True
   siteStaffRules = allowSiteStaff and course_scope_id is None
   if siteStaffRules and requester.is_superuser:
     return True
-  if target.is_superuser:
+  if target.is_superuser and not allowPrivilegedTargets:
     return False
   if siteStaffRules and requester.is_staff:
     return True
 
   profile = getattr(target, 'profile', None)
-  if target.is_staff or (profile is not None and profile.isServiceAccount):
+  if target.is_staff and not allowPrivilegedTargets:
+    return False
+  if profile is not None and profile.isServiceAccount:
     return False
   if not trustedCourseKey and profile is not None and profile.isOrgStaff:
     return False

@@ -250,3 +250,58 @@ class TestGenerateOttEscalationBlocked:
         # Staff impersonate via /impersonate/ (refreshable tokens), not 365-day OTT tokens.
         staff = User.objects.create_user("stf", "stf@x.com", "pw", is_staff=True)
         assert _generate_ott(_as(staff), admin_of_a).status_code == status.HTTP_403_FORBIDDEN
+
+
+class TestSuperuserCreatedAdminKey:
+    """A superuser can already become anyone, so an admin-scope key a superuser
+    created may log in superuser/staff members of its course (JupyterHub logins
+    for site admins). Instructor-created keys stay blocked — see
+    test_admin_key_cannot_generate_for_superuser_instructor."""
+
+    def test_generates_ott_for_superuser_member(self, course_a):
+        su = _superuser("root")
+        course_a.courseAdmins.add(su)
+        client = _key_client(course_a, su, "admin")
+        assert _generate_ott(client, su).status_code == status.HTTP_200_OK
+
+    def test_generates_ott_and_impersonates_other_superuser_member(self, course_a):
+        creator, other = _superuser("root"), _superuser("root2")
+        course_a.students.add(other)
+        client = _key_client(course_a, creator, "admin")
+        assert _generate_ott(client, other).status_code == status.HTTP_200_OK
+        assert _impersonate(client, other).status_code == status.HTTP_200_OK
+
+    def test_generates_ott_for_staff_member(self, course_a):
+        staff = User.objects.create_user("stf", "stf@x.com", "pw", is_staff=True)
+        course_a.graders.add(staff)
+        client = _key_client(course_a, _superuser("root"), "admin")
+        assert _generate_ott(client, staff).status_code == status.HTTP_200_OK
+
+    def test_read_and_write_keys_still_blocked(self, course_a):
+        su = _superuser("root")
+        course_a.courseAdmins.add(su)
+        for scope in ("read", "write"):
+            client = _key_client(course_a, su, scope)
+            assert _generate_ott(client, su).status_code == status.HTTP_403_FORBIDDEN, scope
+
+    def test_superuser_must_still_be_a_course_member(self, course_a):
+        su = _superuser("root")
+        client = _key_client(course_a, su, "admin")
+        assert _generate_ott(client, _superuser("root2")).status_code == status.HTTP_403_FORBIDDEN
+
+    def test_demoted_creator_revokes_the_exception(self, course_a):
+        creator, target = _superuser("root"), _superuser("root2")
+        course_a.courseAdmins.add(target)
+        client = _key_client(course_a, creator, "admin")
+        creator.is_superuser = False
+        creator.save()
+        assert _generate_ott(client, target).status_code == status.HTTP_403_FORBIDDEN
+
+    def test_scoped_jwt_from_key_cannot_reach_superusers(self, course_a, admin_of_a):
+        # The exception belongs to the key itself, not to tokens it hands out.
+        su = _superuser("root")
+        course_a.courseAdmins.add(su)
+        client = _key_client(course_a, su, "admin")
+        resp = _impersonate(client, admin_of_a)
+        assert resp.status_code == status.HTTP_200_OK
+        assert _generate_ott(_bearer(resp.data["token"]), su).status_code == status.HTTP_403_FORBIDDEN

@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 import logging
 from drf_spectacular.utils import extend_schema
 from core.logging import logEvent
-from core.models import Course, OneTimeToken
+from core.models import Course, CourseAPIKey, OneTimeToken
 from core.serializers.user import UserSerializer
 from django.contrib.auth.models import update_last_login
 from rest_framework_simplejwt import serializers, views
@@ -50,6 +50,16 @@ def _course_key_scope(request):
   if isinstance(auth, dict) and 'api_key_id' in auth:
     return auth.get('scope')
   return None
+
+
+def _key_created_by_superuser(request):
+  """Whether the course API key that authenticated ``request`` was created by
+  someone who is an active superuser *now* (demotion revokes this)."""
+  auth = request.auth
+  if not (isinstance(auth, dict) and 'api_key_id' in auth):
+    return False
+  return CourseAPIKey.objects.filter(
+      pk=auth['api_key_id'], created_by__is_superuser=True, created_by__is_active=True).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -190,10 +200,12 @@ class ImpersonateView(APIView):
     # Authorization: superusers can impersonate anyone, staff anyone but superusers.
     # Course admins and read/write course keys can only impersonate unprivileged
     # students/graders of courses they administer. Admin-scope course keys (JupyterHub)
-    # can become any member of their course, instructors included.
+    # can become any member of their course, instructors included — and, when a
+    # superuser created the key, superuser/staff members too.
     is_admin_key = _course_key_scope(request) == 'admin'
     if not canImpersonate(request.user, user, course_scope_id=course_scope_id,
-                          allowCourseAdminTargets=is_admin_key, trustedCourseKey=is_admin_key):
+                          allowCourseAdminTargets=is_admin_key, trustedCourseKey=is_admin_key,
+                          allowPrivilegedTargets=is_admin_key and _key_created_by_superuser(request)):
       return Response({"error": "You do not have permission to impersonate this user."}, status=403)
 
     # Only superusers can create long-lived impersonation tokens
@@ -260,11 +272,13 @@ def generate_one_time_token(request):
 
   # Ensure the requestee user is a course admin and that target user is a student/grader/instructor
   # with no privilege beyond the requestee's. Read/write course keys only reach students/graders;
-  # admin-scope keys (JupyterHub logins) reach any member of their course.
+  # admin-scope keys (JupyterHub logins) reach any member of their course — superuser/staff
+  # members only when a superuser created the key.
   key_scope = _course_key_scope(request)
   if not canImpersonate(request.user, user, course_scope_id=course_scope_id,
                         allowCourseAdminTargets=key_scope in (None, 'admin'), allowSiteStaff=False,
-                        trustedCourseKey=key_scope == 'admin'):
+                        trustedCourseKey=key_scope == 'admin',
+                        allowPrivilegedTargets=key_scope == 'admin' and _key_created_by_superuser(request)):
     return Response({"error": "You do not have permission to generate a one-time token for this user."}, status=403)
 
   
