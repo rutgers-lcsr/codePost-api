@@ -32,6 +32,7 @@ from core.permissions.helpers import (
     returnNotAuthorized,
     returnForbidden,
     returnNotFound,
+    returnInvalid,
 )
 from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import isCourseAdmin, isCourseMember, isCourseStaff
@@ -43,7 +44,7 @@ from core.serializers.actionResponses import CapabilitiesResponseSerializer
 from core.permissions.capabilities import compute_course_capabilities, CAPABILITY_DESCRIPTIONS, Capability, require_capability, check_capability
 from core.permissions.course_scope import get_course_scope_id
 from core.serializers.course_audit_event import CourseAuditEventSerializer
-from core.models import CourseAuditEvent, CourseAPIKey
+from core.models import CourseAuditEvent, CourseAPIKey, COURSE_API_KEY_SCOPE_CHOICES
 from core.serializers.course_api_key import (
     PendingAgentActionSerializer,
     CourseAPIKeyReadSerializer,
@@ -970,6 +971,12 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             api_key.name = name
         if "isActive" in request.data:
             api_key.is_active = request.data["isActive"]
+        if "scope" in request.data:
+            scope = request.data["scope"]
+            valid_scopes = [value for value, _ in COURSE_API_KEY_SCOPE_CHOICES]
+            if scope not in valid_scopes:
+                return returnInvalid(f"scope must be one of: {', '.join(valid_scopes)}.")
+            api_key.scope = scope
 
         api_key.save()
         serializer = CourseAPIKeyReadSerializer(api_key)

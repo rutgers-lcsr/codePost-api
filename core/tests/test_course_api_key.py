@@ -174,6 +174,37 @@ class TestCourseAPIKeyCRUD:
         key_obj.refresh_from_db()
         assert key_obj.is_active is False
 
+    def test_patch_key_scope(self, course_a, admin_of_a, api_client, raw_key_a):
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        assert key_obj.scope == "read"
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.patch(
+            f"/courses/{course_a.id}/apiKeys/{key_obj.id}/",
+            {"scope": "admin"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data["scope"] == "admin"
+        key_obj.refresh_from_db()
+        assert key_obj.scope == "admin"
+        # The existing raw key keeps working, now at the new scope.
+        api_client.force_authenticate(user=None)
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        assert api_client.get(f"/courses/{course_a.id}/").status_code == status.HTTP_200_OK
+
+    def test_patch_key_invalid_scope_rejected(self, course_a, admin_of_a, api_client, raw_key_a):
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        api_client.force_authenticate(user=admin_of_a)
+        resp = api_client.patch(
+            f"/courses/{course_a.id}/apiKeys/{key_obj.id}/",
+            {"scope": "superuser"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert "scope must be one of" in resp.data["detail"]
+        key_obj.refresh_from_db()
+        assert key_obj.scope == "read"
+
     def test_non_admin_cannot_create_key(self, course_a, student_of_a, api_client):
         api_client.force_authenticate(user=student_of_a)
         resp = api_client.post(
@@ -304,6 +335,18 @@ class TestScopedRequestCannotManageKeys:
         delete = api_client.delete(f"/courses/{course_a.id}/apiKeys/{key_obj.id}/")
         assert delete.status_code == status.HTTP_403_FORBIDDEN
         assert CourseAPIKey.objects.filter(pk=key_obj.pk).exists()
+
+    def test_scoped_key_cannot_raise_its_own_scope(self, course_a, api_client, raw_key_a):
+        key_obj = CourseAPIKey.objects.get(course=course_a, name="test-key")
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {raw_key_a}")
+        resp = api_client.patch(
+            f"/courses/{course_a.id}/apiKeys/{key_obj.id}/",
+            {"scope": "admin"},
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        key_obj.refresh_from_db()
+        assert key_obj.scope == "read"
 
     def test_scoped_jwt_cannot_manage_keys(self, course_a, admin_of_a, api_client):
         """Even a real admin's course-scoped JWT is blocked from key management."""
