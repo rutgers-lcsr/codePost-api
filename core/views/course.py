@@ -112,10 +112,15 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         if not isAuthenticated(user):
             return returnNotAuthorized()
 
-        courses = user.courseAdmin_courses.all()
-        if user.profile.isOrgStaff:
-            courses = courses | Course.objects.filter(organization=user.profile.organization)
-            courses = courses.distinct()
+        if user.is_superuser:
+            # Platform staff audit every course from the staff console; scoping them to
+            # their own memberships made that console disagree with /dashboard/stats/.
+            courses = Course.objects.all()
+        else:
+            courses = user.courseAdmin_courses.all()
+            if user.profile.isOrgStaff:
+                courses = courses | Course.objects.filter(organization=user.profile.organization)
+                courses = courses.distinct()
         # compute_course_capabilities dereferences course.organization per course (AI feature
         # toggles); without this the list fans out into one org SELECT per course.
         courses = courses.select_related('organization')
