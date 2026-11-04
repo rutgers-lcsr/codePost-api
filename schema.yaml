@@ -5391,7 +5391,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/User'
+                  $ref: '#/components/schemas/PendingAdminUser'
           description: ''
   /dashboard/stats/:
     get:
@@ -23672,6 +23672,92 @@ components:
           type: string
       required:
       - status
+    PendingAdminUser:
+      type: object
+      description: 'A pending course-admin request: the user plus when they signed
+        up, which is when they asked.'
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        email:
+          title: Email address
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        password:
+          type: string
+          writeOnly: true
+        organization:
+          type: integer
+          nullable: true
+        studentCourses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Course'
+          readOnly: true
+        graderCourses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Course'
+        superGraderCourses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Course'
+        courseadminCourses:
+          type: array
+          items:
+            $ref: '#/components/schemas/Course'
+        leaderSections:
+          type: array
+          items:
+            $ref: '#/components/schemas/Section'
+        codePostAdmin:
+          type: boolean
+        canCreateCourses:
+          type: boolean
+        canModifyRosters:
+          type: boolean
+        isOrgStaff:
+          type: boolean
+        showProductTips:
+          type: boolean
+        api_token:
+          type: string
+          nullable: true
+        student_sections:
+          type: array
+          items:
+            type: integer
+        hasCredentials:
+          type: boolean
+          readOnly: true
+        token:
+          type: string
+          nullable: true
+          readOnly: true
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - canCreateCourses
+      - canModifyRosters
+      - courseadminCourses
+      - date_joined
+      - graderCourses
+      - hasCredentials
+      - id
+      - leaderSections
+      - password
+      - showProductTips
+      - studentCourses
+      - student_sections
+      - superGraderCourses
+      - token
     PendingAgentAction:
       type: object
       description: |-

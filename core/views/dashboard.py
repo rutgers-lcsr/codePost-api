@@ -16,8 +16,7 @@ from django.utils.dateparse import parse_datetime, parse_date
 from datetime import datetime, time, timedelta
 
 from core.models import Organization, Course, Assignment, Section
-from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer, AutogradingStatsSerializer, AutogradingFailureListSerializer
-from core.serializers.user import UserSerializer
+from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminUserSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer, AutogradingStatsSerializer, AutogradingFailureListSerializer
 
 
 FAILURES_PAGE_SIZE_DEFAULT = 25
@@ -241,7 +240,7 @@ class DashboardViewSet(viewsets.ViewSet):
         serializer = AssignmentDeadlineSerializer(results, many=True)
         return Response(serializer.data)
 
-    @extend_schema(responses={200: UserSerializer(many=True)})
+    @extend_schema(responses={200: PendingAdminUserSerializer(many=True)})
     @action(detail=False, methods=['GET'])
     def pending_admins(self, request):
         """
@@ -252,7 +251,7 @@ class DashboardViewSet(viewsets.ViewSet):
             profile__pendingValidation=True
         ).select_related('profile', 'profile__organization').order_by('-profile__created')
 
-        serializer = UserSerializer(pending_users, many=True, context={'request': request})
+        serializer = PendingAdminUserSerializer(pending_users, many=True, context={'request': request})
         return Response(serializer.data)
 
     @extend_schema(request=PendingAdminActionRequestSerializer, responses={200: PendingAdminActionResponseSerializer})

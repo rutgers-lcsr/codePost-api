@@ -296,6 +296,17 @@ class TestDashboardPendingAdmins(APITestCase):
 
     # ---- GET /dashboard/pending_admins/ ----
 
+    def test_pending_admins_carry_their_request_date(self):
+        """Staff triage requests by age: each row says when the account was created."""
+        self.client.force_authenticate(user=self.superuser)
+        response = self.client.get('/dashboard/pending_admins/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        by_email = {row['email']: row for row in response.data}
+        self.assertEqual(
+            by_email['pending1@princeton.edu']['date_joined'][:19],
+            self.pending1.date_joined.isoformat()[:19],
+        )
+
     def test_superuser_can_list_all_pending_admins(self):
         self.client.force_authenticate(user=self.superuser)
         response = self.client.get('/dashboard/pending_admins/')

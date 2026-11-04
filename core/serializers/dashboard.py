@@ -2,6 +2,8 @@
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from core.serializers.user import UserSerializer
+
 
 class DashboardStatsSerializer(serializers.Serializer):
     totalOrganizations = serializers.IntegerField()
@@ -125,6 +127,14 @@ class AutogradingFailureListSerializer(serializers.Serializer):
     page = serializers.IntegerField()
     pageSize = serializers.IntegerField()
     results = AutogradingFailureSerializer(many=True)
+
+
+class PendingAdminUserSerializer(UserSerializer):
+    """A pending course-admin request: the user plus when they signed up, which is when they asked."""
+    date_joined = serializers.DateTimeField(read_only=True)
+
+    class Meta(UserSerializer.Meta):
+        fields = UserSerializer.Meta.fields + ('date_joined',)
 
 
 class PendingAdminActionRequestSerializer(serializers.Serializer):
