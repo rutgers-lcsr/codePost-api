@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from core.models import User
 from core.serializers.user import UserSerializer
-from core.permissions.helpers import returnForbidden, returnNotFound
+from core.permissions.helpers import returnForbidden, returnNotFound, returnInvalid
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from core.serializers.ai_usage import (
     OrganizationAISettingsSerializer,
@@ -189,7 +189,14 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         user = User.objects.get(email=email, profile__organization=organization)
     except User.DoesNotExist:
         return returnNotFound('User not found in this organization')
-        
+
+    # Only pending users can be verified; otherwise "decline" would hard-delete an
+    # established member and "approve" would grant course-creation rights to anyone.
+    if not user.profile.pendingValidation:
+        return returnInvalid('This user is not pending validation.')
+    if action_type == 'decline' and user == request.user:
+        return returnInvalid('You cannot decline yourself.')
+
     if action_type == 'approve':
         user.profile.pendingValidation = False
         user.profile.canCreateCourses = True

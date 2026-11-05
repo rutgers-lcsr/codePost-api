@@ -575,3 +575,36 @@ class TestFullApprovalWorkflow(APITestCase):
         )
         self.assertEqual(response.data['status'], 'denied_and_deleted')
         self.assertFalse(User.objects.filter(email='denied@newplace.edu').exists())
+
+
+class TestOrgVerifyUser(OrgPendingAdminsTestCase):
+    """verify_user must only act on pending users and never delete anyone else."""
+
+    def _post(self, caller, email, action):
+        self.client.force_authenticate(user=caller)
+        return self.client.post(
+            f'/organizations/{self.organization.id}/verify_user/',
+            {'user_email': email, 'action': action}, format='json')
+
+    def test_decline_pending_user_deletes_them(self):
+        resp = self._post(self.org_staff, self.pending_user.email, 'decline')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(User.objects.filter(pk=self.pending_user.pk).exists())
+
+    def test_decline_non_pending_member_is_rejected_and_not_deleted(self):
+        resp = self._post(self.org_staff, self.regular_user.email, 'decline')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIsInstance(resp.data['detail'], str)
+        self.assertTrue(User.objects.filter(pk=self.regular_user.pk).exists())
+
+    def test_decline_self_is_rejected_and_not_deleted(self):
+        resp = self._post(self.org_staff, self.org_staff.email, 'decline')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(User.objects.filter(pk=self.org_staff.pk).exists())
+
+    def test_approve_non_pending_member_does_not_grant_rights(self):
+        resp = self._post(self.org_staff, self.regular_user.email, 'approve')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.regular_user.profile.refresh_from_db()
+        self.assertFalse(self.regular_user.profile.canCreateCourses)
+        self.assertFalse(self.regular_user.profile.canModifyRosters)
