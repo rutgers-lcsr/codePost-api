@@ -1506,14 +1506,13 @@ class NotebookExecutor(Executor):
         """
         if not nonce:
             raise ValueError("extract_json_result requires the run's nonce")
-        start_marker = f"<<<RESULTS_START_{nonce}>>>"
-        end_marker = f"<<<RESULTS_END_{nonce}>>>"
-        start_at = stdout.rfind(start_marker)
-        end_at = stdout.find(end_marker, start_at + len(start_marker)) if start_at != -1 else -1
-        
-        if start_at == -1 or end_at == -1:
+        # The block after the LAST start marker, up to the first end marker after it.
+        _, found_start, after_start = stdout.rpartition(f"<<<RESULTS_START_{nonce}>>>")
+        block, found_end, _ = after_start.partition(f"<<<RESULTS_END_{nonce}>>>")
+
+        if not (found_start and found_end):
             # Use the tail of stderr to see the most recent error/traceback
-            stderr_preview = stderr[-1000:] if len(stderr) > 1000 else stderr
+            stderr_preview = stderr[-1000:]
             # Lead with the last non-empty stderr line so the real cause (e.g. a
             # runc exec error) is the first line of the message, which is what
             # the stats dashboard samples.
@@ -1522,8 +1521,7 @@ class NotebookExecutor(Executor):
             return ExecutionResult.error(f"{cause}Failed to extract results: missing markers. Stdout preview: {stdout[:200]} Stderr tail: {stderr_preview}")
 
         try:
-            results_stdout = stdout[start_at + len(start_marker):end_at].strip()
-            results_json = json.loads(results_stdout)
+            results_json = json.loads(block.strip())
             
             # Create ExecutionResult from the parsed JSON
             return ExecutionResult(
