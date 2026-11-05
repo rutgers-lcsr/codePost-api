@@ -57,6 +57,41 @@ class _SuiteBase(DjangoTestCase):
       return TestService.run_suite(self.submission.id, user_id=user_id, **kwargs)
 
 
+class StudentRunCannotEditTestCasesTests(_SuiteBase):
+  def test_student_run_reporting_only_some_tests_keeps_other_tests_and_other_students_results(self):
+    self.run_suite_with(_result(("test_real", 5)), str(self.student.id))
+
+    self.assertTrue(TestCase.objects.filter(id=self.stale.id).exists(), "instructor TestCase deleted by a student run")
+    self.assertTrue(SubmissionTest.objects.filter(
+      submission=self.other_submission, testCase=self.stale).exists(), "another student's result was cascade-deleted")
+    self.assertTrue(SubmissionTest.objects.get(submission=self.submission, testCase=self.real).passed)
+
+  def test_student_run_reporting_an_unknown_test_name_creates_no_testcase(self):
+    self.run_suite_with(_result(("test_real", 5), ("bonus_free_points", 999)), str(self.student.id))
+
+    self.assertEqual(
+      set(self.category.testCases.values_list("functionName", flat=True)), {"test_real", "test_other"})
+
+  def test_run_on_submit_without_a_user_cannot_edit_testcases(self):
+    self.run_suite_with(_result(("test_real", 5), ("bonus_free_points", 9)), None)
+
+    self.assertEqual(
+      set(self.category.testCases.values_list("functionName", flat=True)), {"test_real", "test_other"})
+
+
+class AdminRunStillSyncsTestCasesTests(_SuiteBase):
+  def test_admin_run_creates_new_tests_and_deletes_stale_ones(self):
+    self.run_suite_with(_result(("test_real", 5), ("test_new", 2)), str(self.admin.id))
+
+    self.assertEqual(
+      set(self.category.testCases.values_list("functionName", flat=True)), {"test_real", "test_new"})
+
+  def test_admin_run_that_returns_no_results_does_not_wipe_the_tests(self):
+    self.run_suite_with(_result(), str(self.admin.id))
+
+    self.assertEqual(self.category.testCases.count(), 2)
+
+
 class UploadedResultFileTests(_SuiteBase):
   def test_student_uploaded_test_result_file_does_not_create_results(self):
     with factory.django.mute_signals(post_save):

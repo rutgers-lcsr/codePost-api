@@ -26,6 +26,17 @@ class TestService:
             return {}
 
     @staticmethod
+    def _is_course_admin(user_id: Optional[str], course) -> bool:
+        """True if user_id names a course admin. Runs started by students, or by nobody
+        (run-on-submit), are never admin runs."""
+        if not user_id:
+            return False
+        from core.models import User
+        from core.permissions.helpers import isCourseAdmin
+        user = User.objects.filter(id=user_id).first()
+        return bool(user and isCourseAdmin(user, course))
+
+    @staticmethod
     def _to_json_safe(value: Any) -> Any:
         """Recursively convert values to JSON-serializable primitives for JSONField writes."""
         if isinstance(value, Decimal):
@@ -446,7 +457,13 @@ class TestService:
                     if not script_crashed and not raw_test_results and 'Test Script Error:' in stderr_log:
                         script_crashed = True
                     
-                    should_sync = script_success and not script_crashed
+                    # Auto-sync edits the instructor's TestCases (and, via cascade, every student's
+                    # results), so only a course admin's run may do it, never a student's.
+                    should_sync = (
+                        script_success
+                        and not script_crashed
+                        and TestService._is_course_admin(user_id, assignment.course)
+                    )
                     
                     # 5b. Process Results & Create New Tests
                     for raw_res in raw_test_results:
@@ -519,8 +536,9 @@ class TestService:
                             }
                             all_results.append(result_data)
 
-                    # 5c. Delete Stale Tests
-                    if should_sync:
+                    # 5c. Delete Stale Tests (a run that reported nothing is a harness failure, not
+                    # an instruction to delete every test)
+                    if should_sync and raw_test_results:
                         for test in all_category_tests:
                             if test.id not in processed_ids:
                                 logger.info(f"Auto-deleting stale test case '{test.functionName}' (id={test.id}) for category '{category.name}'")
