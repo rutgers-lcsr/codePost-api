@@ -63,6 +63,18 @@ def get_service_url(request, provider, org_id=None, next_path=None):
         url += f"&next={urllib.parse.quote(next_path, safe='')}"
     return url
 
+def sso_gate_error(organization, provider):
+    """Return (message, http_status) if this org may not use SSO via `provider`, else None.
+
+    Shared by initiate_sso and sso_callback so both apply the same gates.
+    """
+    if not organization.sso_enabled:
+        return 'SSO is not enabled for this organization', 403
+    if organization.sso_provider != provider:
+        return f'Organization is configured for {organization.sso_provider}, not {provider}', 400
+    return None
+
+
 @extend_schema(
     responses={302: OpenApiResponse(description='Redirect to SSO provider')}
 )
@@ -102,13 +114,12 @@ def initiate_sso(request, provider):
     if not organization:
         return JsonResponse({'error': 'Could not determine organization for SSO'}, status=400)
 
-    if not organization.sso_enabled:
-        return JsonResponse({'error': 'SSO is not enabled for this organization'}, status=403)
-        
+    rejection = sso_gate_error(organization, provider)
+    if rejection:
+        message, status_code = rejection
+        return JsonResponse({'error': message}, status=status_code)
+
     sso_config = organization.sso_config or {}
-    target_provider = organization.sso_provider
-    if target_provider != provider:
-        return JsonResponse({'error': f'Organization is configured for {target_provider}, not {provider}'}, status=400)
 
     # 1. CAS Logic
     if provider == 'CAS':
@@ -216,6 +227,10 @@ def sso_callback(request, provider):
         organization = Organization.objects.get(id=org_id)
     except (Organization.DoesNotExist, ValueError, TypeError):
         return error_redirect('Organization not found')
+
+    rejection = sso_gate_error(organization, provider)
+    if rejection:
+        return error_redirect(rejection[0])
 
     sso_config = organization.sso_config or {}
     email = None
