@@ -684,13 +684,26 @@ def sync_attempts_to_settings(quiz, changed_fields):
     if stale:
       QuizAttempt.objects.bulk_update(stale, ['passed', 'modified'])
   if changed & DEADLINE_FIELDS:
-    stale = []
-    for attempt in quiz.attempts.filter(status='in_progress').select_related('student'):
-      deadline = compute_attempt_deadline(quiz, attempt.student, attempt.startedAt,
-                                          bypass_close=attempt.closeBypassed)
-      if deadline != attempt.deadline:
-        attempt.deadline = deadline
-        attempt.modified = now
-        stale.append(attempt)
-    if stale:
-      QuizAttempt.objects.bulk_update(stale, ['deadline', 'modified'])
+    _resync_deadlines(quiz, quiz.attempts.filter(status='in_progress'))
+
+
+def _resync_deadlines(quiz, in_progress_attempts):
+  """Re-derive the stored deadline of each given in-progress attempt of ``quiz``."""
+  now = timezone.now()
+  stale = []
+  for attempt in in_progress_attempts.select_related('student'):
+    deadline = compute_attempt_deadline(quiz, attempt.student, attempt.startedAt,
+                                        bypass_close=attempt.closeBypassed)
+    if deadline != attempt.deadline:
+      attempt.deadline = deadline
+      attempt.modified = now  # bulk_update bypasses BaseModel.save()
+      stale.append(attempt)
+  if stale:
+    QuizAttempt.objects.bulk_update(stale, ['deadline', 'modified'])
+
+
+def sync_attempts_to_submission(submission, student_ids):
+  """A student's submission time is their quiz close for closeEvent='submission' quizzes, so
+  attempts they have in progress must be re-capped when the submission appears."""
+  for quiz in submission.assignment.quizzes.filter(closeEvent='submission', endAttemptsAtClose=True):
+    _resync_deadlines(quiz, quiz.attempts.filter(status='in_progress', student_id__in=student_ids))

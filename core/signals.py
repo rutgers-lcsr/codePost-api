@@ -5,7 +5,7 @@ Core application signals.
 Handles automatic submission execution when submissions are created.
 """
 import logging
-from django.db.models.signals import post_save
+from django.db.models.signals import m2m_changed, post_save
 from django.dispatch import receiver
 from django.conf import settings
 
@@ -201,6 +201,23 @@ def sync_quiz_attempts_on_assignment_change(sender, instance, created, **kwargs)
     except Exception as e:
         logger.error(
             f"Failed to resync quiz attempt deadlines for assignment {instance.id}: {e}",
+            exc_info=True
+        )
+
+
+@receiver(m2m_changed, sender=Submission.students.through)
+def sync_quiz_attempts_on_submission_students(sender, instance, action, reverse, pk_set, **kwargs):
+    """The student's own submission time is the close of a closeEvent='submission' quiz, and
+    attempt deadlines are stored at start. post_save of the Submission fires before its
+    students are attached, so the resync has to hang off the m2m add."""
+    if action != 'post_add' or reverse or not pk_set:
+        return
+    try:
+        from core.services import quiz_grading
+        quiz_grading.sync_attempts_to_submission(instance, pk_set)
+    except Exception as e:
+        logger.error(
+            f"Failed to resync quiz attempt deadlines for submission {instance.id}: {e}",
             exc_info=True
         )
 
