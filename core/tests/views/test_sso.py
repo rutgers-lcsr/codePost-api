@@ -136,6 +136,7 @@ class SSOTest(SimpleTestCase):
             # Set up state in cache to pass CSRF validation
             cache.set('sso_state:test_azure_state', '1', timeout=600)
             request = self.factory.get('/auth/sso/callback/AZURE/', {'org': '1', 'code': 'auth_code', 'state': 'test_azure_state'})
+            request.session = {'sso_state:test_azure_state': True}  # state was issued to this browser
             response = sso_callback(request, 'AZURE')
             
             self.assertEqual(response.status_code, 302)
@@ -173,6 +174,7 @@ class SSOTest(SimpleTestCase):
             # Set up state in cache to pass CSRF validation
             cache.set('sso_state:test_google_state', '1', timeout=600)
             request = self.factory.get('/auth/sso/callback/GOOGLE/', {'org': '1', 'code': 'google_code', 'state': 'test_google_state'})
+            request.session = {'sso_state:test_google_state': True}  # state was issued to this browser
             response = sso_callback(request, 'GOOGLE')
             
             self.assertEqual(response.status_code, 302)
@@ -278,13 +280,11 @@ class SSOInitiateAllowedDomainsTest(SimpleTestCase):
         mock_get_org.assert_called_once_with("scarletmail.rutgers.edu")
 
     @patch('core.views.sso.get_organization_by_email_domain')
-    @patch('core.views.sso.User.objects.get')
-    def test_initiate_sso_unknown_domain_falls_to_user_lookup(self, mock_user_get, mock_get_org):
+    @patch('core.views.sso._organization_of_unique_user')
+    def test_initiate_sso_unknown_domain_falls_to_user_lookup(self, mock_user_org, mock_get_org):
         """If domain is not in primary or allowed, it falls back to user profile lookup."""
         mock_get_org.return_value = None
-        mock_user = MagicMock()
-        mock_user.profile.organization = self.org_mock
-        mock_user_get.return_value = mock_user
+        mock_user_org.return_value = self.org_mock
 
         request = self.factory.get('/auth/sso/login/CAS/', {'email': 'student@personal.com'})
         response = initiate_sso(request, 'CAS')

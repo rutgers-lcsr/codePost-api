@@ -41,6 +41,15 @@ def get_organization_by_email_domain(domain, **filters):
     return None
 
 
+def _organization_of_unique_user(email):
+    """Organization of the one user with this email, else None (none, or ambiguous:
+    User.email is not unique and a login must not guess between accounts)."""
+    users = list(User.objects.filter(email=email)[:2])
+    if len(users) != 1:
+        return None
+    return users[0].profile.organization
+
+
 # Helper to get service URL
 def get_service_url(request, provider, org_id=None, next_path=None):
     # Construct the callback URL dynamically based on the request's host
@@ -99,17 +108,10 @@ def initiate_sso(request, provider):
             return JsonResponse({'error': 'Organization not found'}, status=404)
     elif email:
         domain = email.split('@')[-1]
-        try:
-            organization = get_organization_by_email_domain(domain)
-        except:
-            pass
-            
-        if not organization: 
-            try:
-                user = User.objects.get(email=email)
-                organization = user.profile.organization
-            except User.DoesNotExist:
-                pass
+        organization = get_organization_by_email_domain(domain)
+
+        if not organization:
+            organization = _organization_of_unique_user(email)
 
     if not organization:
         return JsonResponse({'error': 'Could not determine organization for SSO'}, status=400)
@@ -156,6 +158,10 @@ def initiate_sso(request, provider):
         cache.set(f"sso_state:{state}",
                   json.dumps({"org": str(organization.id), "next": next_path}),
                   timeout=600)  # 10 min TTL
+        # Bind the state to this browser: the callback only honours a state that
+        # this same session started, so a callback URL minted by someone else's
+        # login (login CSRF) is refused.
+        request.session[f"sso_state:{state}"] = True
         
         auth_endpoint = ""
         
@@ -323,6 +329,8 @@ def sso_callback(request, provider):
         received_state = request.query_params.get('state')
         if not received_state:
             return error_redirect('Missing state parameter')
+        if not request.session.pop(f"sso_state:{received_state}", False):
+            return error_redirect('State parameter was not issued to this browser')
         cached_state = cache.get(f"sso_state:{received_state}")
         if cached_state is None:
             return error_redirect('Invalid or expired state parameter')
@@ -366,7 +374,8 @@ def sso_callback(request, provider):
                 resp = requests.get(discovery, timeout=5).json()
                 token_endpoint = resp.get('token_endpoint')
                 userinfo_endpoint = resp.get('userinfo_endpoint')
-            except:
+            except Exception as e:
+                logger.error(f"OIDC discovery failed in callback: {e}")
                 return error_redirect('OIDC discovery failed in callback')
 
         if not token_endpoint:
@@ -425,8 +434,7 @@ def sso_callback(request, provider):
 
         except Exception as e:
             logger.error(f"OAuth Error: {e}")
-            
-
+            return error_redirect("An error occurred during SSO authentication. Please try again.")
 
     # --- OTHER PROVIDERS ---
     else:
@@ -504,12 +512,9 @@ def check_sso_availability(request):
     
     # 2. If no domain match, check user mapping
     if not organization:
-        try:
-            user = User.objects.get(email=email)
-            if user.profile.organization and user.profile.organization.sso_enabled:
-                organization = user.profile.organization
-        except User.DoesNotExist:
-            pass
+        user_org = _organization_of_unique_user(email)
+        if user_org and user_org.sso_enabled:
+            organization = user_org
             
     if organization and organization.sso_enabled:
         return JsonResponse({

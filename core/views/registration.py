@@ -115,14 +115,18 @@ def emailRegistration(request):
                 if email_passes_whitelist(
                     form.cleaned_data["email"], course.emailWhitelist
                 ):
+                    admin = course.courseAdmins.first()
+                    if admin is None:
+                        return Response(
+                            {"detail": "This course cannot accept new registrations right now."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
                     newUser = User.objects.create(
                         username=form.cleaned_data["email"],
                         email=form.cleaned_data["email"],
                         is_active=False,
                     )
-                    newUser.profile.organization = course.courseAdmins.all()[
-                        0
-                    ].profile.organization
+                    newUser.profile.organization = admin.profile.organization
                     newUser.profile.isPasswordSet = False
                     newUser.save()
                     course.students.add(newUser)
@@ -229,6 +233,14 @@ def registerAndSetPassword(request):
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
             )
+            if isValid and not user.is_active and user.profile.isPasswordSet:
+                # An account that already had a password and is inactive was disabled
+                # on purpose; a reset token must not switch it back on. (Pending
+                # accounts, the ones this endpoint activates, never had a password.)
+                return Response(
+                    {"isValid": False, "errors": {"token": "invalid token"}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if isValid:
                 user.is_active = True
                 user.set_password(form.cleaned_data["password1"])

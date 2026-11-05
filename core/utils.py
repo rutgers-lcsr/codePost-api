@@ -82,6 +82,9 @@ def get_or_create_user(email: str, organization: Any, auto_activate: bool = Fals
     try:
       thisUser = User.objects.get(email=email)
       return thisUser
+    except User.MultipleObjectsReturned:
+      # Ambiguous identity: never guess which account an SSO assertion means.
+      return None
     except User.DoesNotExist:
       # Check if organization supports SSO auto-activation
       # If so, we auto-activate the user so they can get an OTT immediately
