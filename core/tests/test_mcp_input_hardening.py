@@ -149,3 +149,27 @@ class TestArgumentTypes:
 
 
 
+class TestEditRubricMissingId:
+
+    @pytest.mark.parametrize("field,item", [
+        ("categories", {"op": "delete"}),
+        ("categories", {"op": "update", "name": "x"}),
+        ("comments", {"op": "delete"}),
+        ("comments", {"op": "update", "text": "x"}),
+    ])
+    def test_update_or_delete_without_id_is_a_tool_error_and_applies_nothing(
+            self, api_client, key, draft, field, item):
+        from core.models import RubricCategory
+        before = RubricCategory.objects.filter(assignment=draft).count()
+        result = call(api_client, key, "codepost_edit_rubric", {
+            "assignmentId": draft.id,
+            # A valid create earlier in the batch must NOT be applied.
+            "categories": [{"op": "create", "name": "Early", "pointLimit": 1}]
+                          + ([item] if field == "categories" else []),
+            **({"comments": [item]} if field == "comments" else {}),
+        })
+        assert result["isError"] is True
+        assert RubricCategory.objects.filter(assignment=draft).count() == before
+
+
+

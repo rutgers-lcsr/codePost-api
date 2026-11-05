@@ -475,6 +475,17 @@ def edit_rubric(ctx, assignmentId: int, categories=None, comments=None):
             'PRECONDITION_NOT_MET', 'Nothing to change.',
             remedy='Pass categories and/or comments operations.', retryable=True)
 
+    # Validate every item before the first write: a batch that crashed or
+    # failed on item N would otherwise leave items 1..N-1 applied.
+    for field, items in (('categories', categories), ('comments', comments)):
+        for i, item in enumerate(items):
+            if item['op'] in ('update', 'delete') and item.get('id') is None:
+                raise errors.ToolError(
+                    'PRECONDITION_NOT_MET',
+                    f"{field}[{i}]: op '{item['op']}' needs an id.",
+                    remedy='Call codepost_get_rubric for the ids, then retry; '
+                           'nothing was changed.', retryable=True)
+
     report = {'categories': [], 'comments': []}
 
     def run(view_cls, item, *, kind, create_body=None, path_root=''):
