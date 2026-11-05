@@ -33,18 +33,22 @@ class NotebookHandler(BaseFileHandler):
 
     def _parse_notebook(self) -> Dict:
         try:
-            return json.loads(self.content)
+            nb = json.loads(self.content)
         except json.JSONDecodeError:
             return {}
+        return nb if isinstance(nb, dict) else {}
 
     def _get_kernel_language(self, nb_data: Dict) -> Optional[str]:
-        language = None
-        if 'metadata' in nb_data:
-            if 'kernelspec' in nb_data['metadata'] and 'language' in nb_data['metadata']['kernelspec']:
-                language = nb_data['metadata']['kernelspec']['language'].lower()
-            elif 'language_info' in nb_data['metadata'] and 'name' in nb_data['metadata']['language_info']:
-                language = nb_data['metadata']['language_info']['name'].lower()
-        return language
+        metadata = nb_data.get('metadata')
+        if not isinstance(metadata, dict):
+            return None
+        kernelspec = metadata.get('kernelspec')
+        if isinstance(kernelspec, dict) and isinstance(kernelspec.get('language'), str):
+            return kernelspec['language'].lower()
+        language_info = metadata.get('language_info')
+        if isinstance(language_info, dict) and isinstance(language_info.get('name'), str):
+            return language_info['name'].lower()
+        return None
 
     def _get_delegate_handler_class(self, nb_data: Dict):
         lang = self._get_kernel_language(nb_data)
@@ -107,12 +111,15 @@ class NotebookHandler(BaseFileHandler):
         Extracts code from all code cells in the notebook.
         """
         code_cells = []
-        if 'cells' in data:
-            for cell in data['cells']:
+        cells = data.get('cells')
+        if isinstance(cells, list):
+            for cell in cells:
+                if not isinstance(cell, dict):
+                    continue
                 if cell.get('cell_type') == 'code':
                     source = cell.get('source', [])
                     if isinstance(source, list):
-                        code_cells.append("".join(source))
+                        code_cells.append("".join(s for s in source if isinstance(s, str)))
                     elif isinstance(source, str):
                         code_cells.append(source)
         return "\n".join(code_cells)
@@ -124,9 +131,11 @@ class NotebookHandler(BaseFileHandler):
         """
         try:
             nb = json.loads(content)
-            if 'cells' in nb and isinstance(nb['cells'], list):
+            if isinstance(nb.get('cells'), list):
                 changed = False
                 for cell in nb['cells']:
+                    if not isinstance(cell, dict):
+                        continue
                     if 'metadata' not in cell:
                         cell['metadata'] = {}
                     

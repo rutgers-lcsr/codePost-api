@@ -65,7 +65,8 @@ class JavaHandler(BaseFileHandler):
     def _generate_pom_dependencies(self, imports: Set[str]) -> Set[str]:
         artifacts = set()
         for imp in imports:
-            for prefix, coord in self.MAPPING.items():
+            # Most specific prefix wins (org.junit.jupiter before org.junit)
+            for prefix, coord in sorted(self.MAPPING.items(), key=lambda kv: len(kv[0]), reverse=True):
                 if imp.startswith(prefix):
                     artifacts.add(coord)
                     break
