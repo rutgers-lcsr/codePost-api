@@ -158,7 +158,9 @@ def isStaffOfSub(user, submission):
   """
   
   
-  if (user == submission.grader):
+  # The assigned grader only counts while still a grader of the course: removing someone
+  # from the roster does not clear submission.grader.
+  if (user == submission.grader and isGrader(user, submission.assignment.course)):
     return True
   elif isCourseAdmin(user, submission.assignment.course):
     return True
