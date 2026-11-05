@@ -84,11 +84,11 @@ class TestPromptTypesEndpoint:
 
 
 class TestAssignmentPromptValidation:
-    """Unit tests of the placeholder validator used by AssignmentSerializer."""
+    """Unit tests of the placeholder validator shared by AssignmentSerializer and the Prompt Lab."""
 
     def _validate(self, field, prompt_type, value):
-        from core.serializers.assignment import AssignmentSerializer
-        AssignmentSerializer._validate_prompt_placeholders({field: value}, field, prompt_type)
+        from core.prompts.validation import validate_prompt_placeholders
+        validate_prompt_placeholders(value, prompt_type, field)
 
     def test_valid_summary_prompt_passes(self):
         self._validate('ai_summary_prompt', 'submission_summary',

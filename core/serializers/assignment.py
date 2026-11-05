@@ -2,6 +2,7 @@
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
+from core.prompts.validation import validate_prompt_placeholders
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import Assignment, ASSIGNMENT_STATE_CHOICES, STUDENT_VISIBLE_STATES
 from django.contrib.auth.models import User
@@ -171,8 +172,12 @@ class AssignmentSerializerBase(ModelSerializerWithPOSTCheck):
       course_id = self.initial_data.get('course')
     if course_id is None:
       return sections  # create without course fails field validation elsewhere
+    try:
+      course_id = int(course_id)
+    except (TypeError, ValueError):
+      raise serializers.ValidationError("A valid course is required to set hideFrom.")
     for section in sections:
-      if section.course_id != int(course_id):
+      if section.course_id != course_id:
         raise serializers.ValidationError(
             "hideFrom sections must belong to the assignment's course.")
     return sections
@@ -212,38 +217,9 @@ class AssignmentSerializer(AssignmentSerializerBase):
 
   def validate(self, data):
     data = super().validate(data)
-    self._validate_prompt_placeholders(data, 'ai_system_prompt', 'comment_generation')
-    self._validate_prompt_placeholders(data, 'ai_summary_prompt', 'submission_summary')
+    validate_prompt_placeholders(data.get('ai_system_prompt'), 'comment_generation', 'ai_system_prompt')
+    validate_prompt_placeholders(data.get('ai_summary_prompt'), 'submission_summary', 'ai_summary_prompt')
     return data
-
-  @staticmethod
-  def _validate_prompt_placeholders(data, field, prompt_type):
-    """Reject a per-assignment prompt override that uses {placeholders} outside the
-    prompt type's allowed set — same check the Prompt Lab applies to global variants
-    (see core/serializers/prompt_variant.py)."""
-    template = data.get(field)
-    if not template:
-      return
-    import string
-    from core.prompts.registry import prompt_registry
-    allowed = prompt_registry.get_allowed_placeholders(prompt_type)
-    used = set()
-    try:
-      for _, field_name, _, _ in string.Formatter().parse(template):
-        if field_name is not None:
-          root = field_name.split('.')[0].split('[')[0]
-          if root:
-            used.add(root)
-    except (ValueError, KeyError):
-      raise serializers.ValidationError({
-          field: 'Invalid template syntax. Check for unmatched or malformed {placeholders}.'
-      })
-    invalid = used - allowed
-    if invalid:
-      raise serializers.ValidationError({
-          field: (f"Unknown placeholder(s): {{{', '.join(sorted(invalid))}}}. "
-                  f"Allowed placeholders: {{{', '.join(sorted(allowed))}}}.")
-      })
 
   def create(self, validated_data):
     user = self.context['request'].user

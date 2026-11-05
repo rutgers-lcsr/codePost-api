@@ -1,9 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-import string
-
 from rest_framework import serializers
 from core.models import SystemPromptVariant
-from core.prompts.registry import prompt_registry
+from core.prompts.validation import validate_prompt_placeholders
 
 
 class SystemPromptVariantSerializer(serializers.ModelSerializer):
@@ -22,37 +20,12 @@ class SystemPromptVariantSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        prompt_type = attrs.get('prompt_type') or (self.instance.prompt_type if self.instance else None)
-        text = attrs.get('text') or (self.instance.text if self.instance else '')
+        prompt_type = attrs['prompt_type'] if 'prompt_type' in attrs else (
+            self.instance.prompt_type if self.instance else None)
+        text = attrs['text'] if 'text' in attrs else (self.instance.text if self.instance else '')
 
-        if prompt_type and text:
-            allowed = prompt_registry.get_allowed_placeholders(prompt_type)
-            if allowed:
-                # Extract placeholder names from the template using string.Formatter
-                formatter = string.Formatter()
-                used = set()
-                try:
-                    for _, field_name, _, _ in formatter.parse(text):
-                        if field_name is not None:
-                            # Handle nested access like {foo.bar} — only validate the root name
-                            root = field_name.split('.')[0].split('[')[0]
-                            if root:
-                                used.add(root)
-                except (ValueError, KeyError):
-                    raise serializers.ValidationError({
-                        'text': 'Invalid template syntax. Check for unmatched or malformed {placeholders}.'
-                    })
-
-                invalid = used - allowed
-                if invalid:
-                    sorted_invalid = ', '.join(sorted(invalid))
-                    sorted_allowed = ', '.join(sorted(allowed))
-                    raise serializers.ValidationError({
-                        'text': (
-                            f'Unknown placeholder(s): {{{sorted_invalid}}}. '
-                            f'Allowed placeholders for {prompt_type}: {{{sorted_allowed}}}.'
-                        )
-                    })
+        if prompt_type:
+            validate_prompt_placeholders(text, prompt_type)
 
         return attrs
 

@@ -171,3 +171,62 @@ class TestSubmissionLateDayAudit(APITestCase):
             "assignment": self._second_assignment().id, "students": [student.username], "lateDayCreditsUsed": 2})
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(self._events(), 1)
+
+
+class TestAssignmentMalformedCourse(APITestCase):
+
+    def setUp(self):
+        setUpBase(self)
+
+    def test_malformed_course_with_hidefrom_is_400(self):
+        admin = self.course.courseAdmins.first()
+        section = self.DB["Section"]
+        for bad in ("abc", [1], {"a": 1}):
+            response = request_as("create", admin, "/assignments/", {
+                "course": bad, "name": "x", "points": 5, "state": "draft", "hideFrom": [section.id]})
+            self.assertEqual(response.status_code, 400, (bad, response.status_code))
+
+    def test_hidefrom_sections_must_belong_to_the_course(self):
+        admin = self.course.courseAdmins.first()
+        own = self.DB["Section"]
+        foreign = self.other_course.sections.first()
+        payload = {"course": self.course.id, "name": "x", "points": 5, "state": "draft"}
+        ok = request_as("create", admin, "/assignments/", {**payload, "hideFrom": [own.id]})
+        self.assertEqual(ok.status_code, 201, ok.content)
+        bad = request_as("create", admin, "/assignments/", {**payload, "name": "y", "hideFrom": [foreign.id]})
+        self.assertEqual(bad.status_code, 400, bad.content)
+
+
+class TestPromptPlaceholderValidation(APITestCase):
+
+    def setUp(self):
+        setUpBase(self)
+        self.su = UserFactory(username="su@princeton.edu", organization=self.course.organization)
+        self.su.is_superuser = self.su.is_staff = True
+        self.su.save()
+
+    def test_unregistered_prompt_type_with_placeholder_rejected(self):
+        response = request_as("create", self.su, "/promptVariants/", {
+            "promptType": "bogus_type", "name": "n", "text": "hi {x}"})
+        self.assertEqual(response.status_code, 400, response.content)
+
+    def test_patching_prompt_type_revalidates_stored_text(self):
+        created = request_as("create", self.su, "/promptVariants/", {
+            "promptType": "submission_summary", "name": "n", "text": "see {rubric}"})
+        self.assertEqual(created.status_code, 201, created.content)
+        response = request_as("update", self.su, f"/promptVariants/{created.data['id']}/", {
+            "promptType": "bogus_type"})
+        self.assertEqual(response.status_code, 400, response.content)
+
+    def test_known_type_unknown_placeholder_rejected(self):
+        response = request_as("create", self.su, "/promptVariants/", {
+            "promptType": "submission_summary", "name": "n", "text": "hi {x}"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_assignment_override_with_valid_placeholder_ok(self):
+        admin = self.course.courseAdmins.first()
+        a = self.DB["Assignment"]
+        ok = request_as("update", admin, f"/assignments/{a.id}/", {"ai_summary_prompt": "see {rubric}"})
+        self.assertEqual(ok.status_code, 200, ok.content)
+        bad = request_as("update", admin, f"/assignments/{a.id}/", {"ai_summary_prompt": "see {nope}"})
+        self.assertEqual(bad.status_code, 400)
