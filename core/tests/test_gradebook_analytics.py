@@ -241,6 +241,11 @@ class TestLateDays:
         late = self._late_stats(api_client, course, 2 * H)
         assert late["lateByDay"] == [{"day": 1, "count": 1}]
 
+    def test_missing_due_date_or_upload_date_is_never_late(self):
+        from core.services.late_days import days_late
+        assert days_late(None, DUE + 50 * H) == 0
+        assert days_late(DUE, None) == 0
+
     def test_early_upload_is_on_time(self, api_client, course):
         late = self._late_stats(api_client, course, -5 * H)
         assert late["onTime"] == 1 and late["late"] == 0 and late["lateByDay"] == []
