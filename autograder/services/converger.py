@@ -185,7 +185,7 @@ class JavaConverger(BaseConverger):
     PATTERNS = [
         r"package ([\w\.]+) does not exist"
     ]
-    STDLIB = {'java', 'javax', 'sun', 'com.sun'}
+    STDLIB = {'java', 'javax', 'sun', 'com.sun', 'jdk'}
     
     # Mapping of package prefixes to Maven coordinates
     # Format: prefix -> (groupId, artifactId, version, scope)
@@ -208,7 +208,7 @@ class JavaConverger(BaseConverger):
     def _is_valid_module(cls, module: str) -> bool:
         """Java packages - check prefix against stdlib."""
         for std in cls.STDLIB:
-            if module.startswith(std):
+            if module == std or module.startswith(std + '.'):
                 return False
         return len(module) >= 2 and re.match(r'^[\w\.]+$', module) is not None
 

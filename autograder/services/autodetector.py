@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 import logging
 import json
+import re
 import time
 from typing import List, Dict, Optional, Tuple, Any
 from django.db.models import Count
@@ -11,11 +12,105 @@ from core.services.file_handlers.factory import FileHandlerFactory
 
 logger = logging.getLogger(__name__)
 
+# Requirement formats that are one package per line and so can be merged line by line.
+# Everything else (pom.xml, package.json, Gemfile, composer.json, Makefile) is a
+# whole-file manifest that must never be split, deduped or sorted line by line.
+LINE_ORIENTED_FAMILIES = ('python', 'r')
+
+
 class Autodetector:
     """
     Service to detect environment settings (Language, Dependencies) from submission files.
     Refactored to use FileHandlers.
     """
+
+    @staticmethod
+    def collect_local_modules(files: List[Any]) -> set:
+        """
+        Names of modules provided by the files themselves (client.py -> client, or
+        client/api/notebook.py -> client), which must not be installed from PyPI.
+        """
+        local_modules = set()
+        for f in files:
+            # f.name might contain path separators if uploaded as such; File models also have a path
+            full_paths = [f.name]
+            if getattr(f, 'path', None):
+                full_paths.append(f"{f.path}/{f.name}")
+
+            for p in full_paths:
+                p = p.replace('\\', '/')
+                parts = p.split('/')
+                if len(parts) > 1:
+                    # Directory structure: the top-level folder is likely the package name
+                    local_modules.add(parts[0])
+                elif p.endswith('.py'):
+                    local_modules.add(p[:-3])
+        return local_modules
+
+    @staticmethod
+    def merge_requirements(language: str, blobs: List[str], local_modules: Optional[set] = None) -> Optional[str]:
+        """
+        The one place that combines per-file requirement strings into an Environment's requirements.
+
+        Line-oriented formats (python, r) are merged per line: local modules are dropped, python
+        packages must exist on PyPI, and the result is deduped and sorted. Whole-file manifests are
+        kept intact; when several distinct ones exist they are merged structurally (package.json
+        dependencies, pom.xml <dependency> blocks) or the first one wins.
+        """
+        family = (language or '').lower().split('-')[0]
+        local_modules = local_modules or set()
+
+        if family in LINE_ORIENTED_FAMILIES:
+            packages = set()
+            for blob in blobs:
+                for req in blob.split('\n'):
+                    req = req.strip()
+                    if not req or req in packages:
+                        continue
+                    if req in local_modules:
+                        logger.info(f"[AutoDetect] Filtering local module '{req}' (found key in local files)")
+                        continue
+                    if family == 'python' and not Autodetector.check_pypi_existence(req):
+                        logger.warning(f"[AutoDetect] Package '{req}' not found on PyPI. Assuming local/private module and skipping.")
+                        continue
+                    packages.add(req)
+            return "\n".join(sorted(packages)) if packages else None
+
+        manifests: List[str] = []
+        for blob in blobs:
+            if blob and blob.strip() and blob not in manifests:
+                manifests.append(blob)
+        if not manifests:
+            return None
+        base, others = manifests[0], manifests[1:]
+        for other in others:
+            base = Autodetector._merge_manifests(base, other)
+        return base
+
+    @staticmethod
+    def _merge_manifests(base: str, other: str) -> str:
+        """Fold the dependencies of `other` into `base`; unmergeable formats keep `base`."""
+        try:
+            a, b = json.loads(base), json.loads(other)
+        except ValueError:
+            a = b = None
+        if isinstance(a, dict) and isinstance(b, dict):
+            for key in ('dependencies', 'devDependencies'):
+                if isinstance(b.get(key), dict):
+                    merged = dict(b[key])
+                    if isinstance(a.get(key), dict):
+                        merged.update(a[key])
+                    a[key] = merged
+            return json.dumps(a, indent=2)
+
+        if '</dependencies>' in base:
+            squash = lambda block: re.sub(r'\s+', '', block)
+            known = {squash(x) for x in re.findall(r'<dependency>.*?</dependency>', base, re.S)}
+            extra = [x for x in re.findall(r'<dependency>.*?</dependency>', other, re.S) if squash(x) not in known]
+            if extra:
+                head, _, tail = base.rpartition('</dependencies>')
+                return head + "\n    ".join([''] + extra) + "\n  </dependencies>" + tail
+        return base
 
     @staticmethod
     def detect_from_files(files: List[Any], assignment: Any = None) -> Optional[Tuple[str, str | None]]:
@@ -67,36 +162,19 @@ class Autodetector:
         detected_language_hint = max(language_counts, key=lambda k: language_counts[k])
         
         # Gather requirements from files matching the detected language
-        requirements = set()
-        
-        # Prioritize "package manager" files (pom.xml, package.json, requirements.txt)
-        # Does the detected language match the file's language?
-        # e.g. if we detecting python, we want python requirements.
-        
+        blobs = []
         for _file_obj, handler in active_files:
             try:
-                # Only gather requirements if the file matches the detected language 
-                # OR if it's a config file relevant to that language.
-                # Simplification: Just ask the handler. 
-                # If the handler thinks this file belongs to 'python-3.12' and we detected 'python-3.12', used it.
-                
-                handler_lang = handler.get_language()
-                
-                # Loose matching for versions (e.g. node-20 vs node)
-                # Or exact match
-                if handler_lang == detected_language_hint:
+                if handler.get_language() == detected_language_hint:
                     reqs = handler.get_requirements()
                     if reqs:
-                        requirements.add(reqs)
+                        blobs.append(reqs)
             except Exception:
                 pass
-                
-        # Merge requirements
-        # If we have multiple requirements strings, how to combine?
-        # For now, simplistic join. Realistically usually only 1 file provides main requirements
-        # or we join line by line.
-        final_requirements = "\n".join(sorted(requirements)) if requirements else None
-        
+
+        local_modules = Autodetector.collect_local_modules([f for f, _h in active_files])
+        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules)
+
         return detected_language_hint, final_requirements
 
     @staticmethod
@@ -271,83 +349,25 @@ class Autodetector:
                 # TODO: Make sure the scripts have the right extension
                 all_files.append(ScriptDummyFile(f"test_script_{cat.id}.py", cat.testScript))
         
-        active_files = []
-        local_modules = set()
-        
-        for f in all_files:
-            if f.extension not in NON_CODE_EXTENSIONS:
-                 active_files.append(f)
-            
-            # Track local python modules (e.g., client.py -> client, or client/api/notebook.py -> client)
-            # We need to construct the full path to check for top-level directories
-            
-            full_paths = []
-            # Assuming f.name might contain path separators if uploaded as such
-            full_paths.append(f.name)
-            
-            # Also check if 'path' field is used (File model has path)
-            if hasattr(f, 'path') and f.path:
-                full_paths.append(f"{f.path}/{f.name}")
-                
-            for p in full_paths:
-                # Normalization
-                p = p.replace('\\', '/')
-                parts = p.split('/')
-                
-                if len(parts) > 1:
-                    # It's a directory structure: client/api/notebook.py
-                    # The top-level folder is likely the package name
-                    local_modules.add(parts[0])
-                elif p.endswith('.py'):
-                    # Top-level file: client.py
-                    local_modules.add(p[:-3])
+        active_files = [f for f in all_files if f.extension not in NON_CODE_EXTENSIONS]
+        local_modules = Autodetector.collect_local_modules(all_files)
         
         logger.info(f"[AutoDetect] Local modules identified: {local_modules}")
 
         # Detect requirements based on hint
-        final_requirements = None
-        requirements_set = set()
-        
+        blobs = []
         for f in active_files:
              try:
                  # Use factory to get safe handler since we mixed SubmissionFile and AssignmentFile
-                 # Although both are Files, using Factory ensures we get the right logic.
                  handler = FileHandlerFactory.get_handler(f)
-                 
-                 lang = handler.get_language()
-                 if lang == detected_language_hint:
+                 if handler.get_language() == detected_language_hint:
                      reqs = handler.get_requirements()
                      if reqs:
-                         # Filter out local modules
-                         for req in reqs.split('\n'):
-                             req = req.strip()
-                             # Logic:
-                             # 1. Check if local -> Filter
-                             # 2. Check if already added -> Skip
-                             # 3. Check PyPI -> Verify existence
-                             if not req:
-                                 continue
-                                 
-                             if req in local_modules:
-                                  logger.info(f"[AutoDetect] Filtering local module '{req}' (found key in local files)")
-                                  continue
-                                  
-                             if req in requirements_set:
-                                  continue
-                                  
-                             # External verification for Python
-                             if 'python' in detected_language_hint:
-                                  exists_on_pypi = Autodetector.check_pypi_existence(req)
-                                  if not exists_on_pypi:
-                                       logger.warning(f"[AutoDetect] Package '{req}' not found on PyPI. Assuming local/private module and skipping.")
-                                       continue
-
-                             requirements_set.add(req)
+                         blobs.append(reqs)
              except Exception as e:
                  logger.error(f"[AutoDetect] Error processing file {f.name}: {e}")
-                 
-        if requirements_set:
-             final_requirements = "\n".join(sorted(requirements_set))
+
+        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules)
 
         # Check against Environment
         if environment.build_status == 1 and not force: # Building

@@ -9,41 +9,24 @@ from .ruby import RubyExecutor, RubyNotebookExecutor  # noqa: F401
 from .php import PHPExecutor, PHPNotebookExecutor  # noqa: F401
 from .node import NodeExecutor, NodeNotebookExecutor  # noqa: F401
 
+# Language family (the part before the first '-') -> executor. Matching is exact on the
+# family so unsupported languages (typescript, scala, csharp, ...) are not routed to a
+# supported executor by accident; they get the base Executor, which callers treat as
+# "no sandbox available".
+_EXECUTOR_FAMILIES = {
+    'python': PythonExecutor, 'python3': PythonExecutor, 'data_science': PythonExecutor,
+    'node': NodeExecutor, 'nodejs': NodeExecutor, 'javascript': NodeExecutor, 'js': NodeExecutor,
+    'ruby': RubyExecutor,
+    'php': PHPExecutor,
+    'r': RExecutor,
+    'java': JavaExecutor,
+    'c/c++': CPPExecutor, 'c': CPPExecutor, 'cpp': CPPExecutor, 'c++': CPPExecutor,
+}
+
+
 def get_executor_class(language: str):
     """
-    Get the executor class for a given language string.
+    Get the executor class for a given language string (e.g. 'python-3.12', 'c/c++', 'R').
     """
-    lang = language.lower()
-    
-    # Python
-    if 'python' in lang or 'data_science' in lang:
-        return PythonExecutor
-        
-    # Node/JS
-    if 'node' in lang or 'javascript' in lang or 'js' in lang:
-        return NodeExecutor
-        
-    # Ruby (Check before R to avoid containment issues if logic becomes fuzzy, though explicit checks below handle it)
-    if 'ruby' in lang:
-        return RubyExecutor
-        
-    # PHP
-    if 'php' in lang:
-        return PHPExecutor
-        
-    # R
-    # Avoid matching 'ruby' or 'rust' if we add it, though rust doesn't share start.
-    if 'r' in lang and 'ruby' not in lang and 'rust' not in lang:
-         if lang == 'r' or lang.startswith('r-'):
-             return RExecutor
-
-    # Java
-    if 'java' in lang:
-        return JavaExecutor
-        
-    # C/C++
-    if 'c' in lang or 'cpp' in lang:
-        return CPPExecutor
-        
-    return Executor
-
+    family = (language or '').strip().lower().split('-')[0]
+    return _EXECUTOR_FAMILIES.get(family, Executor)

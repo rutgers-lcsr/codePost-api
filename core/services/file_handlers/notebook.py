@@ -6,7 +6,7 @@ from typing import Optional, Dict
 from .base import BaseFileHandler
 from .python import PythonHandler
 from .node import NodeHandler
-from .other_langs import RHandler, RubyHandler
+from .other_langs import RHandler, RubyHandler, PHPHandler, CPPHandler
 from .java import JavaHandler
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,8 @@ class NotebookHandler(BaseFileHandler):
         'r': RHandler,
         'ruby': RubyHandler,
         'java': JavaHandler,
+        'php': PHPHandler,
+        'cpp': CPPHandler,
     }
 
     def _parse_notebook(self) -> Dict:
@@ -56,8 +58,11 @@ class NotebookHandler(BaseFileHandler):
             # Normalize
             if 'python' in lang:
                 lang = 'python'
-            elif 'java' in lang or 'ijava' in lang:
+            elif lang in ('java', 'ijava'):
                 lang = 'java'
+            elif lang.startswith('c++') or lang.startswith('cpp'):
+                # xeus-cling reports language 'c++11'/'C++17'/...
+                lang = 'cpp'
             return self.KERNEL_HANDLER_MAP.get(lang)
         return None
 
