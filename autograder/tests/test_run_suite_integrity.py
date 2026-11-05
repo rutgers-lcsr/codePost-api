@@ -115,6 +115,13 @@ class AdminRunStillSyncsTestCasesTests(_SuiteBase):
 
     self.assertEqual(self.category.testCases.count(), 2)
 
+  def test_run_on_submit_of_the_reference_submission_does_not_sync(self):
+    # No user started it (run-on-submit), so nobody vouched for the output.
+    self.run_suite_with(_result(("test_real", 5), ("test_new", 2)), None)
+
+    self.assertEqual(
+      set(self.category.testCases.values_list("functionName", flat=True)), {"test_real", "test_other"})
+
 
 class FileOverrideScopeTests(_SuiteBase):
   def setUp(self):
