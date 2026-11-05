@@ -13,7 +13,7 @@ from core.models import User
 from core.serializers.user import UserSerializer
 from rest_framework.decorators import action
 
-from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound
+from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnNotFound, returnInvalid
 
 from rest_framework.authtoken.models import Token
 
@@ -145,10 +145,11 @@ class UserViewSet(SuperUserListProtectedViewSet):
         return returnForbidden()
 
     # bypass object-level permissions
-    try:
-        user_to_email = User.objects.get(email=email)
-    except User.DoesNotExist:
+    # Emails are not unique at the database level: prefer the account that belongs to this course.
+    candidates = list(User.objects.filter(email=email))
+    if not candidates:
         return returnNotFound("No user with that email address.")
+    user_to_email = next((u for u in candidates if isCourseMember(u, course)), candidates[0])
 
     # does requestor have the authority to email this user?
     if not isCourseMember(user_to_email, course):
@@ -163,19 +164,19 @@ class UserViewSet(SuperUserListProtectedViewSet):
         assignment = None
     else:
         try:
-            assignment = Assignment.objects.get(id=assignmentID)
+            # Scoped to the course the requestor administers: another course's assignment
+            # is indistinguishable from a missing one.
+            assignment = Assignment.objects.get(id=assignmentID, course=course)
         except Assignment.DoesNotExist:
-            return returnForbidden()
-
-        # Make sure the assignment belongs to the specified course
-        if assignment.course.id != course.id:
-            return returnForbidden()
+            return returnNotFound("No such assignment in this course.")
+        except (ValueError, TypeError):
+            return returnInvalid("assignment must be an assignment id.")
 
     # Caller specifies a template via string. The template must be on a whitelist
     # of known templates
     template = request.data.get('template', None)
     if template not in USER_ACCESSIBLE_TEMPLATES:
-        return Response({'error': "template is not valid"}, status=status.HTTP_400_BAD_REQUEST)
+        return returnInvalid("template is not valid")
 
     # Are we running a test? If so, we'll send a dummy version of the email to the requestor
     testMode = not request.data.get('livemode', False)
