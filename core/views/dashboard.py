@@ -10,13 +10,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from core.models import User
+from core.permissions.helpers import returnInvalid
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime, parse_date
 from datetime import datetime, time, timedelta
 
-from core.models import Organization, Course, Assignment, Section
-from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminUserSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer, AutogradingStatsSerializer, AutogradingFailureListSerializer
+from core.models import Organization, Course, Assignment, Section, SystemHealthAcknowledgement
+from core.serializers.dashboard import DashboardStatsSerializer, AssignmentDeadlineSerializer, PendingAdminUserSerializer, PendingAdminActionRequestSerializer, PendingAdminActionResponseSerializer, AutogradingStatsSerializer, AutogradingFailureListSerializer, SystemHealthAckSerializer, SystemHealthAckRequestSerializer
 
 
 FAILURES_PAGE_SIZE_DEFAULT = 25
@@ -330,3 +331,46 @@ class DashboardViewSet(viewsets.ViewSet):
             return Response({'status': 'denied_and_deleted'})
 
         return Response({'status': 'denied'})
+
+    @extend_schema(
+        methods=['GET'],
+        responses={200: SystemHealthAckSerializer},
+        description="The staff-wide acknowledgement of the current System Health failures. An empty signature means none.",
+    )
+    @extend_schema(
+        methods=['PUT'],
+        request=SystemHealthAckRequestSerializer,
+        responses={200: SystemHealthAckSerializer},
+        description="Record the caller as having acknowledged exactly these failing checks, for every staff member.",
+    )
+    @extend_schema(
+        methods=['DELETE'],
+        request=None,
+        responses={200: SystemHealthAckSerializer},
+        description="Clear the acknowledgement.",
+    )
+    @action(detail=False, methods=['GET', 'PUT', 'DELETE'], url_path='health_ack')
+    def health_ack(self, request):
+        """
+        Shared "known problem" note for System Health: GET reads it, PUT records the caller as having
+        acknowledged exactly `signature` (the failing checks), DELETE clears it.
+        """
+        ack = SystemHealthAcknowledgement.load()
+        if request.method == 'PUT':
+            body = SystemHealthAckRequestSerializer(data=request.data)
+            if not body.is_valid():
+                return returnInvalid('signature is required: the failing checks being acknowledged')
+            ack.signature = body.validated_data['signature']
+            ack.acknowledged_by = request.user
+            ack.acknowledged_at = timezone.now()
+            ack.save()
+        elif request.method == 'DELETE':
+            ack.signature = ''
+            ack.acknowledged_by = None
+            ack.acknowledged_at = None
+            ack.save()
+        return Response(SystemHealthAckSerializer({
+            'signature': ack.signature,
+            'acknowledgedBy': ack.acknowledged_by.email if ack.acknowledged_by else None,
+            'acknowledgedAt': ack.acknowledged_at,
+        }).data)

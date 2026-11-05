@@ -2467,6 +2467,37 @@ class MaintenanceBanner(models.Model):
         return f"MaintenanceBanner [{status}]"
 
 
+class SystemHealthAcknowledgement(models.Model):
+    """
+    Singleton (pk=1): the platform staff's shared "known problem" note for System Health.
+
+    ``signature`` names exactly which checks were failing when someone acknowledged (the staff
+    console builds it from the failing check names and statuses). The consoles compare it with
+    the live failure set, so anything new un-acknowledges itself. One row for everyone: a
+    per-browser flag meant each staff member saw the same orange card until they each clicked.
+    """
+
+    signature = models.CharField(max_length=255, blank=True, default="")
+    acknowledged_by = models.ForeignKey(
+        django_settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "System Health Acknowledgement"
+        verbose_name_plural = "System Health Acknowledgement"
+
+    def save(self, *args, **kwargs):
+        # Force singleton: always pk=1
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls) -> "SystemHealthAcknowledgement":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
 class AIUsageRecord(BaseModel):
   """Tracks individual AI API calls for usage reporting and cost estimation."""
   if TYPE_CHECKING:

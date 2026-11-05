@@ -5371,6 +5371,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/PendingAdminActionResponse'
           description: ''
+  /dashboard/health_ack/:
+    get:
+      operationId: dashboard_healthAckRetrieve
+      description: The staff-wide acknowledgement of the current System Health failures.
+        An empty signature means none.
+      tags:
+      - dashboard
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealthAck'
+          description: ''
+    put:
+      operationId: dashboard_healthAckUpdate
+      description: Record the caller as having acknowledged exactly these failing
+        checks, for every staff member.
+      tags:
+      - dashboard
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemHealthAckRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SystemHealthAckRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SystemHealthAckRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealthAck'
+          description: ''
+    delete:
+      operationId: dashboard_healthAckDestroy
+      description: Clear the acknowledgement.
+      tags:
+      - dashboard
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealthAck'
+          description: ''
   /dashboard/pending_admins/:
     get:
       operationId: dashboard_pendingAdminsList
@@ -27242,6 +27308,37 @@ components:
       - pages
       - results
       - total
+    SystemHealthAck:
+      type: object
+      description: The staff-wide acknowledgement of the current System Health failures;
+        an empty signature means none.
+      properties:
+        signature:
+          type: string
+        acknowledgedBy:
+          type: string
+          format: email
+          readOnly: true
+          nullable: true
+        acknowledgedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - acknowledgedAt
+      - acknowledgedBy
+      - signature
+    SystemHealthAckRequest:
+      type: object
+      description: Which failing checks are being acknowledged, as the console's signature
+        string.
+      properties:
+        signature:
+          type: string
+          maxLength: 255
+      required:
+      - signature
     SystemHealthResponse:
       type: object
       properties:

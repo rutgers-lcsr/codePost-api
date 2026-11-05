@@ -143,3 +143,15 @@ class PendingAdminActionRequestSerializer(serializers.Serializer):
 
 class PendingAdminActionResponseSerializer(serializers.Serializer):
     status = serializers.CharField()
+
+
+class SystemHealthAckSerializer(serializers.Serializer):
+    """The staff-wide acknowledgement of the current System Health failures; an empty signature means none."""
+    signature = serializers.CharField(allow_blank=True)
+    acknowledgedBy = serializers.EmailField(allow_null=True, read_only=True)
+    acknowledgedAt = serializers.DateTimeField(allow_null=True, read_only=True)
+
+
+class SystemHealthAckRequestSerializer(serializers.Serializer):
+    """Which failing checks are being acknowledged, as the console's signature string."""
+    signature = serializers.CharField(max_length=255)
