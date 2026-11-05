@@ -241,6 +241,33 @@ class TestStudentAliasMap:
         assert course.graders.first().email.lower() not in m.by_email
 
 
+    def test_for_course_covers_students_with_only_section_quiz_or_audit_footprint(
+            self, course):
+        """A student dropped from both rosters whose only trace is a section
+        membership, a quiz attempt, an accommodation or an audit event is still
+        a student: their identifiers must be scrubbed wherever they surface."""
+        from core.agent.privacy import StudentAliasMap
+        from core.models import (Quiz, QuizAccommodation, QuizAttempt, Section)
+        from core.services.audit import record_audit_event
+        in_section = _user("sec77@uni.example", "sec77")
+        in_quiz = _user("quizonly88@uni.example", "quizonly88")
+        accommodated = _user("accom55@uni.example", "accom55")
+        actor = _user("actor66@uni.example", "actor66")
+        section = Section.objects.create(course=course, name="S1")
+        section.students.add(in_section)
+        q = Quiz.objects.create(course=course, title="Q9", isPublished=True)
+        QuizAttempt.objects.create(quiz=q, student=in_quiz, attemptNumber=1,
+                                   status="submitted")
+        QuizAccommodation.objects.create(course=course, student=accommodated,
+                                         timeMultiplier=1.5)
+        record_audit_event(course, "feedback_view", user=actor)
+        m = StudentAliasMap.for_course(course)
+        for u in (in_section, in_quiz, accommodated, actor):
+            assert u.email in m.by_email, u.email
+        staff = course.graders.first().email.lower()
+        assert staff not in m.by_email
+
+
 # ---------------------------------------------------------------------------
 # Every surface, swept
 # ---------------------------------------------------------------------------

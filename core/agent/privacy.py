@@ -85,12 +85,26 @@ class StudentAliasMap:
     @classmethod
     def for_course(cls, course) -> 'StudentAliasMap':
         from django.contrib.auth.models import User
+        from django.db.models import Q
 
         people = set(course.students.values_list('email', 'username'))
         people |= set(course.inactive_students.values_list('email', 'username'))
         # Students dropped from both lists whose work remains.
         people |= set(User.objects
                       .filter(student_submissions__assignment__course=course)
+                      .values_list('email', 'username').distinct())
+        # ...and students whose only footprint is a section, a quiz attempt, a
+        # quiz accommodation, or an audit event (anyone who isn't course staff).
+        footprints = (
+            Q(student_sections__course=course)
+            | Q(quiz_attempts__quiz__course=course)
+            | Q(quizAccommodations__course=course)
+            | Q(audit_events__course=course)
+        )
+        staff_ids = set(course.graders.values_list('id', flat=True))
+        staff_ids |= set(course.superGraders.values_list('id', flat=True))
+        staff_ids |= set(course.courseAdmins.values_list('id', flat=True))
+        people |= set(User.objects.filter(footprints).exclude(id__in=staff_ids)
                       .values_list('email', 'username').distinct())
         return cls(course.id, people)
 
