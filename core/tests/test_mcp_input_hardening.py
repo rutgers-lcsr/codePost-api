@@ -169,7 +169,16 @@ class TestEditRubricMissingId:
             **({"comments": [item]} if field == "comments" else {}),
         })
         assert result["isError"] is True
+        assert json.loads(result["content"][0]["text"])["error"]["retryable"] is True
         assert RubricCategory.objects.filter(assignment=draft).count() == before
+
+    def test_create_needs_no_id(self, api_client, key, draft):
+        from core.models import RubricCategory
+        result = call(api_client, key, "codepost_edit_rubric", {
+            "assignmentId": draft.id,
+            "categories": [{"op": "create", "name": "Style", "pointLimit": 2}]})
+        assert result["isError"] is False, result["content"][0]["text"]
+        assert RubricCategory.objects.filter(assignment=draft, name="Style").exists()
 
 
 
@@ -182,6 +191,7 @@ class TestListSubmissionsFilters:
                       {"assignmentId": a.id, "status": "missing",
                        "student": alias_of(course, "alpha@uni.example")})
         assert result["isError"] is True
+        assert json.loads(result["content"][0]["text"])["error"]["retryable"] is True
 
     def test_missing_with_grader_filter_is_rejected_not_wrong(
             self, api_client, key, course, roster_assignment):
