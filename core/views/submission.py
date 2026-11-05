@@ -1,5 +1,5 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
-from core.models import Submission, File
+from core.models import Submission, File, SubmissionFile
 from core.models import User
 
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, StudentSubmissionFilesOnlySerializer, SubmissionConsoleDataSerializer, StudentConsoleDataSerializer
@@ -402,17 +402,12 @@ class SubmissionViewSet(ListProtectedViewSet):
     # Ensure the user can at least view this submission
     require_capability(user, 'view_submission', submission)
 
-    # contents of _tests.txt
-    logCode = ''
+    # contents of the dumpMode _tests.txt SubmissionFile
     def retrieve_log_code(submission):
-        try:
-            logFile = File.objects.get(submission=submission, name="_tests.txt")
-            return logFile.data
-        except:
-            return ''
-        
-    
+        logFile = SubmissionFile.objects.filter(submission=submission, name="_tests.txt").first()
+        return logFile.data if logFile is not None else ''
 
+    logCode = ''
     # If admin and admin is not in studentmode
     if isStaffOfSub(user, submission) and not isStudentMode:
             tests = submission.tests.all()
@@ -420,10 +415,10 @@ class SubmissionViewSet(ListProtectedViewSet):
     # If student of the submission
     elif isStudentOfSub(user, submission):
         tests = tests_visible_to_student(submission)
-        try:
+        # The dump holds every test's output, so a student only gets it once results are
+        # revealed and only when none of the tests is hidden.
+        if testResultsVisibleForSubmission(submission) and not any(t.testCase.hidden for t in tests):
             logCode = retrieve_log_code(submission)
-        except:
-            logCode = ''
 
     else:
         return returnForbidden()
