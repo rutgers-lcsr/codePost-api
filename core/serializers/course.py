@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.db import transaction
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.logging import logEvent
@@ -446,7 +447,11 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
     newData = super().validate(data)
     newFields = self.genProposedFields(newData)
 
-    if self.context['request'].user not in newFields['courseAdmins']:
+    # Only a current courseAdmin can remove themselves; superusers and org staff acting
+    # on the roster from outside the course are not being removed by leaving the list.
+    caller = self.context['request'].user
+    if (self.instance and not caller.is_superuser and caller in self.instance.courseAdmins.all()
+            and caller not in newFields['courseAdmins']):
       raise serializers.ValidationError(
           "User cannot remove itself as courseAdmin. Please request another courseAdmin to perform this action.")
 
@@ -521,22 +526,24 @@ class CourseRosterSerializer(ModelSerializerWithPOSTCheck):
     #   if student in newFields['courseAdmins']:
     #     raise serializers.ValidationError("The following user is listed as both a student and a course admin: " + student.email)
 
-    # Check to make sure that all section students and leaders are still enrolled in the course, if they have been changed
-    # NOTE: if self.instance is null, this statement will generate a 500 error. Leaving as-is for now; since we do not post
-    # to this endpoint, self.instance should always be defined. If we decide this serializer is post-able in the future,
-    # we will need to gate this block with <if self.instance>
-    for section in self.instance.sections.all():  # type: ignore[union-attr]  # instance is always set for PATCH
-      if 'graders' in newData:
-        for sectionLeader in section.leaders.all():
-          if sectionLeader not in newFields['graders']:
-            section.leaders.remove(sectionLeader)
-      if 'students' in newData:
-        for sectionStudent in section.students.all():
-          if sectionStudent not in newFields['students']:
-            section.students.remove(sectionStudent)
-      section.save()
-
     return newData
+
+  def update(self, instance, validated_data):
+    with transaction.atomic():
+      instance = super().update(instance, validated_data)
+      # Section students and leaders must still be enrolled in the course. Done here, not in
+      # validate(), so nothing is stripped unless the roster change is actually saved.
+      for section in instance.sections.all():
+        if 'graders' in validated_data:
+          for sectionLeader in section.leaders.all():
+            if sectionLeader not in instance.graders.all():
+              section.leaders.remove(sectionLeader)
+        if 'students' in validated_data:
+          for sectionStudent in section.students.all():
+            if sectionStudent not in instance.students.all():
+              section.students.remove(sectionStudent)
+        section.save()
+    return instance
 
 
 class CourseRosterMapSerializer(serializers.Serializer):
