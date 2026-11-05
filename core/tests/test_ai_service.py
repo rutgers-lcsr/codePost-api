@@ -31,6 +31,15 @@ from core.tests.factories import (
 # don't need the database but DO need the same attribute interface.
 # ---------------------------------------------------------------------------
 
+def _invalid_key_error():
+    """What google-genai raises for a rejected API key (400 + ErrorInfo reason)."""
+    from google.genai import errors as genai_errors
+    return genai_errors.ClientError(400, {'error': {
+        'code': 400, 'message': 'API key not valid. Please pass a valid API key.',
+        'details': [{'reason': 'API_KEY_INVALID'}],
+    }})
+
+
 def _make_org(**overrides):
     defaults = dict(
         ai_provider=None,
@@ -272,14 +281,14 @@ class TestAIServiceConfigResolution(TestCase):
         )
         svc = AIService(cast(Course, course))
         self.assertTrue(svc.api_key_looks_undecrypted)
-        msg = svc._parse_error(Exception('API key not valid. Please pass a valid API key.'))
+        msg = svc._parse_error(_invalid_key_error())
         self.assertIn('FIELD_ENCRYPTION_KEY', msg)
 
         # A normal key keeps the standard message.
         course.ai_api_key = 'AIzaRealLookingKey'
         svc = AIService(cast(Course, course))
         self.assertFalse(svc.api_key_looks_undecrypted)
-        msg = svc._parse_error(Exception('API key not valid. Please pass a valid API key.'))
+        msg = svc._parse_error(_invalid_key_error())
         self.assertIn('Invalid API key', msg)
 
     def test_ollama_blank_base_url_is_configured(self):

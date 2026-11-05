@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class AutoImproveNotConfigured(RuntimeError):
+    """The Prompt Lab has no usable AI provider; the message is safe to show to staff."""
+
+
+class AutoImproveProviderError(RuntimeError):
+    """The AI provider call failed; the cause is chained and logged, never shown."""
+
+
 def auto_improve_prompt(
     prompt_type: str,
     *,
@@ -185,17 +193,21 @@ def _call_ai_for_improvement(meta_prompt: str) -> str:
     model = lab.ai_model
 
     if not provider or not api_key:
-        raise RuntimeError(
+        raise AutoImproveNotConfigured(
             "No AI provider configured for auto-improvement. "
             "Set a provider and API key in the Prompt Lab settings."
         )
 
-    if provider == 'gemini':
-        return _call_gemini(api_key, model or 'gemini-2.5-pro', meta_prompt)
-    elif provider == 'openai':
+    if provider not in ('gemini', 'openai'):
+        raise AutoImproveNotConfigured(f"Unsupported auto-improvement provider: {provider}")
+
+    try:
+        if provider == 'gemini':
+            return _call_gemini(api_key, model or 'gemini-2.5-pro', meta_prompt)
         return _call_openai(api_key, model or 'gpt-4o', meta_prompt)
-    else:
-        raise RuntimeError(f"Unsupported auto-improvement provider: {provider}")
+    except Exception as e:
+        logger.exception("Auto-improvement call to %s failed", provider)
+        raise AutoImproveProviderError(f"The {provider} request failed.") from e
 
 
 def _call_gemini(api_key: str, model: str, meta_prompt: str) -> str:

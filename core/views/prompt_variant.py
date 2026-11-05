@@ -155,7 +155,9 @@ class SystemPromptVariantViewSet(SuperUserListProtectedViewSet):
     )
     @action(detail=False, methods=['POST'], url_path='auto-improve')
     def auto_improve(self, request):
-        from core.services.prompt_improvement import auto_improve_prompt
+        from core.services.prompt_improvement import (
+            AutoImproveNotConfigured, AutoImproveProviderError, auto_improve_prompt,
+        )
 
         prompt_type = request.query_params.get('promptType')
         if not prompt_type:
@@ -180,11 +182,14 @@ class SystemPromptVariantViewSet(SuperUserListProtectedViewSet):
                 triggered_by='manual',
                 user=request.user,
             )
-        except Exception as e:
-            logger.exception(f"Auto-improve AI call failed for {prompt_type}")
+        except AutoImproveNotConfigured as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except AutoImproveProviderError:
+            # Already logged with the provider's exception; its text is never shown.
             return Response(
-                {'detail': f'AI generation failed: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {'detail': 'The AI provider request failed. Check the Prompt Lab provider '
+                           'settings and try again.'},
+                status=status.HTTP_502_BAD_GATEWAY,
             )
 
         if new_variant is None:

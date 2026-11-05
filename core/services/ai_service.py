@@ -1336,47 +1336,64 @@ end"""
         """
         return bool(self.api_key) and str(self.api_key).startswith('gAAAA')
 
-    def _parse_error(self, e: Exception) -> str:
-        """Parse exception into user-friendly error message."""
-        error_str = str(e).lower()
+    @staticmethod
+    def _error_status_code(e: Exception) -> int | None:
+        """HTTP status of a provider error: openai/httpx ``status_code``, google-genai ``code``."""
+        for attr in ('status_code', 'code'):
+            value = getattr(e, attr, None)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+        response = getattr(e, 'response', None)
+        value = getattr(response, 'status_code', None)
+        return value if isinstance(value, int) else None
 
-        # API key errors
-        if 'api_key' in error_str or 'api key' in error_str or 'invalid' in error_str and 'key' in error_str:
+    @staticmethod
+    def _is_invalid_api_key_error(e: Exception) -> bool:
+        """google-genai reports a bad key as 400 with an ErrorInfo reason of API_KEY_INVALID."""
+        body = getattr(e, 'details', None)
+        error = body.get('error') if isinstance(body, dict) else None
+        details = error.get('details') if isinstance(error, dict) else None
+        return isinstance(details, list) and any(
+            isinstance(d, dict) and d.get('reason') == 'API_KEY_INVALID' for d in details)
+
+    def _parse_error(self, e: Exception) -> str:
+        """Turn a provider exception into a user-friendly message.
+
+        Classified by exception type and HTTP status only, never by message text, and the
+        raw provider message is never returned (it can echo request details); it is logged
+        by the caller.
+        """
+        import httpx
+        import openai
+        status_code = self._error_status_code(e)
+
+        if status_code in (401, 403) or self._is_invalid_api_key_error(e):
             if self.api_key_looks_undecrypted:
                 return ("The stored API key could not be decrypted in this process — its "
                         "FIELD_ENCRYPTION_KEY does not match the one the key was saved with. "
                         "Check that the web and worker containers share the same "
                         "FIELD_ENCRYPTION_KEY environment variable.")
+            if status_code == 401:
+                return "Authentication failed. Please verify your API key."
             return "Invalid API key. Please check your AI configuration in Course Settings."
-        
-        # Rate limiting
-        if 'rate' in error_str and 'limit' in error_str:
-            return "Rate limit exceeded. Please wait a moment and try again."
-        
-        if 'quota' in error_str or '429' in error_str:
-            return "API quota exceeded. Please check your API usage limits."
-        
-        # Authentication errors
-        if 'unauthorized' in error_str or '401' in error_str:
-            return "Authentication failed. Please verify your API key."
-        
-        # Connection errors
-        if 'connection' in error_str or 'timeout' in error_str:
-            return "Failed to connect to AI service. Please try again later."
-        
-        # Model not found
-        if 'model' in error_str and ('not found' in error_str or 'invalid' in error_str):
+
+        if status_code == 429:
+            return "API quota or rate limit exceeded. Please wait a moment and check your API usage limits."
+
+        if status_code == 404:
             return f"Model '{self.model}' not found. Please check your AI configuration."
-        
-        # Content policy
-        if 'safety' in error_str or 'blocked' in error_str or 'content' in error_str and 'policy' in error_str:
+
+        if status_code is not None and status_code >= 500:
+            return "The AI service is temporarily unavailable. Please try again later."
+
+        if isinstance(
+                e, (httpx.TransportError, openai.APIConnectionError, ConnectionError, TimeoutError)):
+            return "Failed to connect to AI service. Please try again later."
+
+        if isinstance(e, openai.ContentFilterFinishReasonError):
             return "Content was blocked by AI safety filters. Please try a different selection."
-        
-        # Generic fallback with shortened message
-        short_msg = str(e)[:200]
-        if len(str(e)) > 200:
-            short_msg += "..."
-        return f"AI generation failed: {short_msg}"
+
+        return "AI generation failed. Please try again; if it keeps failing, check your AI configuration."
     
     async def _get_or_create_gemini_cache(self, system_prompt: str) -> str | None:
         """
