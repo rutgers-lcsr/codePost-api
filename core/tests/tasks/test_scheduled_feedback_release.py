@@ -80,3 +80,21 @@ class TestScheduledFeedbackRelease(TestCase):
     self.assignment.course.archived = True
     self.assignment.course.save()
     self.assertEqual(run_scheduled_feedback_release(), 0)
+
+  def test_release_at_pushed_forward_after_snapshot_is_not_released(self):
+    from unittest import mock
+    from core.models import Assignment
+    from core.services import audit
+    _arm(self.assignment)
+    _arm(AssignmentFactory(state='published', name='second', course=self.assignment.course))
+    real_record = audit.record_audit_event
+
+    def push_forward_others(*args, **kwargs):
+      Assignment.objects.exclude(pk=kwargs['assignment'].pk).update(
+          releaseFeedbackAt=timezone.now() + timedelta(days=1))
+      return real_record(*args, **kwargs)
+
+    with mock.patch('core.services.audit.record_audit_event', push_forward_others):
+      count = run_scheduled_feedback_release()
+    self.assertEqual(count, 1)
+    self.assertEqual(Assignment.objects.filter(feedbackStatus='released').count(), 1)

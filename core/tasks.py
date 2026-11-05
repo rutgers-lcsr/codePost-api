@@ -69,6 +69,48 @@ def reap_stale_autograder_state(build_minutes: int = 30, code_run_minutes: int =
         logger.info(f"reap_stale_autograder_state: reset {builds} build(s), {runs} code run(s)")
     return {"builds": builds, "code_runs": runs}
 
+def _run_one_shot_sweep(due_filter, stamp_field, apply, event_type, label):
+    """Fire a one-shot scheduled transition for every due assignment.
+
+    Each row is CLAIMED with a conditional UPDATE that re-applies the due filter and
+    stamps ``stamp_field`` in one statement, so a row the instructor changed after the
+    snapshot (back to draft, archived, schedule pushed forward) is skipped and two
+    concurrent beat ticks can never both fire the same row. Only the claim winner
+    applies the transition and writes the audit event. Rows are isolated so one bad
+    row can't strand the others.
+    """
+    from django.db import transaction
+    from core.models import Assignment
+    from core.services.audit import record_audit_event
+
+    now = timezone.now()
+    count = 0
+    # Snapshot ids first (claiming mutates rows out of the filter).
+    for assignment_id in list(Assignment.objects.filter(due_filter(now)).values_list('id', flat=True)):
+        try:
+            with transaction.atomic():
+                claimed = Assignment.objects.filter(due_filter(now), pk=assignment_id).update(
+                    **{stamp_field: now})
+                if not claimed:
+                    continue
+                assignment = Assignment.objects.get(pk=assignment_id)
+                old, new = apply(assignment)
+                assignment.save()
+                record_audit_event(
+                    course=assignment.course,
+                    event_type=event_type,
+                    user=None,
+                    assignment=assignment,
+                    meta={'from': old, 'to': new, 'scheduled': True},
+                )
+            count += 1
+        except Assignment.DoesNotExist:
+            continue
+        except Exception:
+            logger.exception(f"Failed scheduled {label} for assignment {assignment_id}")
+    return count
+
+
 @shared_task
 def run_scheduled_assignment_publish():
     """One-shot scheduled publish for assignments: when a visible/preview assignment's
@@ -78,40 +120,20 @@ def run_scheduled_assignment_publish():
     pre-published state (mirrors run_scheduled_quiz_generation).
     """
     from django.db.models import F, Q
-    from core.models import Assignment
-    from core.services.audit import record_audit_event
 
-    now = timezone.now()
-    due = Assignment.objects.filter(
-        state__in=('visible', 'preview'), course__archived=False,
-        publishAt__isnull=False, publishAt__lte=now,
-    ).filter(
-        Q(scheduledPublishRanAt__isnull=True)
-        | Q(scheduledPublishRanAt__lt=F('publishAt'))
-    )
-    # Snapshot ids first (stamping mutates rows out of the filter), and isolate each
-    # assignment so one bad row can't strand the others.
-    count = 0
-    for assignment_id in list(due.values_list('id', flat=True)):
-        try:
-            assignment = Assignment.objects.get(pk=assignment_id)
-            old_state = assignment.state
-            # Stamp BEFORE the transition lands so a crash can't re-fire every tick.
-            assignment.scheduledPublishRanAt = now
-            assignment.state = 'published'
-            assignment.save()
-            record_audit_event(
-                course=assignment.course,
-                event_type='assignment_state_changed',
-                user=None,
-                assignment=assignment,
-                meta={'from': old_state, 'to': 'published', 'scheduled': True},
-            )
-            count += 1
-        except Assignment.DoesNotExist:
-            continue
-        except Exception:
-            logger.exception(f"Failed scheduled publish for assignment {assignment_id}")
+    def due_filter(now):
+        return Q(
+            state__in=('visible', 'preview'), course__archived=False,
+            publishAt__isnull=False, publishAt__lte=now,
+        ) & (Q(scheduledPublishRanAt__isnull=True) | Q(scheduledPublishRanAt__lt=F('publishAt')))
+
+    def apply(assignment):
+        old = assignment.state
+        assignment.state = 'published'
+        return old, 'published'
+
+    count = _run_one_shot_sweep(
+        due_filter, 'scheduledPublishRanAt', apply, 'assignment_state_changed', 'publish')
     if count:
         logger.info(f"Scheduled publish fired for {count} assignment(s)")
     return count
@@ -126,38 +148,22 @@ def run_scheduled_feedback_release():
     run_scheduled_assignment_publish).
     """
     from django.db.models import F, Q
-    from core.models import Assignment
-    from core.services.audit import record_audit_event
 
-    now = timezone.now()
-    due = Assignment.objects.filter(
-        feedbackStatus__in=('hidden', 'per_student'), course__archived=False,
-        releaseFeedbackAt__isnull=False, releaseFeedbackAt__lte=now,
-    ).filter(
-        Q(scheduledFeedbackReleaseRanAt__isnull=True)
-        | Q(scheduledFeedbackReleaseRanAt__lt=F('releaseFeedbackAt'))
-    )
-    count = 0
-    for assignment_id in list(due.values_list('id', flat=True)):
-        try:
-            assignment = Assignment.objects.get(pk=assignment_id)
-            old_status = assignment.feedbackStatus
-            # Stamp BEFORE the transition lands so a crash can't re-fire every tick.
-            assignment.scheduledFeedbackReleaseRanAt = now
-            assignment.feedbackStatus = 'released'
-            assignment.save()
-            record_audit_event(
-                course=assignment.course,
-                event_type='assignment_feedback_changed',
-                user=None,
-                assignment=assignment,
-                meta={'from': old_status, 'to': 'released', 'scheduled': True},
-            )
-            count += 1
-        except Assignment.DoesNotExist:
-            continue
-        except Exception:
-            logger.exception(f"Failed scheduled feedback release for assignment {assignment_id}")
+    def due_filter(now):
+        return Q(
+            feedbackStatus__in=('hidden', 'per_student'), course__archived=False,
+            releaseFeedbackAt__isnull=False, releaseFeedbackAt__lte=now,
+        ) & (Q(scheduledFeedbackReleaseRanAt__isnull=True)
+             | Q(scheduledFeedbackReleaseRanAt__lt=F('releaseFeedbackAt')))
+
+    def apply(assignment):
+        old = assignment.feedbackStatus
+        assignment.feedbackStatus = 'released'
+        return old, 'released'
+
+    count = _run_one_shot_sweep(
+        due_filter, 'scheduledFeedbackReleaseRanAt', apply,
+        'assignment_feedback_changed', 'feedback release')
     if count:
         logger.info(f"Scheduled feedback release fired for {count} assignment(s)")
     return count

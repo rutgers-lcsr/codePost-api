@@ -108,3 +108,42 @@ class TestScheduledAssignmentPublish(TestCase):
     self.assertEqual(count, 1)  # the healthy row still published
     other.refresh_from_db()
     self.assertEqual(other.state, 'published')
+
+  def test_row_pulled_back_after_snapshot_is_not_published(self):
+    """An instructor who moves a due row to draft after the sweep took its id snapshot
+    must not see it published when the sweep reaches it."""
+    from unittest import mock
+    from core.models import Assignment
+    from core.services import audit
+    _arm(self.assignment)
+    second = _arm(AssignmentFactory(state='visible', name='second', course=self.assignment.course))
+    real_record = audit.record_audit_event
+
+    def pull_back_others(*args, **kwargs):
+      Assignment.objects.exclude(pk=kwargs['assignment'].pk).update(state='draft')
+      return real_record(*args, **kwargs)
+
+    with mock.patch('core.services.audit.record_audit_event', pull_back_others):
+      count = run_scheduled_assignment_publish()
+    self.assertEqual(count, 1)
+    self.assertEqual(Assignment.objects.filter(state='published').count(), 1)
+    second.refresh_from_db()
+    self.assertEqual(second.state, 'draft')
+
+  def test_publish_at_pushed_forward_after_snapshot_is_not_published(self):
+    from unittest import mock
+    from core.models import Assignment
+    from core.services import audit
+    _arm(self.assignment)
+    _arm(AssignmentFactory(state='visible', name='second', course=self.assignment.course))
+    real_record = audit.record_audit_event
+
+    def push_forward_others(*args, **kwargs):
+      Assignment.objects.exclude(pk=kwargs['assignment'].pk).update(
+          publishAt=timezone.now() + timedelta(days=1))
+      return real_record(*args, **kwargs)
+
+    with mock.patch('core.services.audit.record_audit_event', push_forward_others):
+      count = run_scheduled_assignment_publish()
+    self.assertEqual(count, 1)
+    self.assertEqual(Assignment.objects.filter(state='published').count(), 1)
