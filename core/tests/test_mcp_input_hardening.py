@@ -173,3 +173,33 @@ class TestEditRubricMissingId:
 
 
 
+class TestListSubmissionsFilters:
+
+    def test_missing_with_student_filter_is_rejected_not_wrong(
+            self, api_client, key, course, roster_assignment):
+        a, _ = roster_assignment
+        result = call(api_client, key, "codepost_list_submissions",
+                      {"assignmentId": a.id, "status": "missing",
+                       "student": alias_of(course, "alpha@uni.example")})
+        assert result["isError"] is True
+
+    def test_missing_with_grader_filter_is_rejected_not_wrong(
+            self, api_client, key, course, roster_assignment):
+        a, _ = roster_assignment
+        result = call(api_client, key, "codepost_list_submissions",
+                      {"assignmentId": a.id, "status": "missing",
+                       "grader": course.graders.first().email})
+        assert result["isError"] is True
+
+    def test_plus_addressed_student_filter_matches(
+            self, api_client, key, course, roster_assignment):
+        a, _ = roster_assignment
+        result = call(api_client, key, "codepost_list_submissions",
+                      {"assignmentId": a.id,
+                       "student": alias_of(course, "plus+tag@uni.example")})
+        assert result["isError"] is False, result["content"][0]["text"]
+        rows = result["structuredContent"]["data"]["rows"]
+        assert len(rows) == 1
+
+
+

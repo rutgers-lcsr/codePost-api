@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import datetime
+from urllib.parse import urlencode
 
-from core.agent import privacy, shaping
+from core.agent import errors, privacy, shaping
 from core.agent.registry import SCOPE_READ, tool
 from core.agent.tools._common import (course_header, fetch_assignment,
                                       load_roster, resolve_student)
@@ -68,16 +69,25 @@ def list_submissions(ctx, assignmentId: int, status: str = 'all',
     assignment = fetch_assignment(ctx, assignmentId)
     projection = list(fields or ('id', 'students', 'grader', 'isFinalized', 'grade'))
 
-    query = ['compact=1']
+    if status == 'missing' and (student or grader):
+        # 'Missing' is roster minus everyone with a submission; narrowing the
+        # submissions first would list nearly the whole class as missing.
+        raise errors.ToolError(
+            'PRECONDITION_NOT_MET',
+            "status='missing' cannot be combined with student or grader.",
+            remedy="Drop the student/grader filter, or use another status.",
+            retryable=True)
+
+    query = {'compact': '1'}
     if student:
-        query.append(f'student={resolve_student(ctx, student)}')
+        query['student'] = resolve_student(ctx, student)
     if grader:
-        query.append(f'grader={grader}')
+        query['grader'] = grader
 
     rows = ctx.dispatch.require(
         AssignmentViewSet, {'get': 'submissions'},
         method='GET', path=f'/assignments/{assignmentId}/submissions/',
-        query='&'.join(query), pk=assignmentId,
+        query=urlencode(query), pk=assignmentId,
         what=f'listing submissions for assignment {assignmentId}')
     if not isinstance(rows, list):
         rows = []
