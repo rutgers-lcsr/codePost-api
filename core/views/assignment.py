@@ -576,6 +576,9 @@ class AssignmentViewSet(ListProtectedViewSet):
     if student is not None:
       if not isThisStudent and not isGrader(user, course) and not isCourseAdminCached:
         return returnForbidden()
+      # Looking a student up by identity would let an anonymous grader map student -> submission.
+      if assignment.anonymousGrading and not isThisStudent and not canViewUnanonymizedSubmissions(user, course):
+        return returnForbidden()
 
     # If you want to use this endpoint and you are a student only, then you must wait until the assignment
     # is released, student upload is allowed, or live feedback mode is enabled
