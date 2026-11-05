@@ -18,6 +18,15 @@ from autograder.serializers.execution import (
 logger = logging.getLogger(__name__)
 
 
+def canOverrideCode(user, assignment) -> bool:
+    """Whether user may execute a file with substituted code: superusers and course admins
+    always, other staff only while the assignment's gradersCanEditSubmissions is on. Shared
+    by the async and streaming executors so both apply the same rule."""
+    return bool(user.is_superuser
+                or isCourseAdmin(user, assignment.course)
+                or assignment.gradersCanEditSubmissions)
+
+
 class ExecuteFileAsyncView(GenericAPIView):
     """
     Async file execution endpoint.
@@ -80,9 +89,8 @@ class ExecuteFileAsyncView(GenericAPIView):
         
         # Check permission for code overrides (editing submissions)
         if is_staff and code_override and assignment:
-            if not request.user.is_superuser and not isCourseAdmin(request.user, assignment.course):
-                if assignment.gradersCanEditSubmissions is not None and not assignment.gradersCanEditSubmissions:
-                    return returnForbidden()
+            if not canOverrideCode(request.user, assignment):
+                return returnForbidden()
         
         # Students cannot force execute and must have cached result
         if not is_staff:

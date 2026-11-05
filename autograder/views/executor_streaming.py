@@ -22,7 +22,8 @@ from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from autograder.serializers.execution import FileExecutionRequestSerializer
 from core.models import File, Submission, SubmissionFile, AssignmentFile, CourseFile, Assignment
-from core.permissions.helpers import isStaffOfSub, isCourseAdmin
+from core.permissions.helpers import isStaffOfSub
+from autograder.views.executor_async import canOverrideCode
 from core.permissions.permissions import FileExecutionPermissions
 
 logger = logging.getLogger(__name__)
@@ -147,11 +148,9 @@ class ExecuteFileStreaming(GenericAPIView):
                 if not assignment:
                      _, assignment, _ = file_obj.get_file_info()
                 
-                if assignment:
-                      if not user.is_superuser and not isCourseAdmin(user, assignment.course):
-                           if not assignment.gradersCanEditSubmissions:
-                                yield self._sse_message("error", {"error": "Permission denied: Graders cannot edit submissions for this assignment."})
-                                return
+                if assignment and not canOverrideCode(user, assignment):
+                    yield self._sse_message("error", {"error": "Permission denied: Graders cannot edit submissions for this assignment."})
+                    return
 
             logger.info(f"[ExecuteFileStreaming] Checking cache for file {file_obj.id}, force_execute={force_execute}")
             
