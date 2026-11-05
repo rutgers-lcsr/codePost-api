@@ -42,8 +42,8 @@ def mask_hidden_tests(submission, tests, rows):
   for cat_id, hidden_tests in hidden_by_category.items():
     passed_count = sum(1 for t in hidden_tests if t.passed)
     total_count = len(hidden_tests)
-    points_earned = sum((t.score or 0) for t in hidden_tests)
-    points_total = sum((t.maxScore or 0) for t in hidden_tests)
+    points_earned = sum(t.score for t in hidden_tests)  # non-null DecimalFields, default 0
+    points_total = sum(t.maxScore for t in hidden_tests)
     synthetic_rows.append({
       # Negative id sentinels distinguish synthetic summary rows from real
       # SubmissionTests; clients should treat hiddenSummary != null as the
@@ -53,7 +53,7 @@ def mask_hidden_tests(submission, tests, rows):
       'testCase': None,
       'testCategory': cat_id,
       'logs': '',
-      'passed': passed_count == total_count and total_count > 0,
+      'passed': passed_count == total_count,  # a category here has >= 1 hidden test
       'created': None,
       'modified': None,
       'isError': False,
