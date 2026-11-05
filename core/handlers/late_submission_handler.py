@@ -194,3 +194,10 @@ class LateSubmissionHandler:
 
       # Create new Late comment
       self.__create_late_comment()
+    else:
+      # No longer late (due date extended, deductions removed, ...): a re-handled
+      # submission must not keep the credits or the late comment from an earlier run.
+      if self.submission.lateDayCreditsUsed:
+        self.submission.lateDayCreditsUsed = 0
+        self.submission.save()
+      self.__delete_late_comments()
