@@ -550,7 +550,7 @@ def quiz_availability(quiz, student, now=None):
   if quiz.assignment_id is None:
     if quiz.availableFrom and now < quiz.availableFrom:
       return (False, 'not_yet_open')
-    if quiz.availableUntil and now > quiz.availableUntil:
+    if quiz.availableUntil and now >= quiz.availableUntil:
       return (False, 'closed')
     # Defense in depth: sections require an attached assignment, but a quiz could have
     # been detached historically — never open without the student's approved set.
@@ -563,7 +563,10 @@ def quiz_availability(quiz, student, now=None):
     return (False, 'assignment_not_released')
   trigger = quiz.assignmentTrigger
   if trigger == 'during':
-    if assignment.uploadDueDate and now > assignment.uploadDueDate:
+    # With closeEvent 'assignment_due' the close (due date + offset) is the one close
+    # decision, applied below, so the gate here must not shut the quiz earlier than closeAt.
+    if (quiz.closeEvent != 'assignment_due'
+        and assignment.uploadDueDate and now > assignment.uploadDueDate):
       return (False, 'assignment_closed')
   elif trigger == 'after_assignment':
     if not (assignment.uploadDueDate and now > assignment.uploadDueDate):

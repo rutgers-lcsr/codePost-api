@@ -665,6 +665,61 @@ class TestClosing:
         Quiz.objects.filter(pk=q.id).update(closeEvent='none')
         assert quiz_close_time(Quiz.objects.get(pk=q.id), student) is None
 
+    def test_standalone_availability_flips_at_exactly_available_until(self, taking_setup):
+        from core.services.quiz_grading import quiz_availability, quiz_close_time, quiz_is_closed
+        course, student = taking_setup['course'], taking_setup['students'][0]
+        close = timezone.now() + timedelta(days=1)
+        q = _quiz(course, availableUntil=close)
+        _add(q, _mc(course, _bank(course)))
+        us = timedelta(microseconds=1)
+
+        assert quiz_close_time(q, student) == close
+        assert quiz_availability(q, student, close - us) == (True, 'open')
+        assert not quiz_is_closed(q, student, close - us)
+        # The instant of the close is closed everywhere (reveal, closeAt, start gate).
+        assert quiz_is_closed(q, student, close)
+        assert quiz_availability(q, student, close) == (False, 'closed')
+        assert quiz_availability(q, student, close + us) == (False, 'closed')
+
+    def test_during_trigger_honors_assignment_due_close_offset(self, taking_setup):
+        from core.services.quiz_grading import quiz_availability, quiz_close_time, quiz_is_closed
+        course, assignment, student = taking_setup['course'], taking_setup['assignment'], taking_setup['students'][0]
+        due = timezone.now() + timedelta(days=1)
+        assignment.uploadDueDate = due
+        assignment.state = 'published'
+        assignment.save()
+        q = _quiz(course, assignment=assignment, assignmentTrigger='during',
+                  closeEvent='assignment_due', closeOffsetMinutes=60)
+        _add(q, _mc(course, _bank(course)))
+        close = due + timedelta(minutes=60)
+        us = timedelta(microseconds=1)
+
+        assert quiz_close_time(q, student) == close
+        # Grace period after the due date: still open, matching the advertised closeAt.
+        assert quiz_availability(q, student, due + timedelta(minutes=30)) == (True, 'open')
+        assert quiz_availability(q, student, close - us) == (True, 'open')
+        assert not quiz_is_closed(q, student, close - us)
+        assert quiz_is_closed(q, student, close)
+        assert quiz_availability(q, student, close) == (False, 'closed')
+        assert quiz_availability(q, student, close + us) == (False, 'closed')
+
+    def test_during_trigger_zero_offset_closes_exactly_at_due(self, taking_setup):
+        from core.services.quiz_grading import quiz_availability, quiz_is_closed
+        course, assignment, student = taking_setup['course'], taking_setup['assignment'], taking_setup['students'][0]
+        due = timezone.now() + timedelta(days=1)
+        assignment.uploadDueDate = due
+        assignment.state = 'published'
+        assignment.save()
+        q = _quiz(course, assignment=assignment, assignmentTrigger='during',
+                  closeEvent='assignment_due', closeOffsetMinutes=0)
+        _add(q, _mc(course, _bank(course)))
+        us = timedelta(microseconds=1)
+
+        assert quiz_availability(q, student, due - us) == (True, 'open')
+        assert quiz_is_closed(q, student, due)
+        assert quiz_availability(q, student, due) == (False, 'closed')
+        assert quiz_availability(q, student, due + us) == (False, 'closed')
+
     def test_submission_close_is_per_student_and_gates_start(self, taking_setup):
         from core.models import Quiz, Submission
         from core.services.quiz_grading import quiz_availability, quiz_close_time
