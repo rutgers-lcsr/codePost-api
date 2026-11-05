@@ -98,6 +98,62 @@ class ForgedMarkerParsingTests(SimpleTestCase):
     self.assertFalse(res.success)
     self.assertIn("missing markers", res.err or "")
 
+  def test_extract_without_a_nonce_refuses_to_parse(self):
+    with self.assertRaises(ValueError):
+      NotebookExecutor.extract_json_result(_results_block("", []), "", nonce="")
+
+  def test_start_marker_without_a_following_end_is_missing_markers(self):
+    # An END printed right before the last START must not be paired with it.
+    nonce = "c" * 32
+    stdout = f"<<<RESULTS_END_{nonce}>>><<<RESULTS_START_{nonce}>>>{{\"success\": true}}"
+    res = NotebookExecutor.extract_json_result(stdout, "", nonce=nonce)
+    self.assertFalse(res.success)
+    self.assertIn("missing markers", res.err or "")
+
+  def test_block_found_wherever_it_starts_in_stdout(self):
+    nonce = "f" * 32
+    res = NotebookExecutor.extract_json_result("x" + _results_block(nonce, [REAL_TEST]), "", nonce=nonce)
+    self.assertTrue(res.success)
+    self.assertEqual(res.tests, [REAL_TEST])
+
+  def test_missing_markers_error_leads_with_last_stderr_line_and_keeps_its_tail(self):
+    stderr = "A" * 500 + "\nfirst error\n" + "B" * 1000 + "\nOCI runtime exec failed\n\n"
+    res = NotebookExecutor.extract_json_result("no markers here", stderr, nonce="1" * 32)
+    self.assertFalse(res.success)
+    err = res.err or ""
+    self.assertTrue(err.startswith("OCI runtime exec failed\n"), err[:80])
+    self.assertIn("Stderr tail: " + stderr[-1000:], err)
+    self.assertNotIn("A" * 10, err)
+
+    res = NotebookExecutor.extract_json_result("", "first\nsecond\nthe real cause\n", nonce="1" * 32)
+    self.assertTrue((res.err or "").startswith("the real cause\n"), res.err)
+
+  def test_block_without_success_flag_is_not_a_success(self):
+    nonce = "2" * 32
+    res = NotebookExecutor.extract_json_result(
+      f"<<<RESULTS_START_{nonce}>>>{{\"tests\": []}}<<<RESULTS_END_{nonce}>>>", "", nonce=nonce)
+    self.assertFalse(res.success)
+    self.assertEqual(res.stdout, "")
+
+  def test_block_with_empty_stderr_falls_back_to_container_stderr(self):
+    nonce = "3" * 32
+    res = NotebookExecutor.extract_json_result(_results_block(nonce, []), "container warning", nonce=nonce)
+    self.assertEqual(res.stderr, "container warning")
+
+  def test_malformed_results_json_is_an_error_not_a_pass(self):
+    nonce = "d" * 32
+    res = NotebookExecutor.extract_json_result(
+      f"<<<RESULTS_START_{nonce}>>>{{not json<<<RESULTS_END_{nonce}>>>", "", nonce=nonce)
+    self.assertFalse(res.success)
+    self.assertEqual(res.err, "Failed to parse results JSON")
+
+  def test_results_json_that_is_not_an_object_is_an_error_not_a_pass(self):
+    nonce = "e" * 32
+    res = NotebookExecutor.extract_json_result(
+      f"<<<RESULTS_START_{nonce}>>>[true]<<<RESULTS_END_{nonce}>>>", "", nonce=nonce)
+    self.assertFalse(res.success)
+    self.assertIn("Error processing results", res.err or "")
+
   def test_nonce_is_random_per_executor(self):
     a = PythonExecutor(_mock_file("x\n", "a.py", ".py")).result_nonce
     b = PythonExecutor(_mock_file("x\n", "a.py", ".py")).result_nonce
