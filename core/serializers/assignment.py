@@ -295,6 +295,14 @@ class LiveStatisticsMixin(serializers.Serializer):
       max_digits=5, decimal_places=2, read_only=True, allow_null=True, source='live_median',
       help_text="The median grade of the assignment. Null if no submissions yet")
 
+  def to_representation(self, instance):
+    # mean and median come from one grade-list read, not one each.
+    instance._live_statistics = instance.calculate_average_and_median()
+    try:
+      return super().to_representation(instance)
+    finally:
+      del instance._live_statistics
+
 
 class AssignmentSerializerWithStatistics(LiveStatisticsMixin, AssignmentSerializer):
 

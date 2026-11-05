@@ -14,9 +14,13 @@ from decimal import Decimal
 import factory
 import pytest
 from django.core.management import call_command
+from django.db import connection
 from django.db.models.signals import post_save
+from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 from rest_framework.test import APIClient
+
+from django.contrib.auth.models import User
 
 from core.models import Submission
 from core.tests.factories import AssignmentFactory, CourseFactory
@@ -62,6 +66,10 @@ def make_sub(assignment, student, grade=None, finalized=False, uploaded=None):
 
 
 def students_of(course, n):
+    """The first n students by email, enrolling extra ones if the fixture has fewer."""
+    for i in range(course.students.count(), n):
+        with factory.django.mute_signals(post_save):
+            course.students.add(User.objects.create_user(f"extra{i}@gborg.edu", f"extra{i}@gborg.edu", "pw"))
     return list(course.students.all().order_by('email'))[:n]
 
 
@@ -97,6 +105,20 @@ class TestAttempts:
             make_sub(a, s2, uploaded=DUE)
         resp = api_client.get(f"/assignments/{a.id}/analytics/")
         assert resp.data["submissionAttempts"]["studentsWithMultipleAttempts"] == 2
+
+    def test_single_attempt_student_is_not_a_multiple_attempt_student(self, api_client, course):
+        a = make_assignment(course)
+        s1, s2, s3 = students_of(course, 3)
+        make_sub(a, s1, uploaded=DUE)
+        make_sub(a, s2, uploaded=DUE)
+        make_sub(a, s2, uploaded=DUE + H)
+        make_sub(a, s3, uploaded=DUE)
+        resp = api_client.get(f"/assignments/{a.id}/analytics/")
+        attempts = resp.data["submissionAttempts"]
+        assert attempts["attemptDistribution"] == [
+            {"attempts": 1, "studentCount": 2}, {"attempts": 2, "studentCount": 1}]
+        assert attempts["studentsWithMultipleAttempts"] == 1
+        assert attempts["totalStudents"] == 3
 
 
 class TestGradeDistribution:
@@ -149,6 +171,48 @@ class TestClassStatistics:
         resp = api_client.get(f"/assignments/{a.id}/")
         assert resp.data["mean"] is None and resp.data["median"] is None
 
+    def test_null_grade_finalized_submission_is_ungraded_not_a_500(self, api_client, course):
+        a = make_assignment(course, points=100)
+        s1, s2, s3 = students_of(course, 3)
+        make_sub(a, s1, grade=Decimal('2'), finalized=True)
+        make_sub(a, s2, grade=Decimal('4'), finalized=True)
+        make_sub(a, s3, grade=None, finalized=True)
+        resp = api_client.get(f"/assignments/{a.id}/")
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert Decimal(str(resp.data["mean"])) == Decimal('3')
+        assert Decimal(str(resp.data["median"])) == Decimal('3')
+
+    def test_only_null_grades_reads_null(self, api_client, course):
+        a = make_assignment(course, points=100)
+        make_sub(a, students_of(course, 1)[0], grade=None, finalized=True)
+        resp = api_client.get(f"/assignments/{a.id}/")
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["mean"] is None and resp.data["median"] is None
+
+    def test_course_assignments_query_count_does_not_grow_with_stats(self, api_client, course):
+        """Serving mean/median for every assignment in the listing must not add queries
+        per assignment: the pre-fix base cost 6 queries per assignment without stats."""
+        studs = students_of(course, 2)
+
+        def count_queries():
+            api_client.get(f"/courses/{course.id}/assignments/")  # warm caches
+            with CaptureQueriesContext(connection) as ctx:
+                resp = api_client.get(f"/courses/{course.id}/assignments/")
+            assert resp.status_code == status.HTTP_200_OK
+            return len(ctx)
+
+        def add(n, start):
+            for i in range(start, start + n):
+                a = make_assignment(course, name=f"Q{i}", points=100)
+                make_sub(a, studs[0], grade=Decimal('3'), finalized=True)
+                make_sub(a, studs[1], grade=Decimal('4'), finalized=True)
+
+        add(2, 0)
+        few = count_queries()
+        add(3, 2)
+        many = count_queries()
+        assert (many - few) / 3 <= 6, (few, many)
+
     def test_course_assignments_endpoint_also_live(self, api_client, course):
         a = make_assignment(course, points=100)
         self._grades(course, a, [1, 2, 3])
@@ -177,6 +241,10 @@ class TestLateDays:
         late = self._late_stats(api_client, course, 2 * H)
         assert late["lateByDay"] == [{"day": 1, "count": 1}]
 
+    def test_early_upload_is_on_time(self, api_client, course):
+        late = self._late_stats(api_client, course, -5 * H)
+        assert late["onTime"] == 1 and late["late"] == 0 and late["lateByDay"] == []
+
     def _export(self, course):
         with tempfile.NamedTemporaryFile("r+", suffix=".csv") as f:
             call_command("export_late_days", course_id=course.id, output=f.name)
@@ -195,6 +263,12 @@ class TestLateDays:
         a = make_assignment(course, uploadDueDate=DUE)
         s = students_of(course, 1)[0]
         make_sub(a, s, uploaded=DUE + H)
+        assert self._export(course)[s.email] == 0
+
+    def test_export_early_upload_not_charged(self, course):
+        a = make_assignment(course, uploadDueDate=DUE)
+        s = students_of(course, 1)[0]
+        make_sub(a, s, uploaded=DUE - 5 * H)
         assert self._export(course)[s.email] == 0
 
     def test_export_charges_best_submission_once_per_assignment(self, course):

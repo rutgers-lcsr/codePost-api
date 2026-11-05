@@ -669,27 +669,45 @@ class Assignment(BaseModel):
     return 'published'
 
   def calculate_average_and_median(self):
-    finalizedSubmissions = self.submissions.filter(isFinalized=True)
-    if (len(finalizedSubmissions) == 0):
-      return (None, None)
+    """(mean, median) over finalized, graded submissions; (None, None) if there are none.
 
-    scores = list(finalizedSubmissions.values_list(
-        'grade', flat=True).order_by('grade'))
-    mean = finalizedSubmissions.aggregate(Avg('grade'))['grade__avg']
+    Null grades are ungraded and left out. One query for the grade list, or none when a
+    list endpoint attached the grades with ``Prefetch(..., to_attr='finalized_for_stats')``.
+    """
+    prefetched = getattr(self, 'finalized_for_stats', None)
+    if prefetched is not None:
+      grades = [s.grade for s in prefetched]
+    else:
+      grades = list(self.submissions.filter(isFinalized=True)
+                    .values_list('grade', flat=True))
+    scores = sorted(g for g in grades if g is not None)
+    if not scores:
+      return (None, None)
+    mean = sum(scores) / len(scores)
     # True median: the middle score, or the average of the middle two for an even count.
     mid = len(scores) // 2
     median = scores[mid] if len(scores) % 2 else (scores[mid - 1] + scores[mid]) / 2
     return (mean, median)
 
   @property
+  def live_statistics(self):
+    """(mean, median) computed on read — the stored columns are never refreshed.
+
+    LiveStatisticsMixin pins the result on ``_live_statistics`` for the duration of one
+    serialization so mean and median share a single computation.
+    """
+    cached = getattr(self, '_live_statistics', None)
+    return cached if cached is not None else self.calculate_average_and_median()
+
+  @property
   def live_mean(self):
-    """Class mean over finalized submissions, computed on read (the stored column is never refreshed)."""
-    return self.calculate_average_and_median()[0]
+    """Class mean over finalized submissions."""
+    return self.live_statistics[0]
 
   @property
   def live_median(self):
-    """Class median over finalized submissions, computed on read."""
-    return self.calculate_average_and_median()[1]
+    """Class median over finalized submissions."""
+    return self.live_statistics[1]
 
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''

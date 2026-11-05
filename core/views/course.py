@@ -1261,8 +1261,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         STUDENT_VISIBLE_STATES minus section-hidden assignments; anyone else who can read
         the course (org staff of the org who is not a member) gets an empty list, because
         every per-id retrieve 403s for them today."""
-        from django.db.models import Avg, Count, Max, Min, Q
-        from core.models import STUDENT_VISIBLE_STATES
+        from django.db.models import Avg, Count, Max, Min, Prefetch, Q
+        from core.models import STUDENT_VISIBLE_STATES, Submission
         from core.permissions.helpers import assignmentFeedbackOpen, isGrader, isStudent
         from core.serializers.assignment import (
             AssignmentSerializerWithStatisticsAndSummary,
@@ -1284,6 +1284,13 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             return Response([])
 
         qs = qs.prefetch_related('files', 'rubricCategories', 'testCategories', 'dataSets')
+        if isCourseAdmin(user, course) or (course.showStudentsStatistics and not isGrader(user, course)):
+            # The stats serializers read mean/median per assignment; attach the finalized
+            # grades in one query instead of one grade-list read per assignment.
+            qs = qs.prefetch_related(Prefetch(
+                'submissions',
+                queryset=Submission.objects.filter(isFinalized=True).only('assignment', 'grade'),
+                to_attr='finalized_for_stats'))
         context = {'request': request}
 
         # Serializer choice replicates AssignmentViewSet.get_serializer_class for retrieve —
