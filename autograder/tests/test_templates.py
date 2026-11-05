@@ -799,6 +799,32 @@ def test_partial():
         self.assertEqual(results[0]["score"], 7.0)
         self.assertEqual(results[0]["status"], "partial")
 
+    def test_bool_return_is_full_credit_or_zero_never_partial(self):
+        """return True = full points and passed; return False = 0 and failed (bool is not a partial score)."""
+        tests = """
+@test(name="t_true", points=3)
+def t_true():
+    return 1 == 1
+
+@test(name="t_false", points=3)
+def t_false():
+    return 1 == 2
+
+@test(name="tuple_true", points=3)
+def tuple_true():
+    return [True, "ok"]
+
+@test(name="tuple_false", points=3)
+def tuple_false():
+    return [False, "nope"]
+"""
+        results, _, _ = self._run_and_parse("", tests)
+        by_name = {r["name"]: r for r in results}
+        self.assertEqual((by_name["t_true"]["score"], by_name["t_true"]["passed"], by_name["t_true"]["status"]), (3, True, "passed"))
+        self.assertEqual((by_name["t_false"]["score"], by_name["t_false"]["passed"], by_name["t_false"]["status"]), (0, False, "failed"))
+        self.assertEqual((by_name["tuple_true"]["score"], by_name["tuple_true"]["passed"], by_name["tuple_true"]["status"]), (3, True, "passed"))
+        self.assertEqual((by_name["tuple_false"]["score"], by_name["tuple_false"]["passed"], by_name["tuple_false"]["status"]), (0, False, "failed"))
+
     def test_partial_credit_tuple(self):
         """Returning [score, message] gives partial credit with message."""
         student = ""
@@ -1188,6 +1214,32 @@ def partial():
         self.assertEqual(t["score"], 7)
         self.assertFalse(t["passed"])
         self.assertEqual(t["status"], "partial")
+
+    def test_bool_return_is_full_credit_or_zero_never_partial(self):
+        """return True = full points and passed; return False = 0 and failed (bool is not a partial score)."""
+        tests = """
+@test(name="t_true", points=3)
+def t_true():
+    return 1 == 1
+
+@test(name="t_false", points=3)
+def t_false():
+    return 1 == 2
+
+@test(name="tuple_true", points=3)
+def tuple_true():
+    return [True, "ok"]
+
+@test(name="tuple_false", points=3)
+def tuple_false():
+    return [False, "nope"]
+"""
+        results_json, _, _, _ = self._run_and_parse(["data = 1"], tests)
+        by_name = {r["name"]: r for r in results_json["tests"]}
+        self.assertEqual((by_name["t_true"]["score"], by_name["t_true"]["passed"], by_name["t_true"]["status"]), (3, True, "passed"))
+        self.assertEqual((by_name["t_false"]["score"], by_name["t_false"]["passed"], by_name["t_false"]["status"]), (0, False, "failed"))
+        self.assertEqual((by_name["tuple_true"]["score"], by_name["tuple_true"]["passed"], by_name["tuple_true"]["status"]), (3, True, "passed"))
+        self.assertEqual((by_name["tuple_false"]["score"], by_name["tuple_false"]["passed"], by_name["tuple_false"]["status"]), (0, False, "failed"))
 
     # -- Cell output captured ------------------------------------------------
 

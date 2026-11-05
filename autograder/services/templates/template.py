@@ -251,8 +251,13 @@ class TestCase:
                     signal.alarm(0)
 
             
+            # A bool is pass/fail, not a score (bool is an int subclass, so check it first)
+            if isinstance(return_value, bool):
+                result.passed = return_value
+                result.score = self.points if return_value else 0
+                result.status = "passed" if return_value else "failed"
             # Check if return value is a number (partial credit)
-            if isinstance(return_value, (int, float)):
+            elif isinstance(return_value, (int, float)):
                 # Clamp score to [0, max_score]
                 result.score = max(0, min(return_value, self.points))
                 result.passed = result.score == self.points
@@ -262,7 +267,11 @@ class TestCase:
                 score_val = return_value[0]
                 msg_val = str(return_value[1])
                 
-                if isinstance(score_val, (int, float)):
+                if isinstance(score_val, bool):
+                    result.passed = score_val
+                    result.score = self.points if score_val else 0
+                    result.status = "passed" if score_val else "failed"
+                elif isinstance(score_val, (int, float)):
                     result.score = max(0, min(float(score_val), self.points))
                     result.passed = result.score == self.points
                     result.status = "passed" if result.passed else "partial"
