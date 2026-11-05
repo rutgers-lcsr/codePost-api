@@ -109,6 +109,16 @@ class DuplicateEmailLoginTests(APITestCase):
     from core.utils import get_or_create_user
     self.assertIsNone(get_or_create_user("dup@nowhere.test", None))
 
+  def test_single_user_whose_domain_maps_nowhere_uses_their_own_organization(self):
+    org = Organization.objects.create(
+      name="Solo Org", shortname="solo", email_domain="solo.edu", sso_enabled=True, sso_provider="CAS")
+    user = User.objects.create(username="solo", email="solo@nowhere-else.test")
+    user.profile.organization = org
+    user.profile.save()
+    resp = self.client.get("/auth/sso/check/", {"email": "solo@nowhere-else.test"})
+    self.assertEqual(resp.status_code, 200)
+    self.assertEqual(resp.json(), {"sso_enabled": True, "provider": "CAS", "org_id": org.id, "org_name": "Solo Org"})
+
 
 class InviteCodeWithoutAdminsTests(APITestCase):
 
