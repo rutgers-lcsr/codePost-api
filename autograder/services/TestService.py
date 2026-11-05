@@ -336,24 +336,13 @@ class TestService:
                 # If parsed tests exist, it implies a script.
                 if category.testScript:
                     # Run ONCE for the category
-                    # We pick the first test as a "representative" to trigger the run, 
+                    # We pick the first test as a "representative" to trigger the run,
                     # but we really just need the category context.
                     # However, _run_ephemeral_execution currently takes a test_case.
-                    # We should probably pass one test_case to satisfy the signature, 
+                    # We should probably pass one test_case to satisfy the signature,
                     # and rely on the Executor to run the WHOLE script (which it does).
-                    
-                    # Smart Representative Selection:
-                    # Find the most common target file to avoid outliers (e.g. one test targeting wrong file)
-                    # changing the executor type for the whole category.
-                    from collections import Counter
-                    
-                    # We need to resolve target file for each test to check distinctness
-                if category_tests:
                     logger.info(f"DEBUG: Category '{category_tests[0].testCategory.name}' Expected Tests: {[t.functionName for t in category_tests]}")
-                    
-                    # Optimization: Check test.fileName first (explicit target).
-                    
-                    target_counts = Counter()  # noqa: F841
+
                     # Determine target file
                     most_common_fname = None
                     category = category_tests[0].testCategory # Assuming category_tests is not empty here
