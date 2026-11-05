@@ -54,3 +54,18 @@ class UserListFiltersTests(APITestCase):
     response = self.client.get('/users/', {'role': 'wizard'})
     self.assertEqual(response.status_code, 400)
     self.assertIn('detail', response.data)
+
+  def test_retrieve_by_id_or_email(self):
+    by_email = self.client.get(f'/users/{self.grader.email}/')
+    by_id = self.client.get(f'/users/{self.grader.id}/')
+    self.assertEqual(by_email.status_code, 200, by_email.data)
+    self.assertEqual(by_id.status_code, 200, by_id.data)
+    self.assertEqual(by_id.data['email'], by_email.data['email'])
+    self.assertEqual(self.client.get('/users/999999/').status_code, 404)
+    # The list filters never narrow a retrieve.
+    self.assertEqual(self.client.get(f'/users/{self.grader.id}/?role=student').status_code, 200)
+
+  def test_retrieve_by_id_needs_staff_or_self(self):
+    self.client.force_authenticate(user=self.student)
+    self.assertEqual(self.client.get(f'/users/{self.student.id}/').status_code, 200)
+    self.assertEqual(self.client.get(f'/users/{self.grader.id}/').status_code, 403)

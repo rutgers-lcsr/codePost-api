@@ -15958,7 +15958,7 @@ paths:
         name: email
         schema:
           type: string
-          pattern: ^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+          pattern: ^(?:\d+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)$
         required: true
       tags:
       - users
@@ -15981,7 +15981,7 @@ paths:
         name: email
         schema:
           type: string
-          pattern: ^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+          pattern: ^(?:\d+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)$
         required: true
       tags:
       - users
@@ -16016,7 +16016,7 @@ paths:
         name: email
         schema:
           type: string
-          pattern: ^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+          pattern: ^(?:\d+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)$
         required: true
       tags:
       - users
@@ -16050,7 +16050,7 @@ paths:
         name: email
         schema:
           type: string
-          pattern: ^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+          pattern: ^(?:\d+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)$
         required: true
       tags:
       - users
@@ -16070,7 +16070,7 @@ paths:
         name: email
         schema:
           type: string
-          pattern: ^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+          pattern: ^(?:\d+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)$
         required: true
       tags:
       - users

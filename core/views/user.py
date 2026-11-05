@@ -22,6 +22,7 @@ from core.permissions.helpers import isCourseMember
 from core.permissions.capabilities import require_capability
 
 from rest_framework import status
+from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
@@ -49,7 +50,17 @@ class UserViewSet(SuperUserListProtectedViewSet):
 
   # Instead of id, index into /users/ detail routes with email
   lookup_field = 'email'
-  lookup_value_regex = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+  # An email, or a plain id: the staff console's person page is addressed by id, so no address
+  # carries an email.
+  lookup_value_regex = r'(?:\d+|[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)'
+
+  def get_object(self):
+    value = self.kwargs.get(self.lookup_url_kwarg or self.lookup_field, '')
+    if value.isdigit():
+      obj = get_object_or_404(self.filter_queryset(self.get_queryset()), pk=int(value))
+      self.check_object_permissions(self.request, obj)
+      return obj
+    return super().get_object()
 
   # Note: LightUserSerializer is available for future paginated endpoints
   # but list() uses full UserSerializer for backward compatibility with UsersTable
