@@ -22,10 +22,14 @@ from core.permissions.helpers import isCourseMember
 from core.permissions.capabilities import require_capability
 
 from rest_framework import status
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import filters
 
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
+from django.utils import timezone
+from datetime import timedelta
 
 from core.models import Course, Assignment
 
@@ -49,6 +53,38 @@ class UserViewSet(SuperUserListProtectedViewSet):
 
   # Note: LightUserSerializer is available for future paginated endpoints
   # but list() uses full UserSerializer for backward compatibility with UsersTable
+
+  # The staff console's People page filters the list by role and by idleness; the counts it shows
+  # beside these filters come from /dashboard/stats/, so the definitions must match that view.
+  ROLE_FILTERS = {
+    'student': Q(student_courses__isnull=False),
+    'grader': Q(grader_courses__isnull=False) | Q(superGrader_courses__isnull=False),
+    'course_admin': Q(courseAdmin_courses__isnull=False),
+    'platform_admin': Q(is_superuser=True),
+  }
+
+  def get_queryset(self):
+    qs = super().get_queryset()
+    if self.action != 'list':
+      return qs
+    role = self.request.query_params.get('role')
+    if role:
+      if role not in self.ROLE_FILTERS:
+        raise ValidationError({'detail': f"role must be one of {', '.join(sorted(self.ROLE_FILTERS))}"})
+      qs = qs.filter(self.ROLE_FILTERS[role]).distinct()
+    if self.request.query_params.get('inactive') in ('1', 'true'):
+      ninety_days_ago = timezone.now() - timedelta(days=90)
+      qs = qs.filter(Q(last_login__isnull=True) | Q(last_login__lt=ninety_days_ago))
+    return qs
+
+  @extend_schema(parameters=[
+    OpenApiParameter(name='role', required=False, type=str, enum=sorted(ROLE_FILTERS),
+                     description='Only people holding this role in at least one course (platform_admin: superusers).'),
+    OpenApiParameter(name='inactive', required=False, type=bool,
+                     description='Only people who never signed in, or not in the last 90 days.'),
+  ])
+  def list(self, request, *args, **kwargs):
+    return super().list(request, *args, **kwargs)
 
 
   # Superuser-only, enforced here: this mints tokens for an arbitrary user, and

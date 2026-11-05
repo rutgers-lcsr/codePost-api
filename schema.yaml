@@ -15868,6 +15868,11 @@ paths:
     get:
       operationId: users_list
       parameters:
+      - in: query
+        name: inactive
+        schema:
+          type: boolean
+        description: Only people who never signed in, or not in the last 90 days.
       - name: ordering
         required: false
         in: query
@@ -15886,6 +15891,17 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: role
+        schema:
+          type: string
+          enum:
+          - course_admin
+          - grader
+          - platform_admin
+          - student
+        description: 'Only people holding this role in at least one course (platform_admin:
+          superusers).'
       - name: search
         required: false
         in: query
