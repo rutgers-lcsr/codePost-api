@@ -11,13 +11,27 @@ from rest_framework.decorators import action
 
 from core.permissions.helpers import isStudentOfSub, isStaffOfSub
 
-from core.permissions.helpers import returnNotAuthorized, returnForbidden
+from core.permissions.helpers import returnNotAuthorized, returnForbidden, returnInvalid
 from django.shortcuts import get_object_or_404
 from core.services.audit import record_audit_event
 
 from rest_framework import serializers
 from logging import getLogger
 logger = getLogger(__name__)
+
+
+def _parse_int(value) -> int:
+    """An int or an integer string (form-encoded bodies); ValueError otherwise."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(value)
+    return int(value)
+
+
+def _parse_number(value) -> float:
+    """A number or numeric string; ValueError otherwise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(value)
+    return float(value)
 
 
 def _format_points_str(point_delta) -> str:
@@ -175,6 +189,17 @@ class CommentViewSet(ListProtectedViewSet):
             )
 
         try:
+            start_line = _parse_int(start_line)
+            end_line = _parse_int(end_line)
+            start_char = None if start_char is None else _parse_int(start_char)
+            end_char = None if end_char is None else _parse_int(end_char)
+            points_override = None if points_override is None else _parse_number(points_override)
+        except ValueError:
+            return returnInvalid(
+                'start_line, end_line, start_char and end_char must be integers and points a number.'
+            )
+
+        try:
             file = SubmissionFile.objects.get(id=file_id)
         except (SubmissionFile.DoesNotExist, ValueError, TypeError):
             return Response(
@@ -200,13 +225,18 @@ class CommentViewSet(ListProtectedViewSet):
             )
 
         # Build context
-        context = build_context_from_file(
-            file=file,
-            start_line=start_line,
-            end_line=end_line,
-            start_char=start_char,
-            end_char=end_char,
-        )
+        try:
+            context = build_context_from_file(
+                file=file,
+                start_line=start_line,
+                end_line=end_line,
+                start_char=start_char,
+                end_char=end_char,
+            )
+        except ValueError as e:
+            # build_context_from_file raises ValueError only for an invalid selection range
+            # (its own message, safe to show).
+            return returnInvalid(str(e))
         
         # Add supplementary context
         request_context = {
@@ -216,7 +246,10 @@ class CommentViewSet(ListProtectedViewSet):
         # Add rubric context if provided
         if rubric_comment_id:
             try:
-                rubric_comment = RubricComment.objects.get(id=rubric_comment_id)
+                # Scoped to the file's assignment: another course's rubric text must never
+                # reach the prompt.
+                rubric_comment = get_object_or_404(
+                    RubricComment, id=int(rubric_comment_id), category__assignment=assignment)
                 # Use points override if provided, otherwise default to rubric comment pointDelta
                 point_delta = points_override if points_override is not None else rubric_comment.pointDelta
                 points_str = _format_points_str(point_delta)
@@ -227,8 +260,8 @@ class CommentViewSet(ListProtectedViewSet):
                     f"Description: {rubric_comment.explanation}\n"
                     f"{points_str}"
                 )
-            except (RubricComment.DoesNotExist, ValueError, TypeError):
-                logger.warning(f"Rubric comment {rubric_comment_id} not found")
+            except (ValueError, TypeError):
+                return returnInvalid('rubric_comment_id must be an integer.')
         elif points_override is not None:
             # Handle manual points without rubric
             points_str = _format_points_str(points_override)

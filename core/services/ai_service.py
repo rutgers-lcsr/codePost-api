@@ -2434,7 +2434,9 @@ def build_context_from_file(
         import json
         try:
             notebook = json.loads(file.data)
-            cells = notebook.get('cells', [])
+            cells = notebook.get('cells') if isinstance(notebook, dict) else None
+            if not isinstance(cells, list):
+                cells = []
             
             # Get selected cells
             selected_parts = []
@@ -2442,7 +2444,8 @@ def build_context_from_file(
             start_idx = max(0, min(start_line, len(cells) - 1)) if cells else 0
             end_idx = max(0, min(end_line, len(cells) - 1)) if cells else 0
             
-            for i in range(start_idx, end_idx + 1):
+            # An empty notebook has no cells to select.
+            for i in range(start_idx, end_idx + 1 if cells else 0):
                 cell = cells[i]
                 cell_type = cell.get('cell_type', 'code')
                 content = _parse_notebook_cell(cell, include_outputs=True)
@@ -2469,29 +2472,39 @@ def build_context_from_file(
         import pymupdf
         import pymupdf4llm as pdf_utils
         
-        prefix = "data:application/pdf;base64,"
-        if file.data.startswith(prefix):
-            try:
-                base64_data = file.data[len(prefix):]
-                pdf_bytes, _ = base64_decode(base64_data.encode())  # Validate base64
-            except Exception:
-                selected_content = "Error: Could not decode PDF content."
-                pdf_bytes = b""
-        else: 
-            pdf_bytes = file.data
-        
         # Frontend sends 1-based page numbers as start_line/end_line for PDFs.
         # pymupdf4llm.to_markdown accepts 0-based page numbers via the `pages` param.
-        selected_pages = list(range(start_line - 1, end_line))  # convert 1-based to 0-based
-        
-        stream = pdf_bytes if isinstance(pdf_bytes, bytes) else pdf_bytes.encode()
-        doc = pymupdf.open(stream=stream, filetype="pdf")
-        
-        # Try to extract precise selection based on start_char/end_char
-        selected_content = _extract_pdf_selection(
-            doc, selected_pages, start_char, end_char
-        )
-        doc.close()
+        doc = None
+        try:
+            prefix = "data:application/pdf;base64,"
+            if file.data.startswith(prefix):
+                pdf_bytes, _ = base64_decode(file.data[len(prefix):].encode())
+            else:
+                pdf_bytes = file.data.encode()
+            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+        except Exception:
+            # Like extract_pdf_text: a bad PDF degrades instead of failing the request.
+            logger.exception("Failed to open PDF for comment context")
+            selected_content = "Error: Could not read PDF content."
+
+        if doc is not None:
+            try:
+                if start_line < 1 or end_line < start_line or end_line > len(doc):
+                    raise ValueError(
+                        f"Invalid page range {start_line}-{end_line}: "
+                        f"this PDF has {len(doc)} page(s), numbered from 1."
+                    )
+                selected_pages = list(range(start_line - 1, end_line))  # convert 1-based to 0-based
+                try:
+                    # Try to extract precise selection based on start_char/end_char
+                    selected_content = _extract_pdf_selection(
+                        doc, selected_pages, start_char, end_char
+                    )
+                except Exception:
+                    logger.exception("Failed to extract PDF selection for comment context")
+                    selected_content = "Error: Could not read PDF content."
+            finally:
+                doc.close()
 
         # Convert entire PDF to markdown for full file content (shared extraction path).
         file_content_markdown = extract_pdf_text(file.data) or "(could not extract PDF text)"
@@ -2506,10 +2519,11 @@ def build_context_from_file(
         
         # Narrow to character offsets within the selected lines if provided.
         # start_char/end_char are 0-indexed offsets within their respective lines.
-        if start_char is not None and selected_lines:
-            selected_lines[0] = selected_lines[0][start_char:]
+        # Trim the end first: on a single-line selection both offsets index the original line.
         if end_char is not None and selected_lines:
             selected_lines[-1] = selected_lines[-1][:end_char]
+        if start_char is not None and selected_lines:
+            selected_lines[0] = selected_lines[0][start_char:]
         
         selected_content = '\n'.join(selected_lines)
         file_content_markdown = file.data
