@@ -284,14 +284,26 @@ class AssignmentStudentSerializerNoStats(AssignmentStudentSerializer):
     read_only_fields = AssignmentStudentSerializer.Meta.read_only_fields + STUDENT_RELEASED_EXTRA_FIELDS
 
 
-class AssignmentSerializerWithStatistics(AssignmentSerializer):
+class LiveStatisticsMixin(serializers.Serializer):
+  """mean/median computed from the current finalized grades. The stored columns were
+  only ever filled at creation (always null), so they are never served."""
+
+  mean = serializers.DecimalField(
+      max_digits=5, decimal_places=2, read_only=True, allow_null=True, source='live_mean',
+      help_text="The mean grade of the assignment. Null if no submissions yet")
+  median = serializers.DecimalField(
+      max_digits=5, decimal_places=2, read_only=True, allow_null=True, source='live_median',
+      help_text="The median grade of the assignment. Null if no submissions yet")
+
+
+class AssignmentSerializerWithStatistics(LiveStatisticsMixin, AssignmentSerializer):
 
   class Meta(AssignmentSerializer.Meta):
     fields = AssignmentSerializer.Meta.fields + ('mean', 'median')
     read_only_fields = AssignmentSerializer.Meta.read_only_fields + ('mean', 'median')
 
 
-class AssignmentStudentSerializerWithStats(AssignmentStudentSerializerNoStats):
+class AssignmentStudentSerializerWithStats(LiveStatisticsMixin, AssignmentStudentSerializerNoStats):
 
   class Meta(AssignmentStudentSerializerNoStats.Meta):
     fields = AssignmentStudentSerializerNoStats.Meta.fields + ('mean', 'median')

@@ -11,11 +11,16 @@ time-to-grade, late submissions, and feedback depth.
 import math
 import statistics
 from collections import Counter, defaultdict
+from datetime import datetime, timezone as dt_timezone
 
 from django.db.models import Avg, Count, F, Q, StdDev
 from django.db.models.functions import TruncDay
 
 from core.models import Assignment, Comment, RubricCategory, Submission, SubmissionTest
+from core.services.late_days import days_late as late_days
+
+# Sorts below real upload times so a submission without dateUploaded comes first.
+_EPOCH = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 
 
 def get_grade_distribution(assignment: Assignment, num_buckets: int = 10) -> list[dict]:
@@ -44,7 +49,9 @@ def get_grade_distribution(assignment: Assignment, num_buckets: int = 10) -> lis
     grades = submissions.values_list('grade', flat=True)
     bucket_counts: Counter[int] = Counter()
     for grade in grades:
-        idx = min(int(float(grade) // bucket_size), num_buckets - 1)
+        # Clamp both ends: a negative grade (deductions beyond the points) belongs
+        # in the lowest bucket, not Python's bucket_counts[-1] that is never emitted.
+        idx = max(0, min(int(float(grade) // bucket_size), num_buckets - 1))
         bucket_counts[idx] += 1
 
     distribution = []
@@ -336,7 +343,7 @@ def get_submission_attempts(assignment: Assignment) -> dict:
 
     # Sort each student's submissions by date
     for email in student_subs:
-        student_subs[email].sort(key=lambda s: s['dateUploaded'] or '')
+        student_subs[email].sort(key=lambda s: s['dateUploaded'] or _EPOCH)
 
     # Compute attempt distribution
     attempt_counts: Counter[int] = Counter()
@@ -361,7 +368,7 @@ def get_submission_attempts(assignment: Assignment) -> dict:
     return {
         'attemptDistribution': attempt_distribution,
         'avgGradeImprovement': round(statistics.mean(grade_improvements), 2) if grade_improvements else None,
-        'studentsWithMultipleAttempts': sum(1 for c in attempt_counts if c > 1),
+        'studentsWithMultipleAttempts': sum(n for attempts, n in attempt_counts.items() if attempts > 1),
         'totalStudents': len(student_subs),
     }
 
@@ -440,11 +447,11 @@ def get_late_submission_stats(assignment: Assignment) -> dict | None:
     late_by_day: Counter[int] = Counter()
 
     for date_uploaded in submissions:
-        if date_uploaded <= due_date:
+        days_late = late_days(due_date, date_uploaded)
+        if days_late == 0:
             on_time += 1
         else:
             late += 1
-            days_late = max(1, (date_uploaded - due_date).days + 1)
             late_by_day[days_late] += 1
 
     late_by_day_list = [

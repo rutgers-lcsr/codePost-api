@@ -29,6 +29,11 @@ from core.services import quiz_grading
 _EPOCH = datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
 
 
+def submission_preference(is_finalized, date_uploaded, sub_id):
+  """Sort key picking a student's best submission: finalized, then newest, then highest id."""
+  return (bool(is_finalized), date_uploaded or _EPOCH, sub_id)
+
+
 def build_gradebook(course, assignment_ids=None, quiz_ids=None, section=None):
   """The gradebook for ``course``: column metadata plus one row per active student.
 
@@ -61,7 +66,7 @@ def build_gradebook(course, assignment_ids=None, quiz_ids=None, section=None):
     if email is None:
       continue
     key = (email, assignment_id)
-    pref = (bool(is_finalized), date_uploaded or _EPOCH, sub_id)
+    pref = submission_preference(is_finalized, date_uploaded, sub_id)
     if key not in best or pref > best[key][0]:
       best[key] = (pref, grade, bool(is_finalized))
 

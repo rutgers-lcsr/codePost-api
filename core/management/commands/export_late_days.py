@@ -1,22 +1,22 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 import csv
-import math
 from collections import defaultdict
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from core.models import Submission, Course
+from core.services.gradebook import submission_preference
+from core.services.late_days import days_late as late_days
 
-
-SECONDS_PER_DAY = 60 * 60 * 24
 
 
 class Command(BaseCommand):
     help = (
         "Export total late days per student for a single course into CSV.\n"
         "Output columns: user_email,days_late\n"
-        "Late days are computed from (Submission.dateUploaded - Assignment.uploadDueDate).\n"
+        "Late days follow the rule LateSubmissionHandler charges (see core/services/late_days.py),\n"
+        "counted once per assignment from the student's best submission.\n"
         "All students in the course are included, starting at 0 days."
     )
 
@@ -93,12 +93,17 @@ class Command(BaseCommand):
         late_submissions = 0
         inspected = 0  # just to limit debug spam
 
+        # One submission counts per (student, assignment): the same "best" pick the
+        # gradebook makes (finalized, then newest upload, then highest id). Charging
+        # every resubmission would sum the lateness of each version.
+        best: dict[tuple[str, int], tuple[tuple, int]] = {}
         for submission in submissions:
             assignment = submission.assignment
             due_at = assignment.uploadDueDate
             submitted_at = submission.dateUploaded
 
-            # If either timestamp is missing, we can't calculate lateness
+            # If either timestamp is missing, lateness is unknown (0 days). The submission
+            # still competes for "best", exactly as it does in the gradebook.
             if not due_at or not submitted_at:
                 if debug and inspected < 30:
                     self.stderr.write(
@@ -106,41 +111,23 @@ class Command(BaseCommand):
                         f"(uploadDueDate={due_at}, dateUploaded={submitted_at})"
                     )
                     inspected += 1
-                continue
+                days_late = 0
+            else:
+                # Make sure both are timezone-aware in same tz
+                if timezone.is_naive(due_at):
+                    due_at = timezone.make_aware(due_at, timezone.get_current_timezone())
+                if timezone.is_naive(submitted_at):
+                    submitted_at = timezone.make_aware(submitted_at, timezone.get_current_timezone())
 
-            # Make sure both are timezone-aware in same tz
-            if timezone.is_naive(due_at):
-                due_at = timezone.make_aware(due_at, timezone.get_current_timezone())
-            if timezone.is_naive(submitted_at):
-                submitted_at = timezone.make_aware(submitted_at, timezone.get_current_timezone())
-
-            delta_seconds = (submitted_at - due_at).total_seconds()
-
-            # On time or early
-            if delta_seconds <= 0:
+                days_late = late_days(due_at, submitted_at)
                 if debug and inspected < 30:
                     self.stderr.write(
-                        f"[DEBUG] Submission {submission.id}: ON TIME or early "
-                        f"(due={due_at}, submitted={submitted_at}, "
-                        f"delta_seconds={delta_seconds})"
+                        f"[DEBUG] Submission {submission.id}: days_late={days_late} "
+                        f"(due={due_at}, submitted={submitted_at})"
                     )
                     inspected += 1
-                continue
 
-            days_late = math.ceil(delta_seconds / SECONDS_PER_DAY)
-            late_submissions += 1
-
-            # Debug some late submissions
-            if debug and inspected < 30:
-                self.stderr.write(
-                    f"[DEBUG] Submission {submission.id}: LATE "
-                    f"(due={due_at}, submitted={submitted_at}, "
-                    f"delta_seconds={delta_seconds}, days_late={days_late})"
-                )
-                inspected += 1
-
-            # Apply days_late to each student on the submission
-            student_emails = []
+            pref = submission_preference(submission.isFinalized, submitted_at, submission.id)
             for student in submission.students.all():
                 email = (student.email or "").strip()
                 if not email:
@@ -150,25 +137,23 @@ class Command(BaseCommand):
                             f"(user_id={student.id})"
                         )
                     continue
-                student_emails.append(email)
+                key = (email, assignment.id)
+                if key not in best or pref > best[key][0]:
+                    best[key] = (pref, days_late)
 
-            if debug and student_emails and inspected < 30:
-                self.stderr.write(
-                    f"[DEBUG] Submission {submission.id}: applying {days_late} late days to {student_emails}"
-                )
-                inspected += 1
-
-            for email in student_emails:
-                if email not in late_days_by_email:
-                    if debug:
-                        self.stderr.write(
-                            f"[DEBUG] Email {email} not in roster dict; adding with starting value 0."
-                        )
-                    late_days_by_email[email] = 0
-                late_days_by_email[email] += days_late
+        for (email, _assignment_id), (_pref, days_late) in best.items():
+            if email not in late_days_by_email:
+                if debug:
+                    self.stderr.write(
+                        f"[DEBUG] Email {email} not in roster dict; adding with starting value 0."
+                    )
+                late_days_by_email[email] = 0
+            late_days_by_email[email] += days_late
+            if days_late > 0:
+                late_submissions += 1
 
         if debug:
-            self.stderr.write(f"[DEBUG] Submissions with days_late > 0: {late_submissions}")
+            self.stderr.write(f"[DEBUG] Assignments with days_late > 0: {late_submissions}")
             self.stderr.write("[DEBUG] Final per-student tallies:")
             for email in sorted(late_days_by_email.keys()):
                 self.stderr.write(f"[DEBUG]   {email} -> {late_days_by_email[email]} late days")

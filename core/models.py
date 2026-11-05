@@ -673,11 +673,23 @@ class Assignment(BaseModel):
     if (len(finalizedSubmissions) == 0):
       return (None, None)
 
-    scores = finalizedSubmissions.values_list(
-        'grade', flat=True).order_by('grade')
-    mean = scores.aggregate(Avg('grade'))['grade__avg']
-    median = scores[int(round(len(scores) / 2))]
+    scores = list(finalizedSubmissions.values_list(
+        'grade', flat=True).order_by('grade'))
+    mean = finalizedSubmissions.aggregate(Avg('grade'))['grade__avg']
+    # True median: the middle score, or the average of the middle two for an even count.
+    mid = len(scores) // 2
+    median = scores[mid] if len(scores) % 2 else (scores[mid - 1] + scores[mid]) / 2
     return (mean, median)
+
+  @property
+  def live_mean(self):
+    """Class mean over finalized submissions, computed on read (the stored column is never refreshed)."""
+    return self.calculate_average_and_median()[0]
+
+  @property
+  def live_median(self):
+    """Class median over finalized submissions, computed on read."""
+    return self.calculate_average_and_median()[1]
 
   def save(self, *args, **kwargs):
     ''' Calculate mean, median on save '''
