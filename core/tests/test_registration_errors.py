@@ -2,6 +2,8 @@
 """Registration / password-reset error paths that used to answer 500: mangled uids in
 emailed links, unknown users, and organization-name limits and conflicts."""
 from django.contrib.auth.models import User
+from django.contrib.auth.tokens import default_token_generator
+from django.core.cache import cache
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
@@ -48,6 +50,45 @@ class TokenLinkErrorTests(APITestCase):
         resp = self.client.post("/registration/verifyResetToken/", {"uid": uid, "token": TOKEN})
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data, {"isValid": False})
+
+
+class VerifyTokenDisclosureTests(APITestCase):
+    """The verify endpoints are unauthenticated; the uid is a sequential user id, so an
+    email in the reply for a bad token would let anyone walk ids and harvest addresses."""
+
+    ENDPOINTS = ("verifyRegistrationToken", "verifyResetToken")
+
+    def setUp(self):
+        self.user = User.objects.create(username="victim@example.edu", email="victim@example.edu")
+        self.uid = urlsafe_base64_encode(force_bytes(self.user.pk))
+
+    def test_invalid_token_does_not_reveal_email(self):
+        for endpoint in self.ENDPOINTS:
+            with self.subTest(endpoint=endpoint):
+                resp = self.client.post(f"/registration/{endpoint}/", {"uid": self.uid, "token": TOKEN})
+                self.assertEqual(resp.status_code, status.HTTP_200_OK)
+                self.assertEqual(resp.data, {"isValid": False})
+                self.assertNotIn("victim@example.edu", resp.content.decode())
+
+    def test_valid_token_still_returns_email(self):
+        token = default_token_generator.make_token(self.user)
+        for endpoint in self.ENDPOINTS:
+            with self.subTest(endpoint=endpoint):
+                resp = self.client.post(f"/registration/{endpoint}/", {"uid": self.uid, "token": token})
+                self.assertEqual(resp.status_code, status.HTTP_200_OK)
+                self.assertEqual(resp.data, {"isValid": True, "email": "victim@example.edu"})
+
+    def test_endpoints_are_rate_limited(self):
+        for endpoint in self.ENDPOINTS:
+            with self.subTest(endpoint=endpoint), self.settings(TESTING=False):
+                cache.clear()
+                codes = [
+                    self.client.post(f"/registration/{endpoint}/", {"uid": self.uid, "token": TOKEN}).status_code
+                    for _ in range(11)
+                ]
+                cache.clear()
+                self.assertEqual(codes[:10], [status.HTTP_200_OK] * 10)
+                self.assertEqual(codes[10], status.HTTP_429_TOO_MANY_REQUESTS)
 
 
 class OrganizationCreationTests(APITestCase):

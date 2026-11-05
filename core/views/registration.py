@@ -173,6 +173,7 @@ def emailRegistration(request):
 )
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def verifyRegistrationToken(request):
     """
     Handle valid verify email links sent after account creation.
@@ -191,9 +192,10 @@ def verifyRegistrationToken(request):
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
             )
-            return Response(
-                {"isValid": isValid, "email": user.email}, status=status.HTTP_200_OK
-            )
+            body = {"isValid": isValid}
+            if isValid:
+                body["email"] = user.email
+            return Response(body, status=status.HTTP_200_OK)
         except _INVALID_UID_ERRORS:
             return Response({"isValid": False}, status=status.HTTP_200_OK)
     else:
@@ -751,6 +753,7 @@ def emailPasswordReset(request):
 )
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([AuthAnonRateThrottle])
 def verifyResetToken(request):
     """
     Handle valid verify email links sent after password reset requests.
@@ -763,9 +766,10 @@ def verifyResetToken(request):
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
             )
-            return Response(
-                {"isValid": isValid, "email": user.email}, status=status.HTTP_200_OK
-            )
+            body = {"isValid": isValid}
+            if isValid:
+                body["email"] = user.email
+            return Response(body, status=status.HTTP_200_OK)
         except _INVALID_UID_ERRORS:
             return Response({"isValid": False}, status=status.HTTP_200_OK)
     else:
