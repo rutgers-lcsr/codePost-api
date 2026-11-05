@@ -1050,6 +1050,64 @@ class TestAISuggestions:
         assert feedback[0] == ''
         assert feedback[1].startswith('it was not valid JSON')
 
+    def _pending_and_job(self, quiz_setup):
+        from core.models import QuizSuggestionJob, SuggestedQuizQuestion
+        old = SuggestedQuizQuestion.objects.create(
+            assignment=quiz_setup['assignment'], questionType='essay', text='Old unreviewed', status='pending')
+        job = QuizSuggestionJob.objects.create(
+            course=quiz_setup['course'], assignment=quiz_setup['assignment'],
+            requestedBy=quiz_setup['admin'])
+        return old, job
+
+    def test_unusable_output_keeps_existing_pending_queue(self, quiz_setup, monkeypatch):
+        """A run whose output holds no usable question fails the job but must not wipe the
+        instructor's unreviewed suggestions."""
+        from core.models import SuggestedQuizQuestion
+        from core.tasks import generate_quiz_question_suggestions
+        _mock_ai(monkeypatch, '[{"type": "essay", "text": ""}, "not a dict"]')
+        old, job = self._pending_and_job(quiz_setup)
+
+        generate_quiz_question_suggestions(
+            requested_by_id=quiz_setup['admin'].id,
+            assignment_id=quiz_setup['assignment'].id, job_id=job.id)
+
+        job.refresh_from_db()
+        assert job.status == 'failed'
+        assert SuggestedQuizQuestion.objects.filter(pk=old.pk, status='pending').exists()
+
+    def test_exception_while_saving_fails_job_and_keeps_queue(self, quiz_setup, monkeypatch):
+        """A non-numeric 'points' used to raise out of the task, leaving the job 'running'."""
+        from core.models import SuggestedQuizQuestion
+        from core.tasks import generate_quiz_question_suggestions
+        _mock_ai(monkeypatch, '[{"type": "essay", "text": "Explain.", "points": "five"}]')
+        old, job = self._pending_and_job(quiz_setup)
+
+        generate_quiz_question_suggestions(
+            requested_by_id=quiz_setup['admin'].id,
+            assignment_id=quiz_setup['assignment'].id, job_id=job.id)
+
+        job.refresh_from_db()
+        assert job.status == 'failed'
+        assert job.errorMessage
+        assert SuggestedQuizQuestion.objects.filter(pk=old.pk, status='pending').exists()
+        assert SuggestedQuizQuestion.objects.filter(assignment=quiz_setup['assignment']).count() == 1
+
+    def test_successful_run_replaces_pending_queue(self, quiz_setup, monkeypatch):
+        from core.models import SuggestedQuizQuestion
+        from core.tasks import generate_quiz_question_suggestions
+        _mock_ai(monkeypatch, '[{"type": "essay", "text": "New one."}]')
+        old, job = self._pending_and_job(quiz_setup)
+
+        generate_quiz_question_suggestions(
+            requested_by_id=quiz_setup['admin'].id,
+            assignment_id=quiz_setup['assignment'].id, job_id=job.id)
+
+        job.refresh_from_db()
+        assert job.status == 'completed'
+        assert not SuggestedQuizQuestion.objects.filter(pk=old.pk).exists()
+        assert SuggestedQuizQuestion.objects.filter(
+            assignment=quiz_setup['assignment'], status='pending').count() == 1
+
     def test_job_records_empty_generation(self, api_client, quiz_setup, monkeypatch):
         """A run that yields zero usable questions fails the job instead of completing silently."""
         _mock_ai(monkeypatch, '[]')

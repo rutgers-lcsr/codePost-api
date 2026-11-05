@@ -656,37 +656,49 @@ def generate_quiz_question_suggestions(
     created = 0
     missing_choices = 0
     from django.db import transaction
-    with transaction.atomic():
-        # Replace any prior pending suggestions for this seed (assignment for fresh generation,
-        # or the source question for a refresh) so there's a single batch — but only now that
-        # generation succeeded, so a failed/unparseable run leaves the existing queue intact.
-        if source_question is not None:
-            SuggestedQuizQuestion.objects.filter(sourceQuestion=source_question, status='pending').delete()
-        elif assignment is not None:
-            SuggestedQuizQuestion.objects.filter(assignment=assignment, status='pending').delete()
-        for q in questions:
-            if not isinstance(q, dict) or not q.get('text'):
-                continue
-            qtype = q.get('type', 'multiple_choice')
-            choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
-            if qtype in CHOICE_TYPES and not any(c.get('isCorrect') for c in choices):
-                missing_choices += 1
-            SuggestedQuizQuestion.objects.create(
-                assignment=assignment,
-                sourceQuestion=source_question,
-                questionType=qtype,
-                text=q.get('text', ''),
-                description=q.get('description') or '',
-                choicesData=choices,
-                points=q.get('points', 1) or 1,
-                language=q.get('language') or (source_question.language if source_question else None),
-                starterCode=q.get('starter_code'),
-                referenceSolution=q.get('reference_solution'),
-                generationMetadata=metadata,
-                promptVariant_id=prompt_variant_id,
-                generationBatch=batch,
-            )
-            created += 1
+    try:
+        with transaction.atomic():
+            for q in questions:
+                if not isinstance(q, dict) or not q.get('text'):
+                    continue
+                qtype = q.get('type', 'multiple_choice')
+                choices = _normalize_choices(q.get('choices') or q.get('options') or q.get('answers'))
+                if qtype in CHOICE_TYPES and not any(c.get('isCorrect') for c in choices):
+                    missing_choices += 1
+                SuggestedQuizQuestion.objects.create(
+                    assignment=assignment,
+                    sourceQuestion=source_question,
+                    questionType=qtype,
+                    text=q.get('text', ''),
+                    description=q.get('description') or '',
+                    choicesData=choices,
+                    points=q.get('points', 1) or 1,
+                    language=q.get('language') or (source_question.language if source_question else None),
+                    starterCode=q.get('starter_code'),
+                    referenceSolution=q.get('reference_solution'),
+                    generationMetadata=metadata,
+                    promptVariant_id=prompt_variant_id,
+                    generationBatch=batch,
+                )
+                created += 1
+            # Replace the prior pending suggestions for this seed (assignment for fresh
+            # generation, or the source question for a refresh) so there's a single batch —
+            # but only once the new rows are saved, so a failed or empty run (or an error
+            # above, which rolls the whole block back) leaves the existing queue intact.
+            if created:
+                if source_question is not None:
+                    prior = SuggestedQuizQuestion.objects.filter(sourceQuestion=source_question, status='pending')
+                elif assignment is not None:
+                    prior = SuggestedQuizQuestion.objects.filter(assignment=assignment, status='pending')
+                else:
+                    prior = SuggestedQuizQuestion.objects.none()
+                prior.exclude(generationBatch=batch).delete()
+    except Exception:
+        logger.exception(f"[QuizGen] Saving suggestions failed for course {course.id}")
+        service.record_usage(result, user=user, request_type='quiz_generation')
+        _update_suggestion_job(job_id, status='failed',
+                               errorMessage='The model responded, but its questions could not be saved. Try again.')
+        return
 
     logger.info(f"[QuizGen] Created {created} suggested quiz questions for course {course.id} (batch {batch})")
     if missing_choices:
