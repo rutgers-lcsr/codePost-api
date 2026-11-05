@@ -399,9 +399,9 @@ run_test <- function(name, points, description, fn = NULL, timeout = 30) {
 }
 
 output_test_results <- function() {
-    cat('<<<TEST_RESULT_JSON_START>>>')
+    cat('<<<TEST_RESULT_JSON_START_@@NONCE@@>>>')
     cat(toJSON(test_results, auto_unbox = TRUE))
-    cat('<<<TEST_RESULT_JSON_END>>>')
+    cat('<<<TEST_RESULT_JSON_END_@@NONCE@@>>>')
 }
 # ============================================
 
@@ -442,8 +442,8 @@ final_result <- list(
     )
 )
 
-cat('<<<RESULTS_START>>>\n')
+cat('<<<RESULTS_START_@@NONCE@@>>>\n')
 cat(toJSON(final_result, auto_unbox = TRUE, null = "null"))
-cat('\n<<<RESULTS_END>>>\n')
+cat('\n<<<RESULTS_END_@@NONCE@@>>>\n')
 
 

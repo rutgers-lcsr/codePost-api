@@ -280,12 +280,12 @@ int main(int argc, char** argv) {
         results.push_back(crash);
     }
     
-    std::cout << "<<<TEST_RESULT_JSON_START>>>[";
+    std::cout << "<<<TEST_RESULT_JSON_START_@@NONCE@@>>>[";
     for (size_t i = 0; i < results.size(); ++i) {
         std::cout << results[i].to_json();
         if (i < results.size() - 1) std::cout << ",";
     }
-    std::cout << "]<<<TEST_RESULT_JSON_END>>>" << std::endl;
+    std::cout << "]<<<TEST_RESULT_JSON_END_@@NONCE@@>>>" << std::endl;
     
     return 0;
 }

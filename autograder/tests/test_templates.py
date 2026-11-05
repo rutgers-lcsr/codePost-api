@@ -68,13 +68,17 @@ TEMPLATES_DIR = os.path.join(
 )
 
 
+# Fixed per-run nonce standing in for Executor.result_nonce in these tests.
+TEST_NONCE = "0123456789abcdef0123456789abcdef"
+
+
 # ---------------------------------------------------------------------------
 # Helpers to build template-style output strings
 # ---------------------------------------------------------------------------
 
 def _wrap_result(payload: Any) -> str:
     """Wrap *payload* in the template delimiters, as all templates do."""
-    return f"<<<TEST_RESULT_JSON_START>>>{json.dumps(payload)}<<<TEST_RESULT_JSON_END>>>"
+    return f"<<<TEST_RESULT_JSON_START_{TEST_NONCE}>>>{json.dumps(payload)}<<<TEST_RESULT_JSON_END_{TEST_NONCE}>>>"
 
 
 def _make_test_result(
@@ -117,7 +121,7 @@ def _read_template(filename: str) -> str:
     """Read a template file from the templates directory."""
     path = os.path.join(TEMPLATES_DIR, filename)
     with open(path, "r") as f:
-        return f.read()
+        return f.read().replace("@@NONCE@@", TEST_NONCE)
 
 
 def _fill_python_template(student_code: str, test_code: str, target_function: str = "") -> str:
@@ -747,7 +751,7 @@ class PythonTemplateRoundTripTests(SimpleTestCase):
     def _run_and_parse(self, student_code: str, test_code: str, target_function: str = ""):
         """Helper: exec template → parse results → return (tests, stdout, stderr)."""
         stdout, stderr = _exec_python_template(student_code, test_code, target_function)
-        clean_stdout, clean_stderr, tests = Executor.parse_test_results(stdout, stderr)
+        clean_stdout, clean_stderr, tests = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return tests, stdout, stderr
 
     def test_passing_test(self):
@@ -1052,12 +1056,12 @@ class NotebookPythonTemplateRoundTripTests(SimpleTestCase):
         )
         # Parse the <<<RESULTS_START>>> block from stdout
         results_json = None
-        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        m = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         if m:
             results_json = json.loads(m.group(1))
 
         # Also parse per-test JSON markers from stderr (same as regular template)
-        _, _, per_test = Executor.parse_test_results(stdout, stderr)
+        _, _, per_test = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return results_json, per_test, stdout, stderr
 
     # -- Basic passing test -------------------------------------------------
@@ -1207,7 +1211,7 @@ def partial():
             {"type": "code", "source": "x = 1", "idx": 1},
         ]
         stdout, stderr = _exec_notebook_python_template(cells_list, "")
-        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        m = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         results_json = json.loads(m.group(1))
         cell_types = [c["cell_type"] for c in results_json["output_data"]["cells"]]
         self.assertEqual(cell_types, ["markdown", "code"])
@@ -1221,7 +1225,7 @@ def partial():
             {"type": "code", "source": "x = 1", "idx": 2},
         ]
         stdout, stderr = _exec_notebook_python_template(cells_list, "")
-        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        m = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         results_json = json.loads(m.group(1))
         out = results_json["output_data"]["cells"]
         self.assertEqual([c["cell_type"] for c in out], ["markdown", "raw", "code"])
@@ -1442,7 +1446,7 @@ class JSTemplateRoundTripTests(SimpleTestCase):
         Returns (results_list, stdout, stderr).
         """
         stdout, stderr = _exec_js_template(student_code, test_code)
-        _, _, results = Executor.parse_test_results(stdout, stderr)
+        _, _, results = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return results, stdout, stderr
 
     # -- Basic passing ------------------------------------------------------
@@ -1587,10 +1591,10 @@ class JSNotebookTemplateRoundTripTests(SimpleTestCase):
         stdout, stderr = _exec_notebook_js_template(self._make_cells(cell_sources), test_code)
         # Parse <<<RESULTS_START>>> from stdout
         results_json = None
-        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        m = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         if m:
             results_json = json.loads(m.group(1))
-        _, _, per_test = Executor.parse_test_results(stdout, stderr)
+        _, _, per_test = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return results_json, per_test, stdout, stderr
 
     # -- Basic passing test -------------------------------------------------
@@ -1662,7 +1666,7 @@ test("wrong", 3, function() {
             {"type": "code", "source": "var x = 1;", "idx": 1},
         ]
         stdout, stderr = _exec_notebook_js_template(cells_list, "")
-        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        m = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         results_json = json.loads(m.group(1))
         cell_types = [c["cell_type"] for c in results_json["output_data"]["cells"]]
         self.assertEqual(cell_types, ["markdown", "code"])
@@ -1675,7 +1679,7 @@ test("wrong", 3, function() {
             {"type": "code", "source": "var x = 1;", "idx": 2},
         ]
         stdout, stderr = _exec_notebook_js_template(cells_list, "")
-        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        m = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         results_json = json.loads(m.group(1))
         out = results_json["output_data"]["cells"]
         self.assertEqual([c["cell_type"] for c in out], ["markdown", "raw", "code"])
@@ -1728,7 +1732,7 @@ class CppTemplateRoundTripTests(SimpleTestCase):
         Returns (results_list, stdout, stderr).
         """
         stdout, stderr = _exec_cpp_template(student_code, test_code)
-        _, _, results = Executor.parse_test_results(stdout, stderr)
+        _, _, results = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return results, stdout, stderr
 
     # -- Basic passing -------------------------------------------------------
@@ -1870,7 +1874,7 @@ class JavaTemplateRoundTripTests(SimpleTestCase):
         Returns (results_list, stdout, stderr).
         """
         stdout, stderr = _exec_java_template(student_code, test_code)
-        _, _, results = Executor.parse_test_results(stdout, stderr)
+        _, _, results = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return results, stdout, stderr
 
     # -- Basic passing -------------------------------------------------------
@@ -1997,7 +2001,7 @@ class RTemplateRoundTripTests(SimpleTestCase):
         Returns (results_list, stdout, stderr).
         """
         stdout, stderr = _exec_r_template(student_code, test_code)
-        _, _, results = Executor.parse_test_results(stdout, stderr)
+        _, _, results = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return results, stdout, stderr
 
     # -- Basic passing -------------------------------------------------------
@@ -2134,10 +2138,10 @@ class RubyNotebookTemplateRoundTripTests(SimpleTestCase):
             for i, src in enumerate(cells)
         ]
         stdout, stderr = _exec_notebook_ruby_template(cell_dicts, test_code)
-        _, _, per_test = Executor.parse_test_results(stdout, stderr)
+        _, _, per_test = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         # Parse the RESULTS_START JSON for the full notebook result
         results_json = {}
-        match = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        match = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         if match:
             try:
                 results_json = json.loads(match.group(1))
@@ -2256,9 +2260,9 @@ class PHPNotebookTemplateRoundTripTests(SimpleTestCase):
             for i, src in enumerate(cells)
         ]
         stdout, stderr = _exec_notebook_php_template(cell_dicts, test_code)
-        _, _, per_test = Executor.parse_test_results(stdout, stderr)
+        _, _, per_test = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         results_json = {}
-        match = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        match = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         if match:
             try:
                 results_json = json.loads(match.group(1))
@@ -2383,11 +2387,11 @@ class Tests {
     def _run(self, cell_sources: List[str], check_expr: str):
         cells = [{"type": "code", "source": s, "idx": i} for i, s in enumerate(cell_sources)]
         stdout, stderr = _exec_notebook_java_template(cells, self.TEST_CODE.replace("CHECK", check_expr))
-        m = re.search(r"<<<RESULTS_START>>>\s*(.*?)\s*<<<RESULTS_END>>>", stdout, re.DOTALL)
+        m = re.search(rf"<<<RESULTS_START_{TEST_NONCE}>>>\s*(.*?)\s*<<<RESULTS_END_{TEST_NONCE}>>>", stdout, re.DOTALL)
         if m is None:
             self.fail(f"no results block.\nstdout: {stdout}\nstderr: {stderr}")
         # Per-test results are stdout markers parsed host-side, not part of the results JSON.
-        _, _, per_test = Executor.parse_test_results(stdout, stderr)
+        _, _, per_test = Executor.parse_test_results(stdout, stderr, TEST_NONCE)
         return json.loads(m.group(1)), per_test
 
     @staticmethod
@@ -2562,7 +2566,7 @@ class ParseTestResultsTests(SimpleTestCase):
         """Python template emits one object per test to stderr."""
         result = _make_test_result()
         stderr = _wrap_result(result)
-        clean_stdout, clean_stderr, tests = Executor.parse_test_results("", stderr)
+        clean_stdout, clean_stderr, tests = Executor.parse_test_results("", stderr, TEST_NONCE)
         self.assertEqual(len(tests), 1)
         self.assertTrue(tests[0]["passed"])
         self.assertEqual(clean_stderr.strip(), "")
@@ -2571,7 +2575,7 @@ class ParseTestResultsTests(SimpleTestCase):
         """Some templates (C++, Java) write the array to stdout."""
         result = _make_test_result()
         stdout = _wrap_result([result])
-        clean_stdout, clean_stderr, tests = Executor.parse_test_results(stdout, "")
+        clean_stdout, clean_stderr, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 1)
         self.assertTrue(tests[0]["passed"])
         self.assertEqual(clean_stdout.strip(), "")
@@ -2584,7 +2588,7 @@ class ParseTestResultsTests(SimpleTestCase):
             _make_test_result(name="test_b", passed=False, score=0, max_score=3, status="failed", error="AssertionError"),
         ]
         stdout = _wrap_result(results)
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 2)
         self.assertTrue(tests[0]["passed"])
         self.assertFalse(tests[1]["passed"])
@@ -2596,7 +2600,7 @@ class ParseTestResultsTests(SimpleTestCase):
         r1 = _make_test_result(name="test_1", passed=True)
         r2 = _make_test_result(name="test_2", passed=False, status="failed", error="oops")
         stderr = _wrap_result(r1) + "\n" + _wrap_result(r2)
-        _, _, tests = Executor.parse_test_results("", stderr)
+        _, _, tests = Executor.parse_test_results("", stderr, TEST_NONCE)
         self.assertEqual(len(tests), 2)
         self.assertEqual(tests[0]["name"], "test_1")
         self.assertEqual(tests[1]["name"], "test_2")
@@ -2605,7 +2609,7 @@ class ParseTestResultsTests(SimpleTestCase):
 
     def test_surrounding_output_preserved(self):
         stdout = "some debug line\n" + _wrap_result([_make_test_result()]) + "\nmore output"
-        clean_stdout, _, tests = Executor.parse_test_results(stdout, "")
+        clean_stdout, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 1)
         self.assertIn("some debug line", clean_stdout)
         self.assertIn("more output", clean_stdout)
@@ -2614,14 +2618,14 @@ class ParseTestResultsTests(SimpleTestCase):
     # -- Empty / no markers --
 
     def test_no_markers_returns_empty(self):
-        _, _, tests = Executor.parse_test_results("hello", "world")
+        _, _, tests = Executor.parse_test_results("hello", "world", TEST_NONCE)
         self.assertEqual(tests, [])
 
     # -- Malformed JSON --
 
     def test_malformed_json_skipped(self):
-        stderr = "<<<TEST_RESULT_JSON_START>>>{bad json<<<TEST_RESULT_JSON_END>>>"
-        _, _, tests = Executor.parse_test_results("", stderr)
+        stderr = f"<<<TEST_RESULT_JSON_START_{TEST_NONCE}>>>{{bad json<<<TEST_RESULT_JSON_END_{TEST_NONCE}>>>"
+        _, _, tests = Executor.parse_test_results("", stderr, TEST_NONCE)
         self.assertEqual(tests, [])
 
     # -- Cross-stream: results in both stdout and stderr --
@@ -2629,7 +2633,7 @@ class ParseTestResultsTests(SimpleTestCase):
     def test_results_from_both_streams(self):
         r1 = _make_test_result(name="from_stdout")
         r2 = _make_test_result(name="from_stderr")
-        _, _, tests = Executor.parse_test_results(_wrap_result(r1), _wrap_result(r2))
+        _, _, tests = Executor.parse_test_results(_wrap_result(r1), _wrap_result(r2), TEST_NONCE)
         names = {t["name"] for t in tests}
         self.assertEqual(names, {"from_stdout", "from_stderr"})
 
@@ -2653,7 +2657,7 @@ class PythonTemplateOutputTests(SimpleTestCase):
             "output": "stdout from test",
             "status": "passed",
         }
-        _, _, tests = Executor.parse_test_results("", _wrap_result(payload))
+        _, _, tests = Executor.parse_test_results("", _wrap_result(payload), TEST_NONCE)
         self.assertEqual(len(tests), 1)
         self.assertTrue(tests[0]["passed"])
         self.assertEqual(tests[0]["score"], 2.0)
@@ -2670,7 +2674,7 @@ class PythonTemplateOutputTests(SimpleTestCase):
             "output": "",
             "status": "failed",
         }
-        _, _, tests = Executor.parse_test_results("", _wrap_result(payload))
+        _, _, tests = Executor.parse_test_results("", _wrap_result(payload), TEST_NONCE)
         self.assertEqual(tests[0]["status"], "failed")
         self.assertIn("AssertionError", tests[0]["error"])
 
@@ -2686,7 +2690,7 @@ class PythonTemplateOutputTests(SimpleTestCase):
             "output": "",
             "status": "partial",
         }
-        _, _, tests = Executor.parse_test_results("", _wrap_result(payload))
+        _, _, tests = Executor.parse_test_results("", _wrap_result(payload), TEST_NONCE)
         self.assertEqual(tests[0]["status"], "partial")
         self.assertEqual(tests[0]["score"], 7.5)
 
@@ -2702,7 +2706,7 @@ class PythonTemplateOutputTests(SimpleTestCase):
             "output": "",
             "status": "error",
         }
-        _, _, tests = Executor.parse_test_results("", _wrap_result(payload))
+        _, _, tests = Executor.parse_test_results("", _wrap_result(payload), TEST_NONCE)
         self.assertEqual(tests[0]["status"], "error")
 
 
@@ -2715,7 +2719,7 @@ class JavascriptTemplateOutputTests(SimpleTestCase):
             {"name": "test_length", "max_score": 2, "description": None, "message": "", "score": 0, "passed": False, "status": "failed", "error": "Expected 5, got 3"},
         ]
         stdout = _wrap_result(results)
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 2)
         self.assertEqual(tests[1]["error"], "Expected 5, got 3")
 
@@ -2723,7 +2727,7 @@ class JavascriptTemplateOutputTests(SimpleTestCase):
         results = [
             {"name": "test_slow", "max_score": 1, "description": None, "message": "", "score": 0, "passed": False, "status": "error", "error": "Test timed out after 30s"},
         ]
-        _, _, tests = Executor.parse_test_results(_wrap_result(results), "")
+        _, _, tests = Executor.parse_test_results(_wrap_result(results), "", TEST_NONCE)
         self.assertEqual(tests[0]["status"], "error")
         self.assertIn("timed out", tests[0]["error"])
 
@@ -2737,7 +2741,7 @@ class CppTemplateOutputTests(SimpleTestCase):
             {"name": "TestEdge", "description": "edge cases", "message": "", "score": 0.0, "max_score": 2.0, "passed": False, "status": "failed", "error": "Assertion failed", "output": "some debug"},
         ]
         stdout = _wrap_result(results)
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 2)
         self.assertEqual(tests[0]["score"], 3.0)
 
@@ -2750,7 +2754,7 @@ class JavaTemplateOutputTests(SimpleTestCase):
             {"name": "testAdd", "description": "", "message": "", "score": 1.0, "max_score": 1.0, "passed": True, "status": "passed", "error": None, "output": ""},
         ]
         stdout = _wrap_result(results)
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 1)
         self.assertTrue(tests[0]["passed"])
 
@@ -2758,7 +2762,7 @@ class JavaTemplateOutputTests(SimpleTestCase):
         results = [
             {"name": "testInfiniteLoop", "description": "", "message": "", "score": 0, "max_score": 5, "passed": False, "status": "error", "error": "Test timed out after 30s", "output": ""},
         ]
-        _, _, tests = Executor.parse_test_results(_wrap_result(results), "")
+        _, _, tests = Executor.parse_test_results(_wrap_result(results), "", TEST_NONCE)
         self.assertEqual(tests[0]["status"], "error")
 
 
@@ -2769,8 +2773,8 @@ class RTemplateOutputTests(SimpleTestCase):
         results = [
             {"name": "Test R Logic", "max_score": 2, "description": None, "message": "", "score": 2, "passed": True, "status": "passed", "error": ""},
         ]
-        stdout = f"<<<TEST_RESULT_JSON_START>>>{json.dumps(results)}<<<TEST_RESULT_JSON_END>>>"
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        stdout = _wrap_result(results)
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 1)
         self.assertTrue(tests[0]["passed"])
 
@@ -2778,7 +2782,7 @@ class RTemplateOutputTests(SimpleTestCase):
         results = [
             {"name": "Test R", "max_score": 1, "description": None, "message": "Student code syntax was invalid. Fix syntax errors before running tests.", "score": 0, "passed": False, "status": "error", "error": "Student code syntax was invalid. Fix syntax errors before running tests.\nError in parse: unexpected symbol"},
         ]
-        _, _, tests = Executor.parse_test_results(_wrap_result(results), "")
+        _, _, tests = Executor.parse_test_results(_wrap_result(results), "", TEST_NONCE)
         self.assertEqual(tests[0]["status"], "error")
         self.assertIn("syntax", tests[0]["error"].lower())
 
@@ -2798,28 +2802,28 @@ class CrashDetectionTests(SimpleTestCase):
 
     def test_python_crash_result(self):
         crash = _make_crash_result("Test script failed to load:\nImportError: No module named 'nonexistent'")
-        _, _, tests = Executor.parse_test_results("", _wrap_result(crash))
+        _, _, tests = Executor.parse_test_results("", _wrap_result(crash), TEST_NONCE)
         self._assert_crash(tests)
 
     def test_js_crash_result(self):
         """JS wraps crash as a test via: test("Test Script Execution", 0, () => { throw ... })"""
         results = [_make_crash_result("Failed to run test script: Cannot find module 'foo'")]
-        _, _, tests = Executor.parse_test_results(_wrap_result(results), "")
+        _, _, tests = Executor.parse_test_results(_wrap_result(results), "", TEST_NONCE)
         self._assert_crash(tests)
 
     def test_java_crash_result(self):
         results = [_make_crash_result("Test script failed to load: java.lang.NoClassDefFoundError: Foo")]
-        _, _, tests = Executor.parse_test_results(_wrap_result(results), "")
+        _, _, tests = Executor.parse_test_results(_wrap_result(results), "", TEST_NONCE)
         self._assert_crash(tests)
 
     def test_cpp_crash_result(self):
         results = [_make_crash_result("Test script failed to load: segfault")]
-        _, _, tests = Executor.parse_test_results(_wrap_result(results), "")
+        _, _, tests = Executor.parse_test_results(_wrap_result(results), "", TEST_NONCE)
         self._assert_crash(tests)
 
     def test_r_crash_result(self):
         results = [_make_crash_result("Failed to run test script: Error in eval: object 'x' not found")]
-        _, _, tests = Executor.parse_test_results(_wrap_result(results), "")
+        _, _, tests = Executor.parse_test_results(_wrap_result(results), "", TEST_NONCE)
         self._assert_crash(tests)
 
     def test_crash_blocks_sync_logic(self):
@@ -3301,7 +3305,7 @@ class EndToEndTemplateScenarioTests(SimpleTestCase):
         }))
         stderr = "\n".join(stderr_parts)
 
-        _, clean_stderr, tests = Executor.parse_test_results("", stderr)
+        _, clean_stderr, tests = Executor.parse_test_results("", stderr, TEST_NONCE)
         self.assertEqual(len(tests), 3)
 
         exec_result = {
@@ -3319,7 +3323,7 @@ class EndToEndTemplateScenarioTests(SimpleTestCase):
             {"name": "test_b", "max_score": 5, "description": None, "message": "", "score": 5, "passed": True, "status": "passed", "error": ""},
         ]
         stdout = f"console log\n{_wrap_result(results)}\ndone"
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 2)
 
         exec_result = {"stdout": stdout, "stderr": "", "error": None, "tests": tests}
@@ -3331,7 +3335,7 @@ class EndToEndTemplateScenarioTests(SimpleTestCase):
         """C++ template: test loop itself crashes—only crash result returned."""
         results = [_make_crash_result("Test script failed to load: std::bad_alloc")]
         stdout = _wrap_result(results)
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 1)
 
         # Verify crash detection
@@ -3348,7 +3352,7 @@ class EndToEndTemplateScenarioTests(SimpleTestCase):
             _make_crash_result("Test script failed to load: NullPointerException"),
         ]
         stdout = _wrap_result(results)
-        _, _, tests = Executor.parse_test_results(stdout, "")
+        _, _, tests = Executor.parse_test_results(stdout, "", TEST_NONCE)
         self.assertEqual(len(tests), 2)
 
         _exec_result = {"stdout": stdout, "stderr": "", "error": None, "tests": tests}
@@ -3386,7 +3390,7 @@ class EndToEndTemplateScenarioTests(SimpleTestCase):
     def test_stderr_crash_marker_fallback(self):
         """When no synthetic result parsed but stderr has crash marker, detect crash."""
         stderr = "Test Script Error:\nImportError: No module named 'missing'\nTraceback ..."
-        _, _, tests = Executor.parse_test_results("", stderr)
+        _, _, tests = Executor.parse_test_results("", stderr, TEST_NONCE)
         self.assertEqual(len(tests), 0)
 
         # Backend fallback logic from run_suite

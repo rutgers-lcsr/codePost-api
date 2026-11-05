@@ -16,6 +16,7 @@ import logging
 from core.constants import MAX_FILE_SIZE as MAX_FILE_SIZE_CONST, MAX_OUTPUT_SIZE as MAX_OUTPUT_SIZE_CONST
 import os
 import re
+import secrets
 import shlex
 import shutil
 import struct
@@ -260,11 +261,34 @@ class Executor(abc.ABC):
     # Docker client (singleton)
     _docker_client: Optional[DockerClient] = None
 
-    @classmethod
-    def parse_test_results(cls, stdout: str, stderr: str) -> Tuple[str, str, List[Dict[str, Any]]]:
+    # Placeholder the templates carry inside every result marker; replaced per run.
+    NONCE_PLACEHOLDER = "@@NONCE@@"
+
+    @property
+    def result_nonce(self) -> str:
+        """Unguessable per-run secret embedded in the result markers the harness prints.
+
+        Student code shares the container with the harness, so a fixed marker could be
+        printed by the student to forge results. Only markers carrying this nonce are
+        accepted by parse_test_results / extract_json_result.
         """
-        Extract test results formatted as <<<TEST_RESULT_JSON_START>>>{...}<<<TEST_RESULT_JSON_END>>>
-        from stdout or stderr.
+        nonce = self.__dict__.get("_result_nonce")
+        if nonce is None:
+            nonce = secrets.token_hex(16)
+            self.__dict__["_result_nonce"] = nonce
+        return nonce
+
+    def _read_template_file(self, filename: str) -> str:
+        """Read a template from templates/ with this run's nonce substituted into its markers."""
+        template_path = os.path.join(os.path.dirname(__file__), "../templates", filename)
+        with open(template_path, 'r') as f:
+            return f.read().replace(self.NONCE_PLACEHOLDER, self.result_nonce)
+
+    @classmethod
+    def parse_test_results(cls, stdout: str, stderr: str, nonce: str) -> Tuple[str, str, List[Dict[str, Any]]]:
+        """
+        Extract test results formatted as <<<TEST_RESULT_JSON_START_<nonce>>>{...}<<<TEST_RESULT_JSON_END_<nonce>>>
+        from stdout or stderr. Markers without this run's nonce are ignored (left in place).
         
         Returns:
             Tuple containing:
@@ -274,7 +298,12 @@ class Executor(abc.ABC):
         """
         test_results = []
         # Non-greedy matching across lines
-        test_regex = re.compile(r'<<<TEST_RESULT_JSON_START>>>(.*?)<<<TEST_RESULT_JSON_END>>>', re.DOTALL)
+        if not nonce:
+            raise ValueError("parse_test_results requires the run's nonce")
+        test_regex = re.compile(
+            rf'<<<TEST_RESULT_JSON_START_{re.escape(nonce)}>>>(.*?)<<<TEST_RESULT_JSON_END_{re.escape(nonce)}>>>',
+            re.DOTALL,
+        )
         
         def replace_and_capture(match):
             try:
@@ -1115,10 +1144,8 @@ class Executor(abc.ABC):
             self.log("Missing template name", "error")
             return None
 
-        template_path = os.path.join(os.path.dirname(__file__), "../templates", template_file)
         try:
-            with open(template_path, 'r') as f:
-                return f.read()
+            return self._read_template_file(template_file)
         except Exception as e:
             self.log(f"Failed to load template for: {e}", "error")
             return ""
@@ -1471,13 +1498,20 @@ class NotebookExecutor(Executor):
             raise ValueError("Invalid format")
             
     @classmethod
-    def extract_json_result(cls, stdout: str, stderr: str = "") -> ExecutionResult:
+    def extract_json_result(cls, stdout: str, stderr: str = "", *, nonce: str) -> ExecutionResult:
         """
-        Templates are expected to return a result inside <<<RESULTS_START>>> and <<<RESULTS_END>>> as output from the container.
+        Templates are expected to return a result inside <<<RESULTS_START_<nonce>>>> and
+        <<<RESULTS_END_<nonce>>>> as output from the container. Only the run's own nonce is
+        accepted, and the LAST block wins (the harness prints its block last).
         """
+        if not nonce:
+            raise ValueError("extract_json_result requires the run's nonce")
+        start_marker = f"<<<RESULTS_START_{nonce}>>>"
+        end_marker = f"<<<RESULTS_END_{nonce}>>>"
+        start_at = stdout.rfind(start_marker)
+        end_at = stdout.find(end_marker, start_at + len(start_marker)) if start_at != -1 else -1
         
-        # check if the result is inside <<<RESULTS_START>>> and <<<RESULTS_END>>>
-        if "<<<RESULTS_START>>>" not in stdout or "<<<RESULTS_END>>>" not in stdout:
+        if start_at == -1 or end_at == -1:
             # Use the tail of stderr to see the most recent error/traceback
             stderr_preview = stderr[-1000:] if len(stderr) > 1000 else stderr
             # Lead with the last non-empty stderr line so the real cause (e.g. a
@@ -1488,7 +1522,7 @@ class NotebookExecutor(Executor):
             return ExecutionResult.error(f"{cause}Failed to extract results: missing markers. Stdout preview: {stdout[:200]} Stderr tail: {stderr_preview}")
 
         try:
-            results_stdout = stdout.split("<<<RESULTS_START>>>")[1].split("<<<RESULTS_END>>>")[0].strip()
+            results_stdout = stdout[start_at + len(start_marker):end_at].strip()
             results_json = json.loads(results_stdout)
             
             # Create ExecutionResult from the parsed JSON
@@ -1647,9 +1681,9 @@ class NotebookExecutor(Executor):
             self.log(f"Parsing execution results from stdout...")
             
             # Parse standardized test results (e.g. from Java/C++ test runners injected into notebook)
-            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
             
-            execution_result = self.extract_json_result(stdout, stderr)
+            execution_result = self.extract_json_result(stdout, stderr, nonce=self.result_nonce)
             
             # Attach parsed tests if any found
             if test_results:

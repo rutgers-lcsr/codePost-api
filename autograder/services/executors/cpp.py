@@ -51,10 +51,8 @@ class CPPExecutor(Executor):
         # If test_code is provided, we use the test runner template
         if test_code:
             template_file = self.TEMPLATE
-            template_path = os.path.join(os.path.dirname(__file__), "../templates", template_file)
             try:
-                with open(template_path, 'r') as f:
-                    template = f.read()
+                template = self._read_template_file(template_file)
                 return template.replace("#{TEST_CODE}", test_code)
             except Exception as e:
                 self.log(f"Failed to load template: {e}", "error")
@@ -136,7 +134,7 @@ class CPPExecutor(Executor):
             stderr = container.logs(stdout=False, stderr=True).decode('utf-8', errors='replace')
 
             # Parse Test Results
-            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
             
             execution_time = (datetime.now() - start_time).total_seconds()
             success = result.get('StatusCode', 1) == 0
@@ -228,10 +226,8 @@ class CPPNotebookExecutor(NotebookExecutor):
             return {"notebook.cpp": template}
 
         files = {"student.cpp": template}
-        harness_path = os.path.join(os.path.dirname(__file__), "../templates", "template.cpp")
         try:
-            with open(harness_path, 'r') as f:
-                 harness_template = f.read()
+            harness_template = self._read_template_file("template.cpp")
             files["runner.cpp"] = harness_template.replace("#{TEST_CODE}", self.test_code)
         except Exception as e:
              # g++ then fails visibly on the missing runner.cpp

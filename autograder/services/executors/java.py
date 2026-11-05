@@ -56,10 +56,8 @@ class JavaExecutor(Executor):
         """Get the Java template and inject test code."""
         # We manually load the template here because base.py _get_code_template assumes substitutions
         template_file = self.TEMPLATE
-        template_path = os.path.join(os.path.dirname(__file__), "../templates", template_file)
         try:
-            with open(template_path, 'r') as f:
-                template = f.read()
+            template = self._read_template_file(template_file)
             return template.replace("#{TEST_CODE}", test_code)
         except Exception as e:
             self.log(f"Failed to load template: {e}", "error")
@@ -169,7 +167,7 @@ class JavaExecutor(Executor):
             stderr = container.logs(stdout=False, stderr=True).decode('utf-8', errors='replace')
 
             # Parse Test Results (if any)
-            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
             
             execution_time = (datetime.now() - start_time).total_seconds()
             success = result.get('StatusCode', 1) == 0
@@ -234,10 +232,8 @@ class JavaNotebookExecutor(NotebookExecutor):
         if not template_file:
              return None
         
-        template_path = os.path.join(os.path.dirname(__file__), "../templates", template_file)
         try:
-            with open(template_path, 'r') as f:
-                template = f.read()
+            template = self._read_template_file(template_file)
         except Exception as e:
             self.log(f"Failed to load template: {e}", "error")
             return None

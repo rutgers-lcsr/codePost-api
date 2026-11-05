@@ -263,9 +263,12 @@ class CommandWrapperTests(SimpleTestCase):
         self.assertTrue(wrapped[2].endswith("sh -c 'a && b'"), wrapped[2])
 
 
+TEST_NONCE = "0123456789abcdef0123456789abcdef"
+
+
 def _fill_python_template(student: str, test_code: str) -> str:
     with open(os.path.join(TEMPLATES_DIR, "template.py")) as f:
-        template = f.read()
+        template = f.read().replace("@@NONCE@@", TEST_NONCE)
     return (template
             .replace("#{FILLER_CODE}", base64.b64encode(student.encode()).decode())
             .replace("#{TEST_CODE}", base64.b64encode(test_code.encode()).decode())
@@ -275,7 +278,7 @@ def _fill_python_template(student: str, test_code: str) -> str:
 
 def _fill_python_notebook_template(sources: List[str]) -> str:
     with open(os.path.join(TEMPLATES_DIR, "notebook_template.py")) as f:
-        template = f.read()
+        template = f.read().replace("@@NONCE@@", TEST_NONCE)
     cells = [{"idx": i, "type": "code", "source": src} for i, src in enumerate(sources)]
     return (template
             .replace("{cells_b64}", base64.b64encode(json.dumps(cells).encode()).decode())
@@ -362,7 +365,7 @@ class StudentTracebackTests(SimpleTestCase):
         student = 'def boom():\n    x = {}\n    return x["missing"]\n'
         test_code = '@test(name="boom test", points=2)\ndef test_boom():\n    boom()\n'
         proc = self._run_file_template(student, test_code)
-        block = proc.stderr.split("<<<TEST_RESULT_JSON_START>>>")[1].split("<<<TEST_RESULT_JSON_END>>>")[0]
+        block = proc.stderr.split(f"<<<TEST_RESULT_JSON_START_{TEST_NONCE}>>>")[1].split(f"<<<TEST_RESULT_JSON_END_{TEST_NONCE}>>>")[0]
         error = json.loads(block)["error"]
         self.assertIn('File "/work/hw1.py", line 3, in boom', error)
         self.assertIn('return x["missing"]', error)            # student source line
@@ -392,7 +395,7 @@ class StudentTracebackTests(SimpleTestCase):
     def test_notebook_cell_traceback_names_cell_and_shows_source(self):
         proc = _run_script([sys.executable], self.tmp, ".codepost_runner.py",
                            _fill_python_notebook_template(["x = 1", "def boom():\n    return {}['k']\nboom()"]))
-        result = json.loads(proc.stdout.split("<<<RESULTS_START>>>")[1].split("<<<RESULTS_END>>>")[0])
+        result = json.loads(proc.stdout.split(f"<<<RESULTS_START_{TEST_NONCE}>>>")[1].split(f"<<<RESULTS_END_{TEST_NONCE}>>>")[0])
         tracebacks: List[str] = []
         for cell in result["output_data"]["cells"]:
             for output in cell.get("outputs", []):

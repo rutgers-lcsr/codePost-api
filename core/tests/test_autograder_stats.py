@@ -297,7 +297,8 @@ class ErrorClassifierTestCase(TestCase):
         from autograder.services.error_classifier import classify_error
         result = NotebookExecutor.extract_json_result(
             stdout="",
-            stderr="some earlier noise\nexec /usr/local/bin/python: argument list too long\n")
+            stderr="some earlier noise\nexec /usr/local/bin/python: argument list too long\n",
+            nonce="0123456789abcdef0123456789abcdef")
         assert result.err is not None
         self.assertTrue(result.err.startswith("exec /usr/local/bin/python: argument list too long\n"))
         self.assertIn("missing markers", result.err)

@@ -169,7 +169,7 @@ class TestResult:
     def to_json(self) -> str:
         """Output result with JSON markers for frontend parsing."""
         data = self.to_dict()
-        return f"<<<TEST_RESULT_JSON_START>>>{json.dumps(data)}<<<TEST_RESULT_JSON_END>>>"
+        return f"<<<TEST_RESULT_JSON_START_@@NONCE@@>>>{json.dumps(data)}<<<TEST_RESULT_JSON_END_@@NONCE@@>>>"
 
 class TestCase:
     def __init__(self, func: Callable, name: Optional[str] = None, points: float = 1.0, description: Optional[str] = None, timeout: Optional[int] = None):
@@ -621,6 +621,6 @@ final_result = {
     "tests": test_results
 }
 
-print('<<<RESULTS_START>>>')
+print('<<<RESULTS_START_@@NONCE@@>>>')
 print(json.dumps(final_result))
-print('<<<RESULTS_END>>>')
+print('<<<RESULTS_END_@@NONCE@@>>>')

@@ -212,9 +212,9 @@ output_test_results <- function() {
     }
 
     if (use_jsonlite) {
-        cat('<<<TEST_RESULT_JSON_START>>>')
+        cat('<<<TEST_RESULT_JSON_START_@@NONCE@@>>>')
         cat(jsonlite::toJSON(test_results, auto_unbox = TRUE))
-        cat('<<<TEST_RESULT_JSON_END>>>')
+        cat('<<<TEST_RESULT_JSON_END_@@NONCE@@>>>')
     } else {
         # Pure-R fallback: serialize test_results to JSON without jsonlite
         escape_json_str <- function(s) {
@@ -237,9 +237,9 @@ output_test_results <- function() {
             }, character(1))
             paste0("{", paste(fields, collapse = ","), "}")
         }, character(1))
-        cat("<<<TEST_RESULT_JSON_START>>>")
+        cat("<<<TEST_RESULT_JSON_START_@@NONCE@@>>>")
         cat(paste0("[", paste(parts, collapse = ","), "]"))
-        cat("<<<TEST_RESULT_JSON_END>>>")
+        cat("<<<TEST_RESULT_JSON_END_@@NONCE@@>>>")
     }
 }
 # Execute test code if provided

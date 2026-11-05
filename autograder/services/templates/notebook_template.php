@@ -121,9 +121,9 @@ class Tester {
     }
     
     public static function outputResults(): void {
-        echo "<<<TEST_RESULT_JSON_START>>>";
+        echo "<<<TEST_RESULT_JSON_START_@@NONCE@@>>>";
         echo json_encode(self::$results);
-        echo "<<<TEST_RESULT_JSON_END>>>";
+        echo "<<<TEST_RESULT_JSON_END_@@NONCE@@>>>";
     }
 }
 // ============================================
@@ -230,6 +230,6 @@ $final_result = [
   ]
 ];
 
-echo "<<<RESULTS_START>>>\n";
+echo "<<<RESULTS_START_@@NONCE@@>>>\n";
 echo json_encode($final_result);
-echo "\n<<<RESULTS_END>>>\n";
+echo "\n<<<RESULTS_END_@@NONCE@@>>>\n";

@@ -127,7 +127,7 @@ class NodeExecutor(Executor):
                 if stderr.startswith("\n"): stderr = stderr[1:]
 
             # Parse test results if present
-            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
 
             execution_time = (datetime.now() - start_time).total_seconds()
             success = result.get('StatusCode', 1) == 0

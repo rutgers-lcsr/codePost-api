@@ -171,7 +171,7 @@ class RExecutor(Executor):
             stdout = img_regex.sub(replace_and_capture, stdout)
 
             # Parse standardized test markers from stdout/stderr and remove them from output.
-            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
             
             output_data = {}
             if images:

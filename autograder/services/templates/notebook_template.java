@@ -421,7 +421,7 @@ public class notebook_template {
                             "           } " +
                             "       } " +
                             "   } " +
-                            "   _sb.append(\"<<<TEST_RESULT_JSON_START>>>[\"); " +
+                            "   _sb.append(\"<<<TEST_RESULT_JSON_START_@@NONCE@@>>>[\"); " +
                             "   for (int _i=0; _i<_results.size(); _i++) { " +
                             "       TestResult _r = _results.get(_i); " +
                             "       _sb.append(\"{\\\"name\\\":\\\"\" + _r.name + \"\\\",\"); " +
@@ -443,7 +443,7 @@ public class notebook_template {
                             "       _sb.append(\"\\\"output\\\":\\\"\" + out + \"\\\"}\"); " +
                             "       if (_i < _results.size()-1) _sb.append(\",\"); " +
                             "   } " +
-                            "   _sb.append(\"]<<<TEST_RESULT_JSON_END>>>\"); " +
+                            "   _sb.append(\"]<<<TEST_RESULT_JSON_END_@@NONCE@@>>>\"); " +
                             "       return _sb.toString(); " +
                             "   }; ");
 
@@ -525,8 +525,8 @@ public class notebook_template {
                     String errMsg = e.getMessage() != null ? e.getMessage().replace("\"", "\\\"").replace("\n", "\\n")
                             : "Unknown error";
                     System.out.println(
-                            "<<<TEST_RESULT_JSON_START>>>[{\"name\":\"Test Script Execution\",\"description\":\"\",\"message\":\"\",\"score\":0,\"max_score\":0,\"passed\":false,\"status\":\"error\",\"error\":\"Test script failed to load: "
-                                    + errMsg + "\",\"output\":\"\"}]<<<TEST_RESULT_JSON_END>>>");
+                            "<<<TEST_RESULT_JSON_START_@@NONCE@@>>>[{\"name\":\"Test Script Execution\",\"description\":\"\",\"message\":\"\",\"score\":0,\"max_score\":0,\"passed\":false,\"status\":\"error\",\"error\":\"Test script failed to load: "
+                                    + errMsg + "\",\"output\":\"\"}]<<<TEST_RESULT_JSON_END_@@NONCE@@>>>");
                 }
             }
 
@@ -549,9 +549,9 @@ public class notebook_template {
         finalResult.put("output_data", outputData);
 
         // Output results as JSON
-        System.out.println("<<<RESULTS_START>>>");
+        System.out.println("<<<RESULTS_START_@@NONCE@@>>>");
         System.out.println(toJson(finalResult));
-        System.out.println("<<<RESULTS_END>>>");
+        System.out.println("<<<RESULTS_END_@@NONCE@@>>>");
 
         if (logWriter != null) {
             logWriter.close();

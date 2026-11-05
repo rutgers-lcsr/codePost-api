@@ -190,7 +190,7 @@ class TestResult:
             "output": self.output,
             "status": self.status
         }
-        return f"<<<TEST_RESULT_JSON_START>>>{json.dumps(data)}<<<TEST_RESULT_JSON_END>>>"
+        return f"<<<TEST_RESULT_JSON_START_@@NONCE@@>>>{json.dumps(data)}<<<TEST_RESULT_JSON_END_@@NONCE@@>>>"
 
 class TestCase:
     """

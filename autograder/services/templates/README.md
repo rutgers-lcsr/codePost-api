@@ -49,7 +49,7 @@ Each supported language has a **template file** in this directory that serves as
 7. Captures stdout/stderr, demultiplexes Docker stream
 8. Parses output markers:
     - `<<<RESULT>>>` — separates template system logs from student output
-    - `<<<TEST_RESULT_JSON_START>>>...<<<TEST_RESULT_JSON_END>>>` — test results
+    - `<<<TEST_RESULT_JSON_START_@@NONCE@@>>>...<<<TEST_RESULT_JSON_END_@@NONCE@@>>>` — test results
     - `<<<CODEPOST_PLOT:{base64_data}>>>` — captured plot images
 9. Returns `ExecutionResult` with stdout, stderr, tests, images, system_logs
 
@@ -133,7 +133,7 @@ Every execution container runs with:
 All templates emit test results in the same JSON format between markers:
 
 ```
-<<<TEST_RESULT_JSON_START>>>
+<<<TEST_RESULT_JSON_START_@@NONCE@@>>>
 {
   "name": "test_function_name",
   "max_score": 5.0,
@@ -145,7 +145,7 @@ All templates emit test results in the same JSON format between markers:
   "message": "",
   "output": "captured stdout during test"
 }
-<<<TEST_RESULT_JSON_END>>>
+<<<TEST_RESULT_JSON_END_@@NONCE@@>>>
 ```
 
 ### Return Value Conventions (all languages)
@@ -167,7 +167,7 @@ What the test function returns determines the result:
 | Marker                                                        | Purpose                                            |
 | ------------------------------------------------------------- | -------------------------------------------------- |
 | `<<<RESULT>>>`                                                | Separates template system logs from student output |
-| `<<<TEST_RESULT_JSON_START>>>` / `<<<TEST_RESULT_JSON_END>>>` | Wraps each test result JSON                        |
+| `<<<TEST_RESULT_JSON_START_@@NONCE@@>>>` / `<<<TEST_RESULT_JSON_END_@@NONCE@@>>>` | Wraps each test result JSON                        |
 | `<<<CODEPOST_PLOT:{base64}>>>`                                | Captured matplotlib/R plot image                   |
 
 ---
@@ -249,7 +249,7 @@ Create `autograder/services/templates/template.yourlang`. The template must:
     - Captures stdout during execution
     - Handles all return value conventions (see table above)
     - Catches exceptions and classifies as "failed" vs "error"
-    - Emits JSON between `<<<TEST_RESULT_JSON_START>>>` and `<<<TEST_RESULT_JSON_END>>>`
+    - Emits JSON between `<<<TEST_RESULT_JSON_START_@@NONCE@@>>>` and `<<<TEST_RESULT_JSON_END_@@NONCE@@>>>`
 3. **Inject student code** — Replace `#{FILLER_CODE}` placeholder with base64-decoded student code
 4. **Inject test code** — Replace `#{TEST_CODE}` placeholder with instructor's test script
 5. **Handle `#{TARGET_TEST_FUNCTION}`** — If set, only run that specific test
@@ -329,7 +329,8 @@ If your language supports notebook execution, create `notebook_template.yourlang
 
 2. **The `<<<RESULT>>>` marker matters** — Everything before this marker is treated as "system logs" (package install output, etc.). Everything after is "student output". If you forget this marker, all output gets mixed together.
 
-3. **JSON markers must be exact** — `<<<TEST_RESULT_JSON_START>>>` and `<<<TEST_RESULT_JSON_END>>>` are parsed with exact string matching. Extra whitespace or newlines inside the markers will break parsing.
+3. **JSON markers must be exact and nonced** — every marker (`<<<TEST_RESULT_JSON_START_@@NONCE@@>>>`, `<<<TEST_RESULT_JSON_END_@@NONCE@@>>>`, `<<<RESULTS_START_@@NONCE@@>>>`, `<<<RESULTS_END_@@NONCE@@>>>`) carries the literal `@@NONCE@@`, which `Executor._read_template_file` replaces with the run's unguessable `result_nonce`. The parsers accept only markers with that nonce (so student-printed markers are ignored) and take the last `RESULTS` block. New templates must use the placeholder in every marker and be loaded through `_read_template_file`. Extra whitespace or newlines inside the markers will break parsing.
+   Note: the harness shares a process with student code, so a student who inspects the harness in-process can still learn the nonce; the nonce stops print-based forgery, not in-process tampering.
 
 4. **Timeout handling is per-test AND per-container** — The template should implement per-test timeouts internally (so one test doesn't consume the entire budget). The container also has a global timeout (default 300s).
 

@@ -117,9 +117,9 @@ async function runAllTests() {
 }
 
 function outputTestResults() {
-    console.log("<<<TEST_RESULT_JSON_START>>>");
+    console.log("<<<TEST_RESULT_JSON_START_@@NONCE@@>>>");
     console.log(JSON.stringify(testResults));
-    console.log("<<<TEST_RESULT_JSON_END>>>");
+    console.log("<<<TEST_RESULT_JSON_END_@@NONCE@@>>>");
 }
 // ============================================
 
@@ -262,9 +262,9 @@ async function run() {
         },
     };
 
-    console.log("<<<RESULTS_START>>>");
+    console.log("<<<RESULTS_START_@@NONCE@@>>>");
     console.log(JSON.stringify(finalResult));
-    console.log("<<<RESULTS_END>>>");
+    console.log("<<<RESULTS_END_@@NONCE@@>>>");
 }
 
 run();

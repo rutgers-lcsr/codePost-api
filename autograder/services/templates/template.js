@@ -144,9 +144,9 @@ async function runAllTests() {
 }
 
 function outputTestResults() {
-    process.stdout.write("<<<TEST_RESULT_JSON_START>>>");
+    process.stdout.write("<<<TEST_RESULT_JSON_START_@@NONCE@@>>>");
     process.stdout.write(JSON.stringify(testResults));
-    process.stdout.write("<<<TEST_RESULT_JSON_END>>>");
+    process.stdout.write("<<<TEST_RESULT_JSON_END_@@NONCE@@>>>");
 }
 // ============================================
 

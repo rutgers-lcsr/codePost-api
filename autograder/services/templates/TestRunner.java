@@ -221,7 +221,7 @@ public class TestRunner {
 
         // Output JSON
         System.out.println(
-                "<<<TEST_RESULT_JSON_START>>>" + JsonSerializer.toJson(results) + "<<<TEST_RESULT_JSON_END>>>");
+                "<<<TEST_RESULT_JSON_START_@@NONCE@@>>>" + JsonSerializer.toJson(results) + "<<<TEST_RESULT_JSON_END_@@NONCE@@>>>");
     }
 
     // --- Helper Assertions ---

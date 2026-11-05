@@ -291,7 +291,7 @@ class PythonExecutor(Executor):
             
             # Parse Test Results using base class method
             # This handles both stderr (where tests are usually printed) and stdout
-            stdout, stderr, test_results = self.parse_test_results(stdout, stderr)
+            stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
             
             output_data = {}
             if images:

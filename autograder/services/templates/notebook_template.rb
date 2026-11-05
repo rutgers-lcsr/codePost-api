@@ -194,9 +194,9 @@ def run_test(name, points, description=nil, timeout=30, &block)
 end
 
 def output_test_results
-  puts "<<<TEST_RESULT_JSON_START>>>"
+  puts "<<<TEST_RESULT_JSON_START_@@NONCE@@>>>"
   puts JSON.generate($test_results)
-  puts "<<<TEST_RESULT_JSON_END>>>"
+  puts "<<<TEST_RESULT_JSON_END_@@NONCE@@>>>"
 end
 
 # Make run_test public just in case instance_eval scope is tricky with private methods
@@ -242,6 +242,6 @@ final_result = {
   }
 }
 
-puts "<<<RESULTS_START>>>"
+puts "<<<RESULTS_START_@@NONCE@@>>>"
 puts JSON.generate(final_result)
-puts "<<<RESULTS_END>>>"
+puts "<<<RESULTS_END_@@NONCE@@>>>"
