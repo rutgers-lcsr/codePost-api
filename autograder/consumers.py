@@ -19,9 +19,6 @@ import aiohttp
 import redis.asyncio as redis_async
 from rest_framework.authentication import TokenAuthentication
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework_simplejwt.tokens import SlidingToken, AccessToken
-from rest_framework_simplejwt.exceptions import TokenError
-import jwt
 
 from autograder.services.shell_session_utils import (
     cleanup_staging_dir as _cleanup_staging_dir,
@@ -336,94 +333,23 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
                 else:
                     auth_header = f"Token {token_param}"
 
-        if auth_header.startswith("Bearer "):
-            token = auth_header.split("Bearer ")[-1].strip()
-            jwt_auth = JWTAuthentication()
-            try:
-                validated = jwt_auth.get_validated_token(token)  # type: ignore[arg-type]
-                return jwt_auth.get_user(validated)
-            except Exception as e:
-                logger.debug(
-                    "Shell WS JWT auth failed (str token)",
-                    extra={"error": f"{type(e).__name__}: {e}"},
-                )
-            user = await self._validate_simplejwt_token(token)
-            if user:
-                return user
-            try:
-                validated = jwt_auth.get_validated_token(token.encode("utf-8"))
-                return jwt_auth.get_user(validated)
-            except Exception as e:
-                logger.warning(
-                    "Shell WS JWT auth failed",
-                    extra={"error": f"{type(e).__name__}: {e}"},
-                )
-                user = await self._validate_simplejwt_token(token)
-                if user:
-                    return user
-                if settings.DEBUG:
-                    user = await self._debug_user_from_token(token)
-                    if user:
-                        logger.warning(
-                            "Shell WS using DEBUG token fallback",
-                            extra={"user_id": getattr(user, "id", None)},
-                        )
-                        return user
-                return None
+        return await self._authenticate_header(auth_header)
 
-        if auth_header.startswith("Token "):
-            token = auth_header.split("Token ")[-1].strip()
-            token_auth = TokenAuthentication()
-            try:
-                user, _ = token_auth.authenticate_credentials(token)
-                return user
-            except Exception as e:
-                logger.debug(
-                    "Shell WS token auth failed (str token)",
-                    extra={"error": f"{type(e).__name__}: {e}"},
-                )
-            try:
-                user, _ = token_auth.authenticate_credentials(token.encode("utf-8"))  # type: ignore[arg-type]  # DRF accepts bytes at runtime
-                return user
-            except Exception as e:
-                logger.warning(
-                    "Shell WS token auth failed",
-                    extra={"error": f"{type(e).__name__}: {e}"},
-                )
-                if settings.DEBUG:
-                    user = await self._debug_user_from_token(token)
-                    if user:
-                        logger.warning(
-                            "Shell WS using DEBUG token fallback",
-                            extra={"user_id": getattr(user, "id", None)},
-                        )
-                        return user
-                return None
-
-        return None
-
-    async def _validate_simplejwt_token(self, token: str):
-        # Validate sliding/access tokens directly when JWTAuthentication fails.
+    @staticmethod
+    @database_sync_to_async
+    def _authenticate_header(auth_header: str):
+        # Same checks as the HTTP stack (Token / JWT classes): bad signature, expiry,
+        # unknown token class and inactive users are all rejected.
         try:
-            validated = SlidingToken(token)  # type: ignore[arg-type]
-            user_id = validated.get("user_id")
-            if user_id:
-                return await self._get_user_by_id(int(user_id))
-        except TokenError:
-            pass
+            if auth_header.startswith("Bearer "):
+                jwt_auth = JWTAuthentication()
+                validated = jwt_auth.get_validated_token(auth_header[len("Bearer "):].strip())  # type: ignore[arg-type]
+                return jwt_auth.get_user(validated)
+            if auth_header.startswith("Token "):
+                user, _ = TokenAuthentication().authenticate_credentials(auth_header[len("Token "):].strip())
+                return user
         except Exception as e:
-            logger.debug("Shell WS sliding token failed", extra={"error": f"{type(e).__name__}: {e}"})
-
-        try:
-            validated = AccessToken(token)  # type: ignore[arg-type]
-            user_id = validated.get("user_id")
-            if user_id:
-                return await self._get_user_by_id(int(user_id))
-        except TokenError:
-            pass
-        except Exception as e:
-            logger.debug("Shell WS access token failed", extra={"error": f"{type(e).__name__}: {e}"})
-
+            logger.warning("Shell WS auth failed", extra={"error": f"{type(e).__name__}: {e}"})
         return None
 
     @staticmethod
@@ -440,29 +366,6 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         if getattr(settings, "DEBUG", False):
             return True
         return isCourseStaff(user, env.assignment.course)
-
-    @staticmethod
-    @database_sync_to_async
-    def _get_user_by_id(user_id: int):
-        from django.contrib.auth.models import User
-        try:
-            return User.objects.get(pk=user_id)
-        except Exception:
-            return None
-
-    async def _debug_user_from_token(self, token: str):
-        # DEBUG-only fallback to map JWT to user without signature verification.
-        try:
-            payload = jwt.decode(token, options={"verify_signature": False})
-            user_id = payload.get("user_id")
-            if user_id:
-                return await self._get_user_by_id(int(user_id))
-        except Exception as e:
-            logger.debug(
-                "Shell WS DEBUG token decode failed",
-                extra={"error": f"{type(e).__name__}: {e}"},
-            )
-        return None
 
     @staticmethod
     @database_sync_to_async
