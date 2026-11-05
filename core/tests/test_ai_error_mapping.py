@@ -162,6 +162,34 @@ class AutoImproveErrorMappingTests(APITestCase):
     self.assertEqual(r.status_code, 400, r.content)
     self.assertIn('Prompt Lab', r.json()['detail'])
 
+  def test_provider_without_api_key_is_400(self):
+    lab = PromptLabSettings.load()
+    lab.ai_provider = 'gemini'
+    lab.ai_api_key = ''
+    lab.save()
+    self.assertEqual(self.client.post(self.url).status_code, 400)
+
+  def test_api_key_without_provider_is_400(self):
+    lab = PromptLabSettings.load()
+    lab.ai_provider = ''
+    lab.ai_api_key = 'k'
+    lab.save()
+    self.assertEqual(self.client.post(self.url).status_code, 400)
+
+  def test_configured_model_is_used_else_provider_default(self):
+    for provider, func, default in (('gemini', '_call_gemini', 'gemini-2.5-pro'),
+                                    ('openai', '_call_openai', 'gpt-4o')):
+      for model, expected in (('my-model', 'my-model'), ('', default)):
+        lab = PromptLabSettings.load()
+        lab.ai_provider = provider
+        lab.ai_api_key = 'k'
+        lab.ai_model = model
+        lab.save()
+        with self.subTest(provider=provider, model=model), patch(
+            f'core.services.prompt_improvement.{func}', return_value='t') as call:
+          self.client.post(self.url)
+          self.assertEqual(call.call_args.args[:2], ('k', expected))
+
   def test_unsupported_provider_is_400(self):
     self._configure('mystery')
     r = self.client.post(self.url)
