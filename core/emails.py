@@ -113,6 +113,10 @@ class CodepostEmail(ABC):
     def send(self, email:EmailMessage, type:str = "html"):
         """
         Sends the email using the Django EmailMessage class.
+
+        Returns None when skipped (TESTING), True once handed to the mailer, and False
+        when sending failed (the failure is logged, never raised) so a caller that must
+        tell the user the truth can tell the difference.
         """
         if TESTING:
             return None
@@ -120,10 +124,11 @@ class CodepostEmail(ABC):
             email.content_subtype = type 
             logEvent(event="Email Sent", message="{} sent to {}".format(self.subject, self.get_to_address(),))
             email.send()
+            return True
         except Exception as e:
             # Will log out the error in the Django logs
             logEvent(event="Email Failed", message=str(e), level=logging.ERROR, skip_email=True)
-            return None
+            return False
 class CodepostAPIErrorEmail(CodepostEmail):
     subject = "CodePost API Error Notification"
     template = "emails/api_error_template.html"

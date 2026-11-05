@@ -325,10 +325,15 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     # Send password reset email
     try:
         reset_email = PasswordResetEmail(user)
-        reset_email.send_email()
+        # False means delivery failed (send() logs and swallows it); None means skipped.
+        if reset_email.send_email() is False:
+            return Response({'detail': 'The password reset email could not be sent. Try again later.'},
+                            status=status.HTTP_502_BAD_GATEWAY)
         return Response({'status': 'reset_email_sent'})
-    except Exception as e:
-        return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception:
+        logger.exception(f"Password reset email failed for organization {organization.pk}")
+        return Response({'detail': 'Failed to send the password reset email.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
   @action(detail=True, methods=['GET'])
   def analytics(self, request, pk=None):
