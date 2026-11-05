@@ -703,6 +703,27 @@ class TestClosing:
         assert quiz_availability(q, student, close) == (False, 'closed')
         assert quiz_availability(q, student, close + us) == (False, 'closed')
 
+    def test_during_trigger_fixed_date_close_outlives_due_date(self, taking_setup):
+        from core.services.quiz_grading import quiz_availability, quiz_close_time, quiz_is_closed
+        course, assignment, student = taking_setup['course'], taking_setup['assignment'], taking_setup['students'][0]
+        due = timezone.now() + timedelta(days=1)
+        close = due + timedelta(days=2)
+        assignment.uploadDueDate = due
+        assignment.state = 'published'
+        assignment.save()
+        q = _quiz(course, assignment=assignment, assignmentTrigger='during',
+                  closeEvent='fixed_date', availableUntil=close)
+        _add(q, _mc(course, _bank(course)))
+        us = timedelta(microseconds=1)
+
+        assert quiz_close_time(q, student) == close
+        # Past the due date but before the advertised fixed close: still open.
+        assert quiz_availability(q, student, due + timedelta(days=1)) == (True, 'open')
+        assert quiz_availability(q, student, close - us) == (True, 'open')
+        assert quiz_is_closed(q, student, close)
+        assert quiz_availability(q, student, close) == (False, 'closed')
+        assert quiz_availability(q, student, close + us) == (False, 'closed')
+
     def test_during_trigger_zero_offset_closes_exactly_at_due(self, taking_setup):
         from core.services.quiz_grading import quiz_availability, quiz_is_closed
         course, assignment, student = taking_setup['course'], taking_setup['assignment'], taking_setup['students'][0]

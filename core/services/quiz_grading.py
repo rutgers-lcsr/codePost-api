@@ -563,10 +563,11 @@ def quiz_availability(quiz, student, now=None):
     return (False, 'assignment_not_released')
   trigger = quiz.assignmentTrigger
   if trigger == 'during':
-    # With closeEvent 'assignment_due' the close (due date + offset) is the one close
-    # decision, applied below, so the gate here must not shut the quiz earlier than closeAt.
-    if (quiz.closeEvent != 'assignment_due'
-        and assignment.uploadDueDate and now > assignment.uploadDueDate):
+    # An explicit close (quiz_close_time) is the one close decision, applied below, so the
+    # due-date cutoff here only applies to a quiz with no close of its own and must not shut
+    # it earlier than the closeAt students are shown.
+    if (assignment.uploadDueDate and now > assignment.uploadDueDate
+        and quiz_close_time(quiz, student, now) is None):
       return (False, 'assignment_closed')
   elif trigger == 'after_assignment':
     if not (assignment.uploadDueDate and now > assignment.uploadDueDate):
