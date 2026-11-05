@@ -5,7 +5,9 @@ from unittest import mock
 
 import factory
 from django.db.models.signals import post_save
+from django.core.cache import cache
 from django.test import TestCase
+from rest_framework.test import APITestCase
 
 from autograder.services.autodetector import Autodetector
 from autograder.services.converger import JavaConverger
@@ -15,7 +17,7 @@ from autograder.services.executors import (
 )
 from core.models import AssignmentFile, Environment, SubmissionFile
 from core.services.file_handlers.factory import FileHandlerFactory
-from core.tests.factories import AssignmentFactory, SubmissionFactory
+from core.tests.factories import AssignmentFactory, CourseFactory, SubmissionFactory
 
 
 def _notebook(language, name=None):
@@ -224,3 +226,56 @@ class JavaConvergerStdlibTest(TestCase):
         modules = JavaConverger.extract_missing_modules(logs)
 
         self.assertEqual({'javassist', 'javafx.application', 'sunlabs.x'}, modules)
+
+
+class NoNetworkInRequestTest(APITestCase):
+    """PATCH environments/{id}/ {autoDetect: true} must not call PyPI inside the request."""
+
+    def setUp(self):
+        with factory.django.mute_signals(post_save):
+            self.course = CourseFactory(name="det-net", period="s2026", organization__name="DetNetOrg")
+            self.assignment = self.course.assignments.first()
+            AssignmentFile.objects.create(
+                assignment=self.assignment, name='main.py', data='import numpy\nimport pandas', extension='py')
+        self.env = Environment.objects.create(assignment=self.assignment, language='python-3.12', auto_detect=False)
+
+    def test_autodetect_patch_makes_no_pypi_request(self):
+        self.client.force_authenticate(user=self.course.courseAdmins.first())
+        with mock.patch('requests.head', side_effect=AssertionError('network call inside a request')) as head, \
+                mock.patch('autograder.run.BuildEnvironment.delay'):
+            resp = self.client.patch(f'/autograder/environments/{self.env.id}/', {'autoDetect': True}, format='json')
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        head.assert_not_called()
+        self.env.refresh_from_db()
+        self.assertEqual('numpy\npandas', self.env.requirements)
+
+    def test_bootstrap_still_drops_local_modules_without_pypi(self):
+        with factory.django.mute_signals(post_save):
+            AssignmentFile.objects.create(assignment=self.assignment, name='client.py', data='x = 1', extension='py')
+            AssignmentFile.objects.filter(name='main.py').update(data='import client\nimport numpy')
+        files = list(self.assignment.files.all())
+        with mock.patch('requests.head', side_effect=AssertionError('network')):
+            _lang, reqs = Autodetector.detect_from_files(files, check_pypi=False)  # type: ignore[misc]
+        self.assertEqual('numpy', reqs)
+
+
+class PyPICacheTest(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_definitive_answers_are_cached(self):
+        with mock.patch('requests.head', return_value=mock.Mock(status_code=200)) as head:
+            self.assertTrue(Autodetector.check_pypi_existence('numpy'))
+            self.assertTrue(Autodetector.check_pypi_existence('numpy'))
+        self.assertEqual(1, head.call_count)
+        with mock.patch('requests.head', return_value=mock.Mock(status_code=404)) as head:
+            self.assertFalse(Autodetector.check_pypi_existence('nopkg'))
+            self.assertFalse(Autodetector.check_pypi_existence('nopkg'))
+        self.assertEqual(1, head.call_count)
+
+    def test_failed_lookups_are_not_cached(self):
+        with mock.patch('requests.head', side_effect=OSError('down')) as head:
+            self.assertTrue(Autodetector.check_pypi_existence('flaky'))
+            self.assertTrue(Autodetector.check_pypi_existence('flaky'))
+        self.assertEqual(2, head.call_count)

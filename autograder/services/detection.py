@@ -9,7 +9,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-def detect_from_assignment_files(assignment_id):
+def detect_from_assignment_files(assignment_id, check_pypi=True):
     """
     Scans all files in an assignment to detect the environment language.
     Updates the environment and triggers a build if a new language is detected.
@@ -50,7 +50,7 @@ def detect_from_assignment_files(assignment_id):
             
         logger.info(f"[AutoDetect] Scanning {len(files)} assignment files for Env {environment.id}")
         
-        result = Autodetector.detect_from_files(files, assignment=assignment)
+        result = Autodetector.detect_from_files(files, assignment=assignment, check_pypi=check_pypi)
         
         if not result:
             logger.info("[AutoDetect] No detected language from files.")
@@ -114,13 +114,16 @@ def detect_environment_bootstrap(assignment_id):
     2. Latest Submission (if no starter code or detection failed)
     
     This provides a better UX than leaving the environment blank ("Pending").
+
+    Runs inside an HTTP request, so it makes no network calls: the PyPI existence filter is skipped
+    here and applied when BuildEnvironment re-runs detection before building.
     """
     try:
         assignment = Assignment.objects.get(id=assignment_id)
         logger.info(f"[AutoDetect] Bootstrapping environment for assignment {assignment.id}")
         
         # 1. Try Assignment Files
-        detect_from_assignment_files(assignment.id)
+        detect_from_assignment_files(assignment.id, check_pypi=False)
         
         # Reload environment to check if detection succeeded
         environment = Environment.objects.get(assignment=assignment)
@@ -132,7 +135,7 @@ def detect_environment_bootstrap(assignment_id):
         latest_submission = Submission.objects.filter(assignment=assignment).order_by('-created').first()
         if latest_submission:
             logger.info(f"[AutoDetect] Bootstrap fallback: Checking latest submission {latest_submission.id}")
-            updated = Autodetector.detect_and_update(latest_submission)
+            updated = Autodetector.detect_and_update(latest_submission, check_pypi=False)
             if updated:
                 logger.info(f"[AutoDetect] Bootstrap success via Submission {latest_submission.id}")
             else:

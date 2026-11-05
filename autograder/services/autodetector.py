@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # whole-file manifest that must never be split, deduped or sorted line by line.
 LINE_ORIENTED_FAMILIES = ('python', 'r')
 
+# A PyPI answer (exists / does not) is cached this long; failed lookups are never cached.
+PYPI_CACHE_SECONDS = 24 * 60 * 60
+
 
 class Autodetector:
     """
@@ -48,7 +51,8 @@ class Autodetector:
         return local_modules
 
     @staticmethod
-    def merge_requirements(language: str, blobs: List[str], local_modules: Optional[set] = None) -> Optional[str]:
+    def merge_requirements(language: str, blobs: List[str], local_modules: Optional[set] = None,
+                           check_pypi: bool = True) -> Optional[str]:
         """
         The one place that combines per-file requirement strings into an Environment's requirements.
 
@@ -56,6 +60,9 @@ class Autodetector:
         packages must exist on PyPI, and the result is deduped and sorted. Whole-file manifests are
         kept intact; when several distinct ones exist they are merged structurally (package.json
         dependencies, pom.xml <dependency> blocks) or the first one wins.
+
+        check_pypi=False skips the PyPI existence lookup (a network call), for callers inside an HTTP
+        request; the build path re-runs detection with the check before building.
         """
         family = (language or '').lower().split('-')[0]
         local_modules = local_modules or set()
@@ -70,7 +77,7 @@ class Autodetector:
                     if req in local_modules:
                         logger.info(f"[AutoDetect] Filtering local module '{req}' (found key in local files)")
                         continue
-                    if family == 'python' and not Autodetector.check_pypi_existence(req):
+                    if family == 'python' and check_pypi and not Autodetector.check_pypi_existence(req):
                         logger.warning(f"[AutoDetect] Package '{req}' not found on PyPI. Assuming local/private module and skipping.")
                         continue
                     packages.add(req)
@@ -113,7 +120,7 @@ class Autodetector:
         return base
 
     @staticmethod
-    def detect_from_files(files: List[Any], assignment: Any = None) -> Optional[Tuple[str, str | None]]:
+    def detect_from_files(files: List[Any], assignment: Any = None, check_pypi: bool = True) -> Optional[Tuple[str, str | None]]:
         """
         Detects language and requirements from a list of file dicts.
         Args:
@@ -173,7 +180,7 @@ class Autodetector:
                 pass
 
         local_modules = Autodetector.collect_local_modules([f for f, _h in active_files])
-        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules)
+        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules, check_pypi)
 
         return detected_language_hint, final_requirements
 
@@ -183,17 +190,23 @@ class Autodetector:
         Checks if a package exists on PyPI.
         """
         import requests
+        from django.core.cache import cache
+        cache_key = f"pypi-exists:{package_name}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
         try:
             # Fast check using simple API or just HEAD request to /simple/
             # https://pypi.org/pypi/<package>/json is reliable
             url = f"https://pypi.org/pypi/{package_name}/json"
             response = requests.head(url, timeout=3)
-            if response.status_code == 200:
+            exists = response.status_code == 200
+            if exists:
                 logger.info(f"[AutoDetect] Package '{package_name}' verified on PyPI.")
-                return True
             else:
                 logger.info(f"[AutoDetect] Package '{package_name}' not found on PyPI (Status {response.status_code}).")
-                return False
+            cache.set(cache_key, exists, PYPI_CACHE_SECONDS)
+            return exists
         except Exception as e:
             # Log the error but fail safe? 
             # If we really want to filter 'client', failing safe (returning True) defeats the purpose if network is bad.
@@ -203,7 +216,8 @@ class Autodetector:
             return True
 
     @staticmethod
-    def detect_and_update(submission: Optional[Submission] = None, assignment: Optional["Assignment"] = None, force: bool = False) -> bool:
+    def detect_and_update(submission: Optional[Submission] = None, assignment: Optional["Assignment"] = None, force: bool = False,
+                          check_pypi: bool = True) -> bool:
         """
         Analyzes ALL submission files for the assignment (and assignment files) and updates the environment.
         Can be run with just an assignment (scans assignment files only/mostly).
@@ -367,7 +381,7 @@ class Autodetector:
              except Exception as e:
                  logger.error(f"[AutoDetect] Error processing file {f.name}: {e}")
 
-        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules)
+        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules, check_pypi)
 
         # Check against Environment
         if environment.build_status == 1 and not force: # Building
