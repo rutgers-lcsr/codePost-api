@@ -220,3 +220,32 @@ class TestAuditRedaction:
             assert "scarletmail" not in blob
 
 
+
+    def test_roster_student_is_aliased_and_staff_email_stays_readable(
+            self, api_client, key, course):
+        from core.models import CourseAuditEvent
+        student = course.students.first()
+        staff = course.graders.first().email
+        call(api_client, key, "codepost_manage_sections",
+             {"op": "setMembers", "sectionId": 999999, "dryRun": True,
+              "students": [student.email], "leaders": [staff]})
+        event = CourseAuditEvent.objects.filter(
+            course=course, event_type__startswith="agent_write").latest("id")
+        assert event.meta["args"]["students"] == [alias_of(course, student.email)]
+        assert event.meta["args"]["leaders"] == [staff]
+
+
+class TestCheckValue:
+    """The schema slice the tool schemas use, pinned directly where no
+    registered tool exercises it."""
+
+    def test_array_without_items_accepts_any_elements(self):
+        from core.mcp.protocol import _check_value
+        assert _check_value([1, "a"], {"type": "array"}, "x") is None
+
+    def test_nested_property_types_are_enforced(self):
+        from core.mcp.protocol import _check_value
+        schema = {"type": "object", "properties": {"n": {"type": "integer"}}}
+        assert _check_value({"n": 1}, schema, "x") is None
+        assert _check_value({"n": "1"}, schema, "x") == \
+            "x.n must be of type integer; got str"
