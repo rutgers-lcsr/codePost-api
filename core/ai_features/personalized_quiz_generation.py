@@ -7,8 +7,8 @@ from core.ai_features.registry import register_ai_feature
     label='AI-Generated Quiz Questions',
     description="Generate quiz questions per student when they submit — the instructor's prompt "
                 "can draw on the assignment and/or the student's own submission. Staff review and "
-                "approve each student's questions before their quiz opens. Runs automatically on "
-                'submission, so it is off by default.',
+                "approve each student's questions before their quiz opens. Runs on every "
+                'submission.',
     default_enabled=False,
 )
 def _feature():
