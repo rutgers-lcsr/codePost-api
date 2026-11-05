@@ -5,6 +5,8 @@ The single decision about which SubmissionTests a student may see.
 Used by GET /submissionTests/{id}/ (via SubmissionTestPermissions),
 GET /submissions/{id}/submissionTests/ and GET /submissions/{id}/testResults/.
 """
+from django.core.exceptions import ObjectDoesNotExist
+
 from autograder.run import filterExposedSubmissionTests
 from core.permissions.helpers import testResultsVisibleForSubmission
 
@@ -19,7 +21,7 @@ def tests_visible_to_student(submission):
     return tests
   try:
     maxFailedTests = submission.assignment.environment.maxExposedFailedTests
-  except Exception:
+  except ObjectDoesNotExist:  # no Environment yet: no exposure cap
     maxFailedTests = None
   return filterExposedSubmissionTests(tests, maxFailedTests)[0]
 
