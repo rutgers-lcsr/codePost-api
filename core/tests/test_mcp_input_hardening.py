@@ -108,3 +108,44 @@ class TestNonObjectParams:
 
 
 
+class TestArgumentTypes:
+
+    def test_string_for_array_is_invalid_params(self, api_client, key, draft):
+        resp = call_raw(api_client, key, "codepost_edit_rubric",
+                        {"assignmentId": draft.id, "categories": "abc"})
+        assert resp.status_code == status.HTTP_200_OK, resp.content
+        assert resp.data["error"]["code"] == INVALID_PARAMS
+
+    def test_non_object_item_is_invalid_params(self, api_client, key, draft):
+        resp = call_raw(api_client, key, "codepost_edit_rubric",
+                        {"assignmentId": draft.id, "categories": ["x"]})
+        assert resp.status_code == status.HTTP_200_OK, resp.content
+        assert resp.data["error"]["code"] == INVALID_PARAMS
+
+    def test_nested_required_key_is_invalid_params(self, api_client, key, draft):
+        resp = call_raw(api_client, key, "codepost_edit_rubric",
+                        {"assignmentId": draft.id, "categories": [{"name": "x"}]})
+        assert resp.status_code == status.HTTP_200_OK, resp.content
+        assert resp.data["error"]["code"] == INVALID_PARAMS
+
+    def test_string_for_integer_is_invalid_params(self, api_client, key):
+        resp = call_raw(api_client, key, "codepost_get_assignment",
+                        {"assignmentId": "abc"})
+        assert resp.status_code == status.HTTP_200_OK, resp.content
+        assert resp.data["error"]["code"] == INVALID_PARAMS
+
+    def test_null_for_an_optional_argument_still_means_omitted(
+            self, api_client, key, roster_assignment):
+        a, _ = roster_assignment
+        result = call(api_client, key, "codepost_list_submissions",
+                      {"assignmentId": a.id, "student": None, "grader": None,
+                       "fields": None})
+        assert result["isError"] is False, result["content"][0]["text"]
+
+    def test_boolean_is_not_an_integer(self, api_client, key):
+        resp = call_raw(api_client, key, "codepost_get_assignment",
+                        {"assignmentId": True})
+        assert resp.data["error"]["code"] == INVALID_PARAMS
+
+
+

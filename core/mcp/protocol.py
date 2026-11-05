@@ -361,9 +361,10 @@ def _validate_arguments(spec, arguments: dict) -> None:
     """Enforce the parts of the tool's JSON Schema that matter at this boundary.
 
     Deliberately not a full JSON Schema implementation — required keys, unknown
-    keys, and enum membership are the three failures a model actually makes,
-    and each is far more useful caught here with a precise message than as a
-    TypeError from the handler.
+    keys, types (recursing into array items and nested objects) and enum
+    membership are the failures a model actually makes, and each is far more
+    useful caught here with a precise message than as a TypeError from the
+    handler.
     """
     schema = spec.input_schema or {}
     properties = schema.get('properties', {})
@@ -385,13 +386,53 @@ def _validate_arguments(spec, arguments: dict) -> None:
 
     for key, value in arguments.items():
         prop = properties.get(key)
-        if not isinstance(prop, dict):
+        # Models routinely send null for an optional argument they mean to
+        # omit; handlers have always treated that as the default.
+        if value is None and key not in required and not (
+                isinstance(prop, dict) and 'enum' in prop):
             continue
-        choices = prop.get('enum')
-        if choices is not None and value not in choices:
-            raise JSONRPCError(
-                INVALID_PARAMS,
-                f"{spec.name}.{key} must be one of {choices}; got {value!r}")
+        if isinstance(prop, dict):
+            problem = _check_value(value, prop, key)
+            if problem:
+                raise JSONRPCError(INVALID_PARAMS, f'{spec.name}.{problem}')
+
+
+_JSON_TYPES = {
+    'object': lambda v: isinstance(v, dict),
+    'array': lambda v: isinstance(v, list),
+    'string': lambda v: isinstance(v, str),
+    # bool is an int subclass in Python but not a JSON number.
+    'integer': lambda v: isinstance(v, int) and not isinstance(v, bool),
+    'number': lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    'boolean': lambda v: isinstance(v, bool),
+}
+
+
+def _check_value(value, schema: dict, path: str) -> str | None:
+    """The slice of JSON Schema the tool schemas use: type, enum, items,
+    properties, required. Returns a message, or None when the value fits."""
+    expected = schema.get('type')
+    if expected in _JSON_TYPES and not _JSON_TYPES[expected](value):
+        return f'{path} must be of type {expected}; got {type(value).__name__}'
+    choices = schema.get('enum')
+    if choices is not None and value not in choices:
+        return f'{path} must be one of {choices}; got {value!r}'
+    if isinstance(value, list) and isinstance(schema.get('items'), dict):
+        for i, item in enumerate(value):
+            problem = _check_value(item, schema['items'], f'{path}[{i}]')
+            if problem:
+                return problem
+    if isinstance(value, dict):
+        missing = [k for k in schema.get('required', []) if k not in value]
+        if missing:
+            return f"{path} is missing required key(s): {', '.join(missing)}"
+        for k, v in value.items():
+            sub = (schema.get('properties') or {}).get(k)
+            if isinstance(sub, dict):
+                problem = _check_value(v, sub, f'{path}.{k}')
+                if problem:
+                    return problem
+    return None
 
 
 def _server_version() -> str:
