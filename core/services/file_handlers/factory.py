@@ -33,11 +33,29 @@ class FileHandlerFactory:
         'h': CPPHandler,
     }
 
+    # Dependency manifests are recognised by file name (their extensions - xml, json, none - say nothing
+    # about the language); the handler's get_requirements returns their content verbatim.
+    _filename_map: Dict[str, Type[BaseFileHandler]] = {
+        'package.json': NodeHandler,
+        'pom.xml': JavaHandler,
+        'Gemfile': RubyHandler,
+        'composer.json': PHPHandler,
+        'Makefile': CPPHandler,
+    }
+
+    @classmethod
+    def is_manifest(cls, file_obj: Any) -> bool:
+        """True for an uploaded dependency manifest (package.json, pom.xml, Gemfile, composer.json, Makefile)."""
+        return getattr(file_obj, 'name', None) in cls._filename_map
+
     @classmethod
     def get_handler(cls, file_obj: Any) -> BaseFileHandler:
         """
         Factory method to return the appropriate FileHandler based on file extension or content inference. Will use the extension field if available, but will also attempt to infer from the file name if extension is missing. If no specific handler is found, returns a DefaultHandler.
         """
+        if cls.is_manifest(file_obj):
+            return cls._filename_map[file_obj.name](file_obj)
+
         extension = file_obj.extension 
         if not extension and hasattr(file_obj, 'name') and '.' in file_obj.name:
             # if extension field is not populated, try to infer from name

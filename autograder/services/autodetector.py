@@ -52,7 +52,7 @@ class Autodetector:
 
     @staticmethod
     def merge_requirements(language: str, blobs: List[str], local_modules: Optional[set] = None,
-                           check_pypi: bool = True) -> Optional[str]:
+                           check_pypi: bool = True, uploaded_manifests: Optional[List[str]] = None) -> Optional[str]:
         """
         The one place that combines per-file requirement strings into an Environment's requirements.
 
@@ -60,6 +60,9 @@ class Autodetector:
         packages must exist on PyPI, and the result is deduped and sorted. Whole-file manifests are
         kept intact; when several distinct ones exist they are merged structurally (package.json
         dependencies, pom.xml <dependency> blocks) or the first one wins.
+
+        uploaded_manifests are instructor-uploaded manifest files (package.json, pom.xml, ...); the first
+        is the base (its non-dependency fields win) and the auto-detected `blobs` are merged into it.
 
         check_pypi=False skips the PyPI existence lookup (a network call), for callers inside an HTTP
         request; the build path re-runs detection with the check before building.
@@ -84,7 +87,7 @@ class Autodetector:
             return "\n".join(sorted(packages)) if packages else None
 
         manifests: List[str] = []
-        for blob in blobs:
+        for blob in list(uploaded_manifests or []) + list(blobs):
             if blob and blob.strip() and blob not in manifests:
                 manifests.append(blob)
         if not manifests:
@@ -154,7 +157,8 @@ class Autodetector:
                 
                 # Check directly if it's a known language (not unknown)
                 # We could expose a property "is_detected" on handler but checking against 'unknown' works
-                if lang and lang != 'unknown':
+                # A manifest names a toolchain but is not itself source code, so it does not vote.
+                if lang and lang != 'unknown' and not FileHandlerFactory.is_manifest(file_obj):
                     language_counts[lang] = language_counts.get(lang, 0) + 1
                     
                 active_files.append((file_obj, handler))
@@ -169,18 +173,19 @@ class Autodetector:
         detected_language_hint = max(language_counts, key=lambda k: language_counts[k])
         
         # Gather requirements from files matching the detected language
-        blobs = []
-        for _file_obj, handler in active_files:
+        blobs: List[str] = []
+        uploaded: List[str] = []
+        for file_obj, handler in active_files:
             try:
                 if handler.get_language() == detected_language_hint:
                     reqs = handler.get_requirements()
                     if reqs:
-                        blobs.append(reqs)
+                        (uploaded if FileHandlerFactory.is_manifest(file_obj) else blobs).append(reqs)
             except Exception:
                 pass
 
         local_modules = Autodetector.collect_local_modules([f for f, _h in active_files])
-        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules, check_pypi)
+        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules, check_pypi, uploaded)
 
         return detected_language_hint, final_requirements
 
@@ -291,7 +296,7 @@ class Autodetector:
                  try:
                      handler = FileHandlerFactory.get_handler(f)
                      lang = handler.get_language()
-                     if lang and lang != 'unknown':
+                     if lang and lang != 'unknown' and not FileHandlerFactory.is_manifest(f):
                          language_counts[lang] = language_counts.get(lang, 0) + 1
                          logger.info(f"[AutoDetect] Fallback: Detected {lang} from assignment file {f.name}")
                  except Exception as e:
@@ -369,7 +374,8 @@ class Autodetector:
         logger.info(f"[AutoDetect] Local modules identified: {local_modules}")
 
         # Detect requirements based on hint
-        blobs = []
+        blobs: List[str] = []
+        uploaded: List[str] = []
         for f in active_files:
              try:
                  # Use factory to get safe handler since we mixed SubmissionFile and AssignmentFile
@@ -377,11 +383,11 @@ class Autodetector:
                  if handler.get_language() == detected_language_hint:
                      reqs = handler.get_requirements()
                      if reqs:
-                         blobs.append(reqs)
+                         (uploaded if FileHandlerFactory.is_manifest(f) else blobs).append(reqs)
              except Exception as e:
                  logger.error(f"[AutoDetect] Error processing file {f.name}: {e}")
 
-        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules, check_pypi)
+        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules, check_pypi, uploaded)
 
         # Check against Environment
         if environment.build_status == 1 and not force: # Building

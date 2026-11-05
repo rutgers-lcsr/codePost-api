@@ -279,3 +279,92 @@ class PyPICacheTest(TestCase):
             self.assertTrue(Autodetector.check_pypi_existence('flaky'))
             self.assertTrue(Autodetector.check_pypi_existence('flaky'))
         self.assertEqual(2, head.call_count)
+
+
+class UploadedManifestTest(TestCase):
+    """Instructor-uploaded manifests are the base; auto-detected dependencies merge into them."""
+
+    PKG = json.dumps({'name': 'hw', 'scripts': {'test': 'jest'}, 'dependencies': {'chalk': '^5.0.0'}}, indent=2)
+    POM = (
+        '<project>\n  <artifactId>hw</artifactId>\n  <dependencies>\n'
+        '    <dependency><groupId>org.junit</groupId><artifactId>junit</artifactId></dependency>\n'
+        '  </dependencies>\n</project>\n'
+    )
+
+    def _node_files(self, manifest_first):
+        manifest = {'name': 'package.json', 'data': self.PKG}
+        source = {'name': 'a.js', 'data': "require('express')"}
+        return [manifest, source] if manifest_first else [source, manifest]
+
+    def test_uploaded_package_json_is_base_in_either_order(self):
+        for manifest_first in (True, False):
+            with self.subTest(manifest_first=manifest_first):
+                language, reqs = Autodetector.detect_from_files(self._node_files(manifest_first))  # type: ignore[misc]
+                pkg = json.loads(reqs)
+                self.assertEqual('node-20', language)
+                self.assertEqual('hw', pkg['name'])
+                self.assertEqual({'test': 'jest'}, pkg['scripts'])
+                self.assertEqual({'chalk', 'express'}, set(pkg['dependencies']))
+                self.assertEqual('^5.0.0', pkg['dependencies']['chalk'])
+
+    def test_uploaded_pom_is_base_in_either_order(self):
+        manifest = {'name': 'pom.xml', 'data': self.POM}
+        source = {'name': 'B.java', 'data': 'import com.google.gson.Gson;\nclass B {}'}
+        for files in ([manifest, source], [source, manifest]):
+            with self.subTest(first=files[0]['name']):
+                language, reqs = Autodetector.detect_from_files(files)  # type: ignore[misc]
+                dom = xml.dom.minidom.parseString(reqs)
+                artifacts = {n.firstChild.data for n in dom.getElementsByTagName('artifactId')}
+                self.assertEqual('java-17', language)
+                self.assertIn('hw', artifacts)
+                self.assertIn('junit', artifacts)
+                self.assertIn('gson', artifacts)
+
+    def test_uploaded_gemfile_composer_and_makefile_are_kept_verbatim(self):
+        cases = [
+            ('ruby', 'Gemfile', "source 'https://rubygems.org'\ngem 'rspec'\n", 'app.rb', 'puts 1'),
+            ('php', 'composer.json', json.dumps({'require': {'monolog/monolog': '^3.0'}}), 'index.php', '<?php echo 1;'),
+            ('c/c++', 'Makefile', 'all:\n\tgcc -o a a.c\n', 'a.c', 'int main(){}'),
+        ]
+        for language, manifest, body, source, code in cases:
+            with self.subTest(manifest=manifest):
+                files = [{'name': source, 'data': code}, {'name': manifest, 'data': body}]
+                detected, reqs = Autodetector.detect_from_files(files)  # type: ignore[misc]
+                self.assertEqual(language, detected)
+                self.assertEqual(body, reqs)
+
+    def test_a_manifest_does_not_vote_for_the_language(self):
+        files = [
+            {'name': 'main.py', 'data': 'x = 1'},
+            {'name': 'Makefile', 'data': 'all:\n\ttrue\n'},
+            {'name': 'composer.json', 'data': '{}'},
+        ]
+        with mock.patch.object(Autodetector, 'check_pypi_existence', return_value=True):
+            language, _reqs = Autodetector.detect_from_files(files)  # type: ignore[misc]
+        self.assertTrue(language.startswith('python'))
+
+    def test_detect_and_update_uses_uploaded_package_json_as_base(self):
+        with factory.django.mute_signals(post_save):
+            assignment = AssignmentFactory()
+            env = Environment.objects.create(assignment=assignment, auto_detect=True, language='other')
+            SubmissionFile.objects.filter(submission__assignment=assignment).delete()  # the factory adds .java files
+            for name, data in [('a.js', "require('express')"), ('package.json', self.PKG)]:
+                AssignmentFile.objects.create(assignment=assignment, name=name, data=data, extension=name.rsplit('.', 1)[-1])
+
+        Autodetector.detect_and_update(assignment=assignment)
+
+        env.refresh_from_db()
+        pkg = json.loads(env.requirements)
+        self.assertEqual({'test': 'jest'}, pkg['scripts'])
+        self.assertEqual({'chalk', 'express'}, set(pkg['dependencies']))
+
+
+class MergeManifestsEdgeTest(TestCase):
+    def test_dict_with_non_dict_does_not_raise(self):
+        base = json.dumps({'a': 1})
+        self.assertEqual(base, Autodetector._merge_manifests(base, json.dumps([1, 2])))
+        self.assertEqual(json.dumps([1, 2]), Autodetector._merge_manifests(json.dumps([1, 2]), base))
+
+    def test_nested_path_makes_top_level_folder_the_local_module(self):
+        modules = Autodetector.collect_local_modules([_File('client/api/x.py', '')])
+        self.assertEqual({'client'}, modules)
