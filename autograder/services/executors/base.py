@@ -17,6 +17,7 @@ from core.constants import MAX_FILE_SIZE as MAX_FILE_SIZE_CONST, MAX_OUTPUT_SIZE
 import os
 import re
 import secrets
+from functools import cached_property
 import shlex
 import shutil
 import struct
@@ -264,7 +265,7 @@ class Executor(abc.ABC):
     # Placeholder the templates carry inside every result marker; replaced per run.
     NONCE_PLACEHOLDER = "@@NONCE@@"
 
-    @property
+    @cached_property
     def result_nonce(self) -> str:
         """Unguessable per-run secret embedded in the result markers the harness prints.
 
@@ -272,11 +273,7 @@ class Executor(abc.ABC):
         printed by the student to forge results. Only markers carrying this nonce are
         accepted by parse_test_results / extract_json_result.
         """
-        nonce = self.__dict__.get("_result_nonce")
-        if nonce is None:
-            nonce = secrets.token_hex(16)
-            self.__dict__["_result_nonce"] = nonce
-        return nonce
+        return secrets.token_hex(16)
 
     def _read_template_file(self, filename: str) -> str:
         """Read a template from templates/ with this run's nonce substituted into its markers."""
