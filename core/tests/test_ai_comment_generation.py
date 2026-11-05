@@ -143,11 +143,21 @@ class GenerateEndpointTests(AICommentGenerationBase):
       dict(start_line=0, end_line=[1]),
       dict(start_line=0, end_line=0, start_char='x', end_char=2),
       dict(start_line=0, end_line=0, points='lots'),
+      dict(start_line=0, end_line=0, points=[1]),
+      dict(start_line=0, end_line=0, points=True),
+      dict(start_line=True, end_line=0),
     ]:
       with self.subTest(body=body), self._provider():
         resp = self.post(file_id=f.id, **body)
         self.assertEqual(resp.status_code, 400, resp.content)
         self.assertIsInstance(resp.data['detail'], str)
+
+  def test_points_as_number_or_numeric_string_is_accepted(self):
+    f = self.make_file('a.txt', 'hello')
+    for points in (2, -1.5, '2.5'):
+      with self.subTest(points=points), self._provider():
+        resp = self.post(file_id=f.id, start_line=0, end_line=0, points=points)
+        self.assertEqual(resp.status_code, 200, resp.content)
 
   def test_numeric_strings_are_accepted(self):
     f = self.make_file('a.txt', 'hello')
