@@ -108,7 +108,9 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
     # newFields['students'] could be null
     for student in newFields['students']:
       otherSubs = Submission.objects.filter(assignment=newFields['assignment'], students__in=[student])
-      if len(otherSubs) > 1 or (len(otherSubs) == 1 and not self.instance):
+      if self.instance:
+        otherSubs = otherSubs.exclude(pk=self.instance.pk)
+      if otherSubs.exists():
         badList.append(student)
     if len(badList) > 0:
       message = formErrorMessage("The following students already have submissions for this assignment", badList)
