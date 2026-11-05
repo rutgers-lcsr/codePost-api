@@ -8,7 +8,7 @@ Permissions are organized by domain area for easier navigation and maintenance.
 Reference: https://stackoverflow.com/questions/36553197/permission-checks-in-drf-viewsets-are-not-working-right
 """
 
-from core.models import Assignment, AssignmentFile, CourseFile, Quiz, SubmissionFile, SubmissionTest, User
+from core.models import Assignment, AssignmentFile, CourseFile, Quiz, RubricComment, SubmissionFile, SubmissionTest, User
 from core.permissions.helpers import (
     hasCourseCreationPrivilege,
     isAuthenticated,
@@ -277,7 +277,17 @@ class RubricCommentPermissions(TemplatePermission):
             return isCourseStaff(user, course)
         else:
             from core.permissions.helpers import isRubricEditor
-            return isCourseAdmin(user, course) or isRubricEditor(user, course)
+            if isCourseAdmin(user, course) or isRubricEditor(user, course):
+                return True
+            # Course.allowGradersToEditRubric: graders may add and update (never delete)
+            # rubric comments that no grading comment uses yet. A new comment has no pk.
+            return (
+                course.allowGradersToEditRubric
+                and request.method in ("POST", "PUT", "PATCH")
+                and isGrader(user, course)
+                and isinstance(obj, RubricComment)
+                and (obj.pk is None or not obj.comments.exists())
+            )
 
 
 # =============================================================================

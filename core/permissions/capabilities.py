@@ -190,7 +190,9 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
     quiz_grader = rc.is_quiz_grader(course)
     super_grader = rc.is_super_grader(course)
     archived = course.archived
-    org_staff = hasattr(user, 'profile') and user.profile.isOrgStaff
+    # Same rule as CoursePermissions: only staff of the course's own organization.
+    org_staff = (hasattr(user, 'profile') and user.profile.isOrgStaff
+                 and user.profile.organization_id == course.organization_id)
 
     # One AIService lookup covers both quiz AI capabilities; skipped entirely
     # unless the role/archived gates could grant them.
@@ -208,7 +210,9 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
         Capability.VIEW_AI_USAGE: admin,
         Capability.CREATE_ASSIGNMENT: admin and not archived,
         Capability.CLAIM_SUBMISSIONS: (grader or admin) and course.activateQueue and not archived,
-        Capability.EDIT_RUBRIC: (admin or rubric_editor or (grader and course.allowGradersToEditRubric)) and not archived,
+        # Course level cannot know an assignment's collaborativeRubricMode, so only the
+        # roles that may always edit (see RubricCategoryPermissions) are granted here.
+        Capability.EDIT_RUBRIC: (admin or rubric_editor) and not archived,
         Capability.GRADE_QUIZ: admin or quiz_grader or (grader and course.gradersCanGradeQuizzes),
         Capability.GENERATE_AI_QUIZ_QUESTIONS: quiz_suggestions_on,
         Capability.GENERATE_PERSONALIZED_QUIZ_QUESTIONS: personalized_quiz_on,
@@ -238,7 +242,6 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
     admin = rc.is_course_admin(course)
     staff = rc.is_course_staff(course)
     student = rc.is_student(course)
-    grader = rc.is_grader(course)
     rubric_editor = rc.is_rubric_editor(course)
     archived = course.archived
 
@@ -248,9 +251,10 @@ def compute_assignment_capabilities(user, assignment, *, _rc: RoleCache | None =
     can_download = student and rc.student_can_download_assignment(assignment)
     can_submit = student and rc.student_can_submit_to_assignment(assignment)
 
-    # Rubric editing: admin always; rubric editors if explicitly flagged;
-    # all graders if the course-level setting is on.
-    can_edit_rubric = admin or rubric_editor or (grader and course.allowGradersToEditRubric)
+    # Rubric editing mirrors RubricCategoryPermissions/RubricCommentPermissions:
+    # collaborative mode opens it to all course staff, otherwise only admins and
+    # explicitly flagged rubric editors.
+    can_edit_rubric = admin or rubric_editor or (staff and assignment.collaborativeRubricMode)
 
     # Students see the rubric once the feedback axis opens for them (live/released,
     # or per_student with a finalized submission).

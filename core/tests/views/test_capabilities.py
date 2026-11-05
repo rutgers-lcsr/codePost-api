@@ -185,18 +185,19 @@ class TestAssignmentCapabilitiesEndpoint(APITestCase):
             with factory.django.mute_signals(post_save):
                 self.course.rubricEditors.remove(self.grader)
 
-    def test_allow_graders_to_edit_rubric_setting(self):
+    def test_collaborative_rubric_mode_lets_graders_edit_rubric(self):
+        # Mirrors RubricCategoryPermissions: collaborative mode opens writes to all staff.
         with factory.django.mute_signals(post_save):
-            self.course.allowGradersToEditRubric = True
-            self.course.save()
+            self.assignment.collaborativeRubricMode = True
+            self.assignment.save()
         try:
             response = self._get(self.grader)
             self.assertEqual(response.status_code, status.HTTP_200_OK)
             self.assertTrue(response.data['capabilitiesMap']['edit_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
-                self.course.allowGradersToEditRubric = False
-                self.course.save()
+                self.assignment.collaborativeRubricMode = False
+                self.assignment.save()
 
     def test_descriptions_included_when_requested(self):
         response = self._get(self.admin, params={'descriptions': 'true'})
@@ -339,19 +340,19 @@ class TestCourseCapsSuperGrader(APITestCase):
         self.assertFalse(caps['manage_sections'])
 
     def test_super_grader_edit_rubric(self):
-        """Super graders are graders, so edit_rubric depends on allowGradersToEditRubric or rubricEditors."""
+        """Super graders are graders, so edit_rubric depends on rubricEditors."""
         response = self._get(self.super_grader)
         caps = response.data['capabilitiesMap']
-        # By default allowGradersToEditRubric is False and not a rubric editor
+        # Not a rubric editor
         self.assertFalse(caps['edit_rubric'])
 
-        # Enable allowGradersToEditRubric
+        # allowGradersToEditRubric does not grant it: the rubric permission classes ignore it
         with factory.django.mute_signals(post_save):
             self.course.allowGradersToEditRubric = True
             self.course.save()
         try:
             response = self._get(self.super_grader)
-            self.assertTrue(response.data['capabilitiesMap']['edit_rubric'])
+            self.assertFalse(response.data['capabilitiesMap']['edit_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
                 self.course.allowGradersToEditRubric = False
@@ -498,13 +499,13 @@ class TestCourseRubricEditorCaps(APITestCase):
             with factory.django.mute_signals(post_save):
                 self.course.rubricEditors.remove(self.grader)
 
-    def test_allow_graders_to_edit_rubric_setting(self):
+    def test_allow_graders_to_edit_rubric_setting_does_not_grant_course_level(self):
         with factory.django.mute_signals(post_save):
             self.course.allowGradersToEditRubric = True
             self.course.save()
         try:
             response = self._get(self.grader)
-            self.assertTrue(response.data['capabilitiesMap']['edit_rubric'])
+            self.assertFalse(response.data['capabilitiesMap']['edit_rubric'])
         finally:
             with factory.django.mute_signals(post_save):
                 self.course.allowGradersToEditRubric = False
