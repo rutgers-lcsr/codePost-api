@@ -37,6 +37,15 @@ class TestService:
         return bool(user and isCourseAdmin(user, course))
 
     @staticmethod
+    def _restrict_overrides(file_overrides: Dict[int, str], submission: Submission, user_id: Optional[str]) -> Dict[int, str]:
+        """Non-admin callers may only override files that belong to the submission being run,
+        never instructor resource / expected-output files or other submissions' files."""
+        if not file_overrides or TestService._is_course_admin(user_id, submission.assignment.course):
+            return file_overrides
+        own_ids = set(submission.files.values_list('id', flat=True))
+        return {fid: content for fid, content in file_overrides.items() if fid in own_ids}
+
+    @staticmethod
     def _to_json_safe(value: Any) -> Any:
         """Recursively convert values to JSON-serializable primitives for JSONField writes."""
         if isinstance(value, Decimal):
@@ -275,6 +284,7 @@ class TestService:
         try:
             submission = Submission.objects.get(id=submission_id)
             assignment = submission.assignment
+            file_overrides = TestService._restrict_overrides(file_overrides, submission, user_id)
 
             # 1. Identify relevant TestCategories
             if test_case_ids:
@@ -631,6 +641,7 @@ class TestService:
         try:
             test_case = TestCase.objects.get(id=test_case_id)
             submission = Submission.objects.get(id=submission_id)
+            file_overrides = TestService._restrict_overrides(file_overrides, submission, user_id)
 
             if hasattr(test_case, 'testCategory') and test_case.testCategory and test_case.testCategory.targetFileName:
                 required_name = test_case.testCategory.targetFileName

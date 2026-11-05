@@ -13,7 +13,8 @@ from django.db.models.signals import post_save
 from django.test import TestCase as DjangoTestCase
 
 from autograder.services.TestService import TestService
-from core.models import SubmissionFile, SubmissionTest, TestCase
+from autograder.services.executors.base import ExecutionResult
+from core.models import AssignmentFile, SubmissionFile, SubmissionTest, TestCase, TestCategoryResource
 from core.tests.factories import CourseFactory, SubmissionFactory, TestCategoryFactory
 
 SCRIPT = "@test(name='test_real')\ndef test_real():\n    pass\n"
@@ -90,6 +91,52 @@ class AdminRunStillSyncsTestCasesTests(_SuiteBase):
     self.run_suite_with(_result(), str(self.admin.id))
 
     self.assertEqual(self.category.testCases.count(), 2)
+
+
+class FileOverrideScopeTests(_SuiteBase):
+  def setUp(self):
+    super().setUp()
+    with factory.django.mute_signals(post_save):
+      self.resource_file = AssignmentFile.objects.create(
+        assignment=self.assignment, name="expected.txt", extension=".txt", data="INSTRUCTOR")
+      TestCategoryResource.objects.create(
+        category=self.category, file=self.resource_file, target_path="expected.txt")
+    self.student_file = self.submission.files.first()
+
+  def _factory_calls(self, user_id, overrides):
+    fake_executor = mock.Mock()
+    fake_executor.execute.return_value = ExecutionResult(success=True, tests=[])
+    with mock.patch("autograder.services.TestService.Executor.factory", return_value=fake_executor) as factory_mock:
+      TestService.run_suite(self.submission.id, user_id=user_id, file_overrides=overrides)
+    return factory_mock.call_args.kwargs
+
+  def test_student_cannot_override_instructor_resource_file(self):
+    kwargs = self._factory_calls(str(self.student.id), {self.resource_file.id: "STUDENT"})
+
+    contents = [r.get("content") for r in kwargs["resources"]]
+    self.assertEqual(contents, ["INSTRUCTOR"])
+
+  def test_student_cannot_inject_an_instructor_file_as_additional_file(self):
+    kwargs = self._factory_calls(str(self.student.id), {self.resource_file.id: "STUDENT"})
+
+    self.assertEqual(kwargs["additional_files"], {})
+
+  def test_student_can_still_override_their_own_submission_file(self):
+    kwargs = self._factory_calls(str(self.student.id), {self.student_file.id: "print('unsaved edit')"})
+
+    self.assertEqual(kwargs["content_override"], "print('unsaved edit')")
+
+  def test_student_cannot_override_a_file_of_another_submission(self):
+    other_file = self.other_submission.files.first()
+    kwargs = self._factory_calls(str(self.student.id), {other_file.id: "STUDENT"})
+
+    self.assertEqual(kwargs["additional_files"], {})
+    self.assertIsNone(kwargs["content_override"])
+
+  def test_admin_can_still_override_a_resource_file(self):
+    kwargs = self._factory_calls(str(self.admin.id), {self.resource_file.id: "EDITED"})
+
+    self.assertEqual([r.get("content") for r in kwargs["resources"]], ["EDITED"])
 
 
 class UploadedResultFileTests(_SuiteBase):
