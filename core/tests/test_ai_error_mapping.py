@@ -80,9 +80,30 @@ class ParseErrorTests(APITestCase):
     msg = _service()._parse_error(genai_errors.ClientError(404, {'error': {'message': 'x'}}))
     self.assertIn('not found', msg)
 
+  def test_google_400_with_another_reason_is_not_an_api_key_error(self):
+    err = genai_errors.ClientError(400, {'error': {
+      'code': 400, 'message': 'bad request',
+      'details': [{'reason': 'SOMETHING_ELSE'}, {'reason': 'OTHER'}],
+    }})
+    self.assertNotIn('Invalid API key', _service()._parse_error(err))
+
+  def test_google_invalid_key_reason_found_among_several_details(self):
+    err = genai_errors.ClientError(400, {'error': {
+      'code': 400, 'message': 'bad',
+      'details': [{'reason': 'SOMETHING_ELSE'}, {'reason': 'API_KEY_INVALID'}],
+    }})
+    self.assertIn('Invalid API key', _service()._parse_error(err))
+
   def test_provider_5xx_is_unavailable(self):
-    msg = _service()._parse_error(genai_errors.ServerError(503, {'error': {'message': 'x'}}))
-    self.assertIn('unavailable', msg.lower())
+    svc = _service()
+    for code in (500, 503):
+      with self.subTest(code=code):
+        msg = svc._parse_error(genai_errors.ServerError(code, {'error': {'message': 'x'}}))
+        self.assertIn('unavailable', msg.lower())
+
+  def test_499_is_not_unavailable(self):
+    msg = _service()._parse_error(genai_errors.ClientError(499, {'error': {'message': 'x'}}))
+    self.assertNotIn('unavailable', msg.lower())
 
   def test_unclassified_error_never_echoes_raw_text(self):
     msg = _service()._parse_error(
