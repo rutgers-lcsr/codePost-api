@@ -52,6 +52,7 @@ class _SuiteBase(DjangoTestCase):
         submission=self.other_submission, testCase=self.stale, passed=True, score=3, maxScore=3, logs="ok")
     self.student = self.course.students.first()
     self.admin = self.course.courseAdmins.first()
+    self.submission.students.set([self.student])
 
   def run_suite_with(self, result, user_id, **kwargs):
     with mock.patch.object(TestService, "_run_ephemeral_execution", return_value=result):
@@ -80,7 +81,29 @@ class StudentRunCannotEditTestCasesTests(_SuiteBase):
       set(self.category.testCases.values_list("functionName", flat=True)), {"test_real", "test_other"})
 
 
+class AdminRunOverStudentSubmissionTests(_SuiteBase):
+  """Admin 'run all' and admin single runs execute student code: its output must not edit TestCases."""
+
+  def test_admin_run_on_student_submission_reporting_some_tests_keeps_other_tests_and_results(self):
+    self.run_suite_with(_result(("test_real", 5)), str(self.admin.id))
+
+    self.assertTrue(TestCase.objects.filter(id=self.stale.id).exists(), "instructor TestCase deleted by a run over student code")
+    self.assertTrue(SubmissionTest.objects.filter(
+      submission=self.other_submission, testCase=self.stale).exists(), "another student's result was cascade-deleted")
+
+  def test_admin_run_on_student_submission_reporting_unknown_name_creates_no_testcase(self):
+    self.run_suite_with(_result(("test_real", 5), ("bonus_free_points", 999)), str(self.admin.id))
+
+    self.assertEqual(
+      set(self.category.testCases.values_list("functionName", flat=True)), {"test_real", "test_other"})
+
+
 class AdminRunStillSyncsTestCasesTests(_SuiteBase):
+  def setUp(self):
+    super().setUp()
+    # The instructor's own reference submission: output of instructor code, trusted to sync.
+    self.submission.students.set([self.admin])
+
   def test_admin_run_creates_new_tests_and_deletes_stale_ones(self):
     self.run_suite_with(_result(("test_real", 5), ("test_new", 2)), str(self.admin.id))
 

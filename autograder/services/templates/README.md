@@ -350,7 +350,7 @@ If your language supports notebook execution, create `notebook_template.yourlang
 
 ### System Gotchas
 
-11. **Auto-sync creates/deletes TestCases** — When a course admin's run of a test script succeeds and produces results, `TestService` automatically creates new `TestCase` records for any unknown test names and deletes stale ones. Student-triggered and run-on-submit runs never sync, and a run that reports no results never deletes anything. This means renaming a test function creates a new TestCase (losing history).
+11. **Auto-sync creates/deletes TestCases** — When a course admin runs a test script on an instructor-owned (reference) submission and it succeeds and produces results, `TestService` automatically creates new `TestCase` records for any unknown test names and deletes stale ones. Student-triggered and run-on-submit runs never sync, and a run that reports no results never deletes anything. This means renaming a test function creates a new TestCase (losing history).
 
 12. **Convergence auto-adds packages** — If 3+ submissions fail with the same missing module error, the Converger adds it to requirements and triggers a rebuild. Your template's error messages must be parseable for this to work. Add patterns to `converger.py`.
 

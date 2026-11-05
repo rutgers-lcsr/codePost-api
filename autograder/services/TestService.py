@@ -37,6 +37,18 @@ class TestService:
         return bool(user and isCourseAdmin(user, course))
 
     @staticmethod
+    def _is_reference_run(user_id: Optional[str], submission) -> bool:
+        """True when the output comes from instructor code: a course admin ran it on a
+        submission whose submitters are all course admins (their own reference/sandbox
+        submission). Output of a student-authored submission is never trusted to edit TestCases,
+        whoever triggered the run (e.g. admin "run all" over every student's submission)."""
+        course = submission.assignment.course
+        if not TestService._is_course_admin(user_id, course):
+            return False
+        from core.permissions.helpers import isCourseAdmin
+        return all(isCourseAdmin(u, course) for u in submission.students.all())
+
+    @staticmethod
     def _restrict_overrides(file_overrides: Dict[int, str], submission: Submission, user_id: Optional[str]) -> Dict[int, str]:
         """Non-admin callers may only override files that belong to the submission being run,
         never instructor resource / expected-output files or other submissions' files."""
@@ -468,11 +480,12 @@ class TestService:
                         script_crashed = True
                     
                     # Auto-sync edits the instructor's TestCases (and, via cascade, every student's
-                    # results), so only a course admin's run may do it, never a student's.
+                    # results), so only a course admin's run on an instructor-owned (reference)
+                    # submission may do it; student-authored output is never trusted for that.
                     should_sync = (
                         script_success
                         and not script_crashed
-                        and TestService._is_course_admin(user_id, assignment.course)
+                        and TestService._is_reference_run(user_id, submission)
                     )
                     
                     # 5b. Process Results & Create New Tests
