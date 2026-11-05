@@ -73,14 +73,14 @@ class EnvironmentRunRequestSerializer(serializers.Serializer):
     submission = serializers.IntegerField(required=False, allow_null=True)
     simulate = serializers.BooleanField(required=False, default=True)
     exposedOnly = serializers.BooleanField(required=False, default=False)
-    # In practice this may be sent as a JSON-encoded string or a JSON array.
+    # Maps file id -> replacement content. May be sent as a JSON-encoded string.
     files = LenientJSONField(required=False)
 
     def validate_files(self, value):
         if value is None:
             return value
-        if not isinstance(value, (list, dict)):
-            raise serializers.ValidationError("files must be a JSON array or object")
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("files must be a JSON object mapping file id to content")
         return value
 
 
