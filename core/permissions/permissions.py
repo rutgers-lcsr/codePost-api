@@ -579,7 +579,10 @@ class SubmissionTestPermissions(TemplatePermission):
                 testCase = obj.testCase
                 if testCase is not None and testCase.hidden:
                     return False
-                return True
+                # Same rule as the submission actions: exposed/maxExposedFailedTests
+                # until grading results are revealed.
+                from core.services.student_test_visibility import tests_visible_to_student
+                return obj.id in {t.id for t in tests_visible_to_student(submission)}
             return False
 
         # PUT/PATCH: course admin or staff of submission

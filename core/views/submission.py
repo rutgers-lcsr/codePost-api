@@ -44,6 +44,7 @@ from django.utils.timezone import now
 
 
 from autograder.run import filterExposedSubmissionTests
+from core.services.student_test_visibility import tests_visible_to_student, mask_hidden_tests
 
 from core.permissions.tokens import submission_token_generator
 
@@ -365,12 +366,9 @@ class SubmissionViewSet(ListProtectedViewSet):
             tests = submission.tests.all()
     # If student of the submission
     elif isStudentOfSub(user, submission):
-        # Graded reveal: full test results per the feedback axis (finalized subs)
-        if testResultsVisibleForSubmission(submission):
-            tests = submission.tests.all()
-        else:
-            maxFailedTests = assignment.environment and assignment.environment.maxExposedFailedTests
-            tests = filterExposedSubmissionTests(list(submission.tests.all()), maxFailedTests)[0]
+        tests = tests_visible_to_student(submission)
+        rows = SubmissionTestSerializer(tests, many=True, context={"request": request}).data
+        return Response(mask_hidden_tests(submission, tests, rows))
     else:
         return returnForbidden()
 
@@ -421,22 +419,11 @@ class SubmissionViewSet(ListProtectedViewSet):
             logCode = retrieve_log_code(submission)
     # If student of the submission
     elif isStudentOfSub(user, submission):
-        # Graded reveal: full test results per the feedback axis (finalized subs)
-        if testResultsVisibleForSubmission(submission):
-            tests = submission.tests.all()
+        tests = tests_visible_to_student(submission)
+        try:
             logCode = retrieve_log_code(submission)
-        else:
-            try:
-                maxFailedTests = assignment.environment and assignment.environment.maxExposedFailedTests
-            except:
-                maxFailedTests = None
-
-            tests = filterExposedSubmissionTests(list(submission.tests.all()), maxFailedTests)[0]
-
-            try:
-                logCode = retrieve_log_code(submission)
-            except:
-                logCode = ''
+        except:
+            logCode = ''
 
     else:
         return returnForbidden()
@@ -451,47 +438,7 @@ class SubmissionViewSet(ListProtectedViewSet):
     # summary so the student gets feedback (pass count + point impact) without seeing
     # the underlying test names, logs, or explanations.
     if isStudentView:
-        tests_by_id = {t.id: t for t in tests}
-        hidden_by_category: dict[int, list] = {}
-        visible_rows = []
-        for st_data in submissionTests:
-            st = tests_by_id.get(st_data.get('id'))
-            if st is not None and st.testCase.hidden:
-                hidden_by_category.setdefault(st.testCase.testCategory_id, []).append(st)
-            else:
-                visible_rows.append(st_data)
-
-        synthetic_rows = []
-        for cat_id, hidden_tests in hidden_by_category.items():
-            passed_count = sum(1 for t in hidden_tests if t.passed)
-            total_count = len(hidden_tests)
-            points_earned = sum((t.score or 0) for t in hidden_tests)
-            points_total = sum((t.maxScore or 0) for t in hidden_tests)
-            synthetic_rows.append({
-                # Negative id sentinels distinguish synthetic summary rows from real
-                # SubmissionTests; clients should treat hiddenSummary != null as the
-                # source of truth, not the id.
-                'id': -cat_id,
-                'submission': submission.id,
-                'testCase': None,
-                'testCategory': cat_id,
-                'logs': '',
-                'passed': passed_count == total_count and total_count > 0,
-                'created': None,
-                'modified': None,
-                'isError': False,
-                'score': points_earned,
-                'maxScore': points_total,
-                'results': None,
-                'hiddenSummary': {
-                    'label': 'Hidden tests',
-                    'passedCount': passed_count,
-                    'totalCount': total_count,
-                    'pointsEarned': points_earned,
-                    'pointsTotal': points_total,
-                },
-            })
-        submissionTests = visible_rows + synthetic_rows
+        submissionTests = mask_hidden_tests(submission, tests, submissionTests)
 
     # Compute learning objective summary for all views.
     # Prefetch testCases.id once per objective rather than re-querying inside the loop.
