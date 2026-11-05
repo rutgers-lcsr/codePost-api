@@ -278,8 +278,8 @@ class TestService:
 
             logger.info(f"Running suite of {target_tests.count()} tests for submission {submission_id}")
 
-            # 2. Ingestion Phase (Pre-calculated results)
-            TestService.ingest_test_results(submission)
+            # Results come only from this run's own harness output. Files in the submission
+            # (e.g. a student-uploaded _test_<Category>.txt) are never trusted as results.
 
             # 3. Group by Category
             category_map = {} # category_id -> list of Reference TestCase objects
