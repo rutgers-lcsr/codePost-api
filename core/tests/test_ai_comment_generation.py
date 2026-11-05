@@ -75,6 +75,44 @@ class BuildContextTests(AICommentGenerationBase):
     context = build_context_from_file(f, 0, 0)
     self.assertEqual(context.selected_content, '')
 
+  def test_notebook_selects_exactly_the_requested_cells(self):
+    f = self.make_file('nb.ipynb', _notebook(['c0', 'c1', 'c2', 'c3']))
+    for start, end, wanted, unwanted in [
+      (1, 2, ['c1', 'c2'], ['c0', 'c3']),
+      (3, 3, ['c3'], ['c0', 'c1', 'c2']),
+      (0, 0, ['c0'], ['c1']),
+      (2, 9, ['c2', 'c3'], ['c0', 'c1']),
+    ]:
+      with self.subTest(start=start, end=end):
+        selected = build_context_from_file(f, start, end).selected_content
+        for text in wanted:
+          self.assertIn(text, selected)
+        for text in unwanted:
+          self.assertNotIn(text, selected)
+        self.assertEqual(selected.count('[CODE CELL]'), len(wanted))
+
+  def test_text_selects_exactly_the_requested_lines(self):
+    f = self.make_file('a.txt', 'l0\nl1\nl2\nl3')
+    self.assertEqual(build_context_from_file(f, 1, 2).selected_content, 'l1\nl2')
+    self.assertEqual(build_context_from_file(f, 3, 3).selected_content, 'l3')
+    self.assertEqual(build_context_from_file(f, 2, 99).selected_content, 'l2\nl3')
+
+  def test_corrupt_pdf_file_content_placeholder(self):
+    f = self.make_file('bad.pdf', 'this is not a pdf')
+    self.assignment.ai_system_prompt = '{file_content}'
+    self.assignment.save()
+    context = build_context_from_file(f, 1, 1)
+    self.assertEqual(context.file_content, '(could not extract PDF text)')
+
+  def test_pdf_page_range_boundaries_are_inclusive(self):
+    f = self.make_file('two.pdf', _pdf_data_uri(['PAGE-ONE', 'PAGE-TWO']))
+    first = build_context_from_file(f, 1, 1).selected_content
+    self.assertIn('PAGE-ONE', first)
+    self.assertNotIn('PAGE-TWO', first)
+    both = build_context_from_file(f, 1, 2).selected_content
+    self.assertIn('PAGE-ONE', both)
+    self.assertIn('PAGE-TWO', both)
+
   def test_single_line_selection_uses_end_char_from_line_start(self):
     f = self.make_file('a.txt', 'hello world foo')
     context = build_context_from_file(f, 0, 0, 6, 11)
