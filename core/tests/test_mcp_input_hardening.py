@@ -203,3 +203,20 @@ class TestListSubmissionsFilters:
 
 
 
+class TestAuditRedaction:
+
+    def test_short_student_args_are_not_stored_verbatim(
+            self, api_client, key, course):
+        from core.models import CourseAuditEvent
+        call(api_client, key, "codepost_manage_sections",
+             {"op": "setMembers", "sectionId": 999999, "dryRun": True,
+              "students": ["jane.doe@scarletmail.rutgers.edu"]})
+        events = CourseAuditEvent.objects.filter(course=course,
+                                                 event_type__startswith="agent_write")
+        assert events.exists()
+        for e in events:
+            blob = json.dumps(e.meta).lower()
+            assert "jane.doe" not in blob
+            assert "scarletmail" not in blob
+
+

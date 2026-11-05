@@ -272,7 +272,7 @@ def _audit_write(spec, conn, arguments, *, course=None, applied: bool = False,
         meta = {
             'tool': spec.name,
             'origin': 'mcp',
-            'args': _redact(arguments),
+            'args': _redact(arguments, course),
             'applied': applied,
         }
         if denied is not None:
@@ -287,11 +287,13 @@ def _audit_write(spec, conn, arguments, *, course=None, applied: bool = False,
         pass
 
 
-def _redact(arguments: dict) -> dict:
-    """Keep the audit row structural: names/ids/flags, not free prose.
+def _redact(arguments: dict, course) -> dict:
+    """Keep the audit row structural: names/ids/flags, not free prose or people.
 
     Long strings could carry student PII into a JSON blob that auditLogExport
-    writes to CSV."""
+    writes to CSV, and so can short ones: a ``student`` argument or a handful
+    of emails in ``students``. Roster students are aliased; any other email
+    that is not course staff is masked."""
     out = {}
     for key, value in arguments.items():
         if isinstance(value, str) and len(value) > 80:
@@ -302,7 +304,23 @@ def _redact(arguments: dict) -> dict:
             out[key] = f'{{{len(value)} keys}}'
         else:
             out[key] = value
-    return out
+    from core.agent.privacy import _EMAIL_RE, StudentAliasMap
+    staff = {e.lower() for rel in (course.graders, course.superGraders,
+                                   course.courseAdmins)
+             for e in rel.values_list('email', flat=True)}
+
+    def mask(match):
+        return match.group(0) if match.group(0).lower() in staff else '[email]'
+
+    def clean(value):
+        if isinstance(value, str):
+            return _EMAIL_RE.sub(mask, value)
+        if isinstance(value, list):
+            return [clean(v) for v in value]
+        return value
+
+    scrubbed = StudentAliasMap.for_course(course).scrub(out)
+    return {k: clean(v) for k, v in scrubbed.items()}
 
 
 def _may_call(spec, conn) -> bool:
