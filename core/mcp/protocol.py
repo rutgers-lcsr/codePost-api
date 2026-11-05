@@ -89,7 +89,7 @@ def handle(body: Any, conn) -> dict | None:
 
     method = body.get('method')
     request_id = body.get('id')
-    params = body.get('params') or {}
+    params = body.get('params')
 
     # No "id" means a notification (or a response to us, which we never solicit).
     if request_id is None:
@@ -97,6 +97,10 @@ def handle(body: Any, conn) -> dict | None:
 
     if not isinstance(method, str):
         return _error(request_id, INVALID_REQUEST, "Missing 'method'.")
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        return _error(request_id, INVALID_PARAMS, "'params' must be an object.")
 
     try:
         if method == 'initialize':

@@ -132,7 +132,8 @@ def _wants_elicitation_stream(request) -> bool:
 
     from core.agent import registry
     registry.load_tools()
-    name = (body.get('params') or {}).get('name')
+    params = body.get('params')
+    name = params.get('name') if isinstance(params, dict) else None
     spec = registry.get(name) if isinstance(name, str) else None
     return spec is not None and getattr(spec, 'tier', 0) == 3
 
