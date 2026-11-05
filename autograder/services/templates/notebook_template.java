@@ -769,12 +769,12 @@ public class notebook_template {
             int depth = 0;
             int start = 0;
             boolean inString = false;
-            char prevChar = 0;
+            boolean escaped = false;
 
             for (int i = 0; i < json.length(); i++) {
                 char c = json.charAt(i);
 
-                if (c == '"' && prevChar != '\\') {
+                if (c == '"' && !escaped) {
                     inString = !inString;
                 } else if (!inString) {
                     if (c == '{' || c == '[') {
@@ -790,7 +790,7 @@ public class notebook_template {
                         start = i + 1;
                     }
                 }
-                prevChar = c;
+                escaped = (c == '\\' && !escaped);
             }
 
             // Last element
@@ -826,12 +826,12 @@ public class notebook_template {
         int depth = 0;
         int start = 0;
         boolean inString = false;
-        char prevChar = 0;
+        boolean escaped = false;
 
         for (int i = 0; i < json.length(); i++) {
             char c = json.charAt(i);
 
-            if (c == '"' && prevChar != '\\') {
+            if (c == '"' && !escaped) {
                 inString = !inString;
             } else if (!inString) {
                 if (c == '{' || c == '[') {
@@ -843,7 +843,7 @@ public class notebook_template {
                     start = i + 1;
                 }
             }
-            prevChar = c;
+            escaped = (c == '\\' && !escaped);
         }
 
         // Last key-value
@@ -856,17 +856,17 @@ public class notebook_template {
         kv = kv.trim();
         int colonIndex = -1;
         boolean inString = false;
-        char prevChar = 0;
+        boolean escaped = false;
 
         for (int i = 0; i < kv.length(); i++) {
             char c = kv.charAt(i);
-            if (c == '"' && prevChar != '\\') {
+            if (c == '"' && !escaped) {
                 inString = !inString;
             } else if (c == ':' && !inString) {
                 colonIndex = i;
                 break;
             }
-            prevChar = c;
+            escaped = (c == '\\' && !escaped);
         }
 
         if (colonIndex == -1)

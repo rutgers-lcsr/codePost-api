@@ -2449,6 +2449,14 @@ class Tests {
         self.assertFalse(self._has_error(results, 0))
         self.assertTrue(per_test and per_test[0]["passed"], per_test)
 
+    def test_cell_source_ending_in_backslash_does_not_swallow_later_cells(self):
+        """A cell ending in a literal backslash serializes as "...\\\\" - the closing quote is not escaped."""
+        results, per_test = self._run(["int x = 1; // path C:\\", "int y = 2;"], "x == 1 && y == 2")
+        self.assertEqual(len(results["output_data"]["cells"]), 2)
+        self.assertFalse(self._has_error(results, 0))
+        self.assertFalse(self._has_error(results, 1))
+        self.assertTrue(per_test and per_test[0]["passed"], per_test)
+
 
 # ###################################################################
 # PART B9c — C++ notebook: xeus-cling magics
