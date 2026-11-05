@@ -161,3 +161,20 @@ class TestReadTools:
                       {"jobId": "no-such-task-id", "jobType": "autograderTask"})
         assert result["isError"] is False
         assert result["structuredContent"]["data"]["state"] == "pending"
+
+    def test_poll_job_reads_a_finished_task_of_the_course(self, api_client, key, course, assignment):
+        """TaskViewSet gates results by the task's course; the course key's own
+        replayed request must still be let through."""
+        from django_celery_results.models import TaskResult
+        from core.tests.factories import SubmissionFactory
+        with factory.django.mute_signals(post_save):
+            sub = SubmissionFactory(assignment=assignment)
+        TaskResult.objects.create(
+            task_id="course-task", task_name="autograder.tasks.run_test_task", status="SUCCESS",
+            result=json.dumps({"output": "ok"}), task_args=json.dumps(f"({sub.id},)"),
+            task_kwargs=json.dumps("{'user_id': 987654}"))
+
+        result = call(api_client, key, "codepost_poll_job",
+                      {"jobId": "course-task", "jobType": "autograderTask"})
+        assert result["isError"] is False
+        assert result["structuredContent"]["data"]["state"] == "succeeded"
