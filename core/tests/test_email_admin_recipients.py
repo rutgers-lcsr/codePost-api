@@ -55,3 +55,9 @@ class TestAdminEmailRecipients(APITestCase):
       CodepostAPIErrorEmail().send_email('boom', 'details')
     self.assertEqual(len(mail.outbox), 1)
     self.assertEqual(mail.outbox[0].to, ['sink@example.com'])
+
+  def test_user_without_an_organization_gets_only_codepost_admins(self):
+    loner = User.objects.create_user(username='loner@example.com', email='loner@example.com', password='TestPass1!')
+    with patch('core.emails.OVERRIDE_EMAIL', ''), patch('core.emails.ADMINS', ['ops@example.com']):
+      self.assertEqual(NewAdminRequestEmail(loner).get_admin_emails(), ['ops@example.com'])
+      self.assertEqual(NewAdminRequestEmail().get_admin_emails(), ['ops@example.com'])
