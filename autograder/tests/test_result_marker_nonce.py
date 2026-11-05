@@ -109,7 +109,10 @@ class TemplateNonceTests(SimpleTestCase):
   def test_no_template_prints_an_un_nonced_marker(self):
     bare = re.compile(r"<<<(TEST_RESULT_JSON|RESULTS)_(START|END)>>>")
     for name in sorted(os.listdir(TEMPLATES_DIR)):
-      if name.endswith(".class") or name == "README.md":
+      # Only template sources; skip __pycache__ (exists once a template has been imported).
+      if not os.path.isfile(os.path.join(TEMPLATES_DIR, name)):
+        continue
+      if name.endswith((".class", ".pyc")) or name == "README.md":
         continue
       with open(os.path.join(TEMPLATES_DIR, name)) as f:
         src = f.read()
