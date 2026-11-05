@@ -289,52 +289,62 @@ def generate_ai_grading_assistance(submission_id: int):
         else:
             # Fallback: generate for all files
             results = async_to_sync(service.generate_suggested_comments)(submission)
+        from django.db import transaction
+        # One bad suggestion (hallucinated rubric id, non-numeric line, non-list JSON)
+        # must not cost the grader the rest of the run or skip recording the token spend.
         for result in results:
             if result.success and result.text:
-                suggestions = json.loads(result.text)
-                # When targeting a specific file, only save suggestions for that file.
-                # When generating for all files, accept any valid file ID.
-                if main_file:
-                    valid_file_ids = {main_file.id}
-                else:
-                    valid_file_ids = set(
-                        submission.files.values_list('id', flat=True)
+                try:
+                    suggestions = json.loads(result.text)
+                    # When targeting a specific file, only save suggestions for that file.
+                    # When generating for all files, accept any valid file ID.
+                    if main_file:
+                        valid_file_ids = {main_file.id}
+                    else:
+                        valid_file_ids = set(
+                            submission.files.values_list('id', flat=True)
+                        )
+                    # Identify notebook files so we can convert 1-based cell numbers
+                    # (from the AI prompt) to 0-based cell indices (used by the frontend).
+                    notebook_file_ids = set(
+                        submission.files.filter(name__endswith='.ipynb').values_list('id', flat=True)
                     )
-                # Identify notebook files so we can convert 1-based cell numbers
-                # (from the AI prompt) to 0-based cell indices (used by the frontend).
-                notebook_file_ids = set(
-                    submission.files.filter(name__endswith='.ipynb').values_list('id', flat=True)
-                )
-                created_count = 0
-                for s in suggestions:
-                    file_id = s.get('file_id')
-                    if file_id not in valid_file_ids:
-                        continue
-                    # For notebooks, convert 1-based cell numbers to 0-based indices
-                    start_line = s.get('start_line', 0)
-                    end_line = s.get('end_line', 0)
-                    if file_id in notebook_file_ids:
-                        start_line = max(0, start_line - 1)
-                        end_line = max(0, end_line - 1)
-                    SuggestedComment.objects.create(
-                        submission=submission,
-                        file_id=file_id,
-                        text=s.get('text', ''),
-                        startLine=start_line,
-                        endLine=end_line,
-                        startChar=s.get('start_char', 0),
-                        endChar=s.get('end_char', 0),
-                        rubricComment_id=s.get('rubric_comment_id'),
-                        pointDelta=s.get('point_delta'),
-                        generationMetadata={
-                            'provider': service.provider,
-                            'model': service.model,
-                            'input_tokens': result.input_tokens,
-                            'output_tokens': result.output_tokens,
-                        },
-                    )
-                    created_count += 1
-                logger.info(f"[AIGrading] Created {created_count} suggested comments for submission {submission_id}")
+                    created_count = 0
+                    for s in suggestions:
+                        try:
+                            file_id = s.get('file_id')
+                            if file_id not in valid_file_ids:
+                                continue
+                            # For notebooks, convert 1-based cell numbers to 0-based indices
+                            start_line = s.get('start_line', 0)
+                            end_line = s.get('end_line', 0)
+                            if file_id in notebook_file_ids:
+                                start_line = max(0, start_line - 1)
+                                end_line = max(0, end_line - 1)
+                            with transaction.atomic():
+                                SuggestedComment.objects.create(
+                                    submission=submission,
+                                    file_id=file_id,
+                                    text=s.get('text', ''),
+                                    startLine=start_line,
+                                    endLine=end_line,
+                                    startChar=s.get('start_char', 0),
+                                    endChar=s.get('end_char', 0),
+                                    rubricComment_id=s.get('rubric_comment_id'),
+                                    pointDelta=s.get('point_delta'),
+                                    generationMetadata={
+                                        'provider': service.provider,
+                                        'model': service.model,
+                                        'input_tokens': result.input_tokens,
+                                        'output_tokens': result.output_tokens,
+                                    },
+                                )
+                            created_count += 1
+                        except Exception as e:
+                            logger.warning(f"[AIGrading] Skipping a malformed suggestion for submission {submission_id}: {e}")
+                    logger.info(f"[AIGrading] Created {created_count} suggested comments for submission {submission_id}")
+                except Exception as e:
+                    logger.warning(f"[AIGrading] Skipping an unreadable result for submission {submission_id}: {e}")
 
             service.record_usage(result, user=submission.grader or submission.students.first(), request_type='suggested_comments')
 

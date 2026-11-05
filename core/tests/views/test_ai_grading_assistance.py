@@ -665,3 +665,50 @@ class TestMalformedAIOutput:
         response = api_client.post(url, {'fileId': grading_setup['file'].id}, format='json')
         assert response.status_code == status.HTTP_502_BAD_GATEWAY
         assert 'malformed' in response.data['error'].lower()
+
+
+class TestGenerateAIGradingAssistanceTask:
+    """One malformed suggestion must not cost the grader the rest, or the usage record."""
+
+    def _run(self, grading_setup, monkeypatch, results):
+        from core.services.ai_service import GenerationResult
+        from core.tasks import generate_ai_grading_assistance
+
+        usage = []
+
+        async def fake_suggestions(self, submission, *args):
+            return results(GenerationResult)
+
+        async def fake_summary(self, submission, target_file=None):
+            return GenerationResult(text='', success=False)
+
+        for name in ('generate_file_suggestions', 'generate_suggested_comments'):
+            monkeypatch.setattr(f'core.services.ai_service.AIService.{name}', fake_suggestions)
+        monkeypatch.setattr('core.services.ai_service.AIService.generate_submission_summary', fake_summary)
+        monkeypatch.setattr('core.services.ai_service.AIService.is_configured', property(lambda self: True))
+        monkeypatch.setattr('core.services.ai_service.AIService.is_globally_disabled', property(lambda self: False))
+        monkeypatch.setattr('core.services.ai_service.AIService.is_feature_enabled',
+                            lambda self, feature: feature == 'suggested_comments')
+        monkeypatch.setattr('core.services.ai_service.AIService.record_usage',
+                            lambda self, result, **kw: usage.append(result))
+        generate_ai_grading_assistance(grading_setup['submission'].id)
+        return usage
+
+    def test_bad_suggestions_do_not_abort_the_rest(self, grading_setup, monkeypatch):
+        import json
+        from core.models import SuggestedComment
+
+        file_id = grading_setup['file'].id
+        not_a_list = json.dumps({'file_id': file_id, 'text': 'not a list'})
+        mixed = json.dumps([
+            {'file_id': file_id, 'text': 'bad line', 'start_line': 'abc', 'end_line': 1},
+            {'file_id': file_id, 'text': 'good one', 'start_line': 1, 'end_line': 1},
+        ])
+
+        usage = self._run(grading_setup, monkeypatch, lambda GR: [
+            GR(text=not_a_list, success=True), GR(text=mixed, success=True)])
+
+        texts = list(SuggestedComment.objects.filter(
+            submission=grading_setup['submission']).values_list('text', flat=True))
+        assert texts == ['good one']
+        assert len(usage) == 2
