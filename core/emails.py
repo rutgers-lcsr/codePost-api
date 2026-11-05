@@ -92,8 +92,13 @@ class CodepostEmail(ABC):
         """
         Returns a list of org staff emails for the organization, plus CodePost admins.
         If the user is not part of an organization, it returns only CodePost admins.
+        With OVERRIDE_EMAIL set (dev/staging) everything goes to that one address, so a
+        copy of production data never mails real staff a live approval link.
         """
-        CODEPOST_ADMINS = list(map(lambda x: x[1], ADMINS))
+        if OVERRIDE_EMAIL:
+            return [OVERRIDE_EMAIL]
+
+        CODEPOST_ADMINS = self.get_codepost_admins()
 
         if not self.user or not self.user.profile.organization:
             return CODEPOST_ADMINS
@@ -102,13 +107,17 @@ class CodepostEmail(ABC):
 
         org_staff = User.objects.filter(
             profile__organization__name=org_name,
-            profile__isOrgStaff=True
-        ).values_list('email', flat=True)
+            profile__isOrgStaff=True,
+            is_active=True,
+        ).exclude(email='').values_list('email', flat=True)
 
         return list(org_staff) + CODEPOST_ADMINS
 
     def get_codepost_admins(self):
-        return list(map(lambda x: x[1], ADMINS))
+        # settings.ADMINS is a flat list of email strings (from ADMIN_EMAILS).
+        if OVERRIDE_EMAIL:
+            return [OVERRIDE_EMAIL]
+        return list(ADMINS)
 
     def send(self, email:EmailMessage, type:str = "html"):
         """
@@ -131,7 +140,7 @@ class CodepostEmail(ABC):
             return False
 class CodepostAPIErrorEmail(CodepostEmail):
     subject = "CodePost API Error Notification"
-    template = "emails/api_error_template.html"
+    template = "emails/admin/api_error.html"
 
     def send_email(self, error_message:str, error_details:str):
         """
