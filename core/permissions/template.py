@@ -50,7 +50,11 @@ class TemplatePermission(permissions.BasePermission):
 
     def has_object_permission(self, request, view, obj, _original=original):
       allowed = _original(self, request, view, obj)
-      if allowed and request.method in ('POST', 'DELETE'):
+      # A POST only creates when it is checked against the unsaved instance has_permission
+      # builds; detail actions (e.g. assignments/{id}/clone/) get the existing row and only
+      # read it, so they are not edits of the archived course.
+      creating = request.method == 'POST' and obj.pk is None
+      if allowed and (creating or request.method == 'DELETE'):
         course = courseOf(obj)
         if course is not None and course.archived:
           raise exceptions.PermissionDenied("The Course is archived and cannot be edited.")

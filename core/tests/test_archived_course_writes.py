@@ -1,4 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+import factory
+from django.db.models.signals import post_save
 from rest_framework.test import APITestCase
 
 from core.models import Comment, Course, RubricCategory, RubricComment, Submission
@@ -69,3 +71,12 @@ class ArchivedCourseWritesTest(APITestCase):
   def test_unarchived_course_unaffected(self):
     Course.objects.filter(pk=self.course.pk).update(archived=False)
     self.assertEqual(self.client.delete(f'/comments/{self.comment.id}/').status_code, 204)
+
+  def test_assignment_can_be_cloned_out_of_archived_course(self):
+    # Semester rollover: a POST action that only reads the archived object is not an edit.
+    with factory.django.mute_signals(post_save):
+      target = CourseFactory(name='cos226', period='s2020', organization=self.course.organization)
+    target.courseAdmins.add(self.admin)
+    r = self.client.post(f'/assignments/{self.assignment.id}/clone/', {'course': target.id}, format='json')
+    self.assertEqual(r.status_code, 200, r.content)
+    self.assertTrue(target.assignments.filter(name=self.assignment.name).exists())
