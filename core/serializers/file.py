@@ -182,9 +182,17 @@ class AssignmentFileSerializer(_FileSizeMixin, ModelSerializerWithPOSTCheck):
             "data": {"trim_whitespace": False},
         }
 
+    def _is_notebook(self, attrs):
+        # Effective extension: the submitted one, else the stored one (PATCH),
+        # with or without a leading dot.
+        extension = attrs.get('extension')
+        if not extension and self.instance is not None:
+            extension = self.instance.extension
+        return (extension or '').lower().lstrip('.') == 'ipynb'
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if attrs.get('extension') == '.ipynb' and attrs.get('data'):
+        if attrs.get('data') and self._is_notebook(attrs):
             attrs['data'] = NotebookHandler.inject_cell_ids(attrs['data'])
         return attrs
 
