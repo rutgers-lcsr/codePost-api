@@ -69,12 +69,45 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
                 '-queueOrderKey')[0].queueOrderKey + 1
             validated_data['queueOrderKey'] = biggestKey
 
-    return super().update(instance, validated_data)
+    changed = self._lateDayCreditsChanged(validated_data)
+    instance = super().update(instance, validated_data)
+    if changed:
+      self._recordLateDayUsage(instance)
+    return instance
 
   @extend_schema_field(serializers.DateTimeField)
   def get_dateEdited(self, obj):
     tz = ZoneInfo(obj.assignment.course.timezone)
     return obj.dateEdited.astimezone(tz)
+
+  def _lateDayCreditsChanged(self, data):
+    if self.instance is None:
+      return True
+    if 'lateDayCreditsUsed' in data and data['lateDayCreditsUsed'] != self.instance.lateDayCreditsUsed:
+      return True
+    return 'assignment' in data and data['assignment'] != self.instance.assignment
+
+  def _recordLateDayUsage(self, submission):
+    course = submission.assignment.course
+    if course.lateDayCreditsAllowable is None or submission.lateDayCreditsUsed <= 0:
+      return
+    try:
+      from core.services.audit import record_audit_event
+      for student in submission.students.all():
+        record_audit_event(
+            course=course,
+            event_type='late_day_used',
+            user=student,
+            assignment=submission.assignment,
+            meta={'credits_used': submission.lateDayCreditsUsed},
+        )
+    except Exception:
+      pass
+
+  def create(self, validated_data):
+    submission = super().create(validated_data)
+    self._recordLateDayUsage(submission)
+    return submission
 
   # We can't use validate_students, because we need information from the assignment (the course)
   # Note that we're not checking permissions here, though we could...
@@ -125,8 +158,10 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
       if newFields['grader'] is None:
         raise serializers.ValidationError("Finalized submission must have a grader.")
 
-    # Check that at least one student on the submission has enough Late Day Credits left
-    if course.lateDayCreditsAllowable is not None and newFields['lateDayCreditsUsed'] is not None and newFields['lateDayCreditsUsed'] > 0:
+    # Check that at least one student on the submission has enough Late Day Credits left.
+    # Only when this write introduces the credits (create, or credits/assignment changed), so
+    # unrelated PATCHes are not blocked by a later-lowered allowance.
+    if self._lateDayCreditsChanged(newData) and course.lateDayCreditsAllowable is not None and newFields['lateDayCreditsUsed'] is not None and newFields['lateDayCreditsUsed'] > 0:
       atLeastOneStudentHasEnoughLateDayCredits = False
       for student in newFields['students']:
         thisCourseSubmissions = Submission.objects.filter(assignment__course=course, students__in=[student])
@@ -142,20 +177,6 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
       if not atLeastOneStudentHasEnoughLateDayCredits:
         raise serializers.ValidationError(
             "None of the submission students have enough late day credits remaining for the course.")
-
-      # Record late day usage audit event
-      try:
-        from core.services.audit import record_audit_event
-        for student in newFields['students']:
-          record_audit_event(
-              course=course,
-              event_type='late_day_used',
-              user=student,
-              assignment=newFields['assignment'],
-              meta={'credits_used': newFields['lateDayCreditsUsed']},
-          )
-      except Exception:
-        pass
 
     return newData
 
