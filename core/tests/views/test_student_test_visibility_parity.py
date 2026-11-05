@@ -100,6 +100,36 @@ class StudentTestVisibilityParityTests(APITestCase):
         self.assertEqual(summaries[0]["hiddenSummary"]["totalCount"], 1)
         self.assertEqual(summaries[0]["hiddenSummary"]["passedCount"], 0)
 
+    def test_hidden_summary_row_reports_category_totals_under_a_sentinel_id(self):
+        self._add_test("t_h1", "H1", exposed=True, hidden=True, passed=True)
+        zero_tc = AutograderTestCase.objects.create(
+            testCategory=self.category, functionName="t_h0", description="t_h0",
+            pointsPass=0, exposed=True, hidden=True)
+        SubmissionTest.objects.create(
+            submission=self.submission, testCase=zero_tc, logs="H0", passed=True,
+            score=Decimal("0"), maxScore=Decimal("0"))
+        self.client.force_authenticate(user=self.student)
+        resp = self.client.get(f"/submissions/{self.submission.id}/submissionTests/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        [summary] = [r for r in resp.json() if r.get("hiddenSummary")]
+        self.assertEqual(summary["id"], -self.category.id)
+        self.assertEqual(summary["testCategory"], self.category.id)
+        self.assertIs(summary["passed"], True)
+        self.assertIs(summary["isError"], False)
+        self.assertEqual(summary["hiddenSummary"]["passedCount"], 2)
+        self.assertEqual(summary["hiddenSummary"]["totalCount"], 2)
+        self.assertEqual(float(summary["hiddenSummary"]["pointsEarned"]), 2.0)
+        self.assertEqual(float(summary["hiddenSummary"]["pointsTotal"]), 2.0)
+
+    def test_hidden_summary_is_failed_when_any_hidden_test_failed(self):
+        self._add_test("t_h1", "H1", exposed=True, hidden=True, passed=True)
+        self._add_test("t_h2", "H2", exposed=True, hidden=True, passed=False)
+        self.client.force_authenticate(user=self.student)
+        resp = self.client.get(f"/submissions/{self.submission.id}/submissionTests/")
+        [summary] = [r for r in resp.json() if r.get("hiddenSummary")]
+        self.assertIs(summary["passed"], False)
+        self.assertEqual(summary["hiddenSummary"]["passedCount"], 1)
+
     def test_submission_tests_action_masks_hidden_tests_after_release(self):
         self._add_test("t_open", "OPEN LOGS", exposed=False, hidden=False, passed=True)
         self._add_test("t_hidden", "HIDDENLOGS", exposed=False, hidden=True)
