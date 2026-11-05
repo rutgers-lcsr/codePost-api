@@ -162,6 +162,26 @@ class GetExecutorClassTest(TestCase):
             with self.subTest(language=language):
                 self.assertIs(expected, get_executor_class(language))
 
+    def test_free_text_language_values_still_route(self):
+        """Quiz question language is free text (and LLM-filled); these routed before the exact table."""
+        cases = {
+            'Python 3': PythonExecutor, 'Python 3.12': PythonExecutor, 'python3.12': PythonExecutor,
+            'node.js': NodeExecutor, 'Node.js': NodeExecutor, 'nodejs': NodeExecutor,
+            'Java 17': JavaExecutor, 'java17': JavaExecutor, 'java8': JavaExecutor,
+            'C++17': CPPExecutor, 'c11': CPPExecutor, 'C11': CPPExecutor, 'c99': CPPExecutor,
+            'cplusplus': CPPExecutor, 'gcc': CPPExecutor, 'g++': CPPExecutor, 'C++': CPPExecutor,
+            'php8': PHPExecutor, 'PHP 8.2': PHPExecutor, 'Ruby 3.2': RubyExecutor, 'R 4.3': RExecutor,
+            'r4': RExecutor,
+        }
+        for language, expected in cases.items():
+            with self.subTest(language=language):
+                self.assertIs(expected, get_executor_class(language))
+
+    def test_versioned_unsupported_languages_are_still_rejected(self):
+        for language in ['TypeScript 5', 'scala3', 'C#', 'c# 12', 'csharp', 'Racket 8', 'clojure1.11', 'MATLAB R2023', 'rust1.80']:
+            with self.subTest(language=language):
+                self.assertIs(Executor, get_executor_class(language))
+
     def test_unsupported_languages_are_rejected_not_routed_to_cpp(self):
         for language in ['typescript', 'scala', 'csharp', 'racket', 'clojure', 'matlab', 'rust', 'bash', 'cobol', '']:
             with self.subTest(language=language):
