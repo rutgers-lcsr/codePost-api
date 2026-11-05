@@ -368,3 +368,17 @@ class MergeManifestsEdgeTest(TestCase):
     def test_nested_path_makes_top_level_folder_the_local_module(self):
         modules = Autodetector.collect_local_modules([_File('client/api/x.py', '')])
         self.assertEqual({'client'}, modules)
+
+
+class MergeRequirementsLineEdgeTest(TestCase):
+    def test_pypi_check_is_on_by_default_and_opt_out(self):
+        with mock.patch.object(Autodetector, 'check_pypi_existence', side_effect=lambda p: p != 'private') as check:
+            self.assertEqual('numpy', Autodetector.merge_requirements('python-3.12', ['numpy\nprivate']))
+            self.assertEqual(2, check.call_count)
+            check.reset_mock()
+            self.assertEqual('numpy\nprivate', Autodetector.merge_requirements('python-3.12', ['numpy\nprivate'], check_pypi=False))
+            check.assert_not_called()
+
+    def test_blank_lines_and_duplicates_are_dropped(self):
+        result = Autodetector.merge_requirements('r-4', ['dplyr\n\n  \ndplyr\n', '\nggplot2'])
+        self.assertEqual('dplyr\nggplot2', result)
