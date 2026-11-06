@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List
 
 from core.models import TestCase, TestCategory, Submission, SubmissionTest, File, CachedExecutionResult
 from autograder.services.executors import Executor
-from autograder.services.safe_errors import safe_error_text
+from autograder.services.safe_errors import RunUnavailable, safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -721,7 +721,7 @@ class TestService:
             logger.exception(f"Error running test {test_case_id} for submission {submission_id}")
             return {
                 "success": False, 
-                "error": safe_error_text(e)
+                "error": safe_error_text(e, (RunUnavailable,))
             }
 
     @staticmethod
@@ -827,7 +827,7 @@ class TestService:
         # Use Factory to get instantiated executor
         executor = Executor.factory(file)
         if not executor:
-             raise ValueError(f"No executor found for file type: {file.name}")
+             raise RunUnavailable(f"No executor found for file type: {file.name}")
              
         result = executor.execute() # Synchronous execution
         
@@ -837,7 +837,7 @@ class TestService:
         from autograder.services.execution_events import record_execution_event
         record_execution_event(trigger='test_run', cached=False, success=result.success,
                                file=file, user=user, execution_time=result.execution_time,
-                               error_text=result.err or result.stderr)
+                               error_text=result.stats_error_text)
 
         return {
             "success": result.success,
@@ -951,7 +951,7 @@ class TestService:
         )
         
         if not executor:
-             raise ValueError(f"No executor found for file type: {file.name}")
+             raise RunUnavailable(f"No executor found for file type: {file.name}")
         
         result = executor.execute()
         

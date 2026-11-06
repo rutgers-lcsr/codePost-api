@@ -358,3 +358,87 @@ class RunSubmissionTextTests(_EventTestBase):
     def test_variant_run_keeps_no_executor_diagnostic(self):
         result = self._variant_result(mock.patch("autograder.run.Executor.factory", return_value=None))
         self.assertEqual(result["error"], "No executable file found.")
+
+
+class ReviewFollowUpTests(_EventTestBase):
+    def _relay_errors(self, side_effect):
+        from autograder.worker_shell_relay import WorkerShellRelay
+        with mock.patch("autograder.worker_shell_relay.redis_async.from_url"), \
+                mock.patch("autograder.worker_shell_relay.redis.Redis.from_url"):
+            relay = WorkerShellRelay("redis://unused", "worker-1")
+        sent = []
+
+        async def fake_apublish(client, channel, payload):
+            sent.append(payload)
+
+        with mock.patch("autograder.worker_shell_relay._apublish", fake_apublish), \
+                mock.patch("autograder.worker_shell_relay.database_sync_to_async",
+                           return_value=mock.AsyncMock(side_effect=side_effect)):
+            asyncio.run(relay._handle_start("s1", {"envId": 1, "userId": 1}))
+        return sent[0]["message"]
+
+    def test_shell_start_keeps_docker_unavailable_message(self):
+        from autograder.services.executors.shell import ShellExecutor
+        self.environment.image_name = "img"
+        with mock.patch.object(Executor, "_get_docker_client", return_value=None):
+            with self.assertRaises(RunUnavailable) as caught:
+                ShellExecutor.open_shell_session(self.environment, False, False, 60)
+        self.assertEqual(self._relay_errors(caught.exception), "Docker is not available")
+
+    def test_shell_start_keeps_missing_image_message(self):
+        from autograder.services.executors.shell import ShellExecutor
+        with mock.patch.object(Executor, "_get_docker_client", return_value=mock.Mock()), \
+                mock.patch.object(Executor, "_ensure_image", return_value=False):
+            with self.assertRaises(RunUnavailable) as caught:
+                ShellExecutor.open_shell_session(self.environment, False, False, 60)
+        self.assertEqual(self._relay_errors(caught.exception), "Docker image is not available")
+
+    def test_shell_start_keeps_docker_api_error_text(self):
+        message = self._relay_errors(docker.errors.APIError("OCI runtime create failed: bad mount"))
+        self.assertIn("OCI runtime create failed", message)
+
+    def test_executor_exception_keeps_raw_text_in_stats_only(self):
+        from autograder import tasks
+        client = _boom_container()
+        client.containers.create.return_value.wait.side_effect = docker.errors.APIError(
+            "container create failed: OCI runtime create failed: " + MARKER)
+        with mock.patch.object(Executor, "_get_docker_client", return_value=client), \
+                mock.patch.object(Executor, "_ensure_image", return_value=True):
+            response = tasks.run_file_task(self.file.id, self.user.id, force_execute=True)
+        event = AutograderExecutionEvent.objects.get()
+        self.assertIn(MARKER, event.error_detail)
+        self.assertEqual(event.error_category, "infra")
+        self.assertNotIn(MARKER, json.dumps(response, default=str))
+
+    def test_raw_error_is_never_serialised(self):
+        result = ExecutionResult.from_exception(RuntimeError(MARKER))
+        self.assertIn(MARKER, result.stats_error_text or "")
+        self.assertNotIn(MARKER, json.dumps(result.to_dict()))
+
+    def test_stats_error_text_prefers_err_then_stderr(self):
+        self.assertEqual(ExecutionResult(success=False, err="e", stderr="s").stats_error_text, "e")
+        self.assertEqual(ExecutionResult(success=False, stderr="s").stats_error_text, "s")
+
+    def test_test_run_without_executor_keeps_actionable_message(self):
+        from autograder.services.TestService import TestService
+        from core.models import TestCase as CodepostTestCase
+        from core.tests.factories import TestCategoryFactory
+        category = TestCategoryFactory(assignment=self.assignment, testScript="")
+        case = CodepostTestCase.objects.create(
+            testCategory=category, functionName="t", description="d", type="script", pointsPass=1, testCode="pass")
+        with mock.patch("autograder.services.TestService.Executor.factory", return_value=None):
+            result = TestService.run_test(case.id, self.submission.id)
+        self.assertFalse(result["success"])
+        self.assertIn("No executor found for file type", result["error"])
+
+    def test_builder_keeps_unreachable_daemon_text(self):
+        import requests
+        env = self.environment
+        from autograder.services.builder import Builder
+        with mock.patch("autograder.services.builder.docker.from_env") as from_env:
+            from_env.return_value.api.build = mock.Mock(side_effect=requests.exceptions.ConnectionError("daemon unreachable"))
+            builder = Builder(env.id)
+        with mock.patch("autograder.services.builder.ImageManager"):
+            builder.build()
+        env.refresh_from_db()
+        self.assertIn("daemon unreachable", env.build_logs)

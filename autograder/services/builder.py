@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 import logging
 import docker
+import requests
 import os
 import shutil
 import tempfile
@@ -22,7 +23,7 @@ class BuildFailure(Exception):
     """A build step failed for a reason the instructor can act on (pip/apt/Dockerfile output)."""
 
 
-EXPECTED_BUILD_ERRORS = (BuildFailure, docker.errors.DockerException)
+EXPECTED_BUILD_ERRORS = (BuildFailure, docker.errors.DockerException, requests.exceptions.RequestException)
 
 
 class Builder:

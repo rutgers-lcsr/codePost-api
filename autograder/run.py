@@ -564,7 +564,7 @@ def RunSubmission(self, submissionID: int):
                 logger.info(f"[RunSubmission] Successfully cached execution for file {f.id}")
                 # The stats event reflects the executor's own outcome (a cached
                 # failure is still a failed execution), not the cache-save result.
-                record_event(f, result.success, result.err or result.stderr, result.execution_time)
+                record_event(f, result.success, result.stats_error_text, result.execution_time)
 
 
                 

@@ -48,7 +48,7 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
 
         record_execution_event(trigger='file_run', cached=False, success=result.success,
                                file=file_obj, user=user, execution_time=result.execution_time,
-                               error_text=result.err or result.stderr)
+                               error_text=result.stats_error_text)
 
         return {
             **result.to_dict(),
@@ -171,7 +171,7 @@ def run_file_streaming_task(
 
         record_execution_event(trigger='file_run', cached=False, success=result.success,
                                file=file_obj, user=user, execution_time=result.execution_time,
-                               error_text=result.err or result.stderr)
+                               error_text=result.stats_error_text)
 
         submission, _, _ = file_obj.get_file_info()
         response_data = {

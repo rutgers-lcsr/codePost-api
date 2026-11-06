@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional, Tuple, cast
 from django.utils import timezone
 
 from autograder.services.executors import get_executor_class
+from autograder.services.safe_errors import RunUnavailable
 from autograder.services.executors.base import ExecutionResult, Executor, FileLike
 from core.models import Environment
 
@@ -64,10 +65,10 @@ class ShellExecutor(Executor):
     ) -> Tuple[ShellExecutor, Dict[str, Dict[str, str]], Dict[str, str], str, Any, Any]:
         client = Executor._get_docker_client()
         if not client:
-            raise RuntimeError("Docker is not available")
+            raise RunUnavailable("Docker is not available")
 
         if not Executor._ensure_image(env.image_name):
-            raise RuntimeError("Docker image is not available")
+            raise RunUnavailable("Docker image is not available")
 
         executor, volumes, docker_env, temp_staging_dir = build_shell_context(
             env=env,

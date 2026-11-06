@@ -163,6 +163,8 @@ class ExecutionResult:
         self.output_data = output_data or {}
         self.system_logs = system_logs or []
         self.tests = tests or []
+        # Unsanitised exception text for the superuser stats event only; never serialised.
+        self.raw_error: Optional[str] = None
     
     @classmethod
     def error(cls, message: str) :
@@ -177,10 +179,19 @@ class ExecutionResult:
         )
         
     @classmethod
-    def from_exception(cls, exc: BaseException, prefix: str = "Execution failed") :
-        """Error result for an unexpected exception: the detail goes to the server log only."""
+    def from_exception(cls, exc: BaseException, prefix: str = "Execution failed", notebook: Optional[nbformat.NotebookNode] = None) :
+        """Error result for an unexpected exception. The user sees a fixed message; the raw
+        text goes to the server log and to raw_error (superuser stats events)."""
         logger.error(f"{prefix}: {exc}", exc_info=exc)
-        return cls.error(f"{prefix}: {safe_error_text(exc)}")
+        message = f"{prefix}: {safe_error_text(exc)}"
+        result = cls.error(message) if notebook is None else cls.error_notebook(notebook, message)
+        result.raw_error = f"{prefix}: {exc}"
+        return result
+
+    @property
+    def stats_error_text(self) -> Optional[str]:
+        """Error text for AutograderExecutionEvent (superuser-only): raw when we have it."""
+        return self.raw_error or self.err or self.stderr
 
     @classmethod
     def error_notebook(cls, nb: nbformat.NotebookNode, message: str) :
@@ -1719,8 +1730,7 @@ class NotebookExecutor(Executor):
             return ExecutionResult.error_notebook(nb, "Execution timed out")
         except Exception as e:
             container.kill()
-            logger.error(f"Notebook execution failed: {e}", exc_info=e)
-            return ExecutionResult.error_notebook(nb, f"Execution failed: {safe_error_text(e)}")
+            return ExecutionResult.from_exception(e, notebook=nb)
         finally:
             self.log("Cleaning up Docker container")
             container.remove()

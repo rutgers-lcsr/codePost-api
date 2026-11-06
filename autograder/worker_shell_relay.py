@@ -10,12 +10,13 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict
 
+from docker.errors import DockerException
 import redis
 import redis.asyncio as redis_async
 from channels.db import database_sync_to_async
 from django.utils import timezone
 
-from autograder.services.safe_errors import safe_error_text
+from autograder.services.safe_errors import RunUnavailable, safe_error_text
 from autograder.services.shell_session_utils import (
     cleanup_staging_dir as _cleanup_staging_dir,
     format_mounts as _format_mounts,
@@ -23,6 +24,9 @@ from autograder.services.shell_session_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Shell users are course admins/superusers: Docker and "image missing" text tells them what to fix.
+SHELL_EXPECTED_ERRORS = (RunUnavailable, DockerException)
 
 METRICS_ACTIVE_KEY = "shell:metrics:active"
 METRICS_IN_KEY = "shell:metrics:in"
@@ -220,7 +224,7 @@ class WorkerShellRelay:
             )
         except Exception as e:
             logger.exception("Worker shell start failed")
-            await _apublish(self.redis_async, _out_channel(session_id), {"type": "error", "message": safe_error_text(e)})
+            await _apublish(self.redis_async, _out_channel(session_id), {"type": "error", "message": safe_error_text(e, SHELL_EXPECTED_ERRORS)})
             return
 
         expires_at = time.time() + timeout_seconds
