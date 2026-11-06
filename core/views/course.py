@@ -1261,10 +1261,12 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         STUDENT_VISIBLE_STATES minus section-hidden assignments; anyone else who can read
         the course (org staff of the org who is not a member) gets an empty list, because
         every per-id retrieve 403s for them today."""
-        from django.db.models import Avg, Count, Max, Min, Prefetch, Q
+        from django.db.models import Avg, Count, IntegerField, Max, Min, OuterRef, Prefetch, Q, Subquery
+        from django.db.models.functions import Coalesce
         from core.models import STUDENT_VISIBLE_STATES, Submission
         from core.permissions.helpers import assignmentFeedbackOpen, isGrader, isStudent
         from core.serializers.assignment import (
+            AssignmentGraderSerializer,
             AssignmentSerializerWithStatisticsAndSummary,
             AssignmentStudentSerializer,
             AssignmentStudentSerializerNoStats,
@@ -1296,6 +1298,20 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         # Serializer choice replicates AssignmentViewSet.get_serializer_class for retrieve —
         # including the quirk that a superuser who is not a course member falls through to
         # the student serializers, exactly as the per-id endpoint does.
+        if isCourseAdmin(user, course) or isGrader(user, course):
+            # The caller's queue counts (CallerQueueCountsMixin), in the same query. The
+            # queue length is a correlated subquery, not a filtered Count: joining
+            # submissions→students here would multiply the rows the stats aggregates
+            # below average over, so a group submission would weigh twice.
+            queue_length = (Submission.objects
+                            .filter(assignment=OuterRef('pk'), grader=None, students__in=course.students.all())
+                            .order_by().values('assignment')
+                            .annotate(n=Count('id', distinct=True)).values('n'))
+            qs = qs.annotate(
+                queue_length_anno=Coalesce(Subquery(queue_length, output_field=IntegerField()), 0),
+                my_finalized_count_anno=Count('submissions', filter=Q(submissions__grader=user, submissions__isFinalized=True), distinct=True),
+                my_unfinalized_count_anno=Count('submissions', filter=Q(submissions__grader=user, submissions__isFinalized=False), distinct=True),
+            )
         if isCourseAdmin(user, course):
             # Same annotations retrieve uses; without them the stats/summary fields
             # recompute per object (~8 queries × N assignments).
@@ -1310,7 +1326,7 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             )
             return Response(AssignmentSerializerWithStatisticsAndSummary(qs, many=True, context=context).data)
         if isGrader(user, course):
-            return Response(AssignmentSerializer(qs, many=True, context=context).data)
+            return Response(AssignmentGraderSerializer(qs, many=True, context=context).data)
 
         data = []
         for assignment in qs:

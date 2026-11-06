@@ -6,7 +6,7 @@ from core.constants import MAX_FILE_SIZE, MAX_SUBMISSION_TOTAL_SIZE
 from core.models import Assignment, AssignmentFile, RubricCategory, RubricComment, TestCase, Submission, Course, SubmissionFile, LearningObjective
 from rest_framework import serializers
 from rest_framework.request import Request
-from core.serializers.assignment import AssignmentSerializer, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats, AssignmentCloneSerializer, AssignmentGenerateTestSerializer, AssignmentGenerateTestResponseSerializer
+from core.serializers.assignment import AssignmentSerializer, AssignmentGraderSerializer, AssignmentStudentSerializer, AssignmentSerializerWithStatisticsAndSummary, AssignmentStudentSerializerNoStats, AssignmentStudentSerializerWithStats, AssignmentCloneSerializer, AssignmentGenerateTestSerializer, AssignmentGenerateTestResponseSerializer
 from core.serializers.assignmentDataSet import AssignmentDataSetSerializer
 from core.serializers.submission import AnonymousSubmissionSerializer, SubmissionSerializer, StudentSubmissionSerializer, SubmissionSerializerWithoutFiles, SubmissionWithTestsSerializer
 from core.serializers.rubricCategory import RubricCategorySerializer, RubricCategoryStudentSerializer
@@ -167,9 +167,10 @@ class AssignmentViewSet(ListProtectedViewSet):
       if isCourseAdmin(user, course):
         return AssignmentSerializerWithStatisticsAndSummary
 
-      # if a grader who isn't an admin, return without statistics
+      # if a grader who isn't an admin, return without statistics (but with the
+      # caller's queue counts)
       elif isGrader(user, course):
-        return AssignmentSerializer
+        return AssignmentGraderSerializer
 
       # user is a student only
       else:
@@ -361,7 +362,8 @@ class AssignmentViewSet(ListProtectedViewSet):
     
     toRet = {
         'id': assignment.id,
-        'unclaimed': submissions.count(),
+        # distinct: a group submission joins one row per active student
+        'unclaimed': submissions.distinct().count(),
         'finalized': assignment.submissions.filter(grader=user, isFinalized=True).count(),
         'unfinalized': assignment.submissions.filter(grader=user, isFinalized=False).count(),
     }

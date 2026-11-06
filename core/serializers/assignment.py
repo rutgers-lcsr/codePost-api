@@ -294,7 +294,65 @@ class AssignmentStudentSerializerWithStats(LiveStatisticsMixin, AssignmentStuden
     read_only_fields = AssignmentStudentSerializerNoStats.Meta.read_only_fields + ('mean', 'median')
 
 
-class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStatistics):
+CALLER_QUEUE_COUNT_FIELDS = ('queueLength', 'myFinalizedCount', 'myUnfinalizedCount')
+
+
+def claimable_submissions(assignment):
+  """The submissions Claim draws from: unclaimed and belonging to at least one active
+  student (mirrors drawUnassigned/queueLength; inactive-only submissions are not queued)."""
+  return assignment.submissions.filter(grader=None, students__in=assignment.course.students.all()).distinct()
+
+
+class CallerQueueCountsMixin(serializers.Serializer):
+  """The numbers GET /assignments/{id}/queueLength/ returns, on the serializers staff
+  receive, so the grader console's summary tables show real counts without one request
+  per assignment. Each reads the `*_anno` attribute courses/{id}/assignments/ annotates
+  and otherwise falls back to a query (the per-id retrieve)."""
+
+  queueLength = serializers.SerializerMethodField(
+      help_text="Unclaimed submissions from active students: what Claim draws from.")
+  myFinalizedCount = serializers.SerializerMethodField(
+      help_text="Submissions the caller has claimed and finalized.")
+  myUnfinalizedCount = serializers.SerializerMethodField(
+      help_text="Submissions the caller has claimed and not yet finalized.")
+
+  def _caller(self):
+    request = self.context.get('request')
+    return getattr(request, 'user', None)
+
+  @extend_schema_field(serializers.IntegerField)
+  def get_queueLength(self, obj):
+    val = getattr(obj, 'queue_length_anno', None)
+    if val is not None:
+      return val
+    return claimable_submissions(obj).count()
+
+  @extend_schema_field(serializers.IntegerField)
+  def get_myFinalizedCount(self, obj):
+    val = getattr(obj, 'my_finalized_count_anno', None)
+    if val is not None:
+      return val
+    user = self._caller()
+    return obj.submissions.filter(grader=user, isFinalized=True).count() if user else 0
+
+  @extend_schema_field(serializers.IntegerField)
+  def get_myUnfinalizedCount(self, obj):
+    val = getattr(obj, 'my_unfinalized_count_anno', None)
+    if val is not None:
+      return val
+    user = self._caller()
+    return obj.submissions.filter(grader=user, isFinalized=False).count() if user else 0
+
+
+class AssignmentGraderSerializer(CallerQueueCountsMixin, AssignmentSerializer):
+  """What a grader who is not a course admin receives: the staff assignment plus the
+  caller's queue counts (no course-wide statistics)."""
+
+  class Meta(AssignmentSerializer.Meta):
+    fields = AssignmentSerializer.Meta.fields + CALLER_QUEUE_COUNT_FIELDS
+
+
+class AssignmentSerializerWithStatisticsAndSummary(CallerQueueCountsMixin, AssignmentSerializerWithStatistics):
   submissions_count = serializers.SerializerMethodField()
   submissions_finalized_count = serializers.SerializerMethodField()
   submissions_inprogress_count = serializers.SerializerMethodField()
@@ -309,7 +367,7 @@ class AssignmentSerializerWithStatisticsAndSummary(AssignmentSerializerWithStati
     fields = AssignmentSerializerWithStatistics.Meta.fields + \
         ('submissions_count', 'submissions_finalized_count', 'submissions_inprogress_count',
          'submissions_unclaimed_count', 'submissions_missing_count', 'stats_max', 'stats_min',
-         'stats_mean')
+         'stats_mean') + CALLER_QUEUE_COUNT_FIELDS
 
 
 
