@@ -349,7 +349,11 @@ class CourseViewSet(SuperUserListProtectedViewSet):
         return Response({'providers': [result]})
 
     @extend_schema(request=AIProviderTestRequestSerializer, responses={200: AIProviderTestResultSerializer})
-    @action(detail=True, methods=["POST"], throttle_classes=[AIConnectionTestThrottle])
+    # permission_classes overridden: CoursePermissions only admits a POST on a course for
+    # users with the course-creation privilege, and require_capability('configure_ai')
+    # below is the real gate.
+    @action(detail=True, methods=["POST"], throttle_classes=[AIConnectionTestThrottle],
+            permission_classes=[IsAuthenticated])
     def aiTest(self, request, pk=None):
         """
         POST: Fire a small completion through the course's effective AI

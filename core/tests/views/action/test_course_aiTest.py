@@ -65,6 +65,19 @@ class TestCourseAITest(APITestCase):
         self.assertNotIn('_inputTokens', response.data)
 
     @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
+    def test_admin_without_course_creation_privilege_can_test(self):
+        """CoursePermissions only lets a POST on a course through for users with the
+        course-creation privilege; the capability check in the action is the real gate,
+        so an ordinary course admin must still be able to press "Test connection"."""
+        admin = Persona.ADMIN_OF_COURSE(self)
+        user = admin.user if hasattr(admin, 'user') else admin
+        user.profile.canCreateCourses = False
+        user.profile.save()
+        response = request_as('create', admin, self.endpoint, {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+
+    @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
     def test_custom_prompt_is_sent(self):
         admin = Persona.ADMIN_OF_COURSE(self)
         response = request_as('create', admin, self.endpoint, {'prompt': 'What is 2+2?'})
