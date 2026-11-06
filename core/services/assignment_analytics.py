@@ -293,6 +293,7 @@ def get_grader_consistency(assignment: Assignment) -> list[dict]:
             assignment=assignment,
             isFinalized=True,
             grader__isnull=False,
+            grade__isnull=False,  # ungraded rows would feed NULL to the stddev aggregate
         )
         .values(grader_email=F('grader__email'))
         .annotate(

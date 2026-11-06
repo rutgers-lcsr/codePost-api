@@ -135,6 +135,24 @@ class TestGradeDistribution:
         assert sum(d["count"] for d in dist) == 3
 
 
+class TestGraderConsistency:
+
+    def test_finalized_submission_with_null_grade_does_not_break_analytics(self, api_client, course):
+        # A finalized submission with no grade must not reach the stddev aggregate (on SQLite
+        # the NULL made the aggregate raise and the whole endpoint answered 503).
+        a = make_assignment(course, points=10)
+        s1, s2, s3 = students_of(course, 3)
+        make_sub(a, s1, grade=Decimal('4'), finalized=True)
+        make_sub(a, s2, grade=Decimal('6'), finalized=True)
+        make_sub(a, s3, grade=None, finalized=True)
+        resp = api_client.get(f"/assignments/{a.id}/analytics/")
+        assert resp.status_code == status.HTTP_200_OK
+        consistency = resp.data["graderConsistency"]
+        assert len(consistency) == 1
+        assert consistency[0]["meanGrade"] == 5.0
+        assert consistency[0]["count"] == 2
+
+
 class TestClassStatistics:
 
     def _grades(self, course, a, grades):
