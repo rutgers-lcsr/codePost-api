@@ -18,6 +18,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+OAUTH_PROVIDERS = ('AZURE', 'GOOGLE', 'OIDC')
+
 
 def get_organization_by_email_domain(domain, **filters):
     """
@@ -105,6 +107,113 @@ def sso_gate_error(organization, provider):
     return None
 
 
+def _json_error(message, status):
+    return JsonResponse(dict(error=message), status=status)
+
+
+def _initiate_organization(request):
+    """The organization an SSO login is for, from `org` or `email`: (organization, None),
+    or (None, error response)."""
+    org_id = request.query_params.get('org')
+    if org_id:
+        try:
+            return Organization.objects.get(id=org_id), None
+        except (Organization.DoesNotExist, ValueError, TypeError):
+            return None, _json_error('Organization not found', 404)
+    email = request.query_params.get('email')
+    organization = _organization_of_email(email) if email else None
+    if not organization:
+        return None, _json_error('Could not determine organization for SSO', 400)
+    return organization, None
+
+
+def _organization_of_email(email):
+    domain = email.split('@')[-1]
+    return get_organization_by_email_domain(domain) or _organization_of_unique_user(email)
+
+
+def _azure_endpoint(sso_config, leaf):
+    tenant = sso_config.get('tenant_id', 'common')
+    return f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/{leaf}"
+
+
+def _initiate_cas(request, organization, sso_config):
+    cas_url = sso_config.get('cas_server_url')
+    if not cas_url:
+        return _json_error('CAS Server URL is missing from config', 500)
+
+    # Pass org_id to service URL so we can retrieve config on callback.
+    # A validated `next` (OAuth consent flow) rides along too.
+    from core.views.agent_login import validate_next
+    next_path = validate_next(request.query_params.get('next'))
+    service_url = get_service_url(request, 'CAS', organization.id, next_path,
+                                  _issue_browser_state(request))
+    encoded_service = urllib.parse.quote(service_url)
+
+    # USE PROVIDED URL AS LOGIN ENDPOINT DIRECTLY (per user request)
+    separator = '&' if '?' in cas_url else '?'
+    return HttpResponseRedirect(f"{cas_url}{separator}service={encoded_service}")
+
+
+def _oidc_authorization_endpoint(sso_config):
+    """(authorization endpoint, None), or (None, error response)."""
+    discovery = sso_config.get('discovery_url')
+    if not discovery:
+        return None, _json_error('Discovery URL missing', 500)
+    try:
+        resp = requests.get(discovery, timeout=5).json()
+        return resp.get('authorization_endpoint'), None
+    except Exception as e:
+        return None, _json_error(f'Failed to fetch OIDC config: {e}', 500)
+
+
+def _authorization_endpoint(provider, sso_config):
+    """(authorization endpoint, None), or (None, error response)."""
+    if provider == 'AZURE':
+        return _azure_endpoint(sso_config, 'authorize'), None
+    if provider == 'GOOGLE':
+        return "https://accounts.google.com/o/oauth2/v2/auth", None
+    return _oidc_authorization_endpoint(sso_config)
+
+
+def _authorization_url(auth_endpoint, params):
+    """`auth_endpoint` with `params` merged into its existing query."""
+    url_parts = list(urllib.parse.urlparse(auth_endpoint))
+    query = dict(urllib.parse.parse_qsl(url_parts[4]))
+    query.update(params)
+    url_parts[4] = urllib.parse.urlencode(query)
+    return urllib.parse.urlunparse(url_parts)
+
+
+def _initiate_oauth(request, provider, organization, sso_config):
+    client_id = sso_config.get('client_id')
+    if not client_id:
+        return _json_error('Client ID is missing', 500)
+
+    redirect_uri = get_service_url(request, provider, organization.id)
+    state = _issue_browser_state(request)
+    from core.views.agent_login import validate_next
+    next_path = validate_next(request.query_params.get('next'))
+    # JSON so the OAuth consent flow's `next` can ride the state (the
+    # redirect_uri must stay constant for these providers). The callback
+    # keeps a plain-string fallback for entries cached before this change.
+    cache.set(f"sso_state:{state}",
+              json.dumps(dict(org=str(organization.id), next=next_path)),
+              timeout=600)  # 10 min TTL
+
+    auth_endpoint, error = _authorization_endpoint(provider, sso_config)
+    if error:
+        return error
+    if not auth_endpoint:
+        return _json_error('Could not determine authorization endpoint', 500)
+
+    params = dict(client_id=client_id, response_type='code', redirect_uri=redirect_uri,
+                  scope="openid email profile", state=state)
+    if provider == 'GOOGLE' and sso_config.get('hosted_domain'):
+        params['hd'] = sso_config.get('hosted_domain')
+    return HttpResponseRedirect(_authorization_url(auth_endpoint, params))
+
+
 @extend_schema(
     responses={302: OpenApiResponse(description='Redirect to SSO provider')}
 )
@@ -117,113 +226,22 @@ def initiate_sso(request, provider):
     Requires 'email' query param to identify the organization (and thus the config),
     OR 'org' ID directly.
     """
-    email = request.query_params.get('email')
-    org_id = request.query_params.get('org')
-    
-    organization = None
-    
-    if org_id:
-        try:
-            organization = Organization.objects.get(id=org_id)
-        except (Organization.DoesNotExist, ValueError, TypeError):
-            return JsonResponse({'error': 'Organization not found'}, status=404)
-    elif email:
-        domain = email.split('@')[-1]
-        organization = get_organization_by_email_domain(domain)
-
-        if not organization:
-            organization = _organization_of_unique_user(email)
-
-    if not organization:
-        return JsonResponse({'error': 'Could not determine organization for SSO'}, status=400)
+    organization, error = _initiate_organization(request)
+    if error:
+        return error
 
     rejection = sso_gate_error(organization, provider)
     if rejection:
         message, status_code = rejection
-        return JsonResponse({'error': message}, status=status_code)
+        return _json_error(message, status_code)
 
-    sso_config = organization.sso_config or {}
+    sso_config = organization.sso_config or dict()
 
-    # 1. CAS Logic
     if provider == 'CAS':
-        cas_url = sso_config.get('cas_server_url')
-        if not cas_url:
-            return JsonResponse({'error': 'CAS Server URL is missing from config'}, status=500)
-            
-        # Pass org_id to service URL so we can retrieve config on callback.
-        # A validated `next` (OAuth consent flow) rides along too.
-        from core.views.agent_login import validate_next
-        next_path = validate_next(request.query_params.get('next'))
-        service_url = get_service_url(request, provider, organization.id, next_path,
-                                      _issue_browser_state(request))
-        encoded_service = urllib.parse.quote(service_url)
-        
-        # USE PROVIDED URL AS LOGIN ENDPOINT DIRECTLY (per user request)
-        separator = '&' if '?' in cas_url else '?'
-        redirect_url = f"{cas_url}{separator}service={encoded_service}"
-        return HttpResponseRedirect(redirect_url)
-
-    # 2. OAuth Logic (Azure, Google, OIDC)
-    elif provider in ['AZURE', 'GOOGLE', 'OIDC']:
-        client_id = sso_config.get('client_id')
-        if not client_id:
-            return JsonResponse({'error': 'Client ID is missing'}, status=500)
-            
-        scopes = "openid email profile"
-        redirect_uri = get_service_url(request, provider, organization.id)
-        state = _issue_browser_state(request)
-        from core.views.agent_login import validate_next
-        next_path = validate_next(request.query_params.get('next'))
-        # JSON so the OAuth consent flow's `next` can ride the state (the
-        # redirect_uri must stay constant for these providers). The callback
-        # keeps a plain-string fallback for entries cached before this change.
-        cache.set(f"sso_state:{state}",
-                  json.dumps({"org": str(organization.id), "next": next_path}),
-                  timeout=600)  # 10 min TTL
-
-        auth_endpoint = ""
-        
-        if provider == 'AZURE':
-            tenant = sso_config.get('tenant_id', 'common')
-            auth_endpoint = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"
-        elif provider == 'GOOGLE':
-            auth_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
-            hd = sso_config.get('hosted_domain')
-            if hd:
-                # Optimized for Google Hosted Domain
-                pass 
-        elif provider == 'OIDC':
-            discovery = sso_config.get('discovery_url')
-            if not discovery:
-                return JsonResponse({'error': 'Discovery URL missing'}, status=500)
-            try:
-                resp = requests.get(discovery, timeout=5).json()
-                auth_endpoint = resp.get('authorization_endpoint')
-            except Exception as e:
-                return JsonResponse({'error': f'Failed to fetch OIDC config: {e}'}, status=500)
-                
-        if not auth_endpoint:
-            return JsonResponse({'error': 'Could not determine authorization endpoint'}, status=500)
-            
-        params = {
-            'client_id': client_id,
-            'response_type': 'code',
-            'redirect_uri': redirect_uri,
-            'scope': scopes,
-            'state': state,
-        }
-        if provider == 'GOOGLE' and sso_config.get('hosted_domain'):
-            params['hd'] = sso_config.get('hosted_domain')
-            
-        url_parts = list(urllib.parse.urlparse(auth_endpoint))
-        query = dict(urllib.parse.parse_qsl(url_parts[4]))
-        query.update(params)
-        url_parts[4] = urllib.parse.urlencode(query)
-        full_auth_url = urllib.parse.urlunparse(url_parts)
-        
-        return HttpResponseRedirect(full_auth_url)
-
-    return JsonResponse({'error': f'Unknown provider {provider}'}, status=400)
+        return _initiate_cas(request, organization, sso_config)
+    if provider in OAUTH_PROVIDERS:
+        return _initiate_oauth(request, provider, organization, sso_config)
+    return _json_error(f'Unknown provider {provider}', 400)
 
 
 @extend_schema(
