@@ -18176,6 +18176,8 @@ components:
                 type: boolean
               generate_personalized_quiz_questions:
                 type: boolean
+              edit_unapplied_rubric_comments:
+                type: boolean
               edit_assignment:
                 type: boolean
               copy_assignment:
@@ -18383,6 +18385,8 @@ components:
             generate_ai_quiz_questions:
               type: boolean
             generate_personalized_quiz_questions:
+              type: boolean
+            edit_unapplied_rubric_comments:
               type: boolean
             edit_assignment:
               type: boolean
@@ -22933,6 +22937,9 @@ components:
           type: string
           nullable: true
           maxLength: 255
+        isApplied:
+          type: boolean
+          readOnly: true
     PatchedSaveQuizAnswerRequest:
       type: object
       properties:
@@ -25363,9 +25370,13 @@ components:
           type: string
           nullable: true
           maxLength: 255
+        isApplied:
+          type: boolean
+          readOnly: true
       required:
       - category
       - id
+      - isApplied
       - pointDelta
     RunQuizResponseCodeRequest:
       type: object
@@ -26460,6 +26471,8 @@ components:
             generate_ai_quiz_questions:
               type: boolean
             generate_personalized_quiz_questions:
+              type: boolean
+            edit_unapplied_rubric_comments:
               type: boolean
             edit_assignment:
               type: boolean

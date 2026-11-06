@@ -134,6 +134,7 @@ class CommentWithRubricSerializer(serializers.ModelSerializer):
   color = serializers.SerializerMethodField()
   tags = serializers.SlugRelatedField(many=True, slug_field='label', read_only=True)
   rubricComment = RubricCommentSerializer(read_only=True, allow_null=True)
+  rubric_comments_applied = True  # the nested rubric comment is used by this very comment
 
   class Meta:
     model = Comment

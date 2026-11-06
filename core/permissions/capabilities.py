@@ -31,6 +31,7 @@ class Capability(str, Enum):
     GRADE_QUIZ = "grade_quiz"
     GENERATE_AI_QUIZ_QUESTIONS = "generate_ai_quiz_questions"
     GENERATE_PERSONALIZED_QUIZ_QUESTIONS = "generate_personalized_quiz_questions"
+    EDIT_UNAPPLIED_RUBRIC_COMMENTS = "edit_unapplied_rubric_comments"
 
     # -- Assignment-level --
     EDIT_ASSIGNMENT = "edit_assignment"
@@ -100,6 +101,7 @@ CAPABILITY_DESCRIPTIONS: dict[Capability, str] = {
     Capability.COPY_ASSIGNMENT: "Duplicate an assignment's configuration, rubric, and test cases to another course.",
     Capability.VIEW_ASSIGNMENT: "View the assignment and its associated submissions.",
     Capability.EDIT_RUBRIC: "Create, modify, or delete rubric categories, comments, and point values.",
+    Capability.EDIT_UNAPPLIED_RUBRIC_COMMENTS: "Add rubric comments and edit those no grading comment uses yet; never delete (graders need the course's graders-can-edit-rubric setting).",
     Capability.VIEW_RUBRIC: "View the rubric structure and comments.",
     Capability.RELEASE_GRADES: "Toggle feedback release so students can view their grades and comments.",
     Capability.MANAGE_EXTENSIONS: "Grant deadline extensions to individual students or groups.",
@@ -213,6 +215,7 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
         # Course level cannot know an assignment's collaborativeRubricMode, so only the
         # roles that may always edit (see RubricCategoryPermissions) are granted here.
         Capability.EDIT_RUBRIC: (admin or rubric_editor) and not archived,
+        Capability.EDIT_UNAPPLIED_RUBRIC_COMMENTS: (admin or rubric_editor or (grader and course.allowGradersToEditRubric)) and not archived,
         Capability.GRADE_QUIZ: admin or quiz_grader or (grader and course.gradersCanGradeQuizzes),
         Capability.GENERATE_AI_QUIZ_QUESTIONS: quiz_suggestions_on,
         Capability.GENERATE_PERSONALIZED_QUIZ_QUESTIONS: personalized_quiz_on,

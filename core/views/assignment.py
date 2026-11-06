@@ -74,7 +74,7 @@ from core.serializers.actionResponses import CapabilitiesResponseSerializer
 
 from django.utils import timezone
 
-from django.db.models import Count, Q, Max, Min, Avg, Value, DecimalField, FloatField, Prefetch, FETCH_PEERS
+from django.db.models import Count, Exists, OuterRef, Q, Max, Min, Avg, Value, DecimalField, FloatField, Prefetch, FETCH_PEERS
 from django.db.models.functions import Coalesce
 
 from core.utils import copy_assignment
@@ -388,7 +388,7 @@ class AssignmentViewSet(ListProtectedViewSet):
     else:
       categorySerializer = RubricCategoryStudentSerializer(categories, many=True, context={'request': request})
 
-    comments = RubricComment.objects.filter(category__assignment=assignment)
+    comments = RubricComment.objects.filter(category__assignment=assignment).annotate(applied=Exists(Comment.objects.filter(rubricComment=OuterRef('pk'))))
     commentSerializer = RubricCommentSerializer(comments, many=True, context={'request': request})
 
     toRet = {
