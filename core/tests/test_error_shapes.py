@@ -72,6 +72,13 @@ class TestErrorBodyShapeMiddleware(SimpleTestCase):
         body = self._run(JsonResponse({'errors': {'email': ['Enter a valid email.']}}, status=400))
         self.assertEqual(body['detail'], 'Enter a valid email.')
 
+    def test_serializer_non_field_errors_gain_detail_and_camel_case_alias(self):
+        # A serializer validate() error is {"non_field_errors": [...]} (DRF's snake_case key).
+        body = self._run(JsonResponse({'non_field_errors': ['The Course is archived and cannot be edited.']}, status=400))
+        self.assertEqual(body['detail'], 'The Course is archived and cannot be edited.')
+        self.assertEqual(body['nonFieldErrors'], ['The Course is archived and cannot be edited.'])
+        self.assertEqual(body['non_field_errors'], ['The Course is archived and cannot be edited.'])
+
     def test_field_errors_and_existing_detail_untouched(self):
         self.assertEqual(self._run(JsonResponse({'name': ['Required.']}, status=400)), {'name': ['Required.']})
         self.assertEqual(self._run(JsonResponse({'detail': 'x'}, status=400)), {'detail': 'x'})

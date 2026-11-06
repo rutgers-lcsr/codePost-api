@@ -173,6 +173,10 @@ class ErrorBodyShapeMiddleware:
                 if key == 'error' and isinstance(body.get('message'), str) and body['message']:
                     return {**body, 'detail': body['message']}
                 return {**body, 'detail': body[key]}
+        non_field = body.get('non_field_errors')
+        if isinstance(non_field, list) and non_field and isinstance(non_field[0], str):
+            # A serializer validate() failure; the SPA reads `nonFieldErrors` and `detail`.
+            return {**body, 'detail': non_field[0], 'nonFieldErrors': non_field}
         errors = body.get('errors')
         if isinstance(errors, dict):
             for messages in errors.values():
