@@ -315,6 +315,15 @@ class CASCallbackFlowTests(APITestCase):
     resp, _ = self._callback(side_effect=RuntimeError("boom"))
     self.assertEqual(resp["Location"], err(GENERIC))
 
+  def test_non_string_server_url_answers_the_generic_failure(self):
+    # A misconfigured (non-string) cas_server_url used to escape as a 500; since the
+    # split the validation URL is built inside the guarded CAS call.
+    self.org.sso_config = dict(cas_server_url=123)
+    self.org.save()
+    resp, get = self._callback(cas_ok())
+    self.assertEqual(resp["Location"], err(GENERIC))
+    get.assert_not_called()
+
   def test_missing_ticket_is_refused_before_the_state_is_claimed(self):
     resp, get = self._callback(cas_ok(), params=dict(ticket=None))
     self.assertEqual(resp["Location"], err("No ticket provided"))
