@@ -1092,6 +1092,30 @@ class TestAISuggestions:
         assert SuggestedQuizQuestion.objects.filter(pk=old.pk, status='pending').exists()
         assert SuggestedQuizQuestion.objects.filter(assignment=quiz_setup['assignment']).count() == 1
 
+    def test_unexpected_exception_does_not_leak_text_into_job_error(self, quiz_setup, monkeypatch):
+        """An exception raised out of generation (for example a prompt template that fails
+        to format) used to be stored verbatim as ``The AI request failed: <str(e)>`` and
+        served to course staff by the job endpoint. The message must be a fixed one."""
+        from core.tasks import generate_quiz_question_suggestions
+        _enable_ai(monkeypatch)
+
+        async def boom(self, *args, **kwargs):
+            raise RuntimeError("SECRET-INTERNAL 'str' object has no attribute 'nope' at /srv/app")
+
+        monkeypatch.setattr('core.services.ai_service.AIService.generate_quiz_questions', boom)
+        old, job = self._pending_and_job(quiz_setup)
+
+        generate_quiz_question_suggestions(
+            requested_by_id=quiz_setup['admin'].id,
+            assignment_id=quiz_setup['assignment'].id, job_id=job.id)
+
+        job.refresh_from_db()
+        assert job.status == 'failed'
+        assert job.errorMessage
+        assert 'SECRET-INTERNAL' not in job.errorMessage
+        assert '/srv/app' not in job.errorMessage
+        assert 'nope' not in job.errorMessage
+
     def test_successful_run_replaces_pending_queue(self, quiz_setup, monkeypatch):
         from core.models import SuggestedQuizQuestion
         from core.tasks import generate_quiz_question_suggestions

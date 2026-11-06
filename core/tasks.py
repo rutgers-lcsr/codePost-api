@@ -520,6 +520,13 @@ def _normalize_choices(raw_choices) -> list:
     return out
 
 
+# Stored on a QuizSuggestionJob when generation raises something we did not classify. The
+# job is served to course staff, so it must not carry the exception text (prompt-template
+# internals, file paths, provider details); the full error is in the server log.
+_UNEXPECTED_AI_FAILURE = ('The AI request failed unexpectedly. Try again; if it keeps failing, '
+                          'ask an administrator to check the server log.')
+
+
 def _update_suggestion_job(job_id: int | None, **fields):
     """Persist generation-run state on the QuizSuggestionJob (no-op without a job).
 
@@ -623,7 +630,7 @@ def generate_quiz_question_suggestions(
         except Exception as e:
             logger.error(f"[QuizGen] Generation failed for course {course.id}: {e}", exc_info=True)
             _update_suggestion_job(job_id, status='failed',
-                                   errorMessage=f'The AI request failed: {str(e)[:500]}')
+                                   errorMessage=_UNEXPECTED_AI_FAILURE)
             return
 
         if not result.success or not result.text:
@@ -1132,7 +1139,7 @@ def preview_generated_section(
     except Exception as e:
         logger.error(f"[QuizPreview] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
         _update_suggestion_job(job_id, status='failed',
-                               errorMessage=f'The AI request failed: {str(e)[:500]}')
+                               errorMessage=_UNEXPECTED_AI_FAILURE)
         return
 
     service.record_usage(result, user=user, request_type='personalized_quiz_generation')
