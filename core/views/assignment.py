@@ -389,7 +389,8 @@ class AssignmentViewSet(ListProtectedViewSet):
       categorySerializer = RubricCategoryStudentSerializer(categories, many=True, context={'request': request})
 
     comments = RubricComment.objects.filter(category__assignment=assignment).annotate(applied=Exists(Comment.objects.filter(rubricComment=OuterRef('pk'))))
-    commentSerializer = RubricCommentSerializer(comments, many=True, context={'request': request})
+    commentSerializer = RubricCommentSerializer(comments, many=True, context={
+        'request': request, 'viewer_is_staff': user.is_superuser or isCourseStaff(user, course)})
 
     toRet = {
         'id': assignment.id,

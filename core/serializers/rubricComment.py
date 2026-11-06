@@ -3,6 +3,7 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from core.serializers.template import ModelSerializerWithPOSTCheck
 from core.models import RubricComment
+from core.permissions.helpers import isCourseStaff
 
 from haikunator import Haikunator
 
@@ -32,15 +33,29 @@ class RubricCommentSerializer(ModelSerializerWithPOSTCheck):
     extra_kwargs = {"text": {"trim_whitespace": False}, "explanation": {
         "trim_whitespace": False}, "instructionText": {"trim_whitespace": False}}
 
-  @extend_schema_field(serializers.BooleanField())
+  @extend_schema_field(serializers.BooleanField(allow_null=True))
   def get_isApplied(self, obj):
-    """True once any grading Comment uses this rubric comment. Listings annotate
-    `applied` so this costs no per-comment query; a parent that only nests comments
-    which use the rubric comment sets `rubric_comments_applied`."""
+    """True once any grading Comment uses this rubric comment; None for anyone but
+    course staff and superusers (it is grading information about other students'
+    submissions). Listings annotate `applied` so this costs no per-comment query; a
+    parent that only nests comments which use the rubric comment sets
+    `rubric_comments_applied`."""
     if getattr(self.parent, 'rubric_comments_applied', False):
       return True
+    if not self._viewer_is_staff(obj):
+      return None
     applied = getattr(obj, 'applied', None)
     return obj.comments.exists() if applied is None else applied
+
+  def _viewer_is_staff(self, obj):
+    """A view that already decided (the rubric listing) passes `viewer_is_staff`."""
+    known = self.context.get('viewer_is_staff')
+    if known is not None:
+      return known
+    user = getattr(self.context.get('request'), 'user', None)
+    if user is None:
+      return False
+    return user.is_superuser or isCourseStaff(user, obj.category.assignment.course)
 
   def validate(self, data):
     newData = super().validate(data)

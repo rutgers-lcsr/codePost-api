@@ -31,6 +31,7 @@ class TestRubricCommentIsApplied(APITestCase):
                 assignment=self.assignment, name='cat', pointLimit=50, sortKey=1)
             student = StudentFactory(course='applied', organization=self.org)
             self.course.students.add(student)
+            self.student = student
             submission = SubmissionFactory(assignment=self.assignment)
             submission.students.add(student)
             self.file = submission.files.first()
@@ -61,6 +62,35 @@ class TestRubricCommentIsApplied(APITestCase):
         applied, free = self._make(True), self._make(False)
         self.assertTrue(self.client.get(f'/rubricComments/{applied.id}/').data['isApplied'])
         self.assertFalse(self.client.get(f'/rubricComments/{free.id}/').data['isApplied'])
+
+    def _open_feedback_to_student(self):
+        with factory.django.mute_signals(post_save):
+            self.assignment.state = 'published'
+            self.assignment.feedbackStatus = 'released'
+            self.assignment.save()
+        self.client.force_authenticate(user=self.student)
+
+    def test_students_are_not_told_which_comments_graders_applied(self):
+        """Whether a rubric comment was used is grading information about other students'
+        submissions: once feedback opens a student reads the rubric, but not that."""
+        applied, free = self._make(True), self._make(False)
+        self._open_feedback_to_student()
+        listed = self._rubric()
+        self.assertIn(applied.id, listed)
+        self.assertEqual(set(listed.values()), {None})
+        for rc in (applied, free):
+            response = self.client.get(f'/rubricComments/{rc.id}/')
+            self.assertEqual(response.status_code, 200)
+            self.assertIsNone(response.data['isApplied'])
+
+    def test_graders_and_superusers_see_applied(self):
+        from django.contrib.auth.models import User
+        applied = self._make(True)
+        superuser = User.objects.create_superuser('root@x.edu', 'root@x.edu', 'Rootabega1!')
+        for viewer in (self.grader, superuser):
+            self.client.force_authenticate(user=viewer)
+            self.assertTrue(self._rubric()[applied.id])
+            self.assertTrue(self.client.get(f'/rubricComments/{applied.id}/').data['isApplied'])
 
     def test_listing_query_count_does_not_grow_per_comment(self):
         self._make(True)
