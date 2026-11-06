@@ -1440,8 +1440,10 @@ def get_roster_permission_errors(user, request, course):
         return returnNotAuthorized()
     if request.method == "GET":
         # Full roster access requires admin or supergrader — broader than view_roster
-        # capability (which includes regular graders for lighter UI checks).
-        if not (isCourseAdmin(user, course) or isSuperGrader(user, course) or user.is_superuser):
+        # capability (which includes regular graders for lighter UI checks). Org staff of
+        # the course's organization read the roster they may edit.
+        org_staff = user.profile.isOrgStaff and user.profile.organization_id == course.organization_id
+        if not (isCourseAdmin(user, course) or isSuperGrader(user, course) or user.is_superuser or org_staff):
             return returnForbidden()
     elif request.method == "PATCH":
         if not (user.is_superuser or (check_capability(user, 'manage_roster', course) and user.profile.canModifyRosters)):

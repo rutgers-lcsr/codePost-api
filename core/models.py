@@ -264,6 +264,16 @@ class Profile(BaseModel):
       kwargs.pop('stripeCustomerId')
     super().__init__(*args, **kwargs)
 
+  def save(self, *args, **kwargs):
+    # Org staff manage their organization's course rosters, and the roster PATCH also
+    # requires canModifyRosters, so being org staff forces it on.
+    if self.isOrgStaff and not self.canModifyRosters:
+      self.canModifyRosters = True
+      update_fields = kwargs.get('update_fields')
+      if update_fields is not None and 'canModifyRosters' not in update_fields:
+        kwargs['update_fields'] = [*update_fields, 'canModifyRosters']
+    super().save(*args, **kwargs)
+
   def __str__(self):
     return self.user.email
 

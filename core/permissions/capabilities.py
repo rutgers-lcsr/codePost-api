@@ -204,7 +204,7 @@ def compute_course_capabilities(user, course, *, is_course_scoped: bool = False,
     caps = {
         Capability.VIEW_COURSE: member,
         Capability.EDIT_COURSE_SETTINGS: (admin or org_staff) and not archived,
-        Capability.MANAGE_ROSTER: admin and not archived,
+        Capability.MANAGE_ROSTER: (admin or org_staff) and not archived,
         Capability.VIEW_ROSTER: staff or admin,
         Capability.MANAGE_SECTIONS: admin and not archived,
         Capability.VIEW_ANALYTICS: admin,
