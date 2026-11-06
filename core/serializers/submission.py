@@ -155,7 +155,7 @@ class SubmissionSerializer(SubmissionSerializerWithoutFiles):
 
     # Check that if isFinalized == true, throw an error if grader or grade is null
     if newFields['isFinalized']:
-      if newFields['grader'] is None:
+      if newFields.get('grader') is None:
         raise serializers.ValidationError("Finalized submission must have a grader.")
 
     # Check that at least one student on the submission has enough Late Day Credits left.

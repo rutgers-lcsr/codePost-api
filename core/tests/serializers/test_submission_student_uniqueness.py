@@ -26,3 +26,22 @@ class TestSubmissionStudentUniqueness(APITestCase):
         self.assertIn("already have submissions", str(response.data))
         self.assertEqual(list(sub_a.students.all()), [s0])
         self.assertEqual(list(sub_b.students.all()), [s1])
+
+
+class TestSubmissionFinalizeWithoutGrader(APITestCase):
+
+    def setUp(self):
+        setUpBase(self)
+
+    def test_finalizing_an_ungraded_submission_is_a_400_not_a_500(self):
+        """An unclaimed submission has no grader, so the proposed fields omit it; the
+        finalize check must still answer 400 with a message rather than raise KeyError."""
+        sub = self.DB["Submission"]
+        sub.students.set([self.course.students.first()])
+        sub.grader = None
+        sub.isFinalized = False
+        sub.save()
+        admin = self.course.courseAdmins.first()
+        response = request_as("update", admin, f"/submissions/{sub.id}/", {"isFinalized": True})
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("must have a grader", str(response.data))
