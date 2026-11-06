@@ -78,6 +78,33 @@ class TestCourseAITest(APITestCase):
         self.assertTrue(response.data['success'])
 
     @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
+    def test_course_scoped_credentials_are_refused(self):
+        """A course API key (any scope) or a course-scoped JWT must not fire provider calls
+        with the course's AI key and a caller-chosen prompt: only a signed-in course admin
+        may test the connection."""
+        from rest_framework.test import APIClient
+        from core.models import CourseAPIKey
+        from core.views.auth import access_token_for_user
+        admin = Persona.ADMIN_OF_COURSE(self)
+        creator = admin.user if hasattr(admin, 'user') else admin
+        credentials = []
+        for scope in ('read', 'admin'):
+            raw = CourseAPIKey.generate_key(self.course.id)
+            CourseAPIKey.objects.create(
+                course=self.course, name=f'{scope}-key', created_by=creator, scope=scope,
+                key_prefix=raw.rsplit('_', 1)[0] + '_', hashed_key=CourseAPIKey.hash_key(raw))
+            credentials.append((scope, f'CourseKey {raw}'))
+        scoped_jwt = access_token_for_user(creator, course_id=self.course.id)
+        credentials.append(('course-scoped JWT', f'Bearer {scoped_jwt}'))
+        for label, header in credentials:
+            client = APIClient()
+            client.credentials(HTTP_AUTHORIZATION=header)
+            response = client.post(self.endpoint, {}, format='json')
+            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN, label)
+            self.assertIsInstance(response.data.get('detail'), str, label)
+        self.assertFalse(AIUsageRecord.objects.exists())
+
+    @patch('core.services.ai_service.AIService._dispatch_provider', new=_fake_dispatch_ok)
     def test_custom_prompt_is_sent(self):
         admin = Persona.ADMIN_OF_COURSE(self)
         response = request_as('create', admin, self.endpoint, {'prompt': 'What is 2+2?'})

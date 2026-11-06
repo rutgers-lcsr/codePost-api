@@ -170,6 +170,22 @@ class TestDashboardApproval:
         row.refresh_from_db()
         assert row.approved_at is None
 
+    def test_agents_own_key_cannot_deny_and_is_told_why(
+            self, api_client, admin_key, course, empty_assignment):
+        from core.models import PendingAgentAction
+
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        row = PendingAgentAction.objects.get(course=course)
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"CourseKey {admin_key}")
+        resp = api_client.post(
+            f"/courses/{course.id}/pendingAgentActions/{row.id}/deny/")
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert "course-scoped" in resp.data["detail"]
+        row.refresh_from_db()
+        assert row.denied_at is None
+
     def test_retry_while_pending_refuses_again(
             self, api_client, admin_key, course, empty_assignment):
         from core.models import Assignment

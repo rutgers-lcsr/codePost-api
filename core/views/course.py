@@ -371,6 +371,15 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         course: Course = self.get_object()
 
+        # The permission_classes override above dropped CoursePermissions, which used to keep
+        # course-scoped credentials out incidentally; a course key must never spend the
+        # course's AI key on a prompt it chooses.
+        if get_course_scope_id(request) is not None:
+            return Response(
+                {"detail": "Only a signed-in course admin may test the AI connection, "
+                           "never a course-scoped credential."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         require_capability(user, 'configure_ai', course)
 
         body = AIProviderTestRequestSerializer(data=request.data)
@@ -1043,7 +1052,11 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
         course = self.get_object()
         if get_course_scope_id(request) is not None:
-            return Response(status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "Only a signed-in course admin may deny agent "
+                           "actions, never a course-scoped credential."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         if not (request.user.is_superuser or isCourseAdmin(request.user, course)):
             return returnForbidden()
 
