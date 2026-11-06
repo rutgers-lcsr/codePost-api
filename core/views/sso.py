@@ -13,12 +13,15 @@ import requests
 import secrets
 import json
 import urllib.parse
+import base64
 import xml.etree.ElementTree as ET
 import logging
 
 logger = logging.getLogger(__name__)
 
 OAUTH_PROVIDERS = ('AZURE', 'GOOGLE', 'OIDC')
+SSO_GENERIC_ERROR = "An error occurred during SSO authentication. Please try again."
+USERINFO_URLS = dict(GOOGLE='https://www.googleapis.com/oauth2/v3/userinfo', AZURE='https://graph.microsoft.com/v1.0/me')
 
 
 def get_organization_by_email_domain(domain, **filters):
@@ -244,269 +247,254 @@ def initiate_sso(request, provider):
     return _json_error(f'Unknown provider {provider}', 400)
 
 
-@extend_schema(
-    responses={302: OpenApiResponse(description='Redirect to frontend with token')}
-)
-@api_view(['GET'])
-@permission_classes([AllowAny])
-@throttle_classes([SSORateThrottle])
-def sso_callback(request, provider):
-    """
-    Handles the callback from the SSO provider.
-    Validates ticket/code, creates session, redirects to frontend.
-    """
-    frontend_url = getattr(settings, 'CLIENT_URL', 'http://localhost:3000') 
-    
-    def error_redirect(msg):
-        msg = urllib.parse.quote(msg)
-        return HttpResponseRedirect(f"{frontend_url}/?error={msg}")
+def _frontend_url():
+    return getattr(settings, 'CLIENT_URL', 'http://localhost:3000')
 
-    org_id = request.query_params.get('org')
+
+def _error_redirect(msg):
+    return HttpResponseRedirect(f"{_frontend_url()}/?error={urllib.parse.quote(msg)}")
+
+
+def _callback_organization(org_id, provider):
+    """The organization a callback is for: (organization, None), or (None, error message)."""
     if not org_id:
-        return error_redirect('Organization ID missing from callback')
-        
+        return None, 'Organization ID missing from callback'
     try:
         organization = Organization.objects.get(id=org_id)
     except (Organization.DoesNotExist, ValueError, TypeError):
-        return error_redirect('Organization not found')
-
+        return None, 'Organization not found'
     rejection = sso_gate_error(organization, provider)
     if rejection:
-        return error_redirect(rejection[0])
+        return None, rejection[0]
+    return organization, None
 
-    sso_config = organization.sso_config or {}
-    email = None
-    # OAuth consent flow: set by the CAS query param or the provider-state JSON.
-    oauth_next = None
 
-    # --- CAS VALIDATION ---
+def _cas_validation_url(cas_url, cas_version):
+    validate_path = dict([('3', '/p3/serviceValidate'), ('1', '/validate')]).get(cas_version, '/serviceValidate')
+    # If user provided default '/login' URL, strip it to find base.
+    validation_base = cas_url.rstrip('/')
+    if validation_base.endswith('/login'):
+        validation_base = validation_base[:-6]
+    return f"{validation_base}{validate_path}"
+
+
+def _cas_v1_user(text):
+    """CAS 1.0: two lines. First 'yes', second username."""
+    lines = text.splitlines()
+    if lines and lines[0].strip() == 'yes':
+        return lines[1].strip()
+    return None
+
+
+def _cas_xml_user(root):
+    """(username, None), or (None, error message) when CAS reports a failure."""
+    namespaces = dict(cas='http://www.yale.edu/tp/cas')
+    auth_success = root.find('.//cas:authenticationSuccess', namespaces)
+    if auth_success is not None:
+        user_elem = auth_success.find('cas:user', namespaces)
+        return (user_elem.text if user_elem is not None else None), None
+    failure = root.find('.//cas:authenticationFailure', namespaces)
+    if failure is not None:
+        msg = failure.text.strip() if failure.text else "Unknown"
+        logger.error(f"CAS Auth Failure Response: {msg}")
+        return None, "SSO authentication failed. Please try again or contact support."
+    # Fallback for the user tag directly
+    for elem in root.iter():
+        if elem.tag.endswith('user'):
+            return elem.text, None
+    return None, None
+
+
+def _cas_response_user(response, cas_version):
+    """(username, None), or (None, error message); None, None when CAS named nobody."""
+    if cas_version == '1':
+        return _cas_v1_user(response.text), None
+    # CAS 2.0/3.0: XML
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as e:
+        logger.error(f"XML Parse Error: {e} Content: {response.text}")
+        return None, 'Invalid XML from CAS server'
+    return _cas_xml_user(root)
+
+
+def _cas_email(request, organization, org_id):
+    """Validate the CAS ticket: (username, None), or (None, error message)."""
+    ticket = request.query_params.get('ticket')
+    if not ticket:
+        return None, 'No ticket provided'
+
+    # Refuse a ticket from a login this browser did not start (login CSRF)
+    # before spending it at CAS.
+    state = request.query_params.get('state')
+    state_error = _browser_state_error(request, state)
+    if state_error:
+        return None, state_error
+
+    sso_config = organization.sso_config or dict()
+    cas_url = sso_config.get('cas_server_url')
+    if not cas_url:
+        return None, 'CAS Server URL missing'
+
+    cas_version = str(sso_config.get('cas_version', '3'))
+    # Reconstruct the EXACT service URL used in initiation (including query
+    # params, the raw next must round-trip byte-for-byte for CAS).
+    service_url = get_service_url(request, 'CAS', org_id,
+                                  request.query_params.get('next'), state)
+    params = dict(service=service_url, ticket=ticket)
+
+    try:
+        response = requests.get(_cas_validation_url(cas_url, cas_version), params=params,
+                                timeout=10, verify=True)
+        if response.status_code != 200:
+            logger.error(f"CAS Validation Failed Status: {response.status_code} Body: {response.text}")
+            return None, 'Failed to contact CAS server'
+        return _cas_response_user(response, cas_version)
+    except Exception as e:
+        logger.error(f"CAS Validation Error: {e}")
+        return None, SSO_GENERIC_ERROR
+
+
+def _split_cached_state(cached_state):
+    """(org id, next) from a cached OAuth state, JSON or the older plain org id."""
+    try:
+        state_data = json.loads(cached_state)
+    except (TypeError, ValueError):
+        state_data = None
+    if isinstance(state_data, dict):
+        return state_data.get('org'), state_data.get('next')
+    # Entry cached before the JSON format landed. Note a bare numeric
+    # org id ("123") parses as JSON too, hence the isinstance check,
+    # not just the except.
+    return cached_state, None
+
+
+def _claim_oauth_state(request, org_id):
+    """Claim the OAuth state (CSRF, one-time use): (next, None), or (None, error message)."""
+    received_state = request.query_params.get('state')
+    state_error = _browser_state_error(request, received_state)
+    if state_error:
+        return None, state_error
+    cached_state = cache.get(f"sso_state:{received_state}")
+    if cached_state is None:
+        return None, 'Invalid or expired state parameter'
+    cache.delete(f"sso_state:{received_state}")  # One-time use
+    cached_org_id, oauth_next = _split_cached_state(cached_state)
+    if str(org_id) != cached_org_id:
+        return None, 'State parameter does not match organization'
+    return oauth_next, None
+
+
+def _oidc_endpoints(sso_config):
+    """(token endpoint, userinfo endpoint, error message) from OIDC discovery."""
+    discovery = sso_config.get('discovery_url')
+    try:
+        if not discovery:
+            return None, None, 'Discovery URL missing'
+        resp = requests.get(discovery, timeout=5).json()
+        return resp.get('token_endpoint'), resp.get('userinfo_endpoint'), None
+    except Exception as e:
+        logger.error(f"OIDC discovery failed in callback: {e}")
+        return None, None, 'OIDC discovery failed in callback'
+
+
+def _oauth_endpoints(provider, sso_config):
+    """(token endpoint, userinfo endpoint, error message)."""
+    if provider == 'AZURE':
+        return _azure_endpoint(sso_config, 'token'), '', None
+    if provider == 'GOOGLE':
+        return "https://oauth2.googleapis.com/token", '', None
+    token_endpoint, userinfo_endpoint, error = _oidc_endpoints(sso_config)
+    if not error and not token_endpoint:
+        error = 'Token endpoint not found'
+    return token_endpoint, userinfo_endpoint, error
+
+
+def _userinfo_email(provider, access_token, userinfo_endpoint):
+    url = USERINFO_URLS.get(provider, userinfo_endpoint)
+    if not url:
+        return None
+    resp = requests.get(url, headers=dict(Authorization=f'Bearer {access_token}'), timeout=10)
+    if resp.status_code != 200:
+        return None
+    info = resp.json()
+    if provider == 'AZURE':
+        return info.get('mail') or info.get('userPrincipalName')
+    return info.get('email')
+
+
+def _id_token_email(id_token):
+    if not id_token:
+        return None
+    try:
+        parts = id_token.split('.')
+        if len(parts) > 1:
+            payload = parts[1]
+            payload += '=' * (-len(payload) % 4)
+            decoded = json.loads(base64.b64decode(payload).decode('utf-8'))
+            return decoded.get('email') or decoded.get('preferred_username')
+    except Exception as e:
+        logger.error(f"ID Token decode error: {e}")
+    return None
+
+
+def _exchange_code_for_email(provider, token_endpoint, userinfo_endpoint, data):
+    """Exchange the auth code and read the user's email: (email, None), or (None, error message)."""
+    try:
+        token_resp = requests.post(token_endpoint, data=data, timeout=10)
+        if token_resp.status_code != 200:
+            logger.error(f"Token Exchange Failed: {token_resp.text}")
+            return None, 'Failed to exchange code for token'
+
+        tokens = token_resp.json()
+        email = _userinfo_email(provider, tokens.get('access_token'), userinfo_endpoint)
+        return email or _id_token_email(tokens.get('id_token')), None
+    except Exception as e:
+        logger.error(f"OAuth Error: {e}")
+        return None, SSO_GENERIC_ERROR
+
+
+def _oauth_email(request, provider, organization, org_id):
+    """Validate an OAuth callback: (email, next, None), or (None, None, error message)."""
+    oauth_next, error = _claim_oauth_state(request, org_id)
+    if error:
+        return None, None, error
+
+    code = request.query_params.get('code')
+    if not code:
+        return None, None, 'No auth code provided'
+
+    sso_config = organization.sso_config or dict()
+    redirect_uri = get_service_url(request, provider, org_id)
+    token_endpoint, userinfo_endpoint, error = _oauth_endpoints(provider, sso_config)
+    if error:
+        return None, None, error
+
+    data = dict(client_id=sso_config.get('client_id'), client_secret=sso_config.get('client_secret'),
+                code=code, grant_type='authorization_code', redirect_uri=redirect_uri)
+    email, error = _exchange_code_for_email(provider, token_endpoint, userinfo_endpoint, data)
+    return email, oauth_next, error
+
+
+def _callback_identity(request, provider, organization, org_id):
+    """Who the provider vouches for: (email, next, None), or (None, None, error message).
+    For CAS the next is the raw query param; _finish_login validates it."""
     if provider == 'CAS':
-        ticket = request.query_params.get('ticket')
-        if not ticket:
-             return error_redirect('No ticket provided')
+        email, error = _cas_email(request, organization, org_id)
+        return email, request.query_params.get('next'), error
+    if provider in OAUTH_PROVIDERS:
+        return _oauth_email(request, provider, organization, org_id)
+    return None, None, f"Provider {provider} not supported yet in callback"
 
-        # Refuse a ticket from a login this browser did not start (login CSRF)
-        # before spending it at CAS.
-        state = request.query_params.get('state')
-        state_error = _browser_state_error(request, state)
-        if state_error:
-            return error_redirect(state_error)
 
-        cas_url = sso_config.get('cas_server_url')
-        if not cas_url:
-             return error_redirect('CAS Server URL missing')
-
-        cas_version = str(sso_config.get('cas_version', '3'))
-        
-        # Determine validation endpoint
-        validate_path = '/p3/serviceValidate' if cas_version == '3' else '/serviceValidate'
-        if cas_version == '2':
-             validate_path = '/serviceValidate'
-        elif cas_version == '1':
-             validate_path = '/validate'
-             
-        # Reconstruct the EXACT service URL used in initiation (including query
-        # params — the raw `next` must round-trip byte-for-byte for CAS).
-        service_url = get_service_url(request, provider, org_id,
-                                      request.query_params.get('next'), state)
-        
-        # DERIVE BASE URL FOR VALIDATION
-        # If user provided default '/login' URL, strip it to find base.
-        validation_base = cas_url.rstrip('/')
-        if validation_base.endswith('/login'):
-            validation_base = validation_base[:-6]
-            
-        validation_url = f"{validation_base}{validate_path}"
-        params = {'service': service_url, 'ticket': ticket}
-        
-        try:
-            response = requests.get(validation_url, params=params, timeout=10, verify=True)
-            
-            if response.status_code != 200:
-                 logger.error(f"CAS Validation Failed Status: {response.status_code} Body: {response.text}")
-                 return error_redirect('Failed to contact CAS server')
-                 
-            # Parse Response
-            if cas_version == '1':
-                # CAS 1.0: two lines. First 'yes', second username.
-                lines = response.text.splitlines()
-                if lines and lines[0].strip() == 'yes':
-                    email = lines[1].strip()
-            else:
-                # CAS 2.0/3.0: XML
-                try:
-                    root = ET.fromstring(response.content)
-                    namespaces = {'cas': 'http://www.yale.edu/tp/cas'}
-                    
-                    # Try to find success with namespace
-                    auth_success = root.find('.//cas:authenticationSuccess', namespaces)
-                    if auth_success is not None:
-                        user_elem = auth_success.find('cas:user', namespaces)
-                        if user_elem is not None:
-                            email = user_elem.text
-                    else:
-                        failure = root.find('.//cas:authenticationFailure', namespaces)
-                        if failure is not None:
-                             msg = failure.text.strip() if failure.text else "Unknown"
-                             logger.error(f"CAS Auth Failure Response: {msg}")
-                             return error_redirect("SSO authentication failed. Please try again or contact support.")
-                        
-                        # Fallback for 'user' tag directly
-                        if not email:
-                             for elem in root.iter():
-                                 if elem.tag.endswith('user'):
-                                     email = elem.text
-                                     break
-
-                except ET.ParseError as e:
-                     logger.error(f"XML Parse Error: {e} Content: {response.text}")
-                     return error_redirect('Invalid XML from CAS server')
-
-        except Exception as e:
-            logger.error(f"CAS Validation Error: {e}")
-            return error_redirect("An error occurred during SSO authentication. Please try again.")
-    
-    # --- OAUTH VALIDATION (Azure/Google/OIDC) ---
-    elif provider in ['AZURE', 'GOOGLE', 'OIDC']:
-        # Validate OAuth state parameter to prevent CSRF
-        received_state = request.query_params.get('state')
-        state_error = _browser_state_error(request, received_state)
-        if state_error:
-            return error_redirect(state_error)
-        cached_state = cache.get(f"sso_state:{received_state}")
-        if cached_state is None:
-            return error_redirect('Invalid or expired state parameter')
-        cache.delete(f"sso_state:{received_state}")  # One-time use
-        try:
-            state_data = json.loads(cached_state)
-        except (TypeError, ValueError):
-            state_data = None
-        if isinstance(state_data, dict):
-            cached_org_id = state_data.get('org')
-            oauth_next = state_data.get('next')
-        else:
-            # Entry cached before the JSON format landed. Note a bare numeric
-            # org id ("123") parses as JSON too — hence the isinstance check,
-            # not just the except.
-            cached_org_id, oauth_next = cached_state, None
-        if str(org_id) != cached_org_id:
-            return error_redirect('State parameter does not match organization')
-
-        code = request.query_params.get('code')
-        if not code:
-            return error_redirect('No auth code provided')
-            
-        client_id = sso_config.get('client_id')
-        client_secret = sso_config.get('client_secret')
-        redirect_uri = get_service_url(request, provider, org_id)
-        
-        token_endpoint = ""
-        userinfo_endpoint = ""
-        
-        if provider == 'AZURE':
-            tenant = sso_config.get('tenant_id', 'common')
-            token_endpoint = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-        elif provider == 'GOOGLE':
-            token_endpoint = "https://oauth2.googleapis.com/token"
-        elif provider == 'OIDC':
-            discovery = sso_config.get('discovery_url') 
-            try:
-                if not discovery:
-                    return error_redirect('Discovery URL missing')
-                resp = requests.get(discovery, timeout=5).json()
-                token_endpoint = resp.get('token_endpoint')
-                userinfo_endpoint = resp.get('userinfo_endpoint')
-            except Exception as e:
-                logger.error(f"OIDC discovery failed in callback: {e}")
-                return error_redirect('OIDC discovery failed in callback')
-
-        if not token_endpoint:
-             return error_redirect('Token endpoint not found')
-             
-        # Exchange Code for Token
-        data = {
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'code': code,
-            'grant_type': 'authorization_code',
-            'redirect_uri': redirect_uri
-        }
-        
-        try:
-            token_resp = requests.post(token_endpoint, data=data, timeout=10)
-            if token_resp.status_code != 200:
-                logger.error(f"Token Exchange Failed: {token_resp.text}")
-                return error_redirect('Failed to exchange code for token')
-            
-            tokens = token_resp.json()
-            access_token = tokens.get('access_token')
-            id_token = tokens.get('id_token')
-            
-            # Extract Email logic ...
-            if provider == 'GOOGLE':
-                 userinfo_resp = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', 
-                                    headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
-                 if userinfo_resp.status_code == 200:
-                     email = userinfo_resp.json().get('email')
-                     
-            elif provider == 'AZURE':
-                 graph_resp = requests.get('https://graph.microsoft.com/v1.0/me',
-                                    headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
-                 if graph_resp.status_code == 200:
-                     data = graph_resp.json()
-                     email = data.get('mail') or data.get('userPrincipalName')
-
-            elif provider == 'OIDC':
-                 if userinfo_endpoint:
-                     u_resp = requests.get(userinfo_endpoint, headers={'Authorization': f'Bearer {access_token}'}, timeout=10)
-                     if u_resp.status_code == 200:
-                         email = u_resp.json().get('email')
-            
-            if not email and id_token:
-                try:
-                    import base64
-                    parts = id_token.split('.')
-                    if len(parts) > 1:
-                        payload = parts[1]
-                        payload += '=' * (-len(payload) % 4)
-                        decoded = json.loads(base64.b64decode(payload).decode('utf-8'))
-                        email = decoded.get('email') or decoded.get('preferred_username')
-                except Exception as e:
-                    logger.error(f"ID Token decode error: {e}")
-
-        except Exception as e:
-            logger.error(f"OAuth Error: {e}")
-            return error_redirect("An error occurred during SSO authentication. Please try again.")
-
-    # --- OTHER PROVIDERS ---
-    else:
-        return error_redirect(f"Provider {provider} not supported yet in callback")
-
-    if not email:
-        return error_redirect('Could not extract user identity from SSO response')
-
-    # Heuristic: If email is just a username (no @), append org domain if available
-    # This handles CAS servers that return NetIDs instead of emails
-    if '@' not in email and organization.email_domain:
-        email = f"{email}@{organization.email_domain}"
-
-    # --- USER RESOLUTION & LOGIN ---
-    # We trust the SSO provider. Get or create the user.
-    # Note: get_or_create_user handles auto-activation if sso_enabled is True
-    user = get_or_create_user(email, organization, auto_activate=True)
-    
-    if not user:
-         return error_redirect('Failed to create/retrieve user locally')
-
+def _finish_login(request, user, oauth_next):
     # OAuth consent flow (agent connections): when a validated local
-    # /o/authorize `next` rode the SSO round-trip, finish with a short-lived
+    # o/authorize next rode the SSO round-trip, finish with a short-lived
     # Django session on the API origin and hand the browser back to the consent
-    # page. Everything below this block — the normal SPA JWT redirect — is
-    # untouched when no `next` is present.
+    # page. Everything below this block, the normal SPA JWT redirect, is
+    # untouched when no next is present.
     from core.views.agent_login import (SESSION_LIFETIME_SECONDS, validate_next)
 
-    if provider == 'CAS':
-        oauth_next = request.query_params.get('next')
     oauth_next = validate_next(oauth_next)
     if oauth_next:
         from django.contrib.auth import login as auth_login
@@ -518,7 +506,7 @@ def sso_callback(request, provider):
         return HttpResponseRedirect(oauth_next)
 
     # Generate a short-lived access token to hand off via the redirect URL. The
-    # refresh token is NOT put in the URL — the frontend exchanges this access
+    # refresh token is NOT put in the URL, the frontend exchanges this access
     # token for a refresh token via the current_user endpoint after landing.
     from core.views.auth import access_token_for_user
 
@@ -526,8 +514,45 @@ def sso_callback(request, provider):
 
     # Redirect to Frontend
     # In production, frontend is served by Nginx.
-    frontend_url = getattr(settings, 'CLIENT_URL', 'http://localhost:3000') # Default for dev
-    return HttpResponseRedirect(f"{frontend_url}/?token={token}")
+    return HttpResponseRedirect(f"{_frontend_url()}/?token={token}")
+
+
+@extend_schema(
+    responses={302: OpenApiResponse(description='Redirect to frontend with token')}
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@throttle_classes([SSORateThrottle])
+def sso_callback(request, provider):
+    """
+    Handles the callback from the SSO provider.
+    Validates ticket/code, creates session, redirects to frontend.
+    """
+    org_id = request.query_params.get('org')
+    organization, error = _callback_organization(org_id, provider)
+    if error:
+        return _error_redirect(error)
+
+    email, oauth_next, error = _callback_identity(request, provider, organization, org_id)
+    if error:
+        return _error_redirect(error)
+    if not email:
+        return _error_redirect('Could not extract user identity from SSO response')
+
+    # Heuristic: If email is just a username (no @), append org domain if available
+    # This handles CAS servers that return NetIDs instead of emails
+    if '@' not in email and organization.email_domain:
+        email = f"{email}@{organization.email_domain}"
+
+    # --- USER RESOLUTION & LOGIN ---
+    # We trust the SSO provider. Get or create the user.
+    # Note: get_or_create_user handles auto-activation if sso_enabled is True
+    user = get_or_create_user(email, organization, auto_activate=True)
+
+    if not user:
+        return _error_redirect('Failed to create/retrieve user locally')
+
+    return _finish_login(request, user, oauth_next)
 
 
 @extend_schema(responses={200: CheckSSOAvailabilityResponseSerializer})
