@@ -1019,9 +1019,14 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
     @extend_schema(request=None, responses={204: None})
     # POST, not DELETE: CoursePermissions forbids the DELETE verb on Course
-    # objects wholesale, and sub-actions inherit that object check.
+    # objects wholesale, and sub-actions inherit that object check. For the same
+    # reason these two actions override permission_classes: CoursePermissions only
+    # lets a POST on a course through for superusers and users with the
+    # course-creation privilege, which would lock out an ordinary course admin.
+    # The body of each action does the real check (course admin or superuser).
     @action(detail=True, methods=["POST"],
-            url_path=r"pendingAgentActions/(?P<action_id>\d+)/deny")
+            url_path=r"pendingAgentActions/(?P<action_id>\d+)/deny",
+            permission_classes=[IsAuthenticated])
     def denyPendingAgentAction(self, request, pk=None, action_id=None):
         """Deny a pending agent action.
 
@@ -1049,7 +1054,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
 
     @extend_schema(request=None, responses={204: None})
     @action(detail=True, methods=["POST"],
-            url_path=r"pendingAgentActions/(?P<action_id>\d+)/approve")
+            url_path=r"pendingAgentActions/(?P<action_id>\d+)/approve",
+            permission_classes=[IsAuthenticated])
     def approvePendingAgentAction(self, request, pk=None, action_id=None):
         """Approve a pending agent action — the agent's next retry executes it.
 

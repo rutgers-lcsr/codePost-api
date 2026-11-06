@@ -181,6 +181,44 @@ class TestDashboardApproval:
             assert error_of(result)["code"] == "CONFIRMATION_REQUIRED"
         assert Assignment.objects.filter(pk=empty_assignment.id).exists()
 
+    @pytest.mark.parametrize("verb", ["approve", "deny"])
+    def test_course_admin_without_course_creation_privilege_can_decide(
+            self, api_client, admin_key, course, admin, empty_assignment, verb):
+        """CoursePermissions lets a POST on a course through only for superusers and
+        users with the course-creation privilege, so a plain course admin (the normal
+        instructor, canCreateCourses=False) got 403 on Approve/Deny and the dashboard
+        fallback could never be used. The actions do their own course-admin check."""
+        from core.models import PendingAgentAction
+
+        admin.profile.canCreateCourses = False
+        admin.profile.save()
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        row = PendingAgentAction.objects.get(course=course)
+
+        resp = dashboard_decide(api_client, course, admin, row.id, verb)
+
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        row.refresh_from_db()
+        assert (row.approved_at if verb == "approve" else row.denied_at) is not None
+
+    def test_non_admin_cannot_decide(
+            self, api_client, admin_key, course, admin, empty_assignment):
+        """The widened permission class must not widen who may decide."""
+        from core.models import PendingAgentAction
+        from core.tests.factories import UserFactory
+
+        call(api_client, admin_key, "codepost_delete_resource",
+             {"resourceType": "assignment", "resourceId": empty_assignment.id})
+        row = PendingAgentAction.objects.get(course=course)
+        with factory.django.mute_signals(post_save):
+            outsider = UserFactory()
+        for verb in ("approve", "deny"):
+            resp = dashboard_decide(api_client, course, outsider, row.id, verb)
+            assert resp.status_code == status.HTTP_403_FORBIDDEN
+        row.refresh_from_db()
+        assert row.approved_at is None and row.denied_at is None
+
     def test_approve_then_retry_executes_once(
             self, api_client, admin_key, course, admin, empty_assignment):
         from core.models import Assignment, PendingAgentAction
