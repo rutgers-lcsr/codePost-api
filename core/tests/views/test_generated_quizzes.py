@@ -548,6 +548,18 @@ class TestGenerationTask:
         assert 'model unavailable' in gen_set.errorMessage
         assert gen_set.questions.count() == 0
 
+    def test_unexpected_exception_does_not_leak_into_the_set(self, gen_setup, monkeypatch):
+        """A raise the AI service did not classify fails the set with a fixed message; the
+        exception text (prompt internals, file paths) belongs in the server log only."""
+        def boom(section, submission):
+            raise RuntimeError('SECRET-/srv/internal/prompt.py')
+        _mock_ai(monkeypatch, side_effect=boom)
+        _run_task(gen_setup['submission'])
+        gen_set = gen_setup['quiz'].generatedSets.get(student=gen_setup['students'][0])
+        assert gen_set.status == 'failed'
+        assert 'SECRET' not in gen_set.errorMessage
+        assert 'unexpectedly' in gen_set.errorMessage
+
     def test_failed_regeneration_preserves_previous_questions(self, gen_setup, monkeypatch):
         """An AI failure during force-regen keeps the set's existing (possibly hand-edited)
         questions and returns it to review — instead of leaving it failed and empty."""

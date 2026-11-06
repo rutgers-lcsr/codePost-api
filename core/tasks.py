@@ -525,6 +525,8 @@ def _normalize_choices(raw_choices) -> list:
 # internals, file paths, provider details); the full error is in the server log.
 _UNEXPECTED_AI_FAILURE = ('The AI request failed unexpectedly. Try again; if it keeps failing, '
                           'ask an administrator to check the server log.')
+_UNEXPECTED_IMPORT_FAILURE = ('The import failed unexpectedly. Try again; if it keeps failing, '
+                              'ask an administrator to check the server log.')
 
 
 def _update_suggestion_job(job_id: int | None, **fields):
@@ -969,7 +971,8 @@ def _generate_quiz_question_rows(service, quiz, submission, env_language, user):
                     section, submission, prior_error=prior_error, use_fallback=use_fallback)
             except Exception as e:
                 logger.error(f"[PersonalQuizGen] Generation failed for quiz {quiz.id}: {e}", exc_info=True)
-                error = f"Generation failed: {e}"
+                # Served to course staff on the set: the exception text stays in the log.
+                error = _UNEXPECTED_AI_FAILURE
                 break
             service.record_usage(result, user=user, request_type='personalized_quiz_generation')
             variant_id = result.variant_id or variant_id
@@ -1368,7 +1371,7 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
     from decimal import Decimal
     from django.db import transaction
     from core.models import QuestionBank, Question, QuestionChoice, Quiz, QuizQuestion, QuizImportJob
-    from core.services.canvas_qti_import import parse_canvas_export
+    from core.services.canvas_qti_import import QTIImportRefused, parse_canvas_export
 
     try:
         job = QuizImportJob.objects.select_related('course', 'targetBank').get(id=job_id)
@@ -1504,7 +1507,8 @@ def import_quiz_qti(job_id: int, import_quizzes: bool = False):
     except Exception as e:
         logger.error(f"[QuizImport] Job {job_id} failed: {e}", exc_info=True)
         job.status = 'failed'
-        job.errorMessage = str(e)
+        # Served to course staff: only the importer's own refusals carry their text.
+        job.errorMessage = str(e) if isinstance(e, QTIImportRefused) else _UNEXPECTED_IMPORT_FAILURE
         job.save(update_fields=['status', 'errorMessage', 'modified'])
 
 

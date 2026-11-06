@@ -22,6 +22,10 @@ from defusedxml.ElementTree import fromstring
 from core.constants import MAX_QTI_UNCOMPRESSED_BYTES
 
 
+class QTIImportRefused(ValueError):
+    """An export the importer deliberately refuses; the message is written for the instructor."""
+
+
 # Unambiguous HTML signals used only when ``texttype`` doesn't already say "text/html".
 # Requires a closing tag, ``<br>`` or ``<img>`` so plaintext like ``a < b and c > d`` is
 # never misread as HTML (which would otherwise strip the "< b ... >" as a tag).
@@ -390,7 +394,7 @@ def parse_canvas_export(data) -> dict:
                 # memory (ZipInfo.file_size is the declared uncompressed size).
                 inflated += zf.getinfo(name).file_size
                 if inflated > MAX_QTI_UNCOMPRESSED_BYTES:
-                    raise ValueError("QTI export is too large to import (decompressed size exceeds limit).")
+                    raise QTIImportRefused("QTI export is too large to import (decompressed size exceeds limit).")
                 _parse_document(zf.read(name), default_title=base[:-4], result=result)
     except zipfile.BadZipFile:
         # Not a zip — treat the upload as a single QTI XML document.

@@ -657,6 +657,39 @@ class TestCanvasImport:
         assert quiz.title == 'Week 1 Quiz'
         assert quiz.quizQuestions.count() == 3
 
+    def _import_job(self, quiz_setup):
+        from core.models import QuizImportJob
+        return QuizImportJob.objects.create(
+            course=quiz_setup['course'], createdBy=quiz_setup['admin'],
+            file=SimpleUploadedFile('export.zip', _canvas_zip_bytes(), content_type='application/zip'),
+        )
+
+    def test_unexpected_failure_does_not_leak_into_the_job(self, quiz_setup, monkeypatch):
+        """The job's errorMessage is served to course staff: an unexpected exception's text
+        (paths, internals) stays in the server log."""
+        from core.tasks import import_quiz_qti
+
+        def boom(data):
+            raise RuntimeError('SECRET-/srv/internal/path')
+        monkeypatch.setattr('core.services.canvas_qti_import.parse_canvas_export', boom)
+        job = self._import_job(quiz_setup)
+        import_quiz_qti(job.id)
+        job.refresh_from_db()
+        assert job.status == 'failed'
+        assert job.errorMessage
+        assert 'SECRET' not in job.errorMessage
+
+    def test_refused_export_keeps_its_reason(self, quiz_setup, monkeypatch):
+        """The importer's own refusals are written for the instructor and stay visible."""
+        from core.tasks import import_quiz_qti
+
+        monkeypatch.setattr('core.services.canvas_qti_import.MAX_QTI_UNCOMPRESSED_BYTES', 10)
+        job = self._import_job(quiz_setup)
+        import_quiz_qti(job.id)
+        job.refresh_from_db()
+        assert job.status == 'failed'
+        assert 'too large to import' in job.errorMessage
+
     def test_import_is_bank_only_by_default(self, quiz_setup):
         """Without import_quizzes, the export's questions are imported but no quiz is made."""
         from core.models import QuizImportJob, Question, Quiz
