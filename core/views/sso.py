@@ -50,8 +50,25 @@ def _organization_of_unique_user(email):
     return users[0].profile.organization
 
 
+def _issue_browser_state(request):
+    """A fresh login state, remembered in this browser's session (login CSRF:
+    the callback only honours a state that its own browser started)."""
+    state = secrets.token_urlsafe(32)
+    request.session[f"sso_state:{state}"] = True
+    return state
+
+
+def _browser_state_error(request, state):
+    """Why `state` is refused, or None after claiming it (single use)."""
+    if not state:
+        return 'Missing state parameter'
+    if not request.session.pop(f"sso_state:{state}", False):
+        return 'State parameter was not issued to this browser'
+    return None
+
+
 # Helper to get service URL
-def get_service_url(request, provider, org_id=None, next_path=None):
+def get_service_url(request, provider, org_id=None, next_path=None, state=None):
     # Construct the callback URL dynamically based on the request's host
     # e.g. https://api.codepost.io/auth/sso/callback/CAS/?org=123
     host = request.get_host()
@@ -70,6 +87,10 @@ def get_service_url(request, provider, org_id=None, next_path=None):
         # and validation legs to use a byte-identical service URL — both call
         # sites build it here, threading the raw incoming value.
         url += f"&next={urllib.parse.quote(next_path, safe='')}"
+    if state:
+        # CAS's only binding between a ticket and a browser: the ticket is
+        # valid for this exact URL, and the state in it lives in one session.
+        url += f"&state={state}"
     return url
 
 def sso_gate_error(organization, provider):
@@ -133,7 +154,8 @@ def initiate_sso(request, provider):
         # A validated `next` (OAuth consent flow) rides along too.
         from core.views.agent_login import validate_next
         next_path = validate_next(request.query_params.get('next'))
-        service_url = get_service_url(request, provider, organization.id, next_path)
+        service_url = get_service_url(request, provider, organization.id, next_path,
+                                      _issue_browser_state(request))
         encoded_service = urllib.parse.quote(service_url)
         
         # USE PROVIDED URL AS LOGIN ENDPOINT DIRECTLY (per user request)
@@ -149,7 +171,7 @@ def initiate_sso(request, provider):
             
         scopes = "openid email profile"
         redirect_uri = get_service_url(request, provider, organization.id)
-        state = secrets.token_urlsafe(32)
+        state = _issue_browser_state(request)
         from core.views.agent_login import validate_next
         next_path = validate_next(request.query_params.get('next'))
         # JSON so the OAuth consent flow's `next` can ride the state (the
@@ -158,11 +180,7 @@ def initiate_sso(request, provider):
         cache.set(f"sso_state:{state}",
                   json.dumps({"org": str(organization.id), "next": next_path}),
                   timeout=600)  # 10 min TTL
-        # Bind the state to this browser: the callback only honours a state that
-        # this same session started, so a callback URL minted by someone else's
-        # login (login CSRF) is refused.
-        request.session[f"sso_state:{state}"] = True
-        
+
         auth_endpoint = ""
         
         if provider == 'AZURE':
@@ -249,6 +267,13 @@ def sso_callback(request, provider):
         if not ticket:
              return error_redirect('No ticket provided')
 
+        # Refuse a ticket from a login this browser did not start (login CSRF)
+        # before spending it at CAS.
+        state = request.query_params.get('state')
+        state_error = _browser_state_error(request, state)
+        if state_error:
+            return error_redirect(state_error)
+
         cas_url = sso_config.get('cas_server_url')
         if not cas_url:
              return error_redirect('CAS Server URL missing')
@@ -265,7 +290,7 @@ def sso_callback(request, provider):
         # Reconstruct the EXACT service URL used in initiation (including query
         # params — the raw `next` must round-trip byte-for-byte for CAS).
         service_url = get_service_url(request, provider, org_id,
-                                      request.query_params.get('next'))
+                                      request.query_params.get('next'), state)
         
         # DERIVE BASE URL FOR VALIDATION
         # If user provided default '/login' URL, strip it to find base.
@@ -327,10 +352,9 @@ def sso_callback(request, provider):
     elif provider in ['AZURE', 'GOOGLE', 'OIDC']:
         # Validate OAuth state parameter to prevent CSRF
         received_state = request.query_params.get('state')
-        if not received_state:
-            return error_redirect('Missing state parameter')
-        if not request.session.pop(f"sso_state:{received_state}", False):
-            return error_redirect('State parameter was not issued to this browser')
+        state_error = _browser_state_error(request, received_state)
+        if state_error:
+            return error_redirect(state_error)
         cached_state = cache.get(f"sso_state:{received_state}")
         if cached_state is None:
             return error_redirect('Invalid or expired state parameter')

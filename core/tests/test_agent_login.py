@@ -1,12 +1,12 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 """The OAuth login bridge: /auth/agent-login/ and the SSO `next` threading.
 
-The load-bearing property: a Django session is created ONLY when the OAuth
-flow's validated `next` parameter rides along — every normal SSO login keeps
-today's JWT-redirect behaviour byte-for-byte.
+The load-bearing property: a logged-in Django session is created ONLY when the
+OAuth flow's validated `next` parameter rides along — every normal SSO login
+keeps the JWT-redirect behaviour.
 """
 from unittest import mock
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 import factory
 import pytest
@@ -105,10 +105,14 @@ class TestAgentLoginPage:
 
 class TestSSOThreading:
 
-    def _callback(self, client, org, *, with_next):
-        url = f"/auth/sso/callback/CAS/?org={org.id}&ticket=ST-123"
+    def _callback(self, client, org, *, with_next, extra=""):
+        """Start the login in `client`, then come back from CAS with a ticket
+        appended to the service URL it was given (plus `extra` params)."""
+        url = f"/auth/sso/login/CAS/?org={org.id}"
         if with_next:
             url += f"&next={quote(NEXT, safe='')}"
+        service = parse_qs(urlparse(client.get(url)["Location"]).query)["service"][0]
+        url = f"{service}&ticket=ST-123{extra}"
         with mock.patch("core.views.sso.requests.get") as fake:
             fake.return_value.status_code = 200
             fake.return_value.content = CAS_SUCCESS_XML
@@ -136,12 +140,13 @@ class TestSSOThreading:
         assert quote(NEXT, safe="") in service
 
     def test_callback_without_next_is_untouched(self, sso_org):
-        """The pre-OAuth behaviour, byte-for-byte: JWT redirect, no session."""
+        """The pre-OAuth behaviour: JWT redirect, no logged-in session (the
+        session only carried the login-CSRF state, claimed at the callback)."""
         client = Client()
         resp, fake = self._callback(client, sso_org, with_next=False)
         assert resp.status_code == 302
         assert resp["Location"].startswith("http://localhost:3000/?token=")
-        assert "sessionid" not in client.cookies
+        assert "_auth_user_id" not in client.session
         service = fake.call_args.kwargs["params"]["service"]
         assert "next" not in service
 
@@ -149,12 +154,9 @@ class TestSSOThreading:
         """A hostile next must not become a redirect target — the login falls
         back to the normal SPA JWT redirect."""
         client = Client()
-        url = (f"/auth/sso/callback/CAS/?org={sso_org.id}&ticket=ST-123"
-               f"&next={quote('https://evil.com/x', safe='')}")
-        with mock.patch("core.views.sso.requests.get") as fake:
-            fake.return_value.status_code = 200
-            fake.return_value.content = CAS_SUCCESS_XML
-            resp = client.get(url)
+        resp, _ = self._callback(
+            client, sso_org, with_next=False,
+            extra=f"&next={quote('https://evil.com/x', safe='')}")
         assert resp.status_code == 302
         assert resp["Location"].startswith("http://localhost:3000/?token=")
-        assert "sessionid" not in client.cookies
+        assert "_auth_user_id" not in client.session

@@ -1,4 +1,6 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
+import urllib.parse
+
 from django.test import SimpleTestCase, RequestFactory
 from unittest.mock import patch, MagicMock
 from django.core.cache import cache
@@ -33,9 +35,13 @@ class SSOTest(SimpleTestCase):
         mock_get_org.return_value = self.org_mock
         
         request = self.factory.get('/auth/sso/login/CAS/', {'org': '1'})
+        request.session = {}
         response = initiate_sso(request, 'CAS')
         self.assertEqual(response.status_code, 302)
         self.assertTrue("https://cas.test.edu" in response.url)
+        # The service URL carries a state that only this browser's session remembers.
+        [state_key] = request.session
+        self.assertIn(urllib.parse.quote(f"&state={state_key.split(':', 1)[1]}"), response.url)
 
     @patch('core.views.sso.get_or_create_user')
     @patch('core.views.sso.requests.get')
@@ -61,7 +67,8 @@ class SSOTest(SimpleTestCase):
         with patch('core.views.auth.access_token_for_user') as mock_token_fn:
             mock_token_fn.return_value = "fake_token"
             
-            request = self.factory.get('/auth/sso/callback/CAS/', {'org': '1', 'ticket': 'ST-12345'})
+            request = self.factory.get('/auth/sso/callback/CAS/', {'org': '1', 'ticket': 'ST-12345', 'state': 's1'})
+            request.session = {'sso_state:s1': True}  # state was issued to this browser
             response = sso_callback(request, 'CAS')
             
             self.assertEqual(response.status_code, 302)
@@ -95,10 +102,12 @@ class SSOTest(SimpleTestCase):
         with patch('core.views.auth.access_token_for_user') as mock_token_fn:
             mock_token_fn.return_value = "fake_token"
             
-            request = self.factory.get('/auth/sso/callback/CAS/', {'org': '1', 'ticket': 'ST-12345'})
+            request = self.factory.get('/auth/sso/callback/CAS/', {'org': '1', 'ticket': 'ST-12345', 'state': 's1'})
+            request.session = {'sso_state:s1': True}  # state was issued to this browser
             response = sso_callback(request, 'CAS')
             
             self.assertEqual(response.status_code, 302)
+            self.assertIn("token=fake_token", response.url)
 
     @patch('core.views.sso.get_or_create_user')
     @patch('core.views.sso.requests.post')
@@ -273,6 +282,7 @@ class SSOInitiateAllowedDomainsTest(SimpleTestCase):
         mock_get_org.return_value = self.org_mock
 
         request = self.factory.get('/auth/sso/login/CAS/', {'email': 'student@scarletmail.rutgers.edu'})
+        request.session = {}
         response = initiate_sso(request, 'CAS')
 
         self.assertEqual(response.status_code, 302)
@@ -287,6 +297,7 @@ class SSOInitiateAllowedDomainsTest(SimpleTestCase):
         mock_user_org.return_value = self.org_mock
 
         request = self.factory.get('/auth/sso/login/CAS/', {'email': 'student@personal.com'})
+        request.session = {}
         response = initiate_sso(request, 'CAS')
 
         self.assertEqual(response.status_code, 302)

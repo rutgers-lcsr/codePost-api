@@ -89,6 +89,75 @@ class OAuthCallbackTests(APITestCase):
     self.assertFalse(User.objects.filter(email="someone@az.edu").exists())
 
 
+CAS_SUCCESS = b"""<cas:serviceResponse xmlns:cas='http://www.yale.edu/tp/cas'>
+    <cas:authenticationSuccess><cas:user>someone</cas:user></cas:authenticationSuccess>
+</cas:serviceResponse>"""
+
+
+class CASCallbackTests(APITestCase):
+  """CAS has no OAuth-style state, so initiate_sso puts one in the service URL and keeps it
+  in the browser's session; CAS binds every ticket to that exact service URL. A ticket an
+  attacker obtained from their own login therefore names a state this browser never issued
+  (login CSRF: the victim would otherwise land in the attacker's account)."""
+
+  def setUp(self):
+    self.org = Organization.objects.create(
+      name="Cas Org", shortname="cas", email_domain="cas.edu", sso_enabled=True, sso_provider="CAS",
+      sso_config={"cas_server_url": "https://cas.cas.edu/cas/login"})
+
+  def _start(self, client):
+    """Initiate in `client`; return the service URL it sent to CAS."""
+    resp = client.get(f"/auth/sso/login/CAS/?org={self.org.id}")
+    self.assertEqual(resp.status_code, 302)
+    return urllib.parse.parse_qs(urllib.parse.urlparse(resp["Location"]).query)["service"][0]
+
+  def _return_from_cas(self, client, service_url):
+    """CAS redirects the browser to the service URL with a ticket appended."""
+    idp = MagicMock(status_code=200, content=CAS_SUCCESS)
+    with patch("core.views.sso.requests.get", return_value=idp) as validate:
+      resp = client.get(f"{service_url}&ticket=ST-1")
+    return resp, validate
+
+  def test_happy_path_validates_against_the_initiated_service_url(self):
+    service_url = self._start(self.client)
+    resp, validate = self._return_from_cas(self.client, service_url)
+    self.assertIn("token=", resp["Location"])
+    # CAS only honours a ticket for the byte-identical service URL it was issued for.
+    self.assertEqual(validate.call_args.kwargs["params"]["service"], service_url)
+
+  def test_ticket_from_another_browsers_login_is_rejected(self):
+    attacker_service_url = self._start(self.client)
+    victim = APIClient()
+    resp, validate = self._return_from_cas(victim, attacker_service_url)
+    self.assertIn("error=", resp["Location"])
+    self.assertNotIn("token=", resp["Location"])
+    validate.assert_not_called()
+    self.assertFalse(User.objects.filter(email="someone@cas.edu").exists())
+
+  def test_ticket_from_another_browser_is_rejected_while_the_victim_has_a_login_in_flight(self):
+    attacker_service_url = self._start(self.client)
+    victim = APIClient()
+    self._start(victim)
+    resp, _ = self._return_from_cas(victim, attacker_service_url)
+    self.assertNotIn("token=", resp["Location"])
+    self.assertFalse(User.objects.filter(email="someone@cas.edu").exists())
+
+  def test_state_is_single_use(self):
+    service_url = self._start(self.client)
+    self._return_from_cas(self.client, service_url)
+    resp, validate = self._return_from_cas(self.client, service_url)
+    self.assertIn("error=", resp["Location"])
+    self.assertNotIn("token=", resp["Location"])
+    validate.assert_not_called()
+
+  def test_callback_without_state_is_rejected(self):
+    resp, validate = self._return_from_cas(
+      self.client, f"http://testserver/auth/sso/callback/CAS/?org={self.org.id}")
+    self.assertIn("error=", resp["Location"])
+    self.assertNotIn("token=", resp["Location"])
+    validate.assert_not_called()
+
+
 class DuplicateEmailLoginTests(APITestCase):
 
   def setUp(self):

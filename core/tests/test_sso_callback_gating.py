@@ -28,9 +28,14 @@ class SSOCallbackGatingTests(APITestCase):
         return Organization.objects.create(**fields)
 
     def _callback(self, org, provider="CAS"):
+        # A login this browser started, so only the org gates can refuse it.
+        session = self.client.session
+        session["sso_state:s1"] = True
+        session.save()
         idp = MagicMock(status_code=200, content=CAS_OK)
         with patch("core.views.sso.requests.get", return_value=idp):
-            return self.client.get(f"/auth/sso/callback/{provider}/", {"org": org.id, "ticket": "ST-1"})
+            return self.client.get(f"/auth/sso/callback/{provider}/",
+                                   {"org": org.id, "ticket": "ST-1", "state": "s1"})
 
     def test_enabled_matching_org_logs_in(self):
         resp = self._callback(self._org())
