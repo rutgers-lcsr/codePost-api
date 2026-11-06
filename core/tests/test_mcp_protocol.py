@@ -264,6 +264,21 @@ class TestToolsCall:
                      "arguments": {"courseId": course_a.id}})
         assert resp.data["result"]["isError"] is False
 
+    @pytest.mark.parametrize("arguments", [[], "", 0, False, [1], "x", 7, True])
+    def test_non_object_arguments_are_rejected_even_when_falsy(
+            self, api_client, admin_key, arguments):
+        """`arguments: []` (or "", 0, false) used to be swallowed by `or {}` and the
+        tool ran with no arguments; any non-object, falsy or not, is -32602."""
+        resp = _rpc(api_client, admin_key, "tools/call",
+                    {"name": "codepost_get_course_overview", "arguments": arguments})
+        assert resp.data["error"]["code"] == -32602
+
+    def test_null_or_absent_arguments_mean_no_arguments(self, api_client, admin_key):
+        for params in ({"name": "codepost_get_course_overview"},
+                       {"name": "codepost_get_course_overview", "arguments": None}):
+            resp = _rpc(api_client, admin_key, "tools/call", params)
+            assert resp.data["result"]["isError"] is False
+
     def test_bad_enum_value_is_rejected(self, api_client, admin_key):
         resp = _rpc(api_client, admin_key, "tools/call",
                     {"name": "codepost_get_roster", "arguments": {"view": "nonsense"}})

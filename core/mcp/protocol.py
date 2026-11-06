@@ -184,7 +184,11 @@ def _tools_list(conn) -> dict:
 def _tools_call(params: dict, conn) -> dict:
     registry.load_tools()
     name = params.get('name')
-    arguments = params.get('arguments') or {}
+    # Only an absent/null `arguments` means "none": `or {}` would also swallow a falsy
+    # non-object ([], "", 0, false) and run the tool as if it had been called correctly.
+    arguments = params.get('arguments')
+    if arguments is None:
+        arguments = {}
 
     if not isinstance(name, str):
         raise JSONRPCError(INVALID_PARAMS, "tools/call requires a 'name'.")
