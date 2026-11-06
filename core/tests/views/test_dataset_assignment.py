@@ -572,7 +572,10 @@ class TestVariantRobustnessDispatch:
         run = SubmissionVariantRun.objects.get(
             submission=variant_setup['submission'], dataset=variant_setup['v1'])
         assert run.result['status'] == 'error'
-        assert 'sandbox exploded' in run.result['error']
+        # An unexpected exception is recorded as a fixed message naming its class;
+        # its text stays in the server log (graders can read run.result).
+        assert 'An internal error occurred (RuntimeError)' in run.result['error']
+        assert 'sandbox exploded' not in run.result['error']
 
     def test_run_submission_variant_no_executable_file(self, variant_setup, monkeypatch):
         from autograder.run import RunSubmissionVariant
