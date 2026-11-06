@@ -864,7 +864,7 @@ class Executor(abc.ABC):
             yield self._sse_message("error", {"error": "Execution failed: No result returned"})
             
         if result and not result.success:
-            yield self._sse_message("error", {"error": f"Execution failed: {result.error}"})
+            yield self._sse_message("error", {"error": f"Execution failed: {result.err}"})
         
         yield self._sse_message("progress", {
             "status": "completed",

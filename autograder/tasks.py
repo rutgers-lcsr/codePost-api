@@ -158,7 +158,7 @@ def run_file_streaming_task(
             return
 
         if not result.success:
-            _publish_sse(r, channel, "error", {"error": f"Execution failed: {result.error}"})
+            _publish_sse(r, channel, "error", {"error": f"Execution failed: {result.err}"})
 
         _publish_sse(r, channel, "progress", {
             "status": "completed",
