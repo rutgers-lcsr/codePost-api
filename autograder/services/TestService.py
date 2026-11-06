@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List
 
 from core.models import TestCase, TestCategory, Submission, SubmissionTest, File, CachedExecutionResult
 from autograder.services.executors import Executor
+from autograder.services.safe_errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -623,7 +624,7 @@ class TestService:
                             logger.exception(f"Error running individual test {test.id} in suite")
                             all_results.append({
                                 "success": False,
-                                "error": str(e),
+                                "error": safe_error_text(e),
                                 "testCaseId": test.id,
                                 "testCaseDescription": test.description
                             })
@@ -632,7 +633,7 @@ class TestService:
 
         except Exception as e:
             logger.exception(f"Error running test suite for submission {submission_id}")
-            return [{"success": False, "error": str(e)}]
+            return [{"success": False, "error": safe_error_text(e)}]
 
     @staticmethod
     def run_test(test_case_id: int, submission_id: int, user_id: Optional[str] = None, file_overrides: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
@@ -720,7 +721,7 @@ class TestService:
             logger.exception(f"Error running test {test_case_id} for submission {submission_id}")
             return {
                 "success": False, 
-                "error": str(e)
+                "error": safe_error_text(e)
             }
 
     @staticmethod

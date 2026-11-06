@@ -10,12 +10,20 @@ from autograder.services.image_manager import ImageManager
 from autograder.testUtils.buildHelpers import createDockerFile
 from autograder.services.executors import get_executor_class
 from log.models import Event
+from autograder.services.safe_errors import safe_error_text
 import json
 import time
 
 
 
 logger = logging.getLogger(__name__)
+
+class BuildFailure(Exception):
+    """A build step failed for a reason the instructor can act on (pip/apt/Dockerfile output)."""
+
+
+EXPECTED_BUILD_ERRORS = (BuildFailure, docker.errors.DockerException)
+
 
 class Builder:
     def __init__(self, environment_id: int):
@@ -158,8 +166,8 @@ class Builder:
                 return False
                     
         except Exception as e:
-             logger.error(f"[Builder] Verification exception: {e}")
-             env.build_logs += f"\n[Verification] Error: {e}"
+             logger.error(f"[Builder] Verification exception: {e}", exc_info=e)
+             env.build_logs += f"\n[Verification] Error: {safe_error_text(e, EXPECTED_BUILD_ERRORS)}"
              env.save()
              return False
 
@@ -202,7 +210,7 @@ class Builder:
 
         except Exception as e:
             logger.error(f"[Builder] Failed to fix permissions: {e}")
-            env.build_logs += f"\n[Builder] Warning: Failed to fix cache permissions: {e}"
+            env.build_logs += f"\n[Builder] Warning: Failed to fix cache permissions: {safe_error_text(e, EXPECTED_BUILD_ERRORS)}"
             env.save()
 
     def build(self):
@@ -308,7 +316,7 @@ class Builder:
                              env.save()
                              last_save = timezone.now()
                     elif 'error' in chunk:
-                        raise Exception(chunk['error'])
+                        raise BuildFailure(chunk['error'])
                 
                 # Final save of logs
                 env.save()
@@ -318,7 +326,7 @@ class Builder:
                         
                 # Verify Image before finalizing
                 if not self.verify_image(tag, env):
-                     raise Exception("Image verification failed (permissions check). See logs.")
+                     raise BuildFailure("Image verification failed (permissions check). See logs.")
 
                 # Success
                 env.build_status = 2 # Success
@@ -359,15 +367,15 @@ class Builder:
                 
             except Exception as e:
                 env.build_status = 3 # Failed
-                env.build_logs += f"\nBuild failed: {e}"
+                env.build_logs += f"\nBuild failed: {safe_error_text(e, EXPECTED_BUILD_ERRORS)}"
                 env.save()
-                logger.error(f"Build failed for env {env.id}: {e}")
+                logger.error(f"Build failed for env {env.id}: {e}", exc_info=e)
 
                 try:
                     meta = {
                         "event": "build_failed",
                         "environment_id": env.id,
-                        "error": str(e),
+                        "error": safe_error_text(e, EXPECTED_BUILD_ERRORS),
                         "timestamp": time.time()
                     }
                     Event.objects.create(
@@ -382,21 +390,21 @@ class Builder:
 
                 return {
                     "success": False,
-                    "error": str(e),
+                    "error": safe_error_text(e, EXPECTED_BUILD_ERRORS),
                     "logs": env.build_logs
                 }
 
         except Exception as e:
             env.build_status = 3 # Failed
-            env.build_logs += f"\nUnexpected error: {e}"
+            env.build_logs += f"\nUnexpected error: {safe_error_text(e)}"
             env.save()
-            logger.error(f"Unexpected error in build for env {env.id}: {e}")
+            logger.error(f"Unexpected error in build for env {env.id}: {e}", exc_info=e)
 
             try:
                 meta = {
                     "event": "build_error",
                     "environment_id": env.id,
-                    "error": str(e),
+                    "error": safe_error_text(e),
                     "timestamp": time.time()
                 }
                 Event.objects.create(
@@ -411,7 +419,7 @@ class Builder:
 
             return {
                 "success": False,
-                "error": str(e),
+                "error": safe_error_text(e),
                 "logs": env.build_logs
             }
         finally:

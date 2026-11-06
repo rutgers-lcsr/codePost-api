@@ -15,6 +15,7 @@ import redis.asyncio as redis_async
 from channels.db import database_sync_to_async
 from django.utils import timezone
 
+from autograder.services.safe_errors import safe_error_text
 from autograder.services.shell_session_utils import (
     cleanup_staging_dir as _cleanup_staging_dir,
     format_mounts as _format_mounts,
@@ -219,7 +220,7 @@ class WorkerShellRelay:
             )
         except Exception as e:
             logger.exception("Worker shell start failed")
-            await _apublish(self.redis_async, _out_channel(session_id), {"type": "error", "message": str(e)})
+            await _apublish(self.redis_async, _out_channel(session_id), {"type": "error", "message": safe_error_text(e)})
             return
 
         expires_at = time.time() + timeout_seconds
@@ -285,7 +286,7 @@ class WorkerShellRelay:
             session.socket._sock.sendall(data.encode("utf-8"))  # type: ignore[attr-defined]
             await self.redis_async.set(f"{METRICS_LAST_ACTIVITY_PREFIX}{session_id}", str(time.time()))
         except Exception as e:
-            await _apublish(self.redis_async, _out_channel(session_id), {"type": "error", "message": str(e)})
+            await _apublish(self.redis_async, _out_channel(session_id), {"type": "error", "message": safe_error_text(e)})
 
     async def _handle_close(self, session_id: str):
         session = self.sessions.pop(session_id, None)
@@ -337,7 +338,7 @@ class WorkerShellRelay:
                 )
                 _update_last_activity(self.redis_sync, session_id)
         except Exception as e:
-            _publish(self.redis_sync, _out_channel(session_id), {"type": "error", "message": str(e)})
+            _publish(self.redis_sync, _out_channel(session_id), {"type": "error", "message": safe_error_text(e)})
         finally:
             _publish(self.redis_sync, _out_channel(session_id), {"type": "closed"})
 

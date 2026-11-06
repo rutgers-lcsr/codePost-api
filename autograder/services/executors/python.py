@@ -333,7 +333,7 @@ class PythonExecutor(Executor):
             return ExecutionResult.error("Execution timed out")
         except Exception as e:
             container.kill()
-            return ExecutionResult.error(f"Execution failed: {e}")
+            return ExecutionResult.from_exception(e)
         finally:
             self.log("Cleaning up Docker container")
             container.remove()

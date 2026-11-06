@@ -24,6 +24,7 @@ from autograder.testUtils.buildHelpers import createDockerFile
 
 import json
 import logging
+from autograder.services.safe_errors import safe_error_text
 
 from typing import Any, cast
 
@@ -141,7 +142,7 @@ class EnvironmentViewSet(ListProtectedViewSet):
         except Exception as e:
             # Nothing would ever advance 'Building' now, so fail the build explicitly.
             environment.build_status = 3
-            environment.build_logs += f"Could not queue build: {e}\n"
+            environment.build_logs += f"Could not queue build: {safe_error_text(e)}\n"
             environment.save()
             if isinstance(e, _BROKER_ERRORS):
                 raise

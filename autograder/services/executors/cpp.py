@@ -149,7 +149,7 @@ class CPPExecutor(Executor):
             )
         except Exception as e:
             container.kill()
-            return ExecutionResult.error(f"Execution failed: {e}")
+            return ExecutionResult.from_exception(e)
         finally:
             container.remove()
 

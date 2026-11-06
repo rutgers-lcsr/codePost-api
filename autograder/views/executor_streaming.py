@@ -8,6 +8,7 @@ which publishes progress to a Redis pub/sub channel; this view subscribes and re
 """
 
 import json
+from autograder.services.safe_errors import safe_error_text
 import logging
 import time
 import uuid
@@ -240,7 +241,7 @@ class ExecuteFileStreaming(GenericAPIView):
             raise
         except Exception as e:
             logger.error(f"[ExecuteFileStreaming] Unexpected error: {e}", exc_info=True)
-            yield self._sse_message("error", {"error": f"Execution error: {str(e)}"})
+            yield self._sse_message("error", {"error": f"Execution error: {safe_error_text(e)}"})
     
     
     

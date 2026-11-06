@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple, TypedDict, Type, Union, cast
 
 import nbformat
+from autograder.services.safe_errors import safe_error_text
 from docker import DockerClient
 
 from core.models import User
@@ -175,6 +176,12 @@ class ExecutionResult:
             output_data={}
         )
         
+    @classmethod
+    def from_exception(cls, exc: BaseException, prefix: str = "Execution failed") :
+        """Error result for an unexpected exception: the detail goes to the server log only."""
+        logger.error(f"{prefix}: {exc}", exc_info=exc)
+        return cls.error(f"{prefix}: {safe_error_text(exc)}")
+
     @classmethod
     def error_notebook(cls, nb: nbformat.NotebookNode, message: str) :
         """Create an error ExecutionResult for notebooks, outputs_data in nbformatv4 format"""
@@ -858,7 +865,7 @@ class Executor(abc.ABC):
         
         # Check if execution failed
         if execution_error:
-            yield self._sse_message("error", {"error": f"Execution failed: {str(execution_error)}"})
+            yield self._sse_message("error", {"error": f"Execution failed: {safe_error_text(execution_error)}"})
         
         if result is None:
             yield self._sse_message("error", {"error": "Execution failed: No result returned"})
@@ -886,7 +893,7 @@ class Executor(abc.ABC):
             yield self._sse_message("complete", response_data)
         except Exception as e:
             self.log(f"Failed to send complete message: {e}", "error")
-            yield self._sse_message("error", {"error": f"Failed to send complete message: {str(e)}"})
+            yield self._sse_message("error", {"error": f"Failed to send complete message: {safe_error_text(e)}"})
         finally:
             time.sleep(0.1)
 
@@ -1534,7 +1541,7 @@ class NotebookExecutor(Executor):
         except json.JSONDecodeError:
             return ExecutionResult.error("Failed to parse results JSON")
         except Exception as e:
-            return ExecutionResult.error(f"Error processing results: {str(e)}")
+            return ExecutionResult.from_exception(e, "Error processing results")
 
     def _detect_imports(self, nb: nbformat.NotebookNode) -> List[str]:
         """
@@ -1712,7 +1719,8 @@ class NotebookExecutor(Executor):
             return ExecutionResult.error_notebook(nb, "Execution timed out")
         except Exception as e:
             container.kill()
-            return ExecutionResult.error_notebook(nb, f"Execution failed: {e}")
+            logger.error(f"Notebook execution failed: {e}", exc_info=e)
+            return ExecutionResult.error_notebook(nb, f"Execution failed: {safe_error_text(e)}")
         finally:
             self.log("Cleaning up Docker container")
             container.remove()

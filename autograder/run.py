@@ -1,6 +1,7 @@
 # Copyright © 2026 Rutgers, the State University of New Jersey. All rights reserved except as defined by the Rutgers Non-Commercial License, included with this software.
 # External libraries
 import os
+import docker
 import threading
 from celery import shared_task
 from enum import Enum
@@ -10,6 +11,7 @@ import json
 from autograder.celery import app, logger
 from autograder.services.executors import ExecutionResult, Executor
 from autograder.services.TestService import TestService
+from autograder.services.safe_errors import RunUnavailable, safe_error_text
 from autograder.testUtils.ag_logging import (
     AutograderError,
     AutograderRunAllUsage,
@@ -90,7 +92,7 @@ def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = Non
         # build_status=1 before enqueueing; mark it failed instead of stranding 'Building'.
         Environment.objects.filter(pk=environmentID).update(
             build_status=3,
-            build_logs=f"Build failed: the worker cannot reach its Docker daemon ({e}).\n")
+            build_logs=f"Build failed: the worker cannot reach its Docker daemon ({safe_error_text(e, (docker.errors.DockerException,))}).\n")
         raise
     result = builder.build()
     
@@ -315,7 +317,8 @@ def RunAll(environmentID, user_id, sendEmail=False):
                     "Exception: {}".format(traceback.format_exc()),
                 )
                 newSubmissionTests = []
-                logs = str(e)
+                logger.error(f"Run all - test suite failed for submission {s.id}: {e}", exc_info=e)
+                logs = "The test suite could not be completed because of an internal error."
 
             ######################## 5. Check for run and dump  ######################################
             _runAndDump(environment, s, logs)
@@ -602,8 +605,8 @@ def RunSubmission(self, submissionID: int):
             except Exception as e:
                 logger.error(f"[RunSubmission] Failed to save cache for file {f.id}: {e}")
                 failed += 1
-                results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": f"Cache save failed: {str(e)}"})
-                record_event(f, False, f"Cache save failed: {str(e)}")
+                results.append({"file_id": f.id, "file_name": f.name, "success": False, "error": "Cache save failed"})
+                record_event(f, False, f"Cache save failed: {e}")
     
       except Exception as e:
         logger.error(f"[RunSubmission] Unexpected error processing submission {submissionID}: {e}", exc_info=True)
@@ -761,7 +764,7 @@ def RunSubmissionVariant(self, submission_id: int, dataset_id: int):
                 target_file = f
                 break
         if target_file is None:
-            raise ValueError("No executable file found.")
+            raise RunUnavailable("No executable file found.")
 
         image_name = None
         try:
@@ -779,7 +782,7 @@ def RunSubmissionVariant(self, submission_id: int, dataset_id: int):
         executor = Executor.factory(cast(Any, target_file), image_name=image_name,
                                     datasets=shared + [dataset])
         if not executor:
-            raise ValueError("No executor available for this file.")
+            raise RunUnavailable("No executor available for this file.")
         result = executor.execute()
         elapsed = (timezone.now() - started).total_seconds()
         run.result = {
@@ -794,7 +797,7 @@ def RunSubmissionVariant(self, submission_id: int, dataset_id: int):
         logger.error(
             f"[RunSubmissionVariant] Execution failed for submission {submission_id} "
             f"variant {dataset_id}: {e}", exc_info=True)
-        run.result = {'status': 'error', 'error': str(e)}
+        run.result = {'status': 'error', 'error': safe_error_text(e, (RunUnavailable,))}
     run.save(update_fields=['result', 'modified'])
     return {"success": run.result.get('status') == 'success', "status": run.result.get('status')}
 
@@ -901,8 +904,8 @@ def RunQuizResponseCode(response_id: int):
     except Exception as e:
         logger.error(f"[RunQuizResponseCode] Execution failed for response {response_id}: {e}",
                      exc_info=True)
-        _write({'status': 'error', 'error': str(e)})
-        return {"success": False, "error": str(e)}
+        _write({'status': 'error', 'error': safe_error_text(e)})
+        return {"success": False, "error": safe_error_text(e)}
 
 
 @app.task

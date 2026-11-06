@@ -3,6 +3,7 @@ from celery import shared_task
 from core.models import File, User, CachedExecutionResult
 from autograder.services.executors import Executor
 from autograder.services.execution_events import record_execution_event
+from autograder.services.safe_errors import safe_error_text
 from typing import Optional
 import json
 import logging
@@ -61,7 +62,7 @@ def run_file_task(file_id: int, user_id: int, timeout: int = 30, force_execute: 
         record_execution_event(trigger='file_run', cached=False, success=False,
                                file=locals().get('file_obj'), user=locals().get('user'),
                                error_text=str(e))
-        return {"error": str(e), "success": False}
+        return {"error": safe_error_text(e), "success": False}
 
 @shared_task(time_limit=600, soft_time_limit=550)  # Set time limits for the task
 def run_test_task(submission_id: int, test_id: Optional[int] = None, user_id: Optional[int] = None, file_overrides: Optional[dict] = None):
@@ -88,7 +89,7 @@ def run_test_task(submission_id: int, test_id: Optional[int] = None, user_id: Op
             }
     except Exception as e:
         logger.error(f"Test Execution Task failed: {e}", exc_info=True)
-        return {"error": str(e), "success": False}
+        return {"error": safe_error_text(e), "success": False}
 
 
 @shared_task(time_limit=120, soft_time_limit=100)
@@ -100,7 +101,7 @@ def cleanup_images_task(environment_id: int, keep_count: int = 3):
         return {"success": True, "deleted_count": deleted}
     except Exception as e:
         logger.error(f"Image cleanup task failed for env {environment_id}: {e}", exc_info=True)
-        return {"error": str(e), "success": False}
+        return {"error": safe_error_text(e), "success": False}
 
 
 def _get_redis_client():
@@ -187,6 +188,6 @@ def run_file_streaming_task(
         record_execution_event(trigger='file_run', cached=False, success=False,
                                file=locals().get('file_obj'), user=locals().get('user'),
                                error_text=str(e))
-        _publish_sse(r, channel, "error", {"error": f"Execution error: {str(e)}"})
+        _publish_sse(r, channel, "error", {"error": f"Execution error: {safe_error_text(e)}"})
     finally:
         _publish_sse(r, channel, "_done", {})

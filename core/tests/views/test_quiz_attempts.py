@@ -1907,7 +1907,8 @@ class TestRunQuizResponseCodeTask:
         RunQuizResponseCode(code_id)
         r = QuizResponse.objects.get(id=code_id)
         assert r.codeExecution['status'] == 'error'
-        assert 'sandbox exploded' in r.codeExecution['error']
+        assert 'sandbox exploded' not in r.codeExecution['error']
+        assert 'RuntimeError' in r.codeExecution['error']
 
 
 class TestQuizAuditLog:
