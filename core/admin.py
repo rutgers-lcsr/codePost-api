@@ -2,6 +2,8 @@
 import json
 
 from django.contrib import admin, messages
+from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.models import User
 from django.db.models import Count, Q, F
 from django.utils.html import format_html
 from django.urls import reverse, path
@@ -396,12 +398,28 @@ class OrganizationAdmin(admin.ModelAdmin):
         return qs.prefetch_related("profiles", "courses")
 
 
+class AccountDisablingUserAdmin(UserAdmin):
+    """Unticking "Active" on a user is staff disabling the account: mark it
+    (Profile.isDisabled) so no emailed activation link switches it back on;
+    ticking it again clears the mark. Saves that leave "Active" alone change nothing."""
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if change and 'is_active' in form.changed_data:
+            obj.profile.isDisabled = not obj.is_active
+            obj.profile.save()
+
+
+admin.site.unregister(User)
+admin.site.register(User, AccountDisablingUserAdmin)
+
+
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
     list_display = ("user_email", "organization", "can_create_courses", "can_modify_rosters", "is_org_staff",
                     "pending_validation", "is_password_set", "created")
     search_fields = ("user__email", "user__username", "organization__name")
-    list_filter = ("canCreateCourses", "canModifyRosters", "pendingValidation", "isOrgStaff", "isPasswordSet", "organization", "created")
+    list_filter = ("canCreateCourses", "canModifyRosters", "pendingValidation", "isOrgStaff", "isPasswordSet", "isDisabled", "organization", "created")
     readonly_fields = ("api_token", "created", "modified")
     autocomplete_fields = ["user", "organization"]
     
@@ -410,7 +428,7 @@ class ProfileAdmin(admin.ModelAdmin):
             "fields": ("user", "organization", "api_token")
         }),
         ("Permissions", {
-            "fields": ("canCreateCourses", "canModifyRosters", "isOrgStaff", "pendingValidation")
+            "fields": ("canCreateCourses", "canModifyRosters", "isOrgStaff", "pendingValidation", "isDisabled")
         }),
         ("Settings", {
             "fields": ("showProductTips", "isPasswordSet", "stripeCustomerId")

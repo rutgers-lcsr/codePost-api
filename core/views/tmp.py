@@ -34,13 +34,14 @@ def activate_cip(request):
     code_in_place_course = 925  # code in place
     course = Course.objects.get(id=code_in_place_course)
 
+    # Switches on pending accounts only: staff-disabled ones stay off (Profile.isDisabled).
     for grader in course.graders.all():
-        if not grader.is_active:
+        if not grader.is_active and not grader.profile.isDisabled:
             grader.is_active = True
             grader.save()
 
     for student in course.students.all():
-        if not student.is_active:
+        if not student.is_active and not student.profile.isDisabled:
             student.is_active = True
             student.save()
     logEvent("CIP Activation",

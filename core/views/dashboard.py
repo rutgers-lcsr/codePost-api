@@ -279,6 +279,7 @@ class DashboardViewSet(viewsets.ViewSet):
         user.profile.pendingValidation = False
         user.profile.canCreateCourses = True
         user.profile.canModifyRosters = True
+        user.profile.isDisabled = False
         user.is_active = True
         user.save()
         user.profile.save()

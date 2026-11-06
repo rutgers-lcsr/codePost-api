@@ -253,6 +253,11 @@ class Profile(BaseModel):
   isServiceAccount = models.BooleanField(default=False, help_text=(
       "If True, this user is an auto-created service account for a course API key."))
 
+  isDisabled = models.BooleanField(default=False, help_text=(
+      "If True, staff deliberately turned this account off (User.is_active=False). "
+      "A pending invitee is also inactive but unmarked; no automatic activation path "
+      "(activation link, invite join, SSO) may switch a marked account back on."))
+
   def __init__(self, *args, **kwargs):
     # Remove deprecated stripeCustomerId if provided
     if 'stripeCustomerId' in kwargs:

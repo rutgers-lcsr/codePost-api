@@ -63,6 +63,13 @@ import logging
 # set Django's PasswordResetConfirmView.get_user treats as "no such user".
 _INVALID_UID_ERRORS = (TypeError, ValueError, OverflowError, UnicodeDecodeError, User.DoesNotExist)
 
+
+def _activation_refused(user):
+    """An emailed link must not switch on an account staff disabled: one marked
+    Profile.isDisabled, or (disabled before the marker existed) an inactive one that
+    already had a password. Pending accounts, the ones these links activate, are neither."""
+    return not user.is_active and (user.profile.isDisabled or user.profile.isPasswordSet)
+
 ##########################################################################
 #####################################     JOIN FLOW     ##################
 #####################################                   ##################
@@ -195,7 +202,7 @@ def verifyRegistrationToken(request):
             user = User.objects.get(id=uid_int)
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
-            )
+            ) and not _activation_refused(user)
             body = {"isValid": isValid}
             if isValid:
                 body["email"] = user.email
@@ -233,10 +240,7 @@ def registerAndSetPassword(request):
             isValid = default_token_generator.check_token(
                 user, form.cleaned_data["token"]
             )
-            if isValid and not user.is_active and user.profile.isPasswordSet:
-                # An account that already had a password and is inactive was disabled
-                # on purpose; a reset token must not switch it back on. (Pending
-                # accounts, the ones this endpoint activates, never had a password.)
+            if isValid and _activation_refused(user):
                 return Response(
                     {"isValid": False, "errors": {"token": "invalid token"}},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -691,6 +695,7 @@ def approve_new_admin_user(user, auto_approved=False, org_name=""):
     user.profile.canModifyRosters = True
     user.profile.canCreateCourses = True
     user.profile.pendingValidation = False
+    user.profile.isDisabled = False
     user.is_active = True
     user.save()
     user.profile.save()
