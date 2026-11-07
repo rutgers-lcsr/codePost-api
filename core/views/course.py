@@ -344,7 +344,8 @@ class CourseViewSet(SuperUserListProtectedViewSet):
             result['liveModels'] = live
         except Exception as e:
             logger.warning(f"Failed to list models from {provider}: {e}")
-            result['liveError'] = str(e)
+            # Classified, never the raw text: it can echo the provider URL or request details.
+            result['liveError'] = svc._parse_error(e)
 
         return Response({'providers': [result]})
 

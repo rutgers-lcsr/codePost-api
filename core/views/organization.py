@@ -423,7 +423,7 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
     Only accessible by Org Staff or superuser.
     """
     import asyncio
-    from core.services.ai_service import AI_MODELS, list_provider_models
+    from core.services.ai_service import AI_MODELS, AIService, list_provider_models
 
     organization = self.get_object()
 
@@ -454,7 +454,10 @@ class OrganizationViewSet(SuperUserListProtectedViewSet):
         result['liveModels'] = live
     except Exception as e:
         logger.warning(f"Failed to list models from {provider}: {e}")
-        result['liveError'] = str(e)
+        # Classified, never the raw text: it can echo the provider URL or request details.
+        svc = AIService.for_config(provider=provider, api_key=organization.ai_api_key or '',
+                                   base_url=organization.ai_base_url or '', model=organization.ai_model or '')
+        result['liveError'] = svc._parse_error(e)
 
     return Response({'providers': [result]})
 
