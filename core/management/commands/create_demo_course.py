@@ -202,7 +202,7 @@ class Command(BaseCommand):
             "uploadDueDate": now + timedelta(days=7),
             "maxLateDays": 3,
             "allowLateUploads": True,
-            "lateDeductions": [0, -5, -10, -15],
+            "lateDeductions": [0, 5, 10, 15],
             "explanation": "Upload your hello.py file. Partners allowed. Late submissions accepted with deductions.",
         })
         # Template / required file
@@ -400,7 +400,7 @@ class Command(BaseCommand):
             "uploadDueDate": now - timedelta(days=2),
             "maxLateDays": 5,
             "allowLateUploads": True,
-            "lateDeductions": [0, -10, -20, -30, -40, -50],
+            "lateDeductions": [0, 10, 20, 30, 40, 50],
         })
         self._add_rubric(a11, deductive=True)
         sub11 = self._add_submission(a11, student, grader, finalized=False, files=[
@@ -431,7 +431,7 @@ class Command(BaseCommand):
                         file=sf, author=grader,
                         text=f"Comment on {sf.name}",
                         startLine=0, endLine=1, startChar=0, endChar=0,
-                        pointDelta=Decimal("-2.00"),
+                        pointDelta=Decimal("2.00"),
                         color=colors[i % len(colors)],
                     )
 
@@ -470,22 +470,28 @@ class Command(BaseCommand):
         return assignment
 
     def _add_rubric(self, assignment, deductive=True):
-        """Add a standard rubric with categories and comments."""
+        """Add a standard rubric with categories and comments.
+
+        Sign convention (calculate_grade): a positive pointDelta takes points off, a
+        negative one adds them; a category's pointLimit caps deductions when positive
+        and points earned when negative. Additive rubrics therefore award with
+        negative deltas.
+        """
         if assignment.rubricCategories.exists():
             return
 
         # Category 1: Correctness
         cat1, _ = RubricCategory.objects.get_or_create(
             assignment=assignment, name="Correctness",
-            defaults={"pointLimit": None if deductive else 60, "sortKey": 0,
+            defaults={"pointLimit": None if deductive else -60, "sortKey": 0,
                        "helpText": "Does the code produce correct output?"},
         )
         if deductive:
-            deltas = [("-5.00", "Off-by-one error"), ("-10.00", "Wrong return type"),
-                      ("-15.00", "Crashes on edge case"), ("-20.00", "Incorrect algorithm")]
+            deltas = [("5.00", "Off-by-one error"), ("10.00", "Wrong return type"),
+                      ("15.00", "Crashes on edge case"), ("20.00", "Incorrect algorithm")]
         else:
-            deltas = [("10.00", "Correct for basic cases"), ("20.00", "Handles edge cases"),
-                      ("30.00", "Fully correct")]
+            deltas = [("-10.00", "Correct for basic cases"), ("-20.00", "Handles edge cases"),
+                      ("-30.00", "Fully correct")]
         for i, (delta, text) in enumerate(deltas):
             RubricComment.objects.get_or_create(
                 category=cat1, text=text,
@@ -500,9 +506,9 @@ class Command(BaseCommand):
                        "helpText": "Code readability and formatting.", "atMostOnce": False},
         )
         style_items = [
-            ("-3.00" if deductive else "5.00", "Good variable names"),
-            ("-5.00" if deductive else "5.00", "Proper indentation"),
-            ("-2.00" if deductive else "5.00", "Adequate comments"),
+            ("3.00" if deductive else "-5.00", "Good variable names"),
+            ("5.00" if deductive else "-5.00", "Proper indentation"),
+            ("2.00" if deductive else "-5.00", "Adequate comments"),
         ]
         for i, (delta, text) in enumerate(style_items):
             RubricComment.objects.get_or_create(
@@ -518,7 +524,7 @@ class Command(BaseCommand):
         )
         RubricComment.objects.get_or_create(
             category=cat3, text="Incomplete submission",
-            defaults={"pointDelta": Decimal("-25.00"), "sortKey": 0,
+            defaults={"pointDelta": Decimal("25.00"), "sortKey": 0,
                        "explanation": "Significant portions are missing.",
                        "instructionText": "Describe what is missing:",
                        "templateTextOn": True},
