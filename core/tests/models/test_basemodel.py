@@ -9,12 +9,14 @@ Tests for BaseModel.save() update_fields handling:
 - The change-diff must compare FKs by raw id (attname) without lazy-loading the
   related objects.
 - A no-op save must keep update_fields empty, skipping the UPDATE and signals.
+- A new object given its pk up front is an insert, not an update of a row that
+  does not exist yet; clearing the pk of a loaded object still saves a copy.
 """
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
-from core.models import Course, Section
+from core.models import Course, Organization, Section
 from core.tests.factories import OrganizationFactory, CourseFactory, SectionFactory
 
 
@@ -73,3 +75,26 @@ class TestBaseModelSave(APITestCase):
     updates = [q['sql'] for q in ctx.captured_queries if q['sql'].startswith('UPDATE')]
     self.assertEqual(updates, [], msg="a save with no changes must skip the UPDATE")
     self.assertEqual(Course.objects.get(pk=self.course.pk).modified, before)
+
+  def test_create_with_explicit_pk_inserts_the_row(self):
+    org = Organization.objects.create(id=4242, name='bm-explicit', shortname='BMX')
+    fresh = Organization.objects.get(pk=4242)
+    self.assertEqual(fresh.name, 'bm-explicit')
+    self.assertEqual(fresh.created, org.created)
+    self.assertEqual(fresh.modified, org.modified)
+
+  def test_get_or_create_with_explicit_pk(self):
+    _, created = Organization.objects.get_or_create(pk=4343, defaults={'name': 'bm-goc', 'shortname': 'BMG'})
+    self.assertTrue(created)
+    again, created_again = Organization.objects.get_or_create(pk=4343)
+    self.assertFalse(created_again)
+    self.assertEqual(again.name, 'bm-goc')
+
+  def test_clearing_pk_of_a_loaded_object_saves_a_copy(self):
+    # The pattern copy_assignment and copy_rubric use.
+    copy = Course.objects.get(pk=self.course.pk)
+    copy.pk = None
+    copy.period = 's2101'
+    copy.save()
+    self.assertNotEqual(copy.pk, self.course.pk)
+    self.assertEqual(Course.objects.filter(name='bmsave').count(), 2)

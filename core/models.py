@@ -72,7 +72,10 @@ class BaseModel(models.Model):
     abstract = True
 
   def save(self, *args: Any, **kwargs: Any) -> None:
-    if self.pk:
+    # A new object can arrive with its pk already set (create(id=...), get_or_create(pk=...)),
+    # so "has a pk" is not "has a row": _state.adding says whether it was loaded or saved yet.
+    # A loaded object whose pk was cleared to save a copy has no pk, so it inserts too.
+    if self.pk and not self._state.adding:
       ''' Update '''
       if kwargs.get('update_fields') is not None:
         # The caller declared what changed — honor it (no diff, no extra SELECT)
