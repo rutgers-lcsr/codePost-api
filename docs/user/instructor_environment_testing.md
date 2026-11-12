@@ -40,19 +40,19 @@ When using **Auto-Detect**, codePost looks for standard configuration files to i
 
 ### Packages in an Auto-Detect environment (Python and R)
 
-For Python and R, the **Auto-Detect Status** panel lists every package built into the assignment's image and where it came from:
+For Python and R, the **Packages** section of an Auto-Detect environment lists every package built into the assignment's image and where it came from. The image is a saved copy of the language and its packages; student code runs inside it.
 
 - **From your files and tests**: imported by your assignment files or test scripts.
 - **From student runs**: a package that code from at least three different submissions needed while running. Until then it is installed during each run, which is slower, and it is shown under "Installed while student code ran" with its count.
-- **Added by you**: typed into the **Add package** box. You can include a version, for example `numpy==1.26.4`. A Python package that is not on PyPI is refused, which catches typos.
+- **Added by you**: typed into the **Add package** box. You can include a version, for example `numpy==1.26.4`, and add several at once by separating them with spaces. A Python package that is not on PyPI is refused with the reason shown under the box, which catches typos.
 
-Remove a package with the × on its tag. A removed package stays out of the image, even if your files or student runs ask for it again, until you choose **Restore**.
+Remove a package with the × on its tag; the confirmation message has an **Undo**. A removed package stays out of the image, even if your files or student runs ask for it again, until you choose **Restore**.
 
-Any change to the list rebuilds the image shortly afterwards. Several changes in a row become one build, and packages learned from student runs rebuild an environment at most once every ten minutes. If the panel says the image does not match the package list, use **Rebuild now**.
+Any change to the list rebuilds the image shortly afterwards. Several changes in a row become one build, and packages learned from student runs rebuild an environment at most once every ten minutes. The status next to the page title says whether the image is Ready, Building, Out of date or failed. When it is out of date, the notice under the title has a **Rebuild now** button; when a build failed, it shows the end of the build log.
 
 ### Version history and rollback
 
-Each successful build is kept as a version with its package list. **History** shows what each version added or removed. **Rollback** restores an earlier version's image and package list. Packages added after that version are moved to "Removed by you", so the rollback is not undone by the next student run. codePost keeps the three most recent versions and the one in use.
+Each successful build is kept as a version with its package list. **History** shows what each version added or removed, and lets you switch to any kept version. **Roll back** restores the previous version's image and package list. Packages added after that version are moved to "Removed by you", so the rollback is not undone by the next student run. codePost keeps the three most recent versions and the one in use.
 
 ## Environment shell
 
