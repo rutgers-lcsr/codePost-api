@@ -229,12 +229,14 @@ class ImageManager:
                 env.built_requirements = target_entry["requirements"] or ""
                 # The version in use. The next build still numbers itself after the newest snapshot.
                 env.current_build_version = target_version
+                # The image now in use is one that built successfully, whatever the last build did.
+                env.build_status = 2
                 env.convergence_pending = False
                 env.successful_runs = 0
                 env.total_runs = 0
                 env.save(update_fields=[
                     'image_name', 'requirements', 'built_requirements', 'current_build_version',
-                    'pinned_packages', 'excluded_packages', 'convergence_pending',
+                    'build_status', 'pinned_packages', 'excluded_packages', 'convergence_pending',
                     'successful_runs', 'total_runs'
                 ])
             

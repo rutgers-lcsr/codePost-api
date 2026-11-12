@@ -85,8 +85,10 @@ class EnvironmentViewSet(ListProtectedViewSet):
         """
         validated_data = serializer.validated_data
         
-        # Check if auto_detect is explicitly being set to True
-        if validated_data.get('auto_detect') is True:
+        # Reset only when switching INTO auto-detect. The UI sends autoDetect with every save, so
+        # resetting whenever it is True threw away the built image each time an instructor saved
+        # an environment variable on an environment that was already auto-detect.
+        if validated_data.get('auto_detect') is True and not serializer.instance.auto_detect:
             # We must clear 'language' so RunSubmission logic (if not env.language) activates
             # We must clear 'image_name' so it rebuilds
             # We reset 'build_status' to 0 (Pending) to reflect 'Not Built'
@@ -101,6 +103,10 @@ class EnvironmentViewSet(ListProtectedViewSet):
             
             # Use bootstrap logic to try and detect immediately from assignment files or submissions
             detect_environment_bootstrap(environment.assignment.id)
+        elif serializer.instance.auto_detect and validated_data.get('auto_detect', True):
+            # Staying auto-detect: `requirements` is derived (detection, learning, the package
+            # endpoint), so a client that echoes its own copy back must not overwrite it.
+            serializer.save(requirements=serializer.instance.requirements)
         else:
             serializer.save()
 

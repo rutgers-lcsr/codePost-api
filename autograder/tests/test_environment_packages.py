@@ -511,6 +511,46 @@ class PackagesEndpointTests(APITestCase):
         self.assertEqual([], self.env.pinned_packages)
 
 
+class SavingAnAutoDetectEnvironmentTests(APITestCase):
+    """The UI sends autoDetect with every save. Saving must not reset an environment that is
+    already auto-detect: that threw away its image, language and build status."""
+
+    def setUp(self):
+        with factory.django.mute_signals(post_save):
+            self.course = CourseFactory(name="ag-save", period="s2026", organization__name="SaveOrg")
+            self.assignment = self.course.assignments.first()
+        self.client.force_authenticate(user=self.course.courseAdmins.first())
+
+    def _env(self, auto_detect):
+        return Environment.objects.create(
+            assignment=self.assignment, auto_detect=auto_detect, language='python-3.12',
+            requirements='numpy', image_name='codepost-env-1:1', build_status=2)
+
+    def test_saving_env_vars_keeps_the_image(self):
+        env = self._env(auto_detect=True)
+        with mock.patch('autograder.services.detection.detect_environment_bootstrap') as bootstrap:
+            # The page echoes its copy of the requirements back; in auto-detect they are derived.
+            resp = self.client.patch(f'/autograder/environments/{env.id}/',
+                                     {'autoDetect': True, 'envVars': {'MODE': 'grading'},
+                                      'requirements': 'something-the-page-scanned'}, format='json')
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        bootstrap.assert_not_called()
+        env.refresh_from_db()
+        self.assertEqual(('codepost-env-1:1', 2, 'python-3.12', 'numpy', {'MODE': 'grading'}), (
+            env.image_name, env.build_status, env.language, env.requirements, env.env_vars))
+
+    def test_switching_from_manual_still_resets_and_detects(self):
+        env = self._env(auto_detect=False)
+        with mock.patch('autograder.services.detection.detect_environment_bootstrap') as bootstrap:
+            resp = self.client.patch(f'/autograder/environments/{env.id}/', {'autoDetect': True}, format='json')
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        bootstrap.assert_called_once_with(self.assignment.id)
+        env.refresh_from_db()
+        self.assertEqual((None, 0, True), (env.image_name, env.build_status, env.auto_detect))
+
+
 class RollbackTests(APITestCase):
 
     def setUp(self):
@@ -556,6 +596,20 @@ class RollbackTests(APITestCase):
                 Converger.analyze_and_converge(self.env.id, INSTALLED.format('badpkg'), submission_id=sub.id)
         self.env.refresh_from_db()
         self.assertEqual('numpy\npandas', self.env.requirements)
+
+    def test_rolling_back_to_the_version_in_use_recovers_from_a_failed_build(self):
+        """A learned or added package broke the build: the image in use is still version 3's.
+        Going back to it restores its package list and the environment is no longer 'failed'."""
+        Environment.objects.filter(pk=self.env.pk).update(
+            build_status=3, pinned_packages=['nosuchversion==99'],
+            requirements='badpkg\nnosuchversion==99\nnumpy\npandas')
+
+        resp, _ = self._rollback({'version': 3})
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.env.refresh_from_db()
+        self.assertEqual((2, 'img:3', 'badpkg\nnumpy\npandas', ['nosuchversion']), (
+            self.env.build_status, self.env.image_name, self.env.requirements, self.env.excluded_packages))
 
     def test_rollback_to_an_older_version_pins_what_it_had(self):
         resp, _ = self._rollback({'version': 1})

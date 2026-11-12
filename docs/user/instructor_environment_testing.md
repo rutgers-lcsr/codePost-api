@@ -48,11 +48,11 @@ For Python and R, the **Packages** section of an Auto-Detect environment lists e
 
 Remove a package with the × on its tag; the confirmation message has an **Undo**. A removed package stays out of the image, even if your files or student runs ask for it again, until you choose **Restore**.
 
-Any change to the list rebuilds the image shortly afterwards. Several changes in a row become one build, and packages learned from student runs rebuild an environment at most once every ten minutes. The status next to the page title says whether the image is Ready, Building, Out of date or failed. When it is out of date, the notice under the title has a **Rebuild now** button; when a build failed, it shows the end of the build log.
+Any change to the list rebuilds the image shortly afterwards. Several changes in a row become one build, and packages learned from student runs rebuild an environment at most once every ten minutes. The status next to the page title says whether the image is Ready, Building, Out of date or failed. When it is out of date, the notice under the title has a **Rebuild now** button. When a build failed, the notice shows the end of the build log and offers to roll back to the version that last built, or to build again.
 
 ### Version history and rollback
 
-Each successful build is kept as a version with its package list. **History** shows what each version added or removed, and lets you switch to any kept version. **Roll back** restores the previous version's image and package list. Packages added after that version are moved to "Removed by you", so the rollback is not undone by the next student run. codePost keeps the three most recent versions and the one in use.
+Each successful build is kept as a version with its package list. **History** names each version by what it added or removed, and lets you switch to any kept version. **Roll back to version N** restores the previous version's image and package list. Packages added after that version are moved to "Removed by you", so the rollback is not undone by the next student run. codePost keeps the three most recent versions and the one in use.
 
 ## Environment shell
 
