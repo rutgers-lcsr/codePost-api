@@ -2,6 +2,8 @@
 import logging
 from core.models import Assignment, Environment, Submission
 from autograder.services.autodetector import Autodetector
+from autograder.services.environment_packages import refresh_requirements, supports_package_list
+from django.db import transaction
 from autograder.run import BuildEnvironment
 from log.models import Event
 import json
@@ -72,6 +74,14 @@ def detect_from_assignment_files(assignment_id, check_pypi=True):
                 logger.info(f"[AutoDetect] Requirements changed (New: {len(requirements)} chars)")
 
         should_update = not (is_building_or_done and language_match and reqs_match)
+
+        line_oriented = supports_package_list(final_language)
+        if line_oriented:
+            # Python and R: detection owns the detected list only (it also covers test scripts);
+            # `requirements` is recomputed from it and the learned and instructor lists.
+            requirements = Autodetector.scan_requirements(assignment, final_language, check_pypi=check_pypi) or ""
+            reqs_match = (requirements == environment.detected_requirements)
+            should_update = not (is_building_or_done and language_match and reqs_match)
         
         if should_update:
             logger.info(f"[AutoDetect] Updating Environment to {final_language} and building.")
@@ -94,12 +104,20 @@ def detect_from_assignment_files(assignment_id, check_pypi=True):
             except Exception:
                 pass
 
-            environment.language = final_language
-            if requirements:
-                environment.requirements = requirements
-            environment.auto_detect = True
-            environment.build_status = 1 # Mark as building immediately
-            environment.save(update_fields=['language', 'requirements', 'auto_detect', 'build_status'])
+            with transaction.atomic():
+                if line_oriented:
+                    # Under the row lock: the lists have other writers (runs, the instructor).
+                    environment = Environment.objects.select_for_update().get(pk=environment.pk)
+                environment.language = final_language
+                if line_oriented:
+                    environment.detected_requirements = requirements
+                    refresh_requirements(environment)
+                elif requirements:
+                    environment.requirements = requirements
+                environment.auto_detect = True
+                environment.build_status = 1 # Mark as building immediately
+                environment.save(update_fields=['language', 'requirements', 'detected_requirements',
+                                                'auto_detect', 'build_status'])
             
             BuildEnvironment.delay(environment.id)
             

@@ -180,7 +180,8 @@ class RExecutor(Executor):
                 output_data['image/png'] = cleaned_images[-1] # Primary image (last one)
                 output_data['images'] = cleaned_images # All images
 
-            success = result.get('StatusCode', 1) == 0
+            oom_error = self._oom_error(container, len(packages_to_install) > 0)
+            success = result.get('StatusCode', 1) == 0 and oom_error is None
             
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
@@ -189,7 +190,7 @@ class RExecutor(Executor):
                 success=success,
                 stdout=stdout,
                 stderr=stderr,
-                err=None if success else f"Exit Code: {result.get('StatusCode')}",
+                err=oom_error or (None if success else f"Exit Code: {result.get('StatusCode')}"),
                 execution_time=execution_time,
                 output_data=output_data,
                 system_logs=None,

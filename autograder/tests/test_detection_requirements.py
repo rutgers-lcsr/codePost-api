@@ -77,10 +77,15 @@ class DetectAndUpdateManifestTest(TestCase):
         self.assertEqual({'express', 'lodash'}, set(pkg['dependencies']))
 
     def test_python_requirements_still_line_merged(self):
-        self._sub_file('a.py', 'import numpy\nimport pandas')
-        self._sub_file('b.py', 'import numpy')
+        # Python packages come from the instructor's files; a student's imports are learned
+        # from runs instead (test_environment_packages.py).
+        self._sub_file('s.py', 'import flask')
+        self._sub_file('t.py', 'import flask')  # two: python must outvote the factory's .java file
+        self._asg_file('a.py', 'import numpy\nimport pandas')
+        self._asg_file('b.py', 'import numpy')
 
-        with mock.patch.object(Autodetector, 'check_pypi_existence', return_value=True):
+        with mock.patch.object(Autodetector, 'check_pypi_existence', return_value=True), \
+                mock.patch('autograder.services.environment_packages.schedule_rebuild'):
             Autodetector.detect_and_update(self.submission)
 
         self.env.refresh_from_db()

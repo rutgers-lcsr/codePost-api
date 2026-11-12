@@ -249,6 +249,10 @@ SPECTACULAR_SETTINGS = {
     # (otherwise drf-spectacular assigns hash-suffixed names that change between
     # runs and break the generated TS client's named enum imports).
     'ENUM_NAME_OVERRIDES': {
+        # Auto-detect environment package lists.
+        'EnvironmentPackageOriginEnum': 'autograder.serializers.environment.PACKAGE_ORIGIN_CHOICES',
+        'EnvironmentPendingPackageStatusEnum': 'autograder.serializers.environment.PENDING_PACKAGE_STATUS_CHOICES',
+        'EnvironmentPackageActionEnum': 'autograder.serializers.environment_actions.ENVIRONMENT_PACKAGE_ACTION_CHOICES',
         # Assignment lifecycle — shared by Assignment.state and the read-only
         # effectiveState serializer field.
         'AssignmentStateEnum': 'core.models.ASSIGNMENT_STATE_CHOICES',

@@ -221,6 +221,67 @@ class Autodetector:
             return True
 
     @staticmethod
+    def scan_requirements(assignment: Any, language: str, submission: Optional[Submission] = None,
+                          check_pypi: bool = True) -> Optional[str]:
+        """
+        Requirements for `language` from the assignment's files and its test scripts, plus the
+        submission's files for whole-file manifests.
+        """
+        # We need to scan BOTH submission files and assignment files (instructor provided).
+        # This ensures that:
+        # 1. Instructor provided modules (e.g. client) are detected as local.
+        # 2. Instructor provided requirements are included.
+        
+        # Student files only count for whole-file manifests. For line-oriented languages the
+        # detected list comes from the instructor's material alone: a submission's imports used
+        # to rewrite the list on every upload with no rebuild, so it never matched the image.
+        # What students need is learned from their runs instead (Converger).
+        line_oriented = (language or '').lower().split('-')[0] in LINE_ORIENTED_FAMILIES
+
+        all_files = []
+        if submission and not line_oriented:
+            all_files.extend(list(submission.files.all()))
+        
+        all_files.extend(list(assignment.files.all()))
+
+        # Include Test Scripts in scanning
+        # This ensures libraries used in test scripts (e.g. pandas, numpy) are installed in the environment
+        class ScriptDummyFile:
+             def __init__(self, name, data):
+                 self.name = name
+                 self.extension = name.split('.')[-1]
+                 self.data = data
+                 self.path = ""
+
+        for cat in assignment.testCategories.all():
+            if cat.testScript and cat.testScript.strip():
+                # We assume test scripts are Python for now as that's the primary script language
+                # Using .py extension ensures the Python handler picks it up
+                # TODO: Make sure the scripts have the right extension
+                all_files.append(ScriptDummyFile(f"test_script_{cat.id}.py", cat.testScript))
+        
+        active_files = [f for f in all_files if f.extension not in NON_CODE_EXTENSIONS]
+        local_modules = Autodetector.collect_local_modules(all_files)
+        
+        logger.info(f"[AutoDetect] Local modules identified: {local_modules}")
+
+        # Detect requirements based on hint
+        blobs: List[str] = []
+        uploaded: List[str] = []
+        for f in active_files:
+             try:
+                 # Use factory to get safe handler since we mixed SubmissionFile and AssignmentFile
+                 handler = FileHandlerFactory.get_handler(f)
+                 if handler.get_language() == language:
+                     reqs = handler.get_requirements()
+                     if reqs:
+                         (uploaded if FileHandlerFactory.is_manifest(f) else blobs).append(reqs)
+             except Exception as e:
+                 logger.error(f"[AutoDetect] Error processing file {f.name}: {e}")
+
+        return Autodetector.merge_requirements(language, blobs, local_modules, check_pypi, uploaded)
+
+    @staticmethod
     def detect_and_update(submission: Optional[Submission] = None, assignment: Optional["Assignment"] = None, force: bool = False,
                           check_pypi: bool = True) -> bool:
         """
@@ -341,74 +402,53 @@ class Autodetector:
 
         
         # Phase 2: Requirements scanning
-        # We need to scan BOTH submission files and assignment files (instructor provided).
-        # This ensures that:
-        # 1. Instructor provided modules (e.g. client) are detected as local.
-        # 2. Instructor provided requirements are included.
-        
-        all_files = []
-        if submission:
-            all_files.extend(list(submission.files.all()))
-        
-        all_files.extend(list(assignment.files.all()))
-
-        # Include Test Scripts in scanning
-        # This ensures libraries used in test scripts (e.g. pandas, numpy) are installed in the environment
-        class ScriptDummyFile:
-             def __init__(self, name, data):
-                 self.name = name
-                 self.extension = name.split('.')[-1]
-                 self.data = data
-                 self.path = ""
-
-        for cat in assignment.testCategories.all():
-            if cat.testScript and cat.testScript.strip():
-                # We assume test scripts are Python for now as that's the primary script language
-                # Using .py extension ensures the Python handler picks it up
-                # TODO: Make sure the scripts have the right extension
-                all_files.append(ScriptDummyFile(f"test_script_{cat.id}.py", cat.testScript))
-        
-        active_files = [f for f in all_files if f.extension not in NON_CODE_EXTENSIONS]
-        local_modules = Autodetector.collect_local_modules(all_files)
-        
-        logger.info(f"[AutoDetect] Local modules identified: {local_modules}")
-
-        # Detect requirements based on hint
-        blobs: List[str] = []
-        uploaded: List[str] = []
-        for f in active_files:
-             try:
-                 # Use factory to get safe handler since we mixed SubmissionFile and AssignmentFile
-                 handler = FileHandlerFactory.get_handler(f)
-                 if handler.get_language() == detected_language_hint:
-                     reqs = handler.get_requirements()
-                     if reqs:
-                         (uploaded if FileHandlerFactory.is_manifest(f) else blobs).append(reqs)
-             except Exception as e:
-                 logger.error(f"[AutoDetect] Error processing file {f.name}: {e}")
-
-        final_requirements = Autodetector.merge_requirements(detected_language_hint, blobs, local_modules, check_pypi, uploaded)
+        line_oriented = (detected_language_hint or '').lower().split('-')[0] in LINE_ORIENTED_FAMILIES
+        final_requirements = Autodetector.scan_requirements(assignment, detected_language_hint, submission, check_pypi)
 
         # Check against Environment
-        if environment.build_status == 1 and not force: # Building
-            logger.info(f"Auto-detect: Skipping update for Env {environment.id} because it is currently building.")
-            return False
-            
-        updated = False
-        if detected_language_hint and detected_language_hint != environment.language:
-             environment.language = detected_language_hint
-             updated = True
-             
+        # Re-read under a row lock: the Converger and the instructor's package edits write the
+        # same lists, and a stale copy here would recompute requirements without their change.
+        from django.db import transaction
+        from autograder.services import environment_packages as packages
+
         new_reqs = final_requirements or ""
-        current_reqs = environment.requirements or ""
-        
-        if new_reqs != current_reqs:
-             environment.requirements = new_reqs
-             logger.info(f"Auto-detect: Updated requirements for Env {environment.id} to '{new_reqs}'")
-             updated = True
+        with transaction.atomic():
+            environment = type(environment).objects.select_for_update().get(pk=environment.pk)
+            if not environment.auto_detect:
+                return False
+            if environment.build_status == 1 and not force: # Building
+                logger.info(f"Auto-detect: Skipping update for Env {environment.id} because it is currently building.")
+                return False
+
+            updated = False
+            update_fields = []
+            if detected_language_hint and detected_language_hint != environment.language:
+                 environment.language = detected_language_hint
+                 update_fields.append('language')
+                 updated = True
+
+            current_reqs = environment.requirements or ""
+            if line_oriented:
+                if new_reqs != (environment.detected_requirements or ""):
+                    environment.detected_requirements = new_reqs
+                    update_fields.append('detected_requirements')
+                    updated = True
+                new_reqs = packages.effective_requirements(environment)
+
+            if new_reqs != current_reqs:
+                 environment.requirements = new_reqs
+                 update_fields.append('requirements')
+                 logger.info(f"Auto-detect: Updated requirements for Env {environment.id} to '{new_reqs}'")
+                 updated = True
+
+            if updated:
+                environment.save(update_fields=update_fields)
+
+        # The image no longer matches the list. `force` is the build itself asking.
+        if line_oriented and new_reqs != current_reqs and not force:
+            packages.schedule_rebuild(environment.id, "detected")
 
         if updated:
-            environment.save()
             
             # Log Event
             try:

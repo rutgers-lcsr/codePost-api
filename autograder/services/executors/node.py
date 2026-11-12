@@ -130,7 +130,8 @@ class NodeExecutor(Executor):
             stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
 
             execution_time = (datetime.now() - start_time).total_seconds()
-            success = result.get('StatusCode', 1) == 0
+            oom_error = self._oom_error(container, needs_network)
+            success = result.get('StatusCode', 1) == 0 and oom_error is None
 
             # Merge logs
             full_system_logs = self.executor_logs
@@ -141,7 +142,7 @@ class NodeExecutor(Executor):
                 success=success,
                 stdout=stdout,
                 stderr=stderr,
-                err=None if success else f"Exit Code: {result.get('StatusCode')}",
+                err=oom_error or (None if success else f"Exit Code: {result.get('StatusCode')}"),
                 execution_time=execution_time,
                 system_logs=full_system_logs,
                 tests=test_results

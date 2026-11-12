@@ -104,6 +104,16 @@ class EnvironmentEjectResponseSerializer(serializers.Serializer):
     runTestsPy = serializers.CharField()
 
 
+ENVIRONMENT_PACKAGE_ACTION_CHOICES = [('add', 'Add'), ('remove', 'Remove'), ('restore', 'Restore')]
+
+
+class EnvironmentPackageRequestSerializer(serializers.Serializer):
+    # add: pin a requirement line. remove: exclude a package. restore: lift an exclusion.
+    action = serializers.ChoiceField(choices=ENVIRONMENT_PACKAGE_ACTION_CHOICES)
+    requirement = serializers.CharField(
+        max_length=200, help_text="The package name; when adding, optionally with a version (numpy==1.26.4).")
+
+
 class EnvironmentRollbackRequestSerializer(serializers.Serializer):
     version = serializers.IntegerField(required=False)
 

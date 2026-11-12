@@ -11,6 +11,8 @@ import re
 import json
 from typing import Set, Tuple, List, Dict, Any, Optional
 from core.models import Environment
+from core.services.file_handlers.python import PythonHandler
+from django.db import transaction
 from django.db.models import F
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,18 @@ class BaseConverger(abc.ABC):
                     modules.add(m)
         return modules
 
+    # The runner prints this for every package it had to pip/install.packages at run time.
+    INSTALLED_PATTERN = r"CODEPOST_AUTO_INSTALL_SUCCESS: ([\w\.\-]+)"
+    # Import name -> package name, where they differ.
+    MODULE_TO_PACKAGE: Dict[str, str] = {}
+
+    @classmethod
+    def extract_packages(cls, logs: str) -> Tuple[Set[str], Set[str]]:
+        """(packages installed at run time, packages the run failed for want of)."""
+        installed = {m for m in re.findall(cls.INSTALLED_PATTERN, logs) if cls._is_valid_module(m)}
+        missing = {cls.MODULE_TO_PACKAGE.get(m, m) for m in cls.extract_missing_modules(logs)}
+        return installed, missing - installed
+
     @classmethod
     def _is_valid_module(cls, module: str) -> bool:
         """Validate module name - not stdlib, valid format."""
@@ -93,6 +107,7 @@ class PythonConverger(BaseConverger):
     """Converger for Python environments."""
     
     LANGUAGE_FAMILY = "python"
+    MODULE_TO_PACKAGE = PythonHandler.PIP_MODULE_TO_PACKAGE
     PATTERNS = [
         r"ModuleNotFoundError: No module named '([\w\-]+)'",
         r"ImportError: No module named ([\w\-]+)",
@@ -463,6 +478,12 @@ class Converger:
             if not converger_cls:
                 return (False, added_modules, submissions_to_rerun)
 
+            from autograder.services import environment_packages as packages
+            if packages.supports_package_list(env.language):
+                # Python and R learn packages into their own list and rebuild on a rate limit,
+                # so there is nothing for the caller to build or rerun.
+                return (False, cls.learn_packages(environment_id, converger_cls, logs, submission_id), [])
+
             # Stability check
             if env.total_runs >= converger_cls.MIN_RUNS_FOR_STABILITY:
                 success_rate = env.successful_runs / env.total_runs if env.total_runs > 0 else 0
@@ -530,6 +551,78 @@ class Converger:
         except Exception as e:
             logger.error(f"Converger Error for Env {environment_id}: {e}")
             return (False, added_modules, submissions_to_rerun)
+
+    @classmethod
+    def learn_packages(cls, environment_id: int, converger_cls: type, logs: str,
+                       submission_id: Optional[int]) -> Set[str]:
+        """
+        Count, per package, the distinct submissions whose run needed it: either the runner had
+        to install it (the run passed, slowly) or the import failed. At MODULE_THRESHOLD
+        submissions the package joins learned_packages and a rebuild is queued.
+
+        There is no stability gate here: a run-time install makes the run pass, so a high
+        success rate says nothing about whether the image is complete.
+
+        Returns the packages learned by this call.
+        """
+        from autograder.services import environment_packages as packages
+        from autograder.services.autodetector import Autodetector
+
+        installed, missing = converger_cls.extract_packages(logs)
+        if not submission_id or not (installed or missing):
+            return set()
+
+        learned: Set[str] = set()
+        image_is_behind = False
+        with transaction.atomic():
+            env = Environment.objects.select_for_update().get(pk=environment_id)
+            language = env.language
+            listed = packages._keys(language, packages._lines(packages.effective_requirements(env)))
+            # The runner installed something the list says is in the image: the image is stale.
+            image_is_behind = packages.image_out_of_date(env) and any(
+                packages.package_key(language, p) in listed for p in installed)
+            known = listed | packages._keys(language, env.excluded_packages)
+            candidates = {p for p in installed | missing if packages.package_key(language, p) not in known}
+            if candidates:
+                candidates -= Autodetector.collect_local_modules(list(env.assignment.files.all()))
+
+            stats: Dict[str, Any] = dict(env.convergence_stats or {})
+            if not candidates and not image_is_behind:
+                return set()
+            for package in candidates:
+                entry = dict(stats.get(package) or {})
+                if entry.get("status"):
+                    continue  # refused before (not on the index, or it broke a build)
+                submissions = list(entry.get("submissions") or [])
+                if submission_id not in submissions:
+                    submissions.append(submission_id)
+                rerun = list(entry.get("rerun") or [])
+                if package in missing and submission_id not in rerun:
+                    rerun.append(submission_id)
+                entry.update({"count": len(submissions), "submissions": submissions, "rerun": rerun})
+
+                if len(submissions) >= converger_cls.MODULE_THRESHOLD:
+                    if converger_cls.LANGUAGE_FAMILY == 'python' and not Autodetector.check_pypi_existence(package):
+                        entry["status"] = "not_found"
+                    else:
+                        entry["status"] = "learned"
+                        learned.add(package)
+                stats[package] = entry
+
+            if candidates:
+                env.convergence_stats = stats
+                update_fields = ['convergence_stats']
+                if learned:
+                    env.learned_packages = sorted(set(env.learned_packages or []) | learned)
+                    packages.refresh_requirements(env)
+                    update_fields += ['learned_packages', 'requirements']
+                env.save(update_fields=update_fields)
+
+        if learned:
+            logger.info(f"Converger: Env {environment_id} learned {learned} from student runs")
+        if learned or image_is_behind:
+            packages.schedule_rebuild(environment_id, "learned" if learned else "out of date")
+        return learned
 
     @classmethod
     def rerun_failed_submissions(cls, environment_id: int, submission_ids: List[int]):

@@ -2305,6 +2305,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/EnvironmentEjectResponse'
           description: ''
+  /autograder/environments/{id}/packages/:
+    post:
+      operationId: autograder_environmentsPackagesCreate
+      description: |-
+        Add, remove or restore one package of an auto-detect environment.
+
+        add pins a requirement line (a name, optionally with a version), remove excludes a
+        package whatever detected or learned it, restore lifts that exclusion. The image is
+        rebuilt shortly after; several changes in a row become one build.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this environment.
+        required: true
+      tags:
+      - autograder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentPackageRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EnvironmentPackageRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/EnvironmentPackageRequest'
+        required: true
+      security:
+      - courseKeyAuth: []
+      - tokenAuth: []
+      - basicAuth: []
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Environment'
+          description: ''
+        '400':
+          description: Not a package that can be added, or not an auto-detect Python/R
+            environment
   /autograder/environments/{id}/preview/:
     post:
       operationId: autograder_environmentsPreviewCreate
@@ -19596,6 +19641,30 @@ components:
           type: number
           format: double
           readOnly: true
+        packageListSupported:
+          type: boolean
+          readOnly: true
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentPackage'
+          readOnly: true
+        excludedPackages:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        pendingPackages:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentPendingPackage'
+          readOnly: true
+        imageOutOfDate:
+          type: boolean
+          readOnly: true
+        rebuildScheduled:
+          type: boolean
+          readOnly: true
       required:
       - assignment
       - buildLogs
@@ -19603,9 +19672,15 @@ components:
       - convergencePending
       - convergenceStats
       - currentBuildVersion
+      - excludedPackages
       - id
       - imageHistory
+      - imageOutOfDate
       - lastBuilt
+      - packageListSupported
+      - packages
+      - pendingPackages
+      - rebuildScheduled
       - successRate
       - successfulRuns
       - totalRuns
@@ -19703,6 +19778,76 @@ components:
       - dockerfile
       - runTestsPy
       - testsJson
+    EnvironmentPackage:
+      type: object
+      properties:
+        name:
+          type: string
+        requirement:
+          type: string
+          description: The requirement line, e.g. numpy==1.26.4
+        origin:
+          $ref: '#/components/schemas/EnvironmentPackageOriginEnum'
+      required:
+      - name
+      - origin
+      - requirement
+    EnvironmentPackageActionEnum:
+      enum:
+      - add
+      - remove
+      - restore
+      type: string
+      description: |-
+        * `add` - Add
+        * `remove` - Remove
+        * `restore` - Restore
+    EnvironmentPackageOriginEnum:
+      enum:
+      - detected
+      - learned
+      - pinned
+      type: string
+      description: |-
+        * `detected` - Detected
+        * `learned` - Learned
+        * `pinned` - Pinned
+    EnvironmentPackageRequest:
+      type: object
+      properties:
+        action:
+          $ref: '#/components/schemas/EnvironmentPackageActionEnum'
+        requirement:
+          type: string
+          description: The package name; when adding, optionally with a version (numpy==1.26.4).
+          maxLength: 200
+      required:
+      - action
+      - requirement
+    EnvironmentPendingPackage:
+      type: object
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+          description: Distinct submissions whose run needed the package
+        status:
+          $ref: '#/components/schemas/EnvironmentPendingPackageStatusEnum'
+      required:
+      - count
+      - name
+      - status
+    EnvironmentPendingPackageStatusEnum:
+      enum:
+      - counting
+      - not_found
+      - build_failed
+      type: string
+      description: |-
+        * `counting` - Counting
+        * `not_found` - Not Found
+        * `build_failed` - Build Failed
     EnvironmentPreviewRequest:
       type: object
       properties:
@@ -21876,6 +22021,30 @@ components:
         successRate:
           type: number
           format: double
+          readOnly: true
+        packageListSupported:
+          type: boolean
+          readOnly: true
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentPackage'
+          readOnly: true
+        excludedPackages:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        pendingPackages:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentPendingPackage'
+          readOnly: true
+        imageOutOfDate:
+          type: boolean
+          readOnly: true
+        rebuildScheduled:
+          type: boolean
           readOnly: true
     PatchedEnvironmentBuildRequest:
       type: object

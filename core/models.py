@@ -1999,6 +1999,16 @@ class Environment(BaseModel):
   convergence_pending = models.BooleanField(default=False, help_text="True if waiting to validate convergence after auto-update")
   convergence_failed_notified = models.BooleanField(default=False, help_text="True if admin was notified of convergence failure")
 
+  # Package lists behind `requirements` for line-oriented languages (python, r). `requirements`
+  # stays the manifest the image is built from: detected + learned + pinned, minus excluded.
+  # See autograder/services/environment_packages.py.
+  detected_requirements = models.TextField(default="", blank=True, help_text="Packages detected from the instructor's assignment files and test scripts.")
+  learned_packages = JSONField(default=list, blank=True, help_text="Packages enough student runs needed at run time.")
+  pinned_packages = JSONField(default=list, blank=True, help_text="Requirement lines an instructor added.")
+  excluded_packages = JSONField(default=list, blank=True, help_text="Package names an instructor removed; never detected or learned back.")
+  built_requirements = models.TextField(null=True, blank=True, help_text="The requirements the current image was built from. Null when unknown.")
+  rebuild_scheduled_at = models.DateTimeField(null=True, blank=True, help_text="When an automatic rebuild is due; null when none is queued.")
+
   course = property(lambda self: self.assignment.course)
 
 
@@ -2014,6 +2024,7 @@ class AutograderExecutionEvent(BaseModel):
       ('compile_error', 'Compile Error'),
       ('runtime_error', 'Runtime Error'),
       ('marker_extraction', 'Marker Extraction'),
+      ('memory_limit', 'Memory Limit'),
       ('infra', 'Infrastructure'),
       ('unknown', 'Unknown'),
   ]

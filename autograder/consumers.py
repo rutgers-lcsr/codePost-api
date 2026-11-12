@@ -146,7 +146,6 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
         }
 
         try:
-            tmpfs_size = "size=2g,mode=1777" if needs_network else "size=512m,mode=1777"
             executor, volumes, _docker_env, temp_staging_dir, self.container, self.socket = (
                 await self._open_shell_session_sync(
                     env, 
@@ -154,7 +153,7 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
                     include_assignment_files, 
                     timeout_seconds, 
                     labels, 
-                    tmpfs_size,
+                    needs_network,
                     run_pre_script,
                     dataset_ids,
                 )
@@ -369,14 +368,14 @@ class EnvironmentShellConsumer(AsyncWebsocketConsumer):
 
     @staticmethod
     @database_sync_to_async
-    def _open_shell_session_sync(env, include_datasets, include_assignment_files, timeout_seconds, labels, tmpfs_size, run_pre_script=False, dataset_ids=None):
+    def _open_shell_session_sync(env, include_datasets, include_assignment_files, timeout_seconds, labels, needs_network, run_pre_script=False, dataset_ids=None):
         return Executor.open_shell_session(
             env=env,
             include_datasets=include_datasets,
             include_assignment_files=include_assignment_files,
             timeout_seconds=timeout_seconds,
             labels=labels,
-            tmpfs_size=tmpfs_size,
+            needs_network=needs_network,
             run_pre_script=run_pre_script,
             dataset_ids=dataset_ids,
         )
@@ -797,6 +796,7 @@ class WorkerShellConsumer(AsyncWebsocketConsumer):
                     include_assignment_files=include_assignment_files,
                     timeout_seconds=timeout_seconds,
                     labels=labels,
+                    needs_network=env.allowNetworkAccess,
                     run_pre_script=run_pre_script,
                     dataset_ids=dataset_ids,
                 )

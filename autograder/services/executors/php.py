@@ -98,7 +98,8 @@ class PHPExecutor(Executor):
                 if stderr.startswith("\n"): stderr = stderr[1:]
             
             execution_time = (datetime.now() - start_time).total_seconds()
-            success = result.get('StatusCode', 1) == 0
+            oom_error = self._oom_error(container, bool(packages))
+            success = result.get('StatusCode', 1) == 0 and oom_error is None
             
             full_logs = self.executor_logs
             if template_logs:
@@ -108,7 +109,7 @@ class PHPExecutor(Executor):
                 success=success,
                 stdout=stdout,
                 stderr=stderr,
-                err=None if success else f"Exit Code: {result.get('StatusCode')}",
+                err=oom_error or (None if success else f"Exit Code: {result.get('StatusCode')}"),
                 execution_time=execution_time,
                 system_logs=full_logs
             )

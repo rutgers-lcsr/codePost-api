@@ -15,6 +15,15 @@ MAX_SCAN_LENGTH = 4000
 # Ordered, first-match-wins. Each signal is a regex searched against lowercased
 # output. Specific categories must come before the greedy runtime_error fallback.
 _CATEGORY_SIGNALS = [
+    # The kernel OOM-killed the sandbox (Executor._oom_error) or the program
+    # itself ran out of memory. Before timeout: a kill inside the runner also
+    # leaves the "execution timeout or incomplete" text behind.
+    ('memory_limit', [
+        'sandbox memory limit',
+        'memoryerror',
+        'out of memory',
+        r'\boom-?kill',
+    ]),
     ('timeout', [
         'timed out',
         'timeouterror',

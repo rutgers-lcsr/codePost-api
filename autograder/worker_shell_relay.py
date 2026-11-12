@@ -106,6 +106,7 @@ def _start_container(
         include_assignment_files=include_assignment_files,
         timeout_seconds=timeout_seconds,
         labels=labels,
+        needs_network=env.allowNetworkAccess,
         run_pre_script=run_pre_script,
         dataset_ids=dataset_ids,
     )

@@ -60,9 +60,10 @@ Every execution container runs with:
 - `security_opt=["no-new-privileges"]`
 - `cap_drop=["ALL"]`
 - Network disabled (unless `allowNetworkAccess=True`)
-- tmpfs for `/tmp`
+- tmpfs for `/tmp` (512 MB; 2 GB for install runs). tmpfs pages count against the container's memory limit
 - Non-root `codepost` user
-- Resource limits: 1GB memory, 500 PIDs, 100k CPU quota
+- Resource limits: 1 GB memory (3 GB for runs that install packages, so the 2 GB tmpfs fits), 500 PIDs, 100k CPU quota
+- A kernel OOM kill is reported as "Execution exceeded the sandbox memory limit" (stats category `memory_limit`)
 - Max output: 1MB stdout/stderr, 10MB file size
 
 ---

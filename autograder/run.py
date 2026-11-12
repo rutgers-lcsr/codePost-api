@@ -64,10 +64,11 @@ def AutoDetectEnvironment(assignment_id):
         logger.error(f"[AutoDetect] Task failed for assignment {assignment_id}: {e}")
 
 @app.task(priority=0)
-def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = None):
+def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = None, reason: str = ""):
     """
     Builds the Docker environment for a given Environment ID.
     Optionally reruns submissions after successful build.
+    `reason` is kept on the build's history snapshot.
     """
     
     # --- AUTO-DETECT UPDATE TRIGGER ---
@@ -86,7 +87,7 @@ def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = Non
     # ----------------------------------
 
     try:
-        builder = Builder(environmentID)
+        builder = Builder(environmentID, reason=reason)
     except Exception as e:
         # docker.from_env() failed (daemon down/restarting on this worker). The view set
         # build_status=1 before enqueueing; mark it failed instead of stranding 'Building'.
@@ -95,6 +96,16 @@ def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = Non
             build_logs=f"Build failed: the worker cannot reach its Docker daemon ({safe_error_text(e, (docker.errors.DockerException,))}).\n")
         raise
     result = builder.build()
+
+    # Packages learned from student runs are now in the image (rerun the submissions that
+    # failed without them), or they broke the build and are dropped.
+    try:
+        from autograder.services.environment_packages import settle_learned_packages
+        learned_reruns = settle_learned_packages(environmentID, bool(result.get("success")))
+        if learned_reruns:
+            rerun_submission_ids = sorted(set(rerun_submission_ids or []) | set(learned_reruns))
+    except Exception as e:
+        logger.error(f"[BuildEnvironment] Could not settle learned packages for env {environmentID}: {e}")
     
     if result.get("success") and rerun_submission_ids:
         logger.info(f"[BuildEnvironment] Triggering reruns for {len(rerun_submission_ids)} submissions")
@@ -103,6 +114,36 @@ def BuildEnvironment(environmentID, rerun_submission_ids: list[int] | None = Non
             logger.info(f"[BuildEnvironment] Queued rerun for submission {sub_id}")
     
     return result
+
+
+@app.task(priority=0)
+def RebuildEnvironmentIfStale(environment_id: int, reason: str = "", attempt: int = 0):
+    """
+    The automatic rebuild queued by environment_packages.schedule_rebuild.
+
+    Builds only when the image does not match the environment's requirements, or is gone
+    (a rollback to a snapshot whose image was cleaned up). Waits for a build in progress
+    rather than building beside it.
+    """
+    from autograder.services.environment_packages import image_out_of_date
+    from autograder.services.image_manager import ImageManager
+
+    env = Environment.objects.filter(pk=environment_id).first()
+    if env is None:
+        return {"status": "gone"}
+
+    if env.build_status == 1 and attempt < 10:
+        cast(Any, RebuildEnvironmentIfStale).apply_async(args=[environment_id, reason, attempt + 1], countdown=60)
+        return {"status": "waiting_for_build"}
+
+    Environment.objects.filter(pk=environment_id).update(rebuild_scheduled_at=None)
+    if env.build_status == 1:
+        return {"status": "gave_up"}
+    if not image_out_of_date(env) and ImageManager.image_exists(env.image_name):
+        return {"status": "up_to_date"}
+
+    logger.info(f"[RebuildEnvironmentIfStale] Rebuilding env {environment_id} ({reason})")
+    return cast(Any, BuildEnvironment)(environment_id, reason=reason)
 
 
 @app.task
@@ -585,10 +626,11 @@ def RunSubmission(self, submissionID: int):
                             environment.id, logs_to_analyze, submission_id=submissionID
                         )
                         
-                        if should_converge and added_modules:
+                        if added_modules:
                             logger.info(f"[RunSubmission] Convergence added {added_modules}")
                             results[-1]["converged_modules"] = list(added_modules)
-                            
+
+                        if should_converge and added_modules:
                             # Trigger build and queue reruns
                             if subs_to_rerun:
                                 logger.info(f"[RunSubmission] Triggering build and queueing reruns for {len(subs_to_rerun)} submissions")

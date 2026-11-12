@@ -137,13 +137,14 @@ class CPPExecutor(Executor):
             stdout, stderr, test_results = self.parse_test_results(stdout, stderr, self.result_nonce)
             
             execution_time = (datetime.now() - start_time).total_seconds()
-            success = result.get('StatusCode', 1) == 0
+            oom_error = self._oom_error(container, False)
+            success = result.get('StatusCode', 1) == 0 and oom_error is None
             
             return ExecutionResult(
                 success=success,
                 stdout=stdout,
                 stderr=stderr,
-                err=None if success else f"Exit Code: {result.get('StatusCode')}",
+                err=oom_error or (None if success else f"Exit Code: {result.get('StatusCode')}"),
                 execution_time=execution_time,
                 tests=test_results
             )

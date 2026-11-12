@@ -42,65 +42,51 @@ class ImageManager:
         return f"codepost-env-{assignment_id}-v{version}"
 
     @classmethod
-    def save_image_version(
-        cls,
-        environment_id: int,
-        image_name: str,
-        requirements: str,
-        status: str = "success"
-    ) -> bool:
+    def record_build(cls, env: Environment, image_name: str, reason: str = "") -> int:
         """
-        Save a new image version to history.
-        
-        Args:
-            environment_id: Environment ID
-            image_name: Docker image name
-            requirements: Requirements content at this version
-            status: Build status ('success', 'failed', 'pending')
-            
+        Add a snapshot of a successful build to the environment's history and advance its
+        version. Mutates `env` only: the caller (the Builder) saves it, so there is one writer.
+
         Returns:
-            True if saved successfully
+            The new version number
         """
-        try:
-            env = Environment.objects.get(pk=environment_id)
-            
-            # Get current history
-            history = env.image_history or []
-            
-            # Create new version entry
-            new_entry = {
-                "version": env.current_build_version,
-                "image_name": image_name,
-                "requirements": requirements,
-                "built_at": timezone.now().isoformat(),
-                "status": status,
-                "successful_runs": env.successful_runs,
-                "total_runs": env.total_runs
-            }
-            
-            # Add to history
-            history.append(new_entry)
-            
-            # Trim to max versions
-            if len(history) > MAX_IMAGE_VERSIONS:
-                # Get images to delete
-                to_delete = history[:-MAX_IMAGE_VERSIONS]
-                history = history[-MAX_IMAGE_VERSIONS:]
-                
-                # Schedule cleanup for old images
-                for old_entry in to_delete:
-                    cls.delete_image(old_entry["image_name"])
-            
-            # Save
-            env.image_history = history
-            env.save(update_fields=['image_history'])
-            
-            logger.info(f"Saved image version {env.current_build_version} for env {environment_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to save image version for env {environment_id}: {e}")
+        history = list(env.image_history or [])
+        versions = [entry.get("version") or 0 for entry in history]
+        # Environments built before history was kept have an image but no entry for it.
+        previous = max(versions) if versions else (env.current_build_version if env.image_name else 0)
+        version = previous + 1
+        history.append({
+            "version": version,
+            "image_name": image_name,
+            "requirements": env.requirements,
+            "built_at": timezone.now().isoformat(),
+            "status": "success",
+            "reason": reason,
+            "successful_runs": env.successful_runs,
+            "total_runs": env.total_runs
+        })
+        env.image_history = history
+        env.current_build_version = version
+        logger.info(f"Recorded image version {version} for env {env.id}")
+        return version
+
+    @classmethod
+    def image_exists(cls, image_name: Optional[str]) -> bool:
+        """False only when Docker answers that the image is gone."""
+        if not image_name:
             return False
+        client = cls._get_docker_client()
+        if not client:
+            return True
+        try:
+            client.images.get(image_name)
+            return True
+        except Exception as e:
+            import docker
+            if isinstance(e, docker.errors.ImageNotFound):
+                return False
+            logger.warning(f"Could not check image {image_name}: {e}")
+            return True
 
     @classmethod
     def increment_version(cls, environment_id: int) -> int:
@@ -174,53 +160,32 @@ class ImageManager:
             return 0
             
         try:
-            # 1. Cleanup based on History (if populated)
+            # 1. Trim history, always keeping the snapshot of the image in use (after a
+            #    rollback that is not one of the newest).
             env = Environment.objects.get(pk=environment_id)
             history = env.image_history or []
             
             deleted_count = 0
             
             if len(history) > keep_count:
-                to_delete_history = history[:-keep_count]
-                env.image_history = history[-keep_count:]
+                in_use = [e for e in history[:-keep_count] if e.get("image_name") == env.image_name]
+                env.image_history = in_use[-1:] + history[-keep_count:]
                 env.save(update_fields=['image_history'])
-                
-                for entry in to_delete_history:
-                    if cls.delete_image(entry.get("image_name")):
-                        deleted_count += 1
             
-            # 2. Cleanup orphaned/untagged images directly from Docker
-            # Pattern: codepost-env-{id}:{timestamp}
-            image_prefix = f"codepost-env-{environment_id}"
+            # 2. Delete every image of this environment that nothing points at any more.
+            #    Pattern: codepost-env-{id}:{timestamp}. Skipped mid-build: the image being
+            #    built is not recorded yet.
+            if env.build_status == 1:
+                return deleted_count
+
+            keep = {e.get("image_name") for e in (env.image_history or [])} | {env.image_name}
+            image_prefix = f"codepost-env-{environment_id}:"
             
-            all_images = client.images.list()
-            matching_images = []
-            
-            for img in all_images:
+            for img in client.images.list():
                 for tag in img.tags:
-                    if tag.startswith(image_prefix + ":"):
-                        try:
-                            # Parse timestamp from tag
-                            tag_parts = tag.split(":")
-                            if len(tag_parts) == 2 and tag_parts[1].isdigit():
-                                timestamp = int(tag_parts[1])
-                                matching_images.append({
-                                    "tag": tag,
-                                    "timestamp": timestamp,
-                                    "id": img.id
-                                })
-                        except:
-                            pass
-            
-            # Sort by timestamp descending (newest first)
-            matching_images.sort(key=lambda x: x["timestamp"], reverse=True)
-            
-            # Keep top N
-            if len(matching_images) > keep_count:
-                images_to_remove = matching_images[keep_count:]
-                for img_data in images_to_remove:
-                    if cls.delete_image(img_data["tag"]):
-                         deleted_count += 1
+                    if tag.startswith(image_prefix) and tag not in keep:
+                        if cls.delete_image(tag):
+                            deleted_count += 1
             
             logger.info(f"Cleaned up {deleted_count} old images for env {environment_id}")
             return deleted_count
@@ -232,7 +197,11 @@ class ImageManager:
     @classmethod
     def rollback_to_version(cls, environment_id: int, target_version: int) -> bool:
         """
-        Rollback environment to a specific version.
+        Rollback environment to a specific version: its image and its package list.
+
+        For python and r the package lists are adjusted so the rollback sticks (see
+        environment_packages.restore_snapshot). The caller queues a rebuild check, which
+        rebuilds the snapshot if its image has been deleted.
         
         Args:
             environment_id: Environment ID
@@ -241,31 +210,33 @@ class ImageManager:
         Returns:
             True if rollback successful
         """
+        from django.db import transaction
+        from autograder.services import environment_packages as packages
+
         try:
-            env = Environment.objects.get(pk=environment_id)
-            history = env.image_history or []
-            
-            # Find target version in history
-            target_entry = None
-            for entry in history:
-                if entry.get("version") == target_version:
-                    target_entry = entry
-                    break
-            
-            if not target_entry:
-                logger.error(f"Version {target_version} not found in history for env {environment_id}")
-                return False
-            
-            # Rollback
-            env.image_name = target_entry["image_name"]
-            env.requirements = target_entry["requirements"]
-            env.convergence_pending = False
-            env.successful_runs = 0
-            env.total_runs = 0
-            env.save(update_fields=[
-                'image_name', 'requirements', 'convergence_pending',
-                'successful_runs', 'total_runs'
-            ])
+            with transaction.atomic():
+                env = Environment.objects.select_for_update().get(pk=environment_id)
+
+                # Newest match: entries recorded before versions advanced all say version 1.
+                target_entry = next((entry for entry in reversed(env.image_history or [])
+                                     if entry.get("version") == target_version), None)
+                if not target_entry:
+                    logger.error(f"Version {target_version} not found in history for env {environment_id}")
+                    return False
+
+                packages.restore_snapshot(env, target_entry["requirements"])
+                env.image_name = target_entry["image_name"]
+                env.built_requirements = target_entry["requirements"] or ""
+                # The version in use. The next build still numbers itself after the newest snapshot.
+                env.current_build_version = target_version
+                env.convergence_pending = False
+                env.successful_runs = 0
+                env.total_runs = 0
+                env.save(update_fields=[
+                    'image_name', 'requirements', 'built_requirements', 'current_build_version',
+                    'pinned_packages', 'excluded_packages', 'convergence_pending',
+                    'successful_runs', 'total_runs'
+                ])
             
             logger.info(f"Rolled back env {environment_id} to version {target_version}")
             return True

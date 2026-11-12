@@ -300,7 +300,8 @@ class PythonExecutor(Executor):
 
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
-            success = result.get('StatusCode', 1) == 0
+            oom_error = self._oom_error(container, needs_network)
+            success = result.get('StatusCode', 1) == 0 and oom_error is None
             self.log(f"Execution completed in {execution_time:.2f}s with exit code {result.get('StatusCode', 1)}")
 
             # Truncate output if too large
@@ -320,7 +321,7 @@ class PythonExecutor(Executor):
                 success=success,
                 stdout=stdout,
                 stderr=stderr,
-                err=None if success else f"Non-zero exit code: {result.get('StatusCode', 1)}",
+                err=oom_error or (None if success else f"Non-zero exit code: {result.get('StatusCode', 1)}"),
                 execution_time=execution_time,
                 output_data=output_data,
                 system_logs=full_system_logs,

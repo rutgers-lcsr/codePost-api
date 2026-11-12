@@ -273,6 +273,18 @@ class Executor(abc.ABC):
     # Docker resource limits
     MAX_MEMORY = "1g"  # 1GB memory limit
     MAX_MEMORY_SWAP = "1g"  # No swap
+    # /tmp is a tmpfs: it is the sandbox's only bounded scratch space (overlay2
+    # has no per-container disk quota) and it dies with the container. tmpfs
+    # pages are charged to the container's memory cgroup, so the tmpfs must fit
+    # inside mem_limit with room for the program itself. Install runs
+    # (needs_network: pip/npm/gem staging their downloads and builds in /tmp)
+    # get a bigger tmpfs and a correspondingly bigger memory limit; a 2g tmpfs
+    # under a 1g limit used to OOM-kill the student's python once /tmp passed
+    # ~900 MB, surfacing as "missing markers" or a timeout.
+    TMPFS_SIZE = "size=512m,mode=1777"
+    TMPFS_SIZE_NETWORK = "size=2g,mode=1777"
+    MAX_MEMORY_NETWORK = "3g"
+    MAX_MEMORY_SWAP_NETWORK = "3g"  # No swap
     CPU_QUOTA = 100000  # 1 CPU (100000/100000)
     CPU_PERIOD = 100000
     MAX_PIDS = 500  # Maximum number of processes
@@ -424,6 +436,50 @@ class Executor(abc.ABC):
     _docker_client: Optional[DockerClient] = None
 
     @classmethod
+    def sandbox_limits(cls, needs_network: bool) -> Dict[str, Any]:
+        """
+        Memory limit, swap limit and /tmp tmpfs for one sandbox container, as
+        `containers.create` kwargs. The tmpfs always fits inside the memory
+        limit (see the constants above).
+        """
+        if needs_network:
+            return {
+                "mem_limit": cls.MAX_MEMORY_NETWORK,
+                "memswap_limit": cls.MAX_MEMORY_SWAP_NETWORK,
+                "tmpfs": {"/tmp": cls.TMPFS_SIZE_NETWORK},
+            }
+        return {
+            "mem_limit": cls.MAX_MEMORY,
+            "memswap_limit": cls.MAX_MEMORY_SWAP,
+            "tmpfs": {"/tmp": cls.TMPFS_SIZE},
+        }
+
+    @classmethod
+    def memory_limit_message(cls, needs_network: bool) -> str:
+        """Student-facing error for a sandbox the kernel OOM-killed."""
+        limit = cls.MAX_MEMORY_NETWORK if needs_network else cls.MAX_MEMORY
+        return f"Execution exceeded the sandbox memory limit ({limit}) and was stopped."
+
+    def _oom_error(self, container: Any, needs_network: bool) -> Optional[str]:
+        """
+        The memory-limit message when the kernel OOM-killed a process in this
+        sandbox (Docker's State.OOMKilled), else None. Checked after
+        `container.wait()`; a kill inside the runner otherwise shows up only as
+        exit code 137 or as missing result markers.
+        """
+        try:
+            container.reload()
+            # `is True`: Docker reports a JSON boolean; anything else is not a kill.
+            oom_killed = container.attrs.get("State", {}).get("OOMKilled") is True
+        except Exception as e:
+            self.log(f"Could not read container state: {e}")
+            return None
+        if not oom_killed:
+            return None
+        self.log("Container was OOM-killed by the kernel (memory cgroup limit)", "error")
+        return self.memory_limit_message(needs_network)
+
+    @classmethod
     def open_shell_session(
         cls,
         env,
@@ -431,7 +487,7 @@ class Executor(abc.ABC):
         include_assignment_files: bool,
         timeout_seconds: int,
         labels: Optional[Dict[str, str]] = None,
-        tmpfs_size: str = "size=512m,mode=1777",
+        needs_network: bool = False,
         run_pre_script: bool = False,
         dataset_ids: Optional[list[int]] = None,
     ):
@@ -447,7 +503,7 @@ class Executor(abc.ABC):
             include_assignment_files=include_assignment_files,
             timeout_seconds=timeout_seconds,
             labels=labels,
-            tmpfs_size=tmpfs_size,
+            needs_network=needs_network,
             run_pre_script=run_pre_script,
             dataset_ids=dataset_ids,
         )
@@ -592,17 +648,15 @@ class Executor(abc.ABC):
                 working_dir="/work",
                 # Network settings
                 network_disabled=not needs_network,
-                # Resource limits
-                mem_limit=self.MAX_MEMORY,
+                # Resource limits (mem_limit / memswap_limit / tmpfs)
+                **self.sandbox_limits(needs_network),
                 mem_swappiness=0,
-                memswap_limit=self.MAX_MEMORY_SWAP,
                 cpu_quota=self.CPU_QUOTA,
                 cpu_period=self.CPU_PERIOD,
                 pids_limit=self.MAX_PIDS,
                 #Security options
                 security_opt=["no-new-privileges"],
                 cap_drop=["ALL"],  # Drop all capabilities
-                tmpfs={"/tmp": "size=512m,mode=1777"} if not needs_network else {"/tmp": "size=2g,mode=1777"},
                 environment=env,
             )
             return container
@@ -1658,6 +1712,9 @@ class NotebookExecutor(Executor):
             self.log("Container started, waiting for execution to complete")
             adjusted_timeout = timeout + (30 * len(packages_to_install))
             container.wait(timeout=adjusted_timeout)
+            oom_error = self._oom_error(container, needs_network)
+            if oom_error:
+                return ExecutionResult.error_notebook(nb, oom_error)
             
             # Get output with proper error handling
             self.log(f"Fetching container logs...")

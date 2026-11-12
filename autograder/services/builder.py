@@ -25,10 +25,18 @@ class BuildFailure(Exception):
 
 EXPECTED_BUILD_ERRORS = (BuildFailure, docker.errors.DockerException, requests.exceptions.RequestException)
 
+# The only fields a build writes. The Builder holds one Environment instance for the whole
+# build (minutes), so a plain save() would write back its stale copy of everything else:
+# run counters, package lists and convergence stats that changed while the image built.
+PROGRESS_FIELDS = ['build_status', 'build_logs']
+RESULT_FIELDS = ['image_name', 'last_built', 'built_requirements', 'image_history', 'current_build_version']
+
 
 class Builder:
-    def __init__(self, environment_id: int):
+    def __init__(self, environment_id: int, reason: str = ""):
         self.environment_id = environment_id
+        # Why this build runs, kept on its history snapshot (e.g. "learned", "instructor").
+        self.reason = reason
         try:
             self.client = docker.from_env()
         except Exception as e:
@@ -158,18 +166,18 @@ class Builder:
             if "VERIFICATION SUCCESS" in logs:
                 logger.info(f"[Builder] Verification passed for {image_tag}")
                 env.build_logs += "\n[Verification] Permission & Sanity checks passed."
-                env.save()
+                env.save(update_fields=PROGRESS_FIELDS)
                 return True
             else:
                 logger.error(f"[Builder] Verification failed for {image_tag}. Logs:\n{logs}")
                 env.build_logs += f"\n[Verification] Failed:\n{logs}"
-                env.save()
+                env.save(update_fields=PROGRESS_FIELDS)
                 return False
                     
         except Exception as e:
              logger.error(f"[Builder] Verification exception: {e}", exc_info=e)
              env.build_logs += f"\n[Verification] Error: {safe_error_text(e, EXPECTED_BUILD_ERRORS)}"
-             env.save()
+             env.save(update_fields=PROGRESS_FIELDS)
              return False
 
     def fix_cache_permissions(self, image_tag: str, env: Environment):
@@ -207,12 +215,12 @@ class Builder:
             )
             logger.info(f"[Builder] Successfully fixed permissions for: {paths}")
             env.build_logs += f"\n[Builder] Fixed permissions on cache volumes: {', '.join(paths)}"
-            env.save()
+            env.save(update_fields=PROGRESS_FIELDS)
 
         except Exception as e:
             logger.error(f"[Builder] Failed to fix permissions: {e}")
             env.build_logs += f"\n[Builder] Warning: Failed to fix cache permissions: {safe_error_text(e, EXPECTED_BUILD_ERRORS)}"
-            env.save()
+            env.save(update_fields=PROGRESS_FIELDS)
 
     def build(self):
         """
@@ -232,7 +240,7 @@ class Builder:
         start_time = timezone.now()
         env.build_status = 1  # Building
         env.build_logs = f"Starting build...\nTimestamp: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        env.save()
+        env.save(update_fields=PROGRESS_FIELDS)
         logger.info(f"[Builder] Starting build for env {self.environment_id}")
 
         try:
@@ -297,7 +305,7 @@ class Builder:
             # 2. Build Image
             tag = f"codepost-env-{env.id}:{int(timezone.now().timestamp())}"
             env.build_logs += f"Building image {tag}...\n"
-            env.save()
+            env.save(update_fields=PROGRESS_FIELDS)
 
             try:
                 build_logs_generator = self.client.api.build(
@@ -314,13 +322,13 @@ class Builder:
                         env.build_logs += line
                         # Throttle saves to every 2 seconds to reduce DB load
                         if (timezone.now() - last_save).total_seconds() > 2:
-                             env.save()
+                             env.save(update_fields=PROGRESS_FIELDS)
                              last_save = timezone.now()
                     elif 'error' in chunk:
                         raise BuildFailure(chunk['error'])
                 
                 # Final save of logs
-                env.save()
+                env.save(update_fields=PROGRESS_FIELDS)
 
                 # Fix permissions on cache volumes (Docker named volumes are often root-owned)
                 self.fix_cache_permissions(tag, env)
@@ -330,18 +338,21 @@ class Builder:
                      raise BuildFailure("Image verification failed (permissions check). See logs.")
 
                 # Success
+                # Save version to history (before image_name moves on: the first recorded
+                # build of an environment that already had an image is not version 1)
+                ImageManager.record_build(env, tag, self.reason)
+
                 env.build_status = 2 # Success
                 env.image_name = tag
                 env.last_built = timezone.now()
-                
-                # Save version to history
-                ImageManager.save_image_version(env.id, tag, env.requirements)
-                
-                # Trigger cleanup of old images
-                ImageManager.cleanup_old_images(env.id)
+                # env.requirements is what this build wrote to disk, whatever the row says by now.
+                env.built_requirements = env.requirements or ""
                 env.build_logs += "\nBuild successful!"
                 logger.info(f"Build successful for env {env.id}")
-                env.save()
+                env.save(update_fields=PROGRESS_FIELDS + RESULT_FIELDS)
+
+                # Trigger cleanup of old images (after the save: it reads the new history)
+                ImageManager.cleanup_old_images(env.id)
 
                 try:
                     meta = {
@@ -369,7 +380,7 @@ class Builder:
             except Exception as e:
                 env.build_status = 3 # Failed
                 env.build_logs += f"\nBuild failed: {safe_error_text(e, EXPECTED_BUILD_ERRORS)}"
-                env.save()
+                env.save(update_fields=PROGRESS_FIELDS)
                 logger.error(f"Build failed for env {env.id}: {e}", exc_info=e)
 
                 try:
@@ -398,7 +409,7 @@ class Builder:
         except Exception as e:
             env.build_status = 3 # Failed
             env.build_logs += f"\nUnexpected error: {safe_error_text(e)}"
-            env.save()
+            env.save(update_fields=PROGRESS_FIELDS)
             logger.error(f"Unexpected error in build for env {env.id}: {e}", exc_info=e)
 
             try:

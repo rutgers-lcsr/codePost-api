@@ -38,6 +38,22 @@ When using **Auto-Detect**, codePost looks for standard configuration files to i
 > [!TIP]
 > Include these files in your **Starter Code** or upload them as **Instructor Resources** in the Environment settings to ensure they are present during the build.
 
+### Packages in an Auto-Detect environment (Python and R)
+
+For Python and R, the **Auto-Detect Status** panel lists every package built into the assignment's image and where it came from:
+
+- **From your files and tests**: imported by your assignment files or test scripts.
+- **From student runs**: a package that code from at least three different submissions needed while running. Until then it is installed during each run, which is slower, and it is shown under "Installed while student code ran" with its count.
+- **Added by you**: typed into the **Add package** box. You can include a version, for example `numpy==1.26.4`. A Python package that is not on PyPI is refused, which catches typos.
+
+Remove a package with the × on its tag. A removed package stays out of the image, even if your files or student runs ask for it again, until you choose **Restore**.
+
+Any change to the list rebuilds the image shortly afterwards. Several changes in a row become one build, and packages learned from student runs rebuild an environment at most once every ten minutes. If the panel says the image does not match the package list, use **Rebuild now**.
+
+### Version history and rollback
+
+Each successful build is kept as a version with its package list. **History** shows what each version added or removed. **Rollback** restores an earlier version's image and package list. Packages added after that version are moved to "Removed by you", so the rollback is not undone by the next student run. codePost keeps the three most recent versions and the one in use.
+
 ## Environment shell
 
 After environment setup, you can open an environment shell for troubleshooting:

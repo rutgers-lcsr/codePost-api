@@ -246,6 +246,11 @@ def copy_assignment(assignment: Assignment, destination_course: Course,
         image_name=environment.image_name,  # Reuse image to avoid rebuild
         build_status=environment.build_status,  # Keep status if we reuse image
         requirements=environment.requirements,
+        built_requirements=environment.built_requirements,
+        detected_requirements=environment.detected_requirements,
+        learned_packages=environment.learned_packages,
+        pinned_packages=environment.pinned_packages,
+        excluded_packages=environment.excluded_packages,
         env_vars=environment.env_vars,
         auto_detect=environment.auto_detect,
       )

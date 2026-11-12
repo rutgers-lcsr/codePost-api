@@ -52,16 +52,22 @@ class EnvironmentRollback(APIView):
         # Get target version
         target_version = request.data.get('version')
         if not target_version:
-            # Default to previous version
+            # Default to the version before the one in use (after an earlier rollback that is
+            # not the newest entry).
             history = env.image_history or []
-            if len(history) < 2:
+            in_use = max((i for i, entry in enumerate(history) if entry.get("image_name") == env.image_name),
+                         default=len(history) - 1)
+            if in_use < 1:
                 return JsonResponse({"error": "No previous version available"}, status=400)
-            target_version = history[-2]["version"]
+            target_version = history[in_use - 1]["version"]
         
         from autograder.services.image_manager import ImageManager
         success = ImageManager.rollback_to_version(environment_id, target_version)
         
         if success:
+            # On a worker (it has Docker): rebuild the snapshot if its image was cleaned up.
+            from autograder.services.environment_packages import schedule_rebuild
+            schedule_rebuild(environment_id, "rollback", rate_limited=False)
             logger.info(f"Admin {request.user} rolled back env {environment_id} to v{target_version}")
             data = {
                 "success": True,

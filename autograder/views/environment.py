@@ -10,6 +10,7 @@ from core.permissions.helpers import isAuthenticated
 from core.permissions.helpers import (
     returnNotAuthorized,
     returnForbidden,
+    returnInvalid,
 )
 from core.permissions.helpers import isCourseAdmin, isStudentOfSub, isStaffOfSub
 from rest_framework import serializers
@@ -30,7 +31,10 @@ from typing import Any, cast
 
 import kombu.exceptions
 import redis.exceptions
+from django.db import transaction
 from django.shortcuts import get_object_or_404
+
+from autograder.services import environment_packages
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ from autograder.serializers.environment_actions import (
     EnvironmentBuildStatusErrorSerializer,
     EnvironmentBuildStatusResponseSerializer,
     EnvironmentEjectResponseSerializer,
+    EnvironmentPackageRequestSerializer,
     EnvironmentPreviewRequestSerializer,
     EnvironmentRunAllRequestSerializer,
     EnvironmentRunAllResponseSerializer,
@@ -155,6 +160,59 @@ class EnvironmentViewSet(ListProtectedViewSet):
             instance={"task": x.task_id, "status": "queued"}
         )
         return Response(resp_ser.data)
+    #################################### Packages ###############################################
+    @extend_schema(
+        request=EnvironmentPackageRequestSerializer,
+        responses={
+            200: EnvironmentSerializer,
+            400: OpenApiResponse(description="Not a package that can be added, or not an auto-detect Python/R environment"),
+        },
+    )
+    @action(detail=True, methods=["POST"])
+    def packages(self, request, pk=None):
+        """
+        Add, remove or restore one package of an auto-detect environment.
+
+        add pins a requirement line (a name, optionally with a version), remove excludes a
+        package whatever detected or learned it, restore lifts that exclusion. The image is
+        rebuilt shortly after; several changes in a row become one build.
+        """
+        environment = self.get_object()
+
+        req_ser = EnvironmentPackageRequestSerializer(data=request.data)
+        req_ser.is_valid(raise_exception=True)
+        vd = cast(dict[str, Any], req_ser.validated_data)
+
+        if not environment.auto_detect or not environment_packages.supports_package_list(environment.language):
+            return returnInvalid("Packages can be managed here only for auto-detect Python and R environments.")
+
+        package = vd["requirement"]
+        if vd["action"] == "add":
+            # Validated before taking the row lock: it may ask PyPI whether the package exists.
+            try:
+                package = environment_packages.validate_requirement(environment.language, package)
+            except environment_packages.InvalidPackage as e:
+                return returnInvalid(str(e))
+        elif not environment_packages.package_name(package):
+            return returnInvalid("Name the package to change.")
+
+        with transaction.atomic():
+            environment = Environment.objects.select_for_update().get(pk=environment.pk)
+            before = environment.requirements or ""
+            if vd["action"] == "add":
+                environment_packages.add_package(environment, package, check_pypi=False)
+            elif vd["action"] == "remove":
+                environment_packages.remove_package(environment, package)
+            else:
+                environment_packages.restore_package(environment, package)
+            environment.save(update_fields=[
+                'pinned_packages', 'excluded_packages', 'convergence_stats', 'requirements'])
+
+        if (environment.requirements or "") != before:
+            environment_packages.schedule_rebuild(environment.id, "instructor", rate_limited=False)
+            environment.refresh_from_db()
+        return Response(EnvironmentSerializer(environment).data)
+
     @extend_schema(
         request=None,
         responses={
