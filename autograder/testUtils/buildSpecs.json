@@ -115,12 +115,12 @@
     },
     "alpine": {
         "install": "apk add",
-        "base": "FROM alpine:3.11\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\n",
+        "base": "FROM alpine:3.24\nRUN apk add bash\nRUN apk add make\nRUN apk add build-base\n",
         "useradd": "RUN addgroup -S codepost && adduser -S -G codepost -h /home/codepost -s /bin/bash codepost"
     },
     "ubuntu": {
         "install": "apt-get -y install",
-        "base": "FROM ubuntu:18.04\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
+        "base": "FROM ubuntu:24.04\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update --fix-missing {updateID}\nRUN apt-get install bash\n",
         "useradd": "RUN useradd -m -d /home/codepost -s /bin/bash codepost"
     },
     "windows": {
