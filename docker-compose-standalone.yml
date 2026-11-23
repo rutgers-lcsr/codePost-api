@@ -14,7 +14,7 @@
 services:
     # ─── Reverse Proxy ─────────────────────────────────────────────────
     codepost-entry:
-        image: nginx:latest
+        image: nginx:1.31.9
         container_name: codepost-entry
         volumes:
             - ./certs:/etc/ssl/certs:ro
