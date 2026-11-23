@@ -1,6 +1,7 @@
 services:
     codepost-entry:
-        image: nginx:1.31.9
+        image: nginx:latest
+        pull_policy: always
         container_name: codepost-entry
         volumes:
             - ./certs:/etc/ssl/certs
